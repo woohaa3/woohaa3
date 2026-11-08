@@ -5,7 +5,7 @@ import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state
 import { readWorldCamera } from "../../services/world-camera-ui.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import { worldCameraShotStore } from "../../services/world-camera-shot-store.js";
-import { worldCaptureDynamicFrameCount, worldCaptureFrameTime } from "@woohaa3/contracts";
+import { worldCameraShotContext, worldCaptureDynamicFrameCount, worldCaptureFrameTime } from "@woohaa3/contracts";
 import { encodeWorldCameraVideo } from "./world-camera-video-recorder.js";
 import type { PageCapturePendingEntry } from "../../contract/remote.js";
 import { CameraEditor } from "./camera-editor.js";
@@ -75,20 +75,32 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
       const removeCaptureAction = ctx.slots.register("canvas.node-action", {
         id: "world-camera-capture-progress", owner: WORLD_CAMERAS_PLUGIN_ID, order: -5,
         describe: ({ nodeId, writable }) => {
-          const camera = readWorldCamera(workingCanvasOf(woohaa3CanvasStore.getState()), nodeId);
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          const camera = readWorldCamera(canvas, nodeId);
           const canonical = camera && worldCameraShotStore.get(camera.cameraId);
           const state = camera && (progress.get(camera.cameraId) ?? (canonical?.phase === "failed"
             ? { label: "取景失败 · 重试", reason: canonical.reason, failed: true } : null));
-          return state ? { label: state.label, enabled: !!state.failed && writable,
-            ...(state.failed ? { reason: `取景未完成（${state.reason}），可重试当前版本` } : {}) } : null;
+          if (state) return { label: state.label, enabled: !!state.failed && writable,
+            ...(state.failed ? { reason: `取景未完成（${state.reason}），可重试当前版本` } : {}) };
+          if (!canvas || !camera || worldCameraShotContext(canvas, camera)?.kind !== "dynamic") return null;
+          if (canonical?.phase === "waiting" || canonical?.phase === "capturing") {
+            return { label: "正在录制取景", enabled: false };
+          }
+          return { label: canonical?.video ? "重新录制" : "录制",
+            enabled: writable && !worldCameraEditorStore.getSnapshot() };
         },
         activate: ({ nodeId, writable }) => {
           if (!writable || !ctx.canvasSession.isWritable()) return;
           const camera = readWorldCamera(workingCanvasOf(woohaa3CanvasStore.getState()), nodeId);
-          if (camera && (progress.get(camera.cameraId)?.failed || worldCameraShotStore.get(camera.cameraId)?.phase === "failed")) {
+          const canonical = camera && worldCameraShotStore.get(camera.cameraId);
+          if (camera && !worldCameraEditorStore.getSnapshot()
+            && (!progress.has(camera.cameraId) || progress.get(camera.cameraId)?.failed)
+            && canonical?.phase !== "waiting" && canonical?.phase !== "capturing") {
+            progress.set(camera.cameraId, { key: "manual", label: "准备录制取景" });
             void (async () => {
               const retried = await ctx.canvasRemote.retryPageCapture(camera.cameraId, abort.signal);
               if (retried && !disposed) { progress.delete(camera.cameraId); await drain(); }
+              else if (!disposed) progress.set(camera.cameraId, { key: "manual", label: "取景失败 · 重试", failed: true, reason: "capture-unavailable" });
             })();
           }
         }
@@ -108,11 +120,6 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         } catch {
           fail(item);
         }
-      };
-      const captureStatics = async (): Promise<void> => {
-        const pending = await ctx.canvasRemote.listPendingPageCaptures(abort.signal);
-        if (!pending.ok || disposed) return;
-        for (const item of pending.captures) if (item.kind !== "dynamic") await captureStatic(item);
       };
       const drain = async (): Promise<void> => {
         if (running || disposed) return;
@@ -146,18 +153,10 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         const fps = item.fps ?? key.fps;
         let renderFailure: string | undefined;
         try {
-          let lastStaticPass = Date.now();
           const frames = async function* (): AsyncGenerator<Uint8Array> {
             const total = worldCaptureDynamicFrameCount(key);
             for (let index = 0; index < total; index += 1) {
               if (disposed) throw new Error("cancelled");
-              // Static cameras may proceed between samples, always with the animation override released.
-              if (Date.now() - lastStaticPass >= 400) {
-                runtime.setCaptureAnimationTimes?.(null);
-                await nextFrames();
-                await captureStatics();
-                lastStaticPass = Date.now();
-              }
               update(item, `录制取景 ${index + 1}/${total}`, "rendering", index + 1, total);
               const time = worldCaptureFrameTime(key, index);
               if (item.animationNodeId) {

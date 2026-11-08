@@ -32,6 +32,7 @@ import {
   type RasterCanvasFactory
 } from "./media-raster.js";
 import { resolveNodeVideoSource, defaultCreateVideo, defaultLoadPosterImage } from "./video-source.js";
+import { worldCameraShotStore } from "../../services/world-camera-shot-store.js";
 export { resolveNodeVideoSource } from "./video-source.js";
 import { TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import { NodeResourceLoading, type NodeResourceLoad } from "../../services/node-resource-loading.js";
@@ -183,6 +184,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   /** 视频绑定 memo（design D7 / 任务 7.1）：静止帧不重新解析全量节点视频来源。 */
   let boundCanvas: ServerCanvas | null = null;
   let boundStructure = "";
+  let boundCameraShots = worldCameraShotStore.snapshot();
   let boundSources: Map<string, { url: string; posterUrl: string | null }> | null = null;
   const notify = () => options.onChange?.();
   const loading = new NodeResourceLoading(notify);
@@ -538,14 +540,16 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       // 需求集合 memo（design D7 / 任务 7.1）：画布身份与结构指纹都没变时复用上一帧解析结果，
       // 静止帧不重新解析全量节点视频来源。
       const structure = `${canvasStructureKey(canvas)}|${canvas.id}`;
-      if (canvas !== boundCanvas || structure !== boundStructure || !boundSources) {
+      const cameraShots = worldCameraShotStore.snapshot();
+      if (canvas !== boundCanvas || structure !== boundStructure || cameraShots !== boundCameraShots || !boundSources) {
         for (const node of canvas.document.nodes) {
-          if (node.type !== "video") continue;
+          if (node.type !== "video" && node.type !== "world-camera") continue;
           const resolved = resolveNodeVideoSource(canvas, node.id, options.getMediaAsset?.(node.id));
           if (resolved) next.set(node.id, resolved);
         }
         boundCanvas = canvas;
         boundStructure = structure;
+        boundCameraShots = cameraShots;
         boundSources = next;
       } else {
         for (const [nodeId, source] of boundSources) next.set(nodeId, source);

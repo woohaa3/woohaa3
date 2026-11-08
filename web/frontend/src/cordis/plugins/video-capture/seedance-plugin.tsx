@@ -80,24 +80,6 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
         }
       });
 
-      const removeStillAction = ctx.slots.register("canvas.node-action", {
-        id: "world-camera-still-frame",
-        owner: SEEDANCE_INTERACTION_PLUGIN_ID,
-        order: 5,
-        describe: ({ nodeId, writable }) => {
-          const canvas = woohaa3CanvasStore.getState().canvas;
-          const camera = decodeWorldCamera(canvas?.nodeData[nodeId]?.worldCamera);
-          if (!camera.ok || !canvas || worldCameraShotContext(canvas, camera.value)?.kind !== "dynamic") return null;
-          const enabled = writable && !!cameraFramePayload(canvas, nodeId);
-          return { label: "取静帧", enabled, ...(!enabled ? { reason: writable ? "等待镜头视频就绪后取静帧" : "画布当前只读" } : {}) };
-        },
-        activate: ({ nodeId, writable }) => {
-          if (!writable || !ctx.canvasSession.isWritable()) return;
-          const payload = cameraFramePayload(woohaa3CanvasStore.getState().canvas, nodeId);
-          if (payload) videoDialogs.openFrozenVideoFrameCapture(payload);
-        }
-      });
-
       // Panel + Dialog 的 disposer 由同一 scope 收集；部分激活失败时 Cordis 反序回滚。
       const disposePanel = ctx.modelInteractions.register({
         id: SEEDANCE_VIDEO_INTERACTION_ID,
@@ -132,7 +114,6 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
         () => () => {
           offFrameCapture();
           removeEditAction();
-          removeStillAction();
           videoDialogs.dispose();
           disposePanel();
         },

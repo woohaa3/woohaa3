@@ -15,6 +15,7 @@ export const DEFAULT_FREEZE_TIMEOUT_MS = 15_000;
 export const DEFAULT_CLAIM_TTL_MS = 10 * 60_000;
 
 export type WorldCaptureServiceOptions = {
+  resultStore?: import("./capture-result-store.js").CaptureResultStore;
   resolveRoom(canvasId: string): Promise<import("../sync/room.js").CanvasRoom | null>;
   /** Trusted save port (host injects the media service adapter). Missing means fail closed. */
   mediaSave?: WorldCaptureMediaSavePort;
@@ -87,8 +88,8 @@ export type WorldCaptureService = {
   registerVideoProducer(producer: WorldCaptureVideoProducer): WorldCaptureProducerRegistration;
   notifyResourcesReady(notice: import("@woohaa3/contracts").WorldCaptureResourceReadyNotice): void;
   /** Observe a committed canonical snapshot; only a changed authoring key starts work. */
-  observeCanonical(input: { canvasId: string; canvas: import("@woohaa3/contracts").ServerCanvas }): void;
-  refresh(input: { canvasId: string; cameraId: string }): Promise<WorldCaptureRefreshOutcome>;
+  observeCanonical(input: { canvasId: string; canvas: import("@woohaa3/contracts").ServerCanvas; startup?: boolean }): void;
+  refresh(input: { canvasId: string; cameraId: string; force?: boolean }): Promise<WorldCaptureRefreshOutcome>;
   status(input: { canvasId: string; cameraId: string }): WorldCaptureFramingStatus;
   /** 当前画布全部已观察镜头的状态；供卡片显示 preview/ready/stale/failed。 */
   statuses(canvasId: string): WorldCaptureFramingStatus[];

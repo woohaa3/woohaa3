@@ -224,7 +224,8 @@ pub(crate) fn sync(
             target_size(dw, dh, aspect, zoom, pixel_ratio)
         };
         let on_screen = card_on_screen(node, &scene.0, surface.size);
-        let active = !focus_active && (editing || (edit.is_none() && on_screen));
+        // 已录制视频帧由卡片纹理呈现；编辑仍使用同一实时取景相机。
+        let active = !focus_active && (editing || (edit.is_none() && on_screen && !node.texture));
         let signature = format!(
             "{}:{editing}:{dx}:{dy}:{dw}:{dh}:{}:{}",
             signature(camera, node, index, zoom, pixel_ratio, &theme, active),
@@ -600,6 +601,19 @@ mod tests {
         assert_eq!(cameras, 1);
         assert_eq!(sprites, 1);
 
+        let preview_camera =
+            app.world().resource::<WorldCameraPreviews>().cards["camera-node"].camera;
+        let preview_sprite =
+            app.world().resource::<WorldCameraPreviews>().cards["camera-node"].sprite;
+        assert!(app.world().get::<Camera>(preview_camera).unwrap().is_active);
+        app.world_mut().resource_mut::<CurrentScene>().0.nodes[0].texture = true;
+        app.update();
+        assert!(!app.world().get::<Camera>(preview_camera).unwrap().is_active);
+        assert_eq!(
+            app.world().get::<Visibility>(preview_sprite),
+            Some(&Visibility::Hidden)
+        );
+
         let observer_pose =
             Transform::from_xyz(17.0, 29.0, 41.0).with_rotation(Quat::from_rotation_y(0.5));
         app.insert_resource(Time::<Real>::default());
@@ -631,6 +645,7 @@ mod tests {
             .position
             .u = 5.0;
         app.update();
+        assert!(app.world().get::<Camera>(preview_camera).unwrap().is_active);
         let preview_camera =
             app.world().resource::<WorldCameraPreviews>().cards["camera-node"].camera;
         assert_eq!(

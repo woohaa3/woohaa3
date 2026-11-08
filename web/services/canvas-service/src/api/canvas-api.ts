@@ -339,7 +339,7 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
           sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
           return true;
         }
-        const permission = route === "captures-refresh" || route === "captures-page-pending" || route === "captures-status" ? "read" : "write";
+        const permission = route === "captures-page-pending" || route === "captures-status" ? "read" : "write";
         if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
         if (!(await requireCanvasAccess({ req, res, canvasId, permission, options, log })).ok) return true;
         if (route === "captures-page-progress") return handleCapturePageProgress(req, res, canvasId, options);

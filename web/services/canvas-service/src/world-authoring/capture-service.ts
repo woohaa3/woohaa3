@@ -15,6 +15,7 @@ import {
   createWorldCaptureDynamicMediaSaveRequest,
   createWorldCaptureMediaSaveRequest,
   decodeWorldCaptureResourceReadyNotice,
+  freezeWorldCaptureVideoInput,
   resolveWorldCaptureDynamicOutcome,
   resolveWorldCaptureOutcome,
   worldCaptureContentResolutionOutcome,
@@ -110,8 +111,35 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       stale: false,
       attemptCounter: 0
     };
+    try {
+      const saved = options.resultStore?.read(canvasId, cameraId);
+      if (saved) {
+        const frozen = freezeWorldCaptureVideoInput(saved.key, saved.key, saved.media);
+        if (frozen.ok) Object.assign(created, {
+          key: frozen.value.key, dynamicKey: saved.key, frozenVideo: frozen.value,
+          kind: "dynamic", phase: "ready", width: saved.media.width, height: saved.media.height,
+          durationSeconds: saved.media.durationSeconds
+        });
+      }
+    } catch (error) {
+      log({ event: "world-capture-restore-failed", canvasId, cameraId,
+        message: error instanceof Error ? error.message : String(error) });
+    }
     states.set(key, created);
     return created;
+  }
+
+  function persistVideo(state: FramingState, observation: DynamicCameraObservation,
+    media: import("@woohaa3/contracts").WorldCaptureVideoMediaMetadata): boolean {
+    try {
+      options.resultStore?.write({ key: observation.key, media });
+      return true;
+    } catch (error) {
+      applyFailure(state, "failed", "recording-state-save-failed");
+      log({ event: "world-capture-persist-failed", canvasId: state.canvasId, cameraId: state.cameraId,
+        message: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
   }
 
   function supersedeAttempt(state: FramingState): void {
@@ -286,6 +314,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     });
     switch (decision.status) {
       case "ready": {
+        if (!persistVideo(state, observation, decision.frozen.media)) return;
         state.frozenVideo = decision.frozen;
         state.frozen = undefined;
         state.phase = "ready";
@@ -512,7 +541,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     });
   }
 
-  async function refreshInternal(canvasId: string, cameraId: string): Promise<WorldCaptureRefreshOutcome> {
+  async function refreshInternal(canvasId: string, cameraId: string, force = false): Promise<WorldCaptureRefreshOutcome> {
     const observed = await observeFromRoom(canvasId, cameraId);
     if (!observed.ok) {
       const state = ensureState(canvasId, cameraId);
@@ -525,7 +554,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
     const observation = observed.observation;
     const observedKey = baseKeyOf(observation);
     if (state.key && worldCaptureVersionKeysEqual(state.key, observedKey)) {
-      if (state.phase === "ready") return { ok: true, status: statusOf(state) };
+      if (state.phase === "ready" && !force) return { ok: true, status: statusOf(state) };
       if (state.attempt) {
         await state.attempt.promise;
         return { ok: true, status: statusOf(state) };
@@ -656,7 +685,31 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
           applyFailure(state, "failed", observed.message);
           continue;
         }
-        if (state.key && worldCaptureVersionKeysEqual(state.key, baseKeyOf(observed.observation))) continue;
+        const observation = observed.observation;
+        if (state.key && worldCaptureVersionKeysEqual(state.key, baseKeyOf(observation))
+          && (observation.kind !== "dynamic" || (state.dynamicKey && worldCaptureDynamicKeysEqual(state.dynamicKey, observation.key)))
+          && (state.observation || (state.phase === "ready" && !state.stale))) {
+          state.observation = observation;
+          continue;
+        }
+        // Opening a canvas restores its last recording without scheduling GPU/encoder work.
+        // A missing, damaged or out-of-date result stays a preview until an explicit request
+        // or a subsequent authoring change starts a new recording.
+        if ((input.startup ?? !state.observation) && observation.kind === "dynamic") {
+          supersedeAttempt(state);
+          const matches = state.frozenVideo && state.dynamicKey
+            && worldCaptureDynamicKeysEqual(state.dynamicKey, observation.key);
+          state.key = baseKeyOf(observation);
+          state.dynamicKey = observation.key;
+          state.observation = observation;
+          state.kind = "dynamic";
+          state.durationSeconds = observation.durationSeconds;
+          state.phase = matches ? "ready" : "empty";
+          state.stale = !matches && hasFrozenContent(state);
+          state.reason = matches ? undefined : "recording-required";
+          state.pageAttemptId = undefined;
+          continue;
+        }
         supersedeAttempt(state);
         state.key = baseKeyOf(observed.observation);
         state.stale = hasFrozenContent(state);
@@ -674,8 +727,8 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       }
     },
 
-    refresh: async ({ canvasId, cameraId }) => {
-      return refreshInternal(canvasId, cameraId);
+    refresh: async ({ canvasId, cameraId, force }) => {
+      return refreshInternal(canvasId, cameraId, force);
     },
 
     status: ({ canvasId, cameraId }) => {
@@ -993,6 +1046,9 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         applyFailure(state, "failed", reason);
         return { ok: false, code: "capture-not-ready", message: "页面视频取景提交失败", status: statusOf(state) };
       }
+      if (!persistVideo(state, observation, decision.frozen.media)) {
+        return { ok: false, code: "capture-unavailable", message: "无法保存本地录制索引", status: statusOf(state) };
+      }
       state.frozenVideo = decision.frozen;
       state.frozen = undefined;
       state.phase = "ready";
@@ -1015,6 +1071,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         states.delete(key);
       }
       claims.forgetCanvas(canvasId);
+      options.resultStore?.forgetCanvas(canvasId);
     },
 
     dispose() {

@@ -12,6 +12,7 @@ import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state
 import { hoverNodeStore } from "../../services/hover-store.js";
 import { builtinNodeCapabilityResolver, type NodeCapabilityResolver } from "@woohaa3/contracts";
 import type { VideoFrameSessions } from "../canvas-runtime/video-frame-session.js";
+import { resolveWorldCameraVideoSource } from "../canvas-runtime/video-source.js";
 
 export type HoverTrackerDeps = {
   nodeCapabilities?: NodeCapabilityResolver;
@@ -104,7 +105,8 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     if (hit && hit.kind === "node") {
       const canvasState = woohaa3CanvasStore.getState().canvas;
       const entry = canvasState?.document.nodes.find((candidate) => candidate.id === hit.nodeId);
-      if (entry?.type === "video") next = hit.nodeId;
+      if (entry?.type === "video" || (entry?.type === "world-camera" && canvasState
+        && resolveWorldCameraVideoSource(canvasState, hit.nodeId))) next = hit.nodeId;
     }
     if (next === state.hoveredVideoNode && (next === null || sessions.playingNodeId() === next)) return;
     state.hoveredVideoNode = next;

@@ -402,7 +402,7 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
     async retryPageCapture(cameraId, signal) {
       try {
         const response = await fetchImpl(`${captureBase}-refresh`, {
-          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cameraId }), signal: captureRequestSignal(signal, 10_000)
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cameraId, force: true }), signal: captureRequestSignal(signal, 10_000)
         });
         return response.ok;
       } catch { return false; }

@@ -25,6 +25,7 @@ import type { Viewport } from "./interaction-core.js";
 import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import { shotPhaseOf, worldCameraShotStore } from "../../services/world-camera-shot-store.js";
+import { resolveWorldCameraVideoSource } from "../canvas-runtime/video-source.js";
 
 export type SceneBuildInput = {
   selected: readonly string[];
@@ -149,6 +150,10 @@ export function buildSceneWithResources(
     focusTransition: options.getFocusTransition?.() ?? null
   });
   const isModelLoading = options.getModelLoading?.() ?? options.isModelLoading;
+  for (const node of scene.nodes) {
+    if (node.worldCamera && options.videoSessions?.hasRealFrame(node.id)
+      && resolveWorldCameraVideoSource(canvasState, node.id)) node.texture = true;
+  }
   const cameraEdit = worldCameraEditorStore.getSnapshot();
   if (cameraEdit?.canvasId === canvasState.id && scene.nodes.some(node => node.id === cameraEdit.nodeId && node.worldCamera)) {
     scene.worldCameraEdit = { nodeId: cameraEdit.nodeId, camera: cameraEdit.draft, showHelpers: cameraEdit.showHelpers };

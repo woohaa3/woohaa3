@@ -72,6 +72,7 @@ import { createWorldAuthoringService } from "./world-authoring/scene-area-servic
 import { createWorldCameraSettingsService, type WorldCameraCompletionVerification } from "./world-authoring/camera-service.js";
 import { createAssistantWorldService } from "./world-authoring/assistant-service.js";
 import { createWorldCaptureService, type WorldCaptureService } from "./world-authoring/capture-service.js";
+import { createFileCaptureResultStore } from "./world-authoring/capture-result-store.js";
 
 export type { CanvasMediaAssetSyncPort, CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
 
@@ -422,10 +423,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
           ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}) }),
       onClientAcquired: (room) => {
         const exported = room.exportCanvas();
-        if (exported.ok) worldCapture?.observeCanonical({ canvasId: exported.canvas.id, canvas: exported.canvas });
+        if (exported.ok) worldCapture?.observeCanonical({ canvasId: exported.canvas.id, canvas: exported.canvas, startup: true });
       },
       onCommitted: (input) => {
-        worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas });
+        worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas, startup: false });
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion
             ? {
@@ -530,8 +531,13 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
   }
 
   // T10 取景刷新/冻结：从权威 room 快照派生请求，只在创作版本变化时合并刷新。
+  const captureStorageConfig = resolveStorageConfig();
+  const captureResultDirectory = env.WOOHAA3_WORLD_CAPTURE_RESULTS_DIR
+    ?? (captureStorageConfig.ok && captureStorageConfig.config.backend === "sqlite"
+      ? `${captureStorageConfig.config.sqlitePath}.world-captures` : ".woohaa3/world-captures");
   worldCapture = sync
     ? createWorldCaptureService({
+        resultStore: createFileCaptureResultStore(captureResultDirectory),
         resolveRoom: async (canvasId) => sync.registry.resolve(canvasId),
         ...(options.worldCaptureMediaSave ? { mediaSave: options.worldCaptureMediaSave } : {}),
         ...(options.worldCaptureVideoMediaSave ? { videoMediaSave: options.worldCaptureVideoMediaSave } : {}),

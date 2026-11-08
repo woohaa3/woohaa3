@@ -62,6 +62,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
   });
   entries.set('world-camera', {
     appearance: { palette: 'shot', defaultSize: WORLD_CAMERA_CARD_SIZE, cardLabel: '镜头' },
+    resources: { channel: 'video', previewSlot: false, contentKey: context => context.assetContentKey },
     actions: nodeActionContributions,
     connections: { endpoints: () => 'ordinary' },
     resize: rectangularNodeResize

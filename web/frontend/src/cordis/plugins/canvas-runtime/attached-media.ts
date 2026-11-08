@@ -4,6 +4,8 @@ import type { BevyRuntime } from "./bevy-runtime.js";
 import type { CanvasRuntimeOptions } from "./canvas-runtime-options.js";
 import { createTextureSync } from "./texture-sync.js";
 import { createVideoFrameSessions } from "./video-frame-session.js";
+import { resolveWorldCameraVideoSource } from "./video-source.js";
+import { worldCameraShotStore } from "../../services/world-camera-shot-store.js";
 import { isDevVideoDisabled, hasMismatchedFlag, withoutVideoNodes } from "./dev-media-switches.js";
 import {
   CanvasResourceCoordinator,
@@ -58,6 +60,10 @@ export function createAttachedMedia(input: {
     mediaContentVersion += 1;
     input.invalidate("media-content");
   });
+  const unsubscribeCameraShots = worldCameraShotStore.subscribe(() => {
+    mediaContentVersion += 1;
+    input.invalidate("camera-video");
+  });
   const projectCanvas = (canvas: import("@woohaa3/contracts").ServerCanvas | null) =>
     options.projectHistoryCanvas?.(canvas) ?? canvas;
   const getCanvas = () => projectCanvas(woohaa3CanvasStore.getState().working ?? woohaa3CanvasStore.getState().canvas);
@@ -87,12 +93,18 @@ export function createAttachedMedia(input: {
       budgetMs: Math.max(1, Math.round(policy.modelPrepareBudgetMs))
     });
   }
-  const contentKeyOfOf = createContentIdentity({
+  const baseContentKeyOf = createContentIdentity({
     nodeCapabilities: options.nodeCapabilities,
     assetForNode: nodeId => options.mediaContent?.state(nodeId)?.asset,
     // 模型内容身份用 prepared resource key（不含 nodeId）；缺资源视为无内容。
     modelResourceKey: (nodeId) => options.getModelResources?.().get(nodeId)?.resourceKey ?? null
   });
+  const contentKeyOfOf: ReturnType<typeof createContentIdentity> = canvas => {
+    const base = baseContentKeyOf(canvas);
+    return node => node.type === "world-camera" && canvas
+      ? resolveWorldCameraVideoSource(canvas, node.id)?.contentKey ?? null
+      : base(node);
+  };
   // 内容身份版本：模型/片场的 prepared resource 是异步就绪的，画布对象不变也可能从「无内容」
   // 变成「有内容」。候选表与准入投影都必须据此失效，否则首次投影早于资源就绪时，模型永远不会
   // 进入需求集合（真实故障：片场模型与模型卡片不显示，只有 hover 提升 interactive 才出现）。
@@ -146,6 +158,6 @@ export function createAttachedMedia(input: {
   });
   return {
     textureSync, videoSessions, residency, projectResidency,
-    dispose: () => unsubscribeMediaContent?.()
+    dispose: () => { unsubscribeMediaContent?.(); unsubscribeCameraShots(); }
   };
 }

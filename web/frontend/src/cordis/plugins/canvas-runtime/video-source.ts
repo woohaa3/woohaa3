@@ -1,8 +1,24 @@
 import type { VideoElementLike, PosterImage } from "./video-frame-session.js";
 /** 只解析节点自身 ready 输出的同源媒体，不接受任意 URL。 */
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
-import { hasReadyMediaAsset } from "@woohaa3/contracts";
+import { decodeWorldCamera, hasReadyMediaAsset, worldCameraShotContext } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../media-preview/media-preview.js";
+import { worldCameraShotStore } from "../../services/world-camera-shot-store.js";
+
+/** 动态镜头只播放与当前机位、动画匹配的已录制视频。 */
+export function resolveWorldCameraVideoSource(canvas: ServerCanvas, nodeId: string): { url: string; posterUrl: string | null; contentKey: string } | null {
+  const camera = decodeWorldCamera(canvas.nodeData[nodeId]?.worldCamera);
+  if (!camera.ok) return null;
+  const status = worldCameraShotStore.get(camera.value.cameraId);
+  const shot = worldCameraShotContext(canvas, camera.value);
+  if (!status || status.canvasId !== canvas.id || status.phase !== "ready" || status.stale
+    || status.key?.cameraSettingsVersion !== camera.value.settingsVersion || !status.video || !status.dynamicKey
+    || shot?.kind !== "dynamic" || !shot.animation || status.dynamicKey.animation.areaId !== shot.animation.areaId
+    || status.dynamicKey.animation.scriptRevision !== shot.animation.scriptRevision
+    || status.dynamicKey.animation.sourceHash !== shot.animation.sourceHash) return null;
+  const url = resolveCanonicalMediaUrl({ metadata: { storageKey: status.video.storageKey } }, canvas.id);
+  return url ? { url, posterUrl: null, contentKey: `asset:${status.video.storageKey}` } : null;
+}
 
 /** 从 canonical 画布解析节点**自身** ready 视频输出（design D5）。 */
 export function resolveNodeVideoSource(
@@ -12,7 +28,9 @@ export function resolveNodeVideoSource(
 ): { url: string; posterUrl: string | null } | null {
   if (!canvas) return null;
   const node = canvas.document.nodes.find((entry) => entry.id === nodeId);
-  if (!node || node.type !== "video") return null;
+  if (!node) return null;
+  if (node.type === "world-camera") return resolveWorldCameraVideoSource(canvas, nodeId);
+  if (node.type !== "video") return null;
   const nodeData = canvas.nodeData as Record<string, { outputAssetId?: unknown } | undefined>;
   const outputId = nodeData[nodeId]?.outputAssetId;
   const asset = (typeof outputId === "string" && outputId !== "" ? canvas.assets.find((candidate) => candidate.id === outputId) : undefined) ?? runtimeAsset ?? undefined;

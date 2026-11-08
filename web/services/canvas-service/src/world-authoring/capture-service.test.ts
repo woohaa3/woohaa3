@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SHARED_WORLD_VERSION,
   createDefaultWorldCameraData,
@@ -9,6 +9,18 @@ import {
   type WorldCaptureDynamicSaveResult
 } from "@woohaa3/contracts";
 import { createWorldCaptureService } from "./capture-service.js";
+import { createFileCaptureResultStore } from "./capture-result-store.js";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+const resultDirectories: string[] = [];
+afterEach(() => { for (const directory of resultDirectories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
+function resultDirectory() {
+  const directory = mkdtempSync(path.join(tmpdir(), "world-capture-results-"));
+  resultDirectories.push(directory);
+  return directory;
+}
 
 /** 动画区内的镜头 → 动态取景；验证冻结不会被自己的版本判为 superseded。 */
 function animatedCanvas(): ServerCanvas {
@@ -74,7 +86,7 @@ describe("动态取景冻结", () => {
       videoMediaSave: videoSavePort(bytes.length), freezeTimeoutMs: 1000
     });
     try {
-      service.observeCanonical({ canvasId: canvas.id, canvas });
+      service.observeCanonical({ canvasId: canvas.id, canvas, startup: false });
       const pending = service.pendingPageCaptures(canvas.id)[0]!;
       const abort = new AbortController();
       const first = service.freezeForGeneration({ canvasId: canvas.id, cameraId: "camera", signal: abort.signal });
@@ -199,7 +211,7 @@ it("page progress can exceed the total wait limit but a stalled attempt expires 
   const canvas = animatedCanvas();
   const service = createWorldCaptureService({ now: () => now,
     resolveRoom: async () => ({ exportCanvas: () => ({ ok: true, canvas }) }) as never });
-  service.observeCanonical({ canvasId: canvas.id, canvas });
+  service.observeCanonical({ canvasId: canvas.id, canvas, startup: false });
   const first = service.pendingPageCaptures(canvas.id)[0]!;
   for (let frame = 1; frame <= 4; frame++) {
     now += 80_000;
@@ -215,4 +227,114 @@ it("page progress can exceed the total wait limit but a stalled attempt expires 
   now += 91_000;
   expect(service.status({ canvasId: canvas.id, cameraId: "camera" })).toMatchObject({ phase: "failed", reason: "page-unavailable" });
   service.dispose();
+});
+
+
+async function recordPage(service: ReturnType<typeof createWorldCaptureService>, canvas: ServerCanvas) {
+  await service.refresh({ canvasId: canvas.id, cameraId: "camera", force: true });
+  const pending = service.pendingPageCaptures(canvas.id)[0]!;
+  expect(pending).toBeDefined();
+  const committed = await service.commitPageVideoCapture({ canvasId: canvas.id, cameraId: "camera", attemptId: pending.attemptId,
+    key: pending.dynamicKey!, video: { bytes: new Uint8Array([1, 2, 3]), contentType: "video/mp4",
+      width: pending.width, height: pending.height, durationSeconds: 4, fps: pending.dynamicKey!.fps } });
+  return committed;
+}
+
+describe("持久录制结果与启动调度", () => {
+  it("冷启动没有结果时保持预览，producer 注册和资源通知都不触发录制", async () => {
+    const canvas = animatedCanvas();
+    const service = createWorldCaptureService({ resolveRoom: async () => ({ exportCanvas: () => ({ ok: true, canvas }) }) as never });
+    const captureVideo = vi.fn();
+    try {
+      service.observeCanonical({ canvasId: canvas.id, canvas, startup: true });
+      service.registerVideoProducer({ producerId: "native", captureVideo });
+      service.notifyResourcesReady({ canvasId: canvas.id, cameraId: "camera" });
+      await Promise.resolve();
+      expect(service.status({ canvasId: canvas.id, cameraId: "camera" })).toMatchObject({ phase: "empty", shotKind: "dynamic", stale: false });
+      expect(service.pendingPageCaptures(canvas.id)).toEqual([]);
+      expect(captureVideo).not.toHaveBeenCalled();
+    } finally { service.dispose(); }
+  });
+
+  it.each([true, false])("结果写入文件后新建宿主服务恢复相同视频，首次观察 startup=%s 与重复打开都不重新录制", async (startup) => {
+    const canvas = animatedCanvas();
+    const directory = resultDirectory();
+    const makeService = () => createWorldCaptureService({ resultStore: createFileCaptureResultStore(directory),
+      resolveRoom: async () => ({ exportCanvas: () => ({ ok: true, canvas }) }) as never, videoMediaSave: videoSavePort(3) });
+    const first = makeService();
+    expect(await recordPage(first, canvas)).toMatchObject({ ok: true });
+    const original = first.status({ canvasId: canvas.id, cameraId: "camera" });
+    first.dispose();
+    const second = makeService();
+    try {
+      second.observeCanonical({ canvasId: canvas.id, canvas, startup });
+      second.observeCanonical({ canvasId: canvas.id, canvas, startup: true });
+      expect(second.status({ canvasId: canvas.id, cameraId: "camera" })).toMatchObject({
+        phase: "ready", stale: false, video: original.video, dynamicKey: original.dynamicKey
+      });
+      expect(second.pendingPageCaptures(canvas.id)).toEqual([]);
+      expect(await second.freezeForGeneration({ canvasId: canvas.id, cameraId: "camera" })).toMatchObject({ ok: true });
+      expect(second.pendingPageCaptures(canvas.id)).toEqual([]);
+      // An explicit re-record must bypass the same-version ready result.
+      await second.refresh({ canvasId: canvas.id, cameraId: "camera", force: true });
+      expect(second.pendingPageCaptures(canvas.id)).toHaveLength(1);
+    } finally { second.dispose(); }
+  });
+
+  it("启动时过期结果只标记为过期，后续真实编辑才触发新录制", async () => {
+    const canvas = animatedCanvas();
+    const directory = resultDirectory();
+    const makeService = () => createWorldCaptureService({ resultStore: createFileCaptureResultStore(directory),
+      resolveRoom: async () => ({ exportCanvas: () => ({ ok: true, canvas }) }) as never, videoMediaSave: videoSavePort(3) });
+    const first = makeService();
+    expect(await recordPage(first, canvas)).toMatchObject({ ok: true });
+    first.dispose();
+    const camera = canvas.nodeData.camera!.worldCamera as unknown as import("@woohaa3/contracts").WorldCameraData;
+    canvas.nodeData.camera = { worldCamera: { ...camera, settingsVersion: "v2" } } as never;
+    const second = makeService();
+    try {
+      second.observeCanonical({ canvasId: canvas.id, canvas, startup: true });
+      expect(second.status({ canvasId: canvas.id, cameraId: "camera" })).toMatchObject({ phase: "empty", stale: true });
+      expect(second.pendingPageCaptures(canvas.id)).toEqual([]);
+      canvas.nodeData.camera = { worldCamera: { ...camera, settingsVersion: "v3" } } as never;
+      second.observeCanonical({ canvasId: canvas.id, canvas, startup: false });
+      expect(second.pendingPageCaptures(canvas.id)).toHaveLength(1);
+    } finally { second.dispose(); }
+  });
+
+  it("损坏索引在启动时不自动录制，主动录制可以修复索引且画布删除清理索引", async () => {
+    const canvas = animatedCanvas();
+    const directory = resultDirectory();
+    const store = createFileCaptureResultStore(directory);
+    const makeService = () => createWorldCaptureService({ resultStore: store,
+      resolveRoom: async () => ({ exportCanvas: () => ({ ok: true, canvas }) }) as never, videoMediaSave: videoSavePort(3) });
+    const first = makeService();
+    expect(await recordPage(first, canvas)).toMatchObject({ ok: true });
+    first.dispose();
+    const canvasDirectory = path.join(directory, readdirSync(directory)[0]!);
+    writeFileSync(path.join(canvasDirectory, readdirSync(canvasDirectory)[0]!), "{broken");
+    const second = makeService();
+    try {
+      second.observeCanonical({ canvasId: canvas.id, canvas, startup: true });
+      expect(second.pendingPageCaptures(canvas.id)).toEqual([]);
+      expect(second.status({ canvasId: canvas.id, cameraId: "camera" }).phase).toBe("empty");
+      expect(await recordPage(second, canvas)).toMatchObject({ ok: true });
+      expect(store.read(canvas.id, "camera")).not.toBeNull();
+      expect(store.read("other-canvas", "camera")).toBeNull();
+      second.forgetCanvas(canvas.id);
+      expect(store.read(canvas.id, "camera")).toBeNull();
+    } finally { second.dispose(); }
+  });
+
+  it("无法持久保存索引时返回失败，不把结果发布为已完成", async () => {
+    const canvas = animatedCanvas();
+    const service = createWorldCaptureService({
+      resultStore: { read: () => null, write: () => { throw new Error("disk full"); }, forgetCanvas: () => {} },
+      resolveRoom: async () => ({ exportCanvas: () => ({ ok: true, canvas }) }) as never, videoMediaSave: videoSavePort(3)
+    });
+    try {
+      expect(await recordPage(service, canvas)).toMatchObject({ ok: false, code: "capture-unavailable" });
+      expect(service.status({ canvasId: canvas.id, cameraId: "camera" })).toMatchObject({ phase: "failed", reason: "recording-state-save-failed" });
+    } finally { service.dispose(); }
+  });
 });

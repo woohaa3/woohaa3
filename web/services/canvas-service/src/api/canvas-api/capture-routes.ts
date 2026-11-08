@@ -48,7 +48,7 @@ export async function handleCaptureRefresh(
     sendError(res, 400, "INVALID_COMMAND_BATCH", "cameraId 必须是非空字符串");
     return true;
   }
-  const outcome = await options.worldCapture.refresh({ canvasId, cameraId });
+  const outcome = await options.worldCapture.refresh({ canvasId, cameraId, ...(body.force === true ? { force: true } : {}) });
   if (!outcome.ok) {
     const status = outcome.code === "camera-not-found" ? 404
       : outcome.code === "capture-unavailable" || outcome.code === "producer-missing" ? 503
