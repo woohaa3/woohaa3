@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { CanvasGenerationHistoryListItem } from "@woohaa3/contracts";
+import { UiProvider } from "@woohaa3/ui/primitives";
 import { RuntimeProvider } from "../../react.js";
 import { startFrontendRuntime, type FrontendRuntime } from "../../kernel.js";
 import { SlotRegistry } from "../../slots.js";
@@ -41,7 +42,7 @@ async function fixture(read: CanvasHistoryClient["listCanvas"] = async () => pag
     return <Renderer instance={instance} requestClose={() => dialogs.requestClose(instance.instanceId)} setBusy={() => {}} replace={() => {}} />;
   }
   const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
-  await act(async () => { root!.render(<RuntimeProvider runtime={runtime!}><Host /></RuntimeProvider>); });
+  await act(async () => { root!.render(<RuntimeProvider runtime={runtime!}><UiProvider><Host /></UiProvider></RuntimeProvider>); });
   const open = async (payload: object = { section: "generation-history" }) => { await act(async () => { dialogs.open({ dialogId: "agent-assistant", payload }); await import("./assistant.js"); }); };
   const click = async (selector: string) => { const button = el.querySelector<HTMLButtonElement>(selector); expect(button).not.toBeNull(); await act(async () => button!.click()); };
   const changeUser = async (next: string | null) => { await act(async () => { namespace = next; users.forEach(notify => notify()); }); };
