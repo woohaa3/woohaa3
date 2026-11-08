@@ -30,6 +30,7 @@ export type ModelExecutionHostProps = {
   runtime?: CanvasRuntimeService;
   /** 页面级画布会话（参数提交与引用连线用）。 */
   session: CanvasSession;
+  editService?: import("../../services/canvas-state/store/canvas-edit-service.js").CanvasEditService;
   /** Canvas 远端（run/cancel）。 */
   runClient: CanvasRemoteService;
   submitCoordinator?: SubmitCoordinator;

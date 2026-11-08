@@ -75,10 +75,10 @@ function resolveDuplicateNodePosition(source: Woohaa3CanvasNode, existingNodes?:
   }, source, existingNodes);
 }
 
-function findNonOverlappingNodePosition(
+export function findNonOverlappingNodePosition(
   preferred: Woohaa3CanvasPosition,
-  source: Woohaa3CanvasNode,
-  existingNodes: Woohaa3CanvasNode[]
+  source: Pick<Woohaa3CanvasNode, "width" | "height">,
+  existingNodes: readonly Pick<Woohaa3CanvasNode, "position" | "width" | "height">[]
 ): Woohaa3CanvasPosition {
   const width = source.width ?? DEFAULT_NODE_DIMS.width;
   const height = source.height ?? DEFAULT_NODE_DIMS.height;
@@ -91,13 +91,15 @@ function findNonOverlappingNodePosition(
       if (!existingNodes.some((node) => rectsOverlap(candidate, { width, height }, node, gap))) return candidate;
     }
   }
-  return preferred;
+  // A dense canvas can fill the local search. Place beyond the rightmost card
+  // instead of returning an occupied position.
+  return { x: Math.max(preferred.x, ...existingNodes.filter(node => node.position).map(node => node.position!.x + (node.width ?? DEFAULT_NODE_DIMS.width) + gap)), y: preferred.y };
 }
 
 function rectsOverlap(
   position: Woohaa3CanvasPosition,
   size: { width: number; height: number },
-  node: Woohaa3CanvasNode,
+  node: Pick<Woohaa3CanvasNode, "position" | "width" | "height">,
   gap: number
 ): boolean {
   const nodeWidth = node.width ?? DEFAULT_NODE_DIMS.width;

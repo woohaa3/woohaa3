@@ -1,3 +1,5 @@
+import { itemMeta } from "./summary.js";
+import type { ServerCanvas } from "@woohaa3/contracts";
 import { ScenePackageImport } from "../scene-experience/import-controls.js";
 /**
  * Canvas Switcher chrome
@@ -52,29 +54,6 @@ export const canvasSwitcherDefinition: DialogDefinition = {
       ? { ok: true, payload: payload as Record<string, never> }
       : { ok: false, error: "画布切换器 payload 必须是对象" }
 };
-
-/** 相对时间：列表里只回答「多久没动过」，不摆绝对时间戳。 */
-function formatRelativeTime(iso: string, now = Date.now()): string {
-  const at = Date.parse(iso);
-  if (!Number.isFinite(at)) return "";
-  const delta = Math.max(0, now - at);
-  const minute = 60_000;
-  if (delta < minute) return "刚刚更新";
-  if (delta < 60 * minute) return `${Math.floor(delta / minute)} 分钟前`;
-  if (delta < 24 * 60 * minute) return `${Math.floor(delta / (60 * minute))} 小时前`;
-  if (delta < 30 * 24 * 60 * minute) return `${Math.floor(delta / (24 * 60 * minute))} 天前`;
-  return new Date(at).toLocaleDateString();
-}
-
-/** 条目副行：更新时间 + 规模。remote-only 的计数来自远端摘要，缺失时按 0 展示。 */
-function itemMeta(entry: CanvasSummary): string {
-  const updated = formatRelativeTime(entry.updatedAt);
-  const scale = [
-    entry.nodeCount > 0 ? `${entry.nodeCount} 个节点` : null,
-    entry.assetCount > 0 ? `${entry.assetCount} 个素材` : null
-  ].filter((part): part is string => part !== null);
-  return [updated, ...scale].filter((part) => part !== "").join(" · ") || "暂无内容";
-}
 
 /** 目录同步状态的展示文案（触发器与条目徽标共用）。 */
 const SYNC_LABELS: Record<NonNullable<CanvasSummary["sync"]>, string> = {
@@ -192,6 +171,10 @@ export type CanvasSwitcherDeps = {
   selection: CanvasSelectionService;
   session: CanvasSession;
   currentCanvasId: () => string;
+  currentDocument?: {
+    getSnapshot: () => ServerCanvas | null;
+    subscribe: (listener: () => void) => () => void;
+  };
   switchTo: (canvasId: string) => void;
   create: (options?: readonly CanvasCreateOptionContribution[]) => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
   rename: (title: string) => Promise<{ ok: boolean; error?: string }>;
@@ -242,6 +225,9 @@ function SyncBadge({ entry }: { entry: CanvasSummary }) {
   );
 }
 
+const emptyDocument = () => null;
+const noDocumentSubscription = () => () => {};
+
 /** Dialog renderer：分页列表、新建、当前画布重命名与 busy/error 状态。 */
 export function createCanvasSwitcherRenderer(deps: CanvasSwitcherDeps): DialogRenderer {
   return function CanvasSwitcherDialog({ instance, requestClose, setBusy }: DialogRendererProps) {
@@ -265,7 +251,15 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
       createOptions.filter((option) => option.defaultEnabled === true).map((option) => option.id)
     );
     const currentCanvasId = deps.currentCanvasId();
-    const currentEntry = catalogState.entries.find((entry) => entry.id === currentCanvasId);
+    const document = useSyncExternalStore(deps.currentDocument?.subscribe ?? noDocumentSubscription,
+      deps.currentDocument?.getSnapshot ?? emptyDocument, deps.currentDocument?.getSnapshot ?? emptyDocument);
+    const listedCurrent = catalogState.entries.find((entry) => entry.id === currentCanvasId);
+    // Only this page's canonical document may supply a missing/current summary.
+    const currentEntry: CanvasSummary | undefined = document?.id === currentCanvasId ? {
+      ...listedCurrent, id: document.id, title: document.title ?? listedCurrent?.title ?? "", revision: document.revision,
+      createdAt: listedCurrent?.createdAt ?? document.updatedAt, updatedAt: document.updatedAt,
+      nodeCount: document.document.nodes.length, assetCount: Object.keys(document.assets).length
+    } : listedCurrent;
     const [query, setQuery] = useState("");
     /** 重命名只在当前画布行内展开，不再常驻一个输入框占掉列表空间。 */
     const [renaming, setRenaming] = useState(false);
@@ -377,9 +371,8 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
     // 条目顺序/标题变化时不偷偷覆盖用户正在编辑的值；只在离开编辑态时跟随权威标题。
     useEffect(() => {
       if (renaming) return;
-      const entry = deps.catalog.getState().entries.find((item) => item.id === deps.currentCanvasId());
-      if (entry) setRenameValue(entry.title);
-    }, [catalogState.entries.length, renaming]);
+      if (currentEntry) setRenameValue(currentEntry.title);
+    }, [currentEntry?.title, renaming]);
 
     const run = async <T extends { ok: boolean; error?: string }>(action: () => Promise<T>): Promise<T | null> => {
       setLocalBusy(true);
@@ -445,9 +438,14 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
 
     // 刷新失败时 store 会清空 entries：这里退回上一次成功的快照，列表不因刷新失败消失。
     const staleSnapshot = catalogState.status === "error" ? lastReadyRef.current : null;
-    const displayEntries = staleSnapshot ? staleSnapshot.entries : catalogState.entries;
+    const pageEntries = staleSnapshot ? staleSnapshot.entries : catalogState.entries;
+    const displayEntries = currentEntry
+      ? pageEntries.some(entry => entry.id === currentCanvasId)
+        ? pageEntries.map(entry => entry.id === currentCanvasId ? currentEntry : entry)
+        : [currentEntry, ...pageEntries]
+      : pageEntries;
     const displayTotal = staleSnapshot ? staleSnapshot.total : catalogState.total;
-    const hasMore = catalogState.offset + displayEntries.length < displayTotal;
+    const hasMore = catalogState.offset + pageEntries.length < displayTotal;
     const isOffline = sessionStatus.remote.phase === "offline";
     const hasSources = deps.sources !== undefined;
     // 搜索在列表真的开始变长时才出现：三张画布不需要一个搜索框。
@@ -456,7 +454,7 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
     const visibleEntries = normalizedQuery === ""
       ? displayEntries
       : displayEntries.filter((entry) => (entry.title.trim() || "未命名画布").toLowerCase().includes(normalizedQuery));
-    const isEmpty = catalogState.status === "ready" && catalogState.entries.length === 0 && catalogState.total === 0 && !catalogState.loadingMore;
+    const isEmpty = catalogState.status === "ready" && displayEntries.length === 0 && catalogState.total === 0 && !catalogState.loadingMore;
     const isFilteredEmpty = catalogState.status === "ready" && normalizedQuery !== "" && visibleEntries.length === 0 && !isEmpty;
     const showSources = hasSources && (sourceState.error !== null || sourceState.items.length > 0);
 

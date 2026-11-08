@@ -153,6 +153,8 @@ export interface WorldCaptureFramingStatus {
   readonly canvasId: WorldId;
   readonly cameraId: WorldId;
   readonly key: WorldCaptureVersionKey | null;
+  /** Full frozen animation/range/profile identity for explicit video frame derivation. */
+  readonly dynamicKey?: import("./world-capture-dynamic-contract.js").WorldCaptureDynamicVersionKey;
   readonly phase: WorldCaptureFramingPhase;
   readonly stale: boolean;
   readonly requestId?: WorldId;
@@ -373,3 +375,13 @@ function decodeWorldCaptureInput(input: unknown): SharedWorldDecodeResult<WorldC
   }
   return { ok: true, value: { key: key.value, mediaId, checksum } };
 }
+
+/** A page reports progress for one host-issued attempt; it cannot publish ready. */
+export type WorldCapturePageProgress = {
+  cameraId: string;
+  attemptId: string;
+  stage: "rendering" | "encoding" | "uploading" | "failed";
+  completedFrames?: number;
+  totalFrames?: number;
+  reason?: string;
+};

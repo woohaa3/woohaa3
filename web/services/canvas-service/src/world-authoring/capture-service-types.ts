@@ -46,7 +46,7 @@ export type WorldCaptureClaimResult =
 
 /** 页面渲染路径的预备结果：输出尺寸 + 当前 canonical 版本键。 */
 export type WorldCapturePagePrepareOutcome =
-  | { ok: true; key: WorldCaptureVersionKey; width: number; height: number }
+  | { ok: true; key: WorldCaptureVersionKey; width: number; height: number; attemptId: string }
   | { ok: false; code: string; message: string };
 
 /**
@@ -54,6 +54,7 @@ export type WorldCapturePagePrepareOutcome =
  * 页面按它渲染后走 commit 接口回填，宿主只做版本校验、可信 Media 保存与冻结。
  */
 export type PendingPageCapture = {
+  attemptId?: string;
   canvasId: string;
   cameraId: string;
   /** 基础六字段键（静态图片或动态视频共享）。 */
@@ -110,12 +111,14 @@ export type WorldCaptureService = {
    * 动态镜头的页面视频提交：校验当前动态键、经可信视频端口保存后冻结并申领 binding。
    */
   commitPageVideoCapture(input: {
+    attemptId?: string;
     canvasId: string;
     cameraId: string;
     key: import("@woohaa3/contracts").WorldCaptureDynamicVersionKey;
     video: import("@woohaa3/contracts").WorldCaptureVideo;
   }): Promise<import("@woohaa3/contracts").WorldCaptureFreezeOutcome>;
   commitPageCapture(input: {
+    attemptId?: string;
     canvasId: string;
     cameraId: string;
     key: WorldCaptureVersionKey;
@@ -128,6 +131,7 @@ export type WorldCaptureService = {
    * 无待取景项时返回空数组。
    */
   pendingPageCaptures(canvasId: string): PendingPageCapture[];
+  reportPageProgress(canvasId: string, input: import("@woohaa3/contracts").WorldCapturePageProgress): boolean;
   /** Validate a completed freeze immediately before durable run acceptance. */
   claimForGeneration(input: WorldCaptureClaimInput): WorldCaptureClaimResult;
   forgetCanvas(canvasId: string): void;
@@ -143,6 +147,9 @@ export type Attempt = {
 };
 
 export type FramingState = {
+  pageAttemptId?: string;
+  pageProgressAt?: number;
+  pageProgress?: import("@woohaa3/contracts").WorldCapturePageProgress;
   canvasId: string;
   cameraId: string;
   /** 静态镜头是静态键；动态镜头是基础六字段键（outputVersion 已覆盖动画/区间/fps）。 */
@@ -186,6 +193,7 @@ export function statusOf(state: FramingState): WorldCaptureFramingStatus {
     ...(state.lastContentFingerprint ? { contentFingerprint: state.lastContentFingerprint } : {}),
     ...(frozen ? { input: { key: frozen.key, mediaId: frozen.media.mediaId, checksum: frozen.media.checksum } } : {}),
     ...(video ? { video: video.media } : {}),
+    ...(video && state.phase === "ready" && !state.stale && state.dynamicKey ? { dynamicKey: state.dynamicKey } : {}),
     ...(state.width !== undefined ? { width: state.width } : {}),
     ...(state.height !== undefined ? { height: state.height } : {}),
     ...(state.reason ? { reason: state.reason } : {})

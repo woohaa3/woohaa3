@@ -69,9 +69,6 @@ export function createCatalogRuntime(options: CatalogRuntimeOptions): CatalogRun
                 ? { capabilityFacts: dynamic?.capabilityFacts ?? model.capabilityFacts }
                 : {}),
               ...(dynamic?.promptRequirement ?? model.promptRequirement ? { promptRequirement: dynamic?.promptRequirement ?? model.promptRequirement } : {}),
-              ...(dynamic?.referencePolicy ?? model.referencePolicy
-                ? { referencePolicy: dynamic?.referencePolicy ?? model.referencePolicy }
-                : {}),
               ...(dynamic?.cancel ?? model.cancel ? { cancel: dynamic?.cancel ?? model.cancel } : {})
             };
           }
@@ -86,7 +83,7 @@ export function createCatalogRuntime(options: CatalogRuntimeOptions): CatalogRun
     return providers.map((entry) => {
       // 能力事实也参与签名：discovery 刷新只改画是否可读图时，目录必须失效重算。
       const models = entry.models
-        .map((model) => `${model.modelType}:${model.providerModelId}:${model.executable === false ? "0" : "1"}:${JSON.stringify(model.capabilityFacts ?? null)}:${model.referencePolicy ?? "optional"}`)
+        .map((model) => `${model.modelType}:${model.providerModelId}:${model.executable === false ? "0" : "1"}:${JSON.stringify(model.capabilityFacts ?? null)}`)
         .join("+");
       // Provider 的 catalogRevision 参与签名：远端 Provider 只改 schema/能力、不改模型 id 集合时，
       // 目录也要失效重算（否则已打开的画布看不到新描述）。

@@ -409,7 +409,6 @@ function decodeModel(
   const bindings = readArrayField(record, "bindings");
   const capabilities = mergeBindings(rawCapabilities, bindings);
   const capabilityFacts = warnCapabilityFacts(record);
-  const rawReferencePolicy = record.referencePolicy ?? record.reference_policy;
 
   const { interaction } = normalizeInteraction(readRecordField(record, "interaction"));
 
@@ -435,7 +434,6 @@ function decodeModel(
     taskTimeoutMs,
     ...(capabilities !== undefined ? { capabilities } : {}),
     ...(capabilityFacts !== undefined ? { capabilityFacts } : {}),
-    ...(rawReferencePolicy === "identity-required" ? { referencePolicy: rawReferencePolicy } : {}),
     // 只有显式 false 才标记不可执行；缺省按可执行处理（proto 用 optional bool 保留
     // presence：服务端明确不可执行时会发 false，未声明时省略）。
     ...(executable === false ? { executable: false } : {})

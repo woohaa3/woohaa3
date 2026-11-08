@@ -22,6 +22,7 @@
 import {
   DEFAULT_MODEL_PLACEMENT,
   describeWorldModelAnimationRig,
+  findNonOverlappingNodePosition,
   SHARED_WORLD_VERSION,
   assistantWorldToolsForScope,
   decodeSceneAreaData,
@@ -63,7 +64,7 @@ import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash, stableStringify }
 import { executeSceneIr } from "../model-mcp/script-executor.js";
 import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult } from "../sync/room-types.js";
-import { stableAuthorityVersion, worldObjectVersion, nextSceneAreaScopeVersion, type WorldAuthoringAuthority } from "./authority.js";
+import { instanceFootprint, stableAuthorityVersion, worldObjectVersion, nextSceneAreaScopeVersion, type WorldAuthoringAuthority } from "./authority.js";
 import { findWorldCameraNodeId, planWorldCameraSettings, worldCameraSettingsOf, type WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldCameraCompletionVerification } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
@@ -1345,7 +1346,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     const currentInstance = current.fields.sharedWorldInstance as Record<string, unknown>;
     const fields = { sharedWorldInstance: { ...currentInstance, transform: operation.transform } };
     const prepared = await deps.authority.prepareContent({ ...current.fields, ...fields }, inspected.canvas);
-    if (!prepared) return failure("not-ready", "无法确定移动后模型的权威占地");
+    if (!prepared) return failure("not-ready", `模型 ${operation.instanceId} 移动后的权威占地未知，请等待模型资源就绪后重试`);
     const commandId = intentCommandId("assistant-world-move", operation);
     const result = await inspected.room.submitDerived({
       commandId,
@@ -1365,7 +1366,19 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         };
       }
     }, { spatialContext: capability });
-    if (!result.ok) return commandFailure(result);
+    if (!result.ok) {
+      const rejected = commandFailure(result);
+      if (rejected.code === "outside-scope" && context.scope.scope.kind === "scene-area") {
+        const areaId = context.scope.scope.areaId;
+        const area = findArea(inspected.canvas, areaId)?.area;
+        const actual = instanceFootprint(prepared.localAabb, operation.transform);
+        if (area && (actual.min.u < area.bounds.min.u || actual.max.u > area.bounds.max.u
+          || actual.min.v < area.bounds.min.v || actual.max.v > area.bounds.max.v)) {
+          return { ...rejected, message: `模型 ${operation.instanceId} 移动后占地 u=[${actual.min.u}, ${actual.max.u}]，v=[${actual.min.v}, ${actual.max.v}] 超出导演区 ${areaId}：u=[${area.bounds.min.u}, ${area.bounds.max.u}]，v=[${area.bounds.min.v}, ${area.bounds.max.v}]。请调整位置，或先手动调整范围后重新授权` };
+        }
+      }
+      return rejected;
+    }
     const after = await inspected.room.inspectPublished(value => value);
     const version = after.ok ? worldObjectVersion(after.canvas, identity) : null;
     if (version) {
@@ -1440,17 +1453,11 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     }
     const planned = planWorldCameraSettings(operation.cameraId, operation.settings);
     if ("ok" in planned) return failure(planned.code === "not-ready" ? "not-ready" : "invalid-data", planned.message);
-    // 镜头资格按空间定位点判定。默认镜头站在地面点后方 distance 米往目标看，机身常在导演区外；
-    // 创建时把导演区扩到包含镜头定位点（留少量边距），而不是拒绝。
+    // Creating a camera cannot silently enlarge the user's issued scope.
     const bounds = area.area.bounds;
-    const margin = 1;
     const inside = planned.position.u >= bounds.min.u && planned.position.u <= bounds.max.u
       && planned.position.v >= bounds.min.v && planned.position.v <= bounds.max.v;
-    const nextBounds = inside ? bounds : {
-      min: { u: Math.min(bounds.min.u, planned.position.u - margin), v: Math.min(bounds.min.v, planned.position.v - margin) },
-      max: { u: Math.max(bounds.max.u, planned.position.u + margin), v: Math.max(bounds.max.v, planned.position.v + margin) }
-    };
-    const cardPosition = operation.cardPosition ?? { x: 0, y: 0 };
+    if (!inside) return failure("outside-scope", `镜头 ${operation.cameraId} 定位点 (u=${planned.position.u}, v=${planned.position.v}) 超出导演区 ${areaId}：u=[${bounds.min.u}, ${bounds.max.u}]，v=[${bounds.min.v}, ${bounds.max.v}]。请调整机位，或先手动调整导演区范围后重新授权`);
     const commandId = intentCommandId("assistant-world-create-camera", operation);
     const result = await inspected.room.submitDerived({
       commandId,
@@ -1459,15 +1466,16 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           return { ok: false as const, code: "operation-conflict", message: `新镜头身份已存在（nodeId=${operation.nodeId}, cameraId=${operation.cameraId}）` };
         }
         const commands: unknown[] = [];
-        if (!inside) {
-          commands.push({ type: "nodeData.patch", nodeId: area.node.id, value: { sceneArea: { ...area.area, bounds: nextBounds } } as unknown as CanvasNodeData });
-        }
         commands.push({
           type: "node.add",
           node: {
             id: operation.nodeId,
             type: "world-camera",
-            position: cardPosition,
+            position: operation.cardPosition ?? findNonOverlappingNodePosition(
+              { x: 0, y: 0 },
+              WORLD_CAMERA_CARD_SIZE,
+              canvas.document.nodes
+            ),
             width: WORLD_CAMERA_CARD_SIZE.width,
             height: WORLD_CAMERA_CARD_SIZE.height
           },

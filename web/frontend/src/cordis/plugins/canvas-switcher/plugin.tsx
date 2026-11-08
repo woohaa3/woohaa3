@@ -22,6 +22,7 @@ import {
 } from "./chrome.js";
 import type { CanvasCreateOptionContribution } from "../../contracts.js";
 import type { CanvasLiveSync } from "./chrome.js";
+import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 
 export const CANVAS_SWITCHER_PLUGIN_ID = "canvas-switcher";
 
@@ -77,7 +78,8 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
       /** 目录与会话共用同一组监听者：触发器据此同时重读标题、目录状态与实时态。 */
       const refreshTitle = () => {
         const entry = catalog.getState().entries.find((item) => item.id === canvasId);
-        const nextTitle = entry?.title ?? currentTitle;
+        const document = woohaa3CanvasStore.getState().canvas;
+        const nextTitle = (document?.id === canvasId ? document.title : undefined) ?? entry?.title ?? currentTitle;
         const nextSync = entry?.sync;
         const nextLiveSync = deriveLiveSync(session.getStatus());
         if (nextTitle === currentTitle && nextSync === currentSync && nextLiveSync === currentLiveSync) return;
@@ -95,9 +97,11 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
       const unsubscribeSession = session.subscribe(() => {
         refreshTitle();
       });
+      const unsubscribeDocument = woohaa3CanvasStore.subscribe(refreshTitle);
       ctx.effect(() => () => {
         unsubscribeCatalog();
         unsubscribeSession();
+        unsubscribeDocument();
       }, "canvas-switcher-title");
       // 进入新的画布 page scope：使目录缓存失效，下一次读取得到最新标题/列表。
       catalog.invalidate();
@@ -194,6 +198,7 @@ export function canvasSwitcherExtension(options: CanvasSwitcherExtensionOptions 
           // 由扩展自行决定每个条目是否呈现动作。
           slots: ctx.slots,
           currentCanvasId: () => canvasId,
+          currentDocument: { getSnapshot: () => woohaa3CanvasStore.getState().canvas, subscribe: woohaa3CanvasStore.subscribe },
           switchTo,
           create,
           rename,

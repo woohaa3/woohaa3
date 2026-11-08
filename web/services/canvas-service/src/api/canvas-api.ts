@@ -30,7 +30,7 @@ import { checkServiceToken, decodeSegment, isLoopbackRequest, readJsonBody, resp
 import { handleCreate, handleDelete, handleGet, handleHealth, handleList, loadCanvasListPage, requireCanvasAccess } from "./canvas-api/lifecycle-routes.js";
 import { DEFAULT_CANVAS_MAX_BODY_BYTES } from "./canvas-api/types.js";
 import { handleCancel, handleRun } from "./canvas-api/run-routes.js";
-import { handleCaptureFreeze, handleCapturePageCommit, handleCapturePageCommitVideo, handleCapturePagePending, handleCapturePagePrepare, handleCaptureReady, handleCaptureRefresh, handleCaptureStatuses } from "./canvas-api/capture-routes.js";
+import { handleCapturePageProgress, handleCaptureFreeze, handleCapturePageCommit, handleCapturePageCommitVideo, handleCapturePagePending, handleCapturePagePrepare, handleCaptureReady, handleCaptureRefresh, handleCaptureStatuses } from "./canvas-api/capture-routes.js";
 
 export {
   DEFAULT_CANVAS_API_BASE_PATH,
@@ -329,7 +329,7 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
       }
       if (
         segments.length === 2 &&
-        (segments[1] === "captures-refresh" || segments[1] === "captures-freeze" || segments[1] === "captures-ready" || segments[1] === "captures-page-prepare" || segments[1] === "captures-page-commit" || segments[1] === "captures-page-commit-video" || segments[1] === "captures-page-pending" || segments[1] === "captures-status") &&
+        (segments[1] === "captures-refresh" || segments[1] === "captures-freeze" || segments[1] === "captures-ready" || segments[1] === "captures-page-progress" || segments[1] === "captures-page-prepare" || segments[1] === "captures-page-commit" || segments[1] === "captures-page-commit-video" || segments[1] === "captures-page-pending" || segments[1] === "captures-status") &&
         req.method === "POST"
       ) {
         const canvasId = segments[0];
@@ -342,6 +342,7 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         const permission = route === "captures-refresh" || route === "captures-page-pending" || route === "captures-status" ? "read" : "write";
         if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
         if (!(await requireCanvasAccess({ req, res, canvasId, permission, options, log })).ok) return true;
+        if (route === "captures-page-progress") return handleCapturePageProgress(req, res, canvasId, options);
         return route === "captures-refresh"
           ? await handleCaptureRefresh(req, res, canvasId, options, log)
           : route === "captures-freeze"

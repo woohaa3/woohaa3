@@ -96,6 +96,9 @@ describe("modal stack reducer", () => {
     const updated = setDialogBusy(a.stack, "a", true);
     expect(updated.updated).toBe(true);
     expect(topDialog(updated.stack)!.busy).toBe(true);
+    const repeated = setDialogBusy(updated.stack, "a", true);
+    expect(repeated.updated).toBe(false);
+    expect(repeated.stack).toBe(updated.stack);
     const late = setDialogBusy(updated.stack, "gone", true);
     expect(late.updated).toBe(false);
     expect(late.stack).toBe(updated.stack);

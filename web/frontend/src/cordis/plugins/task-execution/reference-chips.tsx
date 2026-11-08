@@ -140,7 +140,7 @@ function ReferenceTile({
         // 删除键是显式动作；避免 tile 被点开时误触发。
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
-          onRemove?.(item);
+          if (!disabled) onRemove?.(item);
         }
       }}
     >

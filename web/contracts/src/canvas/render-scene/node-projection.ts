@@ -6,7 +6,6 @@
  * 不含领域写入，也不缓存任何状态。
  */
 import type { CanvasNodeData, StoredAsset } from "../domain/index.js";
-import { UNSUBMITTED_VIDEO_LABEL, isUnsubmittedVideoNode } from "../node-execution-state.js";
 import type { BevyModelPlacement } from "./wire-model.js";
 
 const FAILURE_BODY_LABELS = {
@@ -21,9 +20,6 @@ const FAILURE_BODY_LABELS = {
  * `outputAssetId` **不回落** prompt。
  */
 export function readBody(type: string, data: CanvasNodeData | undefined, assets: Map<string, StoredAsset>): string {
-  // 空视频节点表达「还没提交」，而不是空卡片或成功/失败
-  // （change: 2026-11-06-guard-video-generation-inputs，N12）。
-  if (isUnsubmittedVideoNode(type, data)) return UNSUBMITTED_VIDEO_LABEL;
   if (!data) return "";
   // 浏览器本地历史预览选中失败/取消归档时，卡片正文显示安全原因，而不是上一个成功输出。
   const failure = data.historyPreviewFailure;

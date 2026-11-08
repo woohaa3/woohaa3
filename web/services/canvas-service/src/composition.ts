@@ -420,6 +420,10 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       logger: (event) =>
         log({ event: event.event, status: event.status, ...(event.code ? { code: event.code } : {}),
           ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}) }),
+      onClientAcquired: (room) => {
+        const exported = room.exportCanvas();
+        if (exported.ok) worldCapture?.observeCanonical({ canvasId: exported.canvas.id, canvas: exported.canvas });
+      },
       onCommitted: (input) => {
         worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas });
         void recordModelPlacementHistory(

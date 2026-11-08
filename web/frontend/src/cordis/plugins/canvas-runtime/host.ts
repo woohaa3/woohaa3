@@ -224,6 +224,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     if (!runtime?.requestWorldCapture) return { ok: false, code: "renderer-unavailable" };
     const release = await acquireCaptureLock();
     try {
+      if (this.disposed || runtime !== this.runtimeInstance) return { ok: false, code: "renderer-unavailable" };
       worldCaptureGeneration += 1;
       const frame = await runtime.requestWorldCapture({
         generation: worldCaptureGeneration,
@@ -231,6 +232,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         width: input.width,
         height: input.height
       });
+      if (this.disposed || runtime !== this.runtimeInstance) return { ok: false, code: "renderer-unavailable" };
       if (!frame) return { ok: false, code: "renderer-unavailable" };
       if (!frame.ok) return { ok: false, code: frame.code };
       return { ok: true, rgba: frame.rgba, width: frame.width, height: frame.height };

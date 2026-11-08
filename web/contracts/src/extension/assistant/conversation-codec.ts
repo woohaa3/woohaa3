@@ -119,7 +119,6 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   if (typeof entryRaw.prompt !== "string" || entryRaw.prompt.trim() === "") {
     return fail("malformed-request", "prompt 必须是非空字符串");
   }
-  if (entryRaw.prompt.length > 20_000) return fail("malformed-request", "prompt 超过 20000 字符");
   if (entryRaw.nodeId !== undefined && !isBoundedId(entryRaw.nodeId)) return fail("malformed-request", "nodeId 非法");
   if (entryRaw.mode !== undefined && !isAgentTargetMode(entryRaw.mode)) return fail("malformed-request", "mode 非法");
   if (entryRaw.cameraId !== undefined && !isBoundedId(entryRaw.cameraId)) return fail("malformed-request", "cameraId 非法");

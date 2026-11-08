@@ -16,9 +16,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
-import { effectiveReferencePolicy } from "@woohaa3/contracts";
 import { Button } from "@woohaa3/ui";
-import { isUnsubmittedVideoNode, resolveModelSubmissionParameters } from "@woohaa3/contracts";
+import { AssistantModelSelector } from "@woohaa3/ui/assistant";
+import { resolveModelSubmissionParameters } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
@@ -66,8 +66,7 @@ import {
   mentionTypeFor,
   placeholderModel,
   readPanelLocalSurface,
-  removeReference,
-  setReferencePolicy as commitReferencePolicy
+  changeReferences
 } from "./model-execution-host-helpers.js";
 import type { ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
 import type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
@@ -130,6 +129,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const canvasState = useCanvasStoreState();
   const { state: catalogState, reload } = useTaskCatalog(catalogService);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [referenceError, setReferenceError] = useState<{ nodeId: string; message: string } | null>(null);
+  const referenceWrite = useRef(0);
+  const [recoveryModelOpen, setRecoveryModelOpen] = useState(false);
+  useEffect(() => { setRecoveryModelOpen(false); }, [props.selectedNodeId]);
   /**
    * 模型 Panel 渲染失败：连同失败时的 `{nodeId, modelKey}` 作用域一起记录。
    *
@@ -172,10 +175,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const pendingSelection = Boolean(context && !canonicalNodeIds.has(context.nodeId));
   // provider 已产出、正在转存稳定媒体：面板显示准备态，成功/下载入口保持禁用。
   const mediaPreparing = useNodeMediaPreparing(canvasId ?? "", context?.nodeId ?? "");
-  const unsubmitted = useMemo(
-    () => isUnsubmittedVideoNode(context?.nodeType, context?.nodeData),
-    [context]
-  );
 
   const panelKind = context?.panelKind ?? null;
   const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
@@ -189,7 +188,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     [catalog, panelKind]
   );
 
-  // 每个节点的模型选择（session-only）；节点无记录时回落到规范值/目录默认。
+  // 未确认的本地选择优先；保存后读取规范字段，撤销/别页修改也由同一投影恢复。
   const selectionSnapshot = useSyncExternalStore(
     draftStore.subscribe,
     useCallback(() => (context ? draftStore.getSelection(context.nodeId) ?? "" : ""), [context, draftStore])
@@ -197,27 +196,25 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
 
   const targetModelKey = useMemo(() => {
     if (!context || !panelKind) return "";
-    const fromSelection = selectionSnapshot !== "" && typedModels.some((m) => m.modelKey === selectionSnapshot)
-      ? selectionSnapshot
-      : undefined;
+    const fromSelection = selectionSnapshot || undefined;
     if (fromSelection) return fromSelection;
     return resolveSelectedModelKey({
       nodeData: context.nodeData,
       draftParameters: undefined,
       models: typedModels,
-      defaultModelKey: modelConfig?.defaultModel ?? typedModels[0]?.modelKey ?? ""
+      defaultModelKey: modelConfig?.defaultModel ?? ""
     });
   }, [context, panelKind, selectionSnapshot, typedModels, modelConfig]);
+  useEffect(() => {
+    if (context && selectionSnapshot && canvas?.nodeData[context.nodeId]?.preferredModelKey === selectionSnapshot) {
+      draftStore.clearSelection(context.nodeId);
+    }
+  }, [canvas, context, selectionSnapshot, draftStore]);
 
   const draft = useNodeDraft(context?.nodeId ?? null, targetModelKey);
   const model = useMemo(
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
-  );
-  /** 身份参考策略：节点设置优先，其次模型描述，缺省 optional。 */
-  const referencePolicy = useMemo(
-    () => effectiveReferencePolicy(context?.nodeData.referencePolicy, model?.referencePolicy),
-    [context, model]
   );
   // T10: capture framing is explicit-only. The panel never scans the canvas for a
   // camera card, so an unrelated world camera cannot change an ordinary generation.
@@ -253,10 +250,9 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       modelDefinition: model,
       prompt: draftPrompt,
       canvas,
-      panelParameters: parameters,
-      referencePolicy
+      panelParameters: parameters
     });
-  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, model, draftPrompt, canvas, parameters, referencePolicy]);
+  }, [panelKind, context, disabledReason, pendingSelection, catalog, catalogState, targetModelKey, model, draftPrompt, canvas, parameters]);
 
   // 展示用阻止原因：会话只读（断线）时面板不重复枚举「网络已断开 / 目录尚未加载」这类
   // 会话级状态——左下角同步状态控件的常驻 tooltip 已经承载该信息。主操作仍由 `readOnly`
@@ -290,7 +286,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         : null,
     [canvasId, runClient, activity, props.submitCoordinator]
   );
-  const executionMessage = submitError;
+  const executionMessage = submitError ?? (referenceError?.nodeId === context?.nodeId ? referenceError?.message : null);
 
   const references = useMemo<ModelReferenceItem[]>(() => {
     if (!canvas || !context || !panelKind || !catalog || !targetModelKey) return [];
@@ -318,6 +314,13 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => (context ? buildSnippetTrigger(snippetSource, context.nodeId) : undefined),
     [snippetSource, context]
   );
+  const saveModelSelection = useCallback((nodeId: string, modelKey: string,
+    baseline = structuredClone(woohaa3CanvasStore.getState().canvas?.nodeData[nodeId] ?? null)) => {
+    if (!props.editService) return;
+    void props.editService.record(
+      [{ type: "nodeData.patch", nodeId, value: { preferredModelKey: modelKey }, expectedNodeData: { [nodeId]: baseline } }], "选择模型"
+    ).catch(() => {});
+  }, [props.editService]);
   const patchDraft = useCallback(
     (patch: { prompt?: string; parameters?: Record<string, unknown> }) => {
       if (!context) return;
@@ -334,6 +337,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
           ...(patch.parameters !== undefined ? { parameters: patch.parameters } : {})
         });
         draftStore.setSelection(context.nodeId, nextModel);
+        saveModelSelection(context.nodeId, nextModel);
         return;
       }
       // 参数手势：把连续变更合并为一次可撤销的本地条目（任务 1.6）。
@@ -352,7 +356,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         ...(patch.parameters !== undefined ? { parameters: patch.parameters } : {})
       });
     },
-    [context, draft, draftStore, targetModelKey, typedModels, props]
+    [context, draft, draftStore, targetModelKey, typedModels, props, saveModelSelection]
   );
 
   /**
@@ -411,8 +415,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         modelDefinition: model,
         prompt: input.prompt,
         canvas,
-        panelParameters: resolvedParameters,
-        referencePolicy
+        panelParameters: resolvedParameters
       });
       if (reasons.length > 0) {
         setSubmitError(reasons[0]!);
@@ -456,7 +459,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, referencePolicy, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
   );
 
   const submitIntent = useCallback(
@@ -502,6 +505,13 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     );
   }
 
+  const editReferences = (items: readonly Pick<ModelReferenceItem, "slotId" | "sourceNodeId">[]) => {
+    const write = ++referenceWrite.current;
+    setReferenceError(null);
+    return changeReferences(session, canvas, context.nodeId, items, undefined, message => {
+      if (mounted.current && write === referenceWrite.current) setReferenceError({ nodeId: context.nodeId, message });
+    });
+  };
   const referenceBindings = catalog ? capabilityForModel(catalog, panelKind, targetModelKey)?.bindings ?? [] : [];
   const referencesSlot = (
     <NodeExecutionReferences
@@ -512,19 +522,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       }
       candidates={computePickerCandidates(canvas, context.nodeId, { bindings: referenceBindings })}
       presentation={presentation}
-      disabled={pendingSelection}
+      disabled={readOnly || pendingSelection}
       pickerOpen={pickerOpen}
       onPickerOpenChange={setPickerOpen}
       onConnect={(sourceNodeId) => addReference(session, context.nodeId, sourceNodeId)}
-      onDisconnect={(item) => removeReference(session, canvas, context.nodeId, item.sourceNodeId)}
-      identityRequired={referencePolicy === "identity-required"}
-      onReferencePolicyChange={(required) =>
-        commitReferencePolicy(
-          session,
-          context.nodeId,
-          required ? "identity-required" : "optional"
-        )
-      }
+      onDisconnect={(item) => editReferences([item])}
     />
   );
 
@@ -550,7 +552,15 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       data-presentation={expanded ? "expanded" : "compact"}
     >
       {diagnostic ? (
-        <ModelInteractionDiagnosticView diagnostic={diagnostic} />
+        <>
+          <ModelInteractionDiagnosticView diagnostic={diagnostic} />
+          {!readOnly && typedModels.length > 0 ? <AssistantModelSelector
+            model={targetModelKey} options={typedModels.map(entry => ({ value: entry.modelKey, label: entry.title || entry.providerModelId, provider: entry.providerId }))}
+            open={recoveryModelOpen} onOpenChange={setRecoveryModelOpen} disabled={pendingSelection}
+            onChange={modelKey => patchDraft({ parameters: { model: modelKey } })}
+          /> : null}
+          {catalogState.status === "error" ? <Button size="sm" onClick={reload}>重新加载模型目录</Button> : null}
+        </>
       ) : renderError !== null && model && renderError.scope === panelErrorScope(context.nodeId, targetModelKey) ? (
         <ModelInteractionDiagnosticView
           diagnostic={{ kind: "render-error", model, message: renderError.message }}
@@ -571,7 +581,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             readOnly={readOnly}
             presentation={expanded ? "expanded" : "compact"}
             status={effectiveStatus}
-            {...(unsubmitted ? { unsubmitted } : {})}
             {...(taskState.progress !== undefined ? { progress: taskState.progress } : {})}
             {...(taskState.errorMessage !== undefined
               ? { errorMessage: taskState.errorMessage }

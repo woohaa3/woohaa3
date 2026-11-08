@@ -92,13 +92,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       if (used > binding.maxItems) { blockingReasons.push(`镜头参考数量超过模型对 ${binding.field} 的上限 ${binding.maxItems}`); continue; }
       counts.set(binding.field, used);
       references.push({ slotId: mapping.slotId ?? "", role: referenceRole, sortKey: mapping.sortKey,
-        sourceNodeId: mapping.sourceNodeId, input: {
-          ...cameraInput,
-          role: referenceRole,
-          slotId: mapping.slotId ?? "",
-          sourceNodeId: mapping.sourceNodeId,
-          order: references.length
-        } });
+        sourceNodeId: mapping.sourceNodeId, input: { ...cameraInput, role: referenceRole } });
       continue;
     }
     const explicit = (mapping.sourceAssetIds ?? []).filter(
@@ -149,10 +143,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
           role: mapping.role,
           storageKey,
           mediaType,
-          mediaKind,
-          slotId: mapping.slotId ?? "",
-          sourceNodeId: mapping.sourceNodeId,
-          order: references.length
+          mediaKind
         }
       });
     }

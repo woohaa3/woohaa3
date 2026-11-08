@@ -5,7 +5,7 @@
  * 只读仍可定位；结果在点击前失效时提示并刷新，不向原点跳转。
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { ServerCanvas } from "@woohaa3/contracts";
+import type { CanvasNodeData, ServerCanvas } from "@woohaa3/contracts";
 import { searchCanvasNodes, type CanvasSearchKind, type CanvasSearchResult } from "../domain/canvas-search.js";
 import type { CanvasSearchStore } from "../services/canvas-search-store.js";
 import { Button, IconButton } from "@woohaa3/ui/primitives";
@@ -15,8 +15,10 @@ export type CanvasSearchPanelProps = {
   store: CanvasSearchStore;
   /** 当前授权画布（working projection 的 committed 部分）。 */
   getCanvas: () => ServerCanvas | null;
+  subscribeCanvas?: (notify: () => void) => () => void;
   /** 定位并选择结果；失效时返回 ok:false。 */
   onLocate: (nodeId: string) => { ok: boolean; reason?: string };
+  onRename?: (nodeId: string, title: string, expectedData: CanvasNodeData | null) => Promise<{ ok: boolean; reason?: string }>;
   /** 取消/关闭时恢复焦点到传入元素。 */
   onRequestFocusRestore?: () => void;
 };
@@ -27,14 +29,24 @@ const KIND_OPTIONS: readonly { kind: CanvasSearchKind; label: string }[] = [
   { kind: "video", label: "视频" },
   { kind: "audio", label: "音频" },
   { kind: "model3d", label: "3D 模型" },
-  { kind: "composite-asset", label: "复合资产" }
+  { kind: "composite-asset", label: "复合资产" },
+  { kind: "scene-area", label: "导演区" },
+  { kind: "world-camera", label: "镜头" },
+  { kind: "workflow-group-2d", label: "节点组" }
 ];
 
-export function CanvasSearchPanel({ store, getCanvas, onLocate, onRequestFocusRestore }: CanvasSearchPanelProps) {
+const noCanvasSubscription = () => () => {};
+const noCanvasSnapshot = () => null;
+
+export function CanvasSearchPanel({ store, getCanvas, subscribeCanvas, onLocate, onRename, onRequestFocusRestore }: CanvasSearchPanelProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  const canvas = getCanvas();
+  const subscribedCanvas = useSyncExternalStore(subscribeCanvas ?? noCanvasSubscription,
+    subscribeCanvas ? getCanvas : noCanvasSnapshot, noCanvasSnapshot);
+  const canvas = subscribeCanvas ? subscribedCanvas : getCanvas();
   const [failure, setFailure] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [renaming, setRenaming] = useState<{ nodeId: string; title: string; expectedData: CanvasNodeData | null } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const results = useMemo(
     () => (canvas ? searchCanvasNodes(canvas, { query: snapshot.query, kinds: snapshot.kinds }) : []),
@@ -140,12 +152,25 @@ export function CanvasSearchPanel({ store, getCanvas, onLocate, onRequestFocusRe
               onMouseEnter={() => store.setActiveIndex(index)}
               onClick={() => locate(result)}
             >
-              <span className="canvas-search__result-name" title={result.name}>{result.name}</span>
+              <div className="canvas-search__result-content">
+              {renaming?.nodeId === result.nodeId ? <input className="canvas-search__input" value={renaming.title} disabled={saving}
+                onClick={event => event.stopPropagation()} onChange={event => setRenaming(current => current && { ...current, title: event.target.value })}
+                onKeyDown={event => event.stopPropagation()} /> : <span className="canvas-search__result-name" title={result.name}>{result.name}</span>}
               <span className="canvas-search__result-meta">
                 {result.typeLabel}
                 {result.groupName ? ` · ${result.groupName}` : ""}
-                <span className="canvas-search__result-id">#{result.shortId}</span>
+                <span className="canvas-search__result-id" title={result.nodeId}>#{result.shortId}</span>
               </span>
+              </div>
+              {onRename ? <Button size="sm" disabled={saving} onClick={event => {
+                event.stopPropagation();
+                if (renaming?.nodeId !== result.nodeId) { setRenaming({ nodeId: result.nodeId, title: result.name, expectedData: structuredClone(canvas?.nodeData[result.nodeId] ?? null) }); return; }
+                setSaving(true);
+                void onRename(result.nodeId, renaming.title, renaming.expectedData).then(outcome => {
+                  if (outcome.ok) setRenaming(null); else setFailure(outcome.reason ?? "重命名未保存");
+                }).catch(() => setFailure("重命名未保存，请重试")).finally(() => setSaving(false));
+              }}>{renaming?.nodeId === result.nodeId ? "保存名称" : "重命名"}</Button> : null}
+              {renaming?.nodeId === result.nodeId ? <Button size="sm" disabled={saving} onClick={event => { event.stopPropagation(); setRenaming(null); }}>取消</Button> : null}
               <IconButton
                 className="canvas-search__result-locate"
                 label={`定位 ${result.name}`}

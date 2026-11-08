@@ -10,13 +10,7 @@ import type {
   CanvasReferenceMediaKind,
   ServerCanvas
 } from "@woohaa3/contracts";
-import {
-  decodeWorldCamera,
-  hasReadyImageReference,
-  IDENTITY_REFERENCE_REQUIRED_REASON,
-  worldCameraShotContext,
-  type CanvasReferencePolicy
-} from "@woohaa3/contracts";
+import { decodeWorldCamera, worldCameraShotContext } from "@woohaa3/contracts";
 import { catalogBlockingReasons, catalogStateBlockingReasons, capabilityForModel } from "./catalog-projection.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { modelParameterBlockingReasons, readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
@@ -31,7 +25,7 @@ export { resolveModelMcpServerUrl };
 /**
  * 解析选中节点的 target modelKey（change: add-pluggable-model-interactions，D8）。
  *
- * 优先级：面板 draft → 规范 `nodeData.parameters.model` → 规范 `nodeData.modelKey`
+ * 优先级：面板 draft → 显式 preferredModelKey → 规范 `nodeData.parameters.model` → 规范 `nodeData.modelKey`
  * → catalog 默认模型。Host 用它作为 draft identity 与 commit 身份。
  */
 export function resolveSelectedModelKey(input: {
@@ -42,12 +36,14 @@ export function resolveSelectedModelKey(input: {
 }): string {
   const candidates = [
     input.draftParameters?.model,
+    input.nodeData.preferredModelKey,
     input.nodeData.parameters?.model,
     input.nodeData.modelKey
   ];
   for (const candidate of candidates) {
     if (typeof candidate !== "string" || candidate === "") continue;
-    if (input.models.some((model) => model.modelKey === candidate)) return candidate;
+    // An unavailable saved identity must stay visible and block execution.
+    return candidate;
   }
   return input.defaultModelKey;
 }
@@ -70,8 +66,6 @@ export type ResolveBlockingReasonsInput = {
   prompt?: string;
   canvas: ServerCanvas | null;
   panelParameters: Record<string, unknown>;
-  /** 节点设置优先于模型声明的身份参考策略。 */
-  referencePolicy?: CanvasReferencePolicy;
 };
 
 /**
@@ -93,7 +87,7 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
   if (catalog?.available && catalog.models.length > 0 && panelKind) {
     const capability = capabilityForModel(catalog, panelKind, model);
     if (!capability) {
-      reasons.push("该节点没有可用模型");
+      reasons.push(model ? `所选模型 ${model} 当前不可用，请重新选择模型` : "该节点没有可用模型");
     } else if (canvas) {
       const resolution = resolveNodeReferenceInputs({
         canvas,
@@ -101,12 +95,6 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
         bindings: capability.bindings
       });
       reasons.push(...resolution.blockingReasons.filter(reason => reason !== "等待镜头参考图片准备完成"));
-      if (
-        input.referencePolicy === "identity-required" &&
-        !hasReadyImageReference(resolution.inputs)
-      ) {
-        reasons.push(IDENTITY_REFERENCE_REQUIRED_REASON);
-      }
       // 视频生成模式约束（edit_video / first_last_frame）：与 Canvas Service 共用同一规则，
       // 面板在 provider 调用前就给出稳定原因，而不是静默提交注定失败的输入。
       const mode = readGenerationMode(input.panelParameters);

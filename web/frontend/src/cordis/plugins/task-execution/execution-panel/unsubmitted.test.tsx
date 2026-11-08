@@ -17,26 +17,17 @@ const CONFIG = {
 	onRun: () => undefined
 };
 
-describe("ExecutionPanel 未提交视频节点", () => {
-	it("显示未提交/待配置并提示下一步，而不是失败", () => {
+describe("ExecutionPanel idle 视频节点", () => {
+	it.each(["compact", "expanded"] as const)("%s 不显示未提交状态和配置说明", presentation => {
 		const html = renderToStaticMarkup(
 			<ExecutionPanel
 				{...CONFIG}
-				data={{ panelPrompt: "", taskStatus: "idle", unsubmitted: true, parameters: { model: "agnes" } }}
-			/>
-		);
-		expect(html).toContain("未提交 · 待配置");
-		expect(html).toContain("选择模型并填写提示词后提交");
-		expect(html).not.toContain("生成失败");
-	});
-
-	it("普通 idle 节点不显示未提交文案", () => {
-		const html = renderToStaticMarkup(
-			<ExecutionPanel
-				{...CONFIG}
-				data={{ panelPrompt: "一段动画", taskStatus: "idle", parameters: { model: "agnes" } }}
+				presentation={presentation}
+				data={{ panelPrompt: "", taskStatus: "idle", parameters: { model: "agnes" } }}
 			/>
 		);
 		expect(html).not.toContain("未提交 · 待配置");
+		expect(html).not.toContain("选择模型并填写提示词后提交");
+		expect(html).not.toContain("生成失败");
 	});
 });

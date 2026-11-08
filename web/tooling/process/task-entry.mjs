@@ -32,9 +32,11 @@ const fakeWorker = {
       emit({
         id: input.key,
         providerId: "e2e",
-        state: "succeeded",
+        state: process.env.WORKER_FAIL === "1" ? "failed" : "succeeded",
         events: [],
-        result: { outputs: [{ kind: "text", text: "durable-result" }] },
+        ...(process.env.WORKER_FAIL === "1"
+          ? { error: { name: "FixtureProviderFailure", message: "Controlled provider failure" } }
+          : { result: { outputs: [{ kind: "text", text: "durable-result" }] } }),
         createdAt: now,
         updatedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
@@ -85,7 +87,10 @@ const service = createTaskService({
   storePath: process.env.TASK_DB,
   serviceToken: process.env.TASK_TOKEN,
   mediaServiceUrl: process.env.MEDIA_URL,
-  generationProviders: () => [{ extensionId: "test-provider", providerId: "litellm", available: true, provider: {}, models: [{ providerId: "litellm", providerModelId: "gemini-2.5-flash", modelType: "language", inputSchema: {}, defaultInput: {} }] }],
+  generationProviders: () => [{ extensionId: "test-provider", providerId: "litellm", available: true, provider: {}, models: [
+    { providerId: "litellm", providerModelId: "gemini-2.5-flash", modelType: "language", inputSchema: {}, defaultInput: {} },
+    { providerId: "litellm", providerModelId: "fixture-image", modelType: "image", inputSchema: {}, defaultInput: {} }
+  ] }],
   workerServer: fakeWorker,
   logger: () => undefined
 });

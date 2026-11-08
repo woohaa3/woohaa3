@@ -20,6 +20,7 @@ import {
 } from "../../domain/node-catalog.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { initialCameraCardPosition, revealWorldCamera } from "../../services/world-camera-frame.js";
+import { findNonOverlappingNodePosition } from "@woohaa3/contracts";
 import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
@@ -32,6 +33,7 @@ import type { SlotsService } from "../../contract/platform.js";
 import { reportContributionFault } from "../../contribution-guard.js";
 import type { ExtensionFaultService } from "../../extension-faults.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
+import { planSelectionArrange, selectionArrangeItems, selectionArrangeKind } from "./selection-arrange.js";
 
 export const CANVAS_MENU_PLUGIN_ID = "canvas-context-menu";
 export const CANVAS_MENU_CONTRIBUTION_ID = "canvas-menu";
@@ -118,10 +120,10 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
         if (nodeId) {
           const nodes = canvas?.document.nodes ?? [];
-          return nodeContextMenuItems(nodes, selectedNodeIds ?? [], writable, {
+          return [...nodeContextMenuItems(nodes, selectedNodeIds ?? [], writable, {
             activeNodeId: nodeId,
             nodeData: canvas?.nodeData
-          });
+          }), ...(canvas ? selectionArrangeItems(canvas, selectedNodeIds ?? [], writable) : [])];
         }
         // 拉线创建只列出合法可连接节点（创作工具类节点不作为连线目标）。
         const baseTemplates = NODE_TEMPLATES.filter((template) => template.nodeType !== COMPOSITE_ASSET_NODE_TYPE);
@@ -143,6 +145,21 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
         ];
       },
       onSelect: (itemId, context) => {
+        const arrangeKind = selectionArrangeKind(itemId);
+        if (arrangeKind) {
+          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+          if (!canvas || !ctx.canvasSession.isWritable() || (context.selectedNodeIds?.length ?? 0) < 2) return;
+          const plan = planSelectionArrange(canvas, context.selectedNodeIds!, arrangeKind);
+          const report = (reason: string) => {
+            if (!disposed && workingCanvasOf(woohaa3CanvasStore.getState())?.id === canvas.id) {
+              ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "整理未完成", description: reason } });
+            }
+          };
+          if (!plan.ok) { report(plan.reason); return; }
+          if (plan.commands.length) void ctx.canvasEdit.record(plan.commands, "整理所选作品")
+            .then(result => { if (!result.ok) report(result.reason); }).catch(() => report("无法保存整理，请检查画布连接"));
+          return;
+        }
         if (itemId === "convert-world") {
           const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
           const nodeId = context.nodeId;
@@ -222,7 +239,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
             : cameraData
               ? { worldCamera: cameraData } as unknown as CanvasNodeData
               : { sceneArea: { kind: "scene-area", version: SHARED_WORLD_VERSION, areaId: id, scopeVersion: version, animationOrigin: { u: ground.u, v: ground.v }, bounds: { min: { u: ground.u - 2, v: ground.v - 2 }, max: { u: ground.u + 2, v: ground.v + 2 } } } };
-          const position = cameraData ? initialCameraCardPosition(cameraData) : context.world;
+          const position = cameraData ? findNonOverlappingNodePosition(initialCameraCardPosition(cameraData),
+            WORLD_CAMERA_CARD_SIZE, workingCanvasOf(woohaa3CanvasStore.getState())?.document.nodes ?? []) : context.world;
           const commands = planInsertNode({
             nodeType: group ? "workflow-group-2d" : camera ? "world-camera" : "scene-area",
             // 导演区没有卡片，但节点结构仍需要有限位置：用右键地面点，保证 edit.apply 可规划。

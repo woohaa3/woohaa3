@@ -13,6 +13,7 @@ import type { Plugin } from "@deepseek-ai/cordis";
 import { CanvasZoomControls } from "./canvas-zoom-controls.js";
 import { CanvasMinimap } from "./canvas-minimap.js";
 import { CanvasSearchPanel } from "../../ui/CanvasSearchPanel.js";
+import { submitNodeRename } from "../../services/node-rename.js";
 import { CanvasUndoControls } from "./canvas-undo-controls.js";
 import { CanvasEditStatus } from "./canvas-edit-status.js";
 import { CanvasUndoToast } from "./canvas-undo-toast.js";
@@ -224,9 +225,16 @@ export function canvasShellExtension(): Plugin.Function<void> {
           <CanvasSearchPanel
             store={canvasSearchStore}
             getCanvas={() => workingCanvasOf(woohaa3CanvasStore.getState()) ?? null}
+            subscribeCanvas={woohaa3CanvasStore.subscribe}
             onLocate={(nodeId) => {
               const result = ctx.canvasLocate.locateNodes([nodeId]);
               return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+            }}
+            onRename={async (nodeId, title, expectedData) => {
+              const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+              if (!canvas?.document.nodes.some(node => node.id === nodeId)) return { ok: false, reason: "目标作品已不存在" };
+              const result = await submitNodeRename({ edit: ctx.canvasEdit, nodeId, name: title, expectedData });
+              return result.ok ? { ok: true } : { ok: false, reason: result.error };
             }}
           />
         )

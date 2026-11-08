@@ -5,6 +5,12 @@ import { nodeSelectionStore } from "../../services/selection-store.js";
 
 type ScreenRect = { left: number; right: number; top: number; bottom: number };
 
+/** Reserve an editable composer and its action row below a visible anchor. */
+export function belowPanelRevealOffset(node: ScreenRect, area: ScreenRect, height: number): number {
+  if (node.right <= area.left || node.left >= area.right || node.bottom <= area.top || node.top >= area.bottom) return 0;
+  return Math.max(0, node.bottom + 12 + Math.min(height, area.bottom - area.top - 48) - area.bottom);
+}
+
 /** 最小向上平移；超大节点保留顶部，避免为了露出底部把整个节点移出画布。 */
 export function dockRevealOffset(node: ScreenRect, dock: ScreenRect, surfaceTop: number): number {
   if (node.right <= dock.left || node.left >= dock.right || node.top >= dock.bottom || node.bottom <= dock.top) return 0;

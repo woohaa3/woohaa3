@@ -1,95 +1,18 @@
-/**
- * 身份参考策略的面板阻止原因（change: 2026-11-06-require-identity-reference，任务 2.1）。
- *
- * 覆盖无参考、参考未 ready、参考 ready 与 optional 不受影响四条路径。
- */
 import { describe, expect, it } from "vitest";
-import type { CanvasTaskCatalog, CanvasTaskCatalogModel, CanvasTaskInputBinding } from "@woohaa3/contracts";
-import { IDENTITY_REFERENCE_REQUIRED_REASON } from "@woohaa3/contracts";
-import { canvasFixture, imageAsset } from "./test-support/fixtures.js";
 import { resolveBlockingReasons } from "./node-panel-helpers.js";
+import { catalogFixture, canvasFixture } from "./test-support/fixtures.js";
 
-const BINDINGS: CanvasTaskInputBinding[] = [
-  {
-    field: "referenceImages",
-    semantic: "reference-image",
-    roles: ["reference_image"],
-    mediaKinds: ["image"],
-    mediaTypes: ["image/png", "image/jpeg", "image/webp"],
-    maxItems: 4,
-    valueFormat: "url"
-  }
-];
+const MODEL = catalogFixture([{ modelKey: "m", modelType: "image" }]).models[0]!;
+const catalog = () => catalogFixture([MODEL]);
 
-const MODEL: CanvasTaskCatalogModel = {
-  modelKey: "m",
-  providerId: "p",
-  providerModelId: "m",
-  modelType: "image",
-  title: "M",
-  interaction: { id: "generic-model", version: 1 },
-  inputSchema: {},
-  defaultInput: {},
-  bindings: BINDINGS,
-  taskTimeoutMs: 1000
-};
-
-function catalog(): CanvasTaskCatalog {
-  return { available: true, models: [MODEL], defaultModels: {} };
-}
-
-function canvasWithReference(options: { status?: "ready" | "generating"; title?: string } = {}) {
-  return canvasFixture({
-    nodes: [
-      { id: "up-1", type: "image", data: { outputAssetId: "asset-a" } },
-      { id: "target", type: "image", data: {} }
-    ],
-    edges: [{ id: "e1", source: "up-1", target: "target" }],
-    assets: [imageAsset({ id: "asset-a", status: options.status ?? "ready", title: options.title ?? "角色参考" })]
+describe("模型选择恢复", () => {
+  it("显式选择优先于已生成模型，未提交 prompt/参数不影响恢复", async () => {
+    const { resolveSelectedModelKey } = await import("./node-panel-helpers.js");
+    expect(resolveSelectedModelKey({ nodeData: { preferredModelKey: "chosen", modelKey: "old", parameters: { model: "old" } }, draftParameters: undefined, models: [MODEL], defaultModelKey: "m" })).toBe("chosen");
+    expect(resolveSelectedModelKey({ nodeData: { modelKey: "old" }, draftParameters: undefined, models: [MODEL], defaultModelKey: "m" })).toBe("old");
   });
-}
-
-function reasons(canvas: ReturnType<typeof canvasWithReference>, referencePolicy: "optional" | "identity-required") {
-  return resolveBlockingReasons({
-    panelKind: "image-generation",
-    nodeId: "target",
-    disabledReason: null,
-    pendingSelection: false,
-    catalog: catalog(),
-    catalogState: { status: "ready", catalog: catalog() },
-    model: "m",
-    canvas,
-    panelParameters: {},
-    referencePolicy
-  });
-}
-
-describe("身份参考阻止原因", () => {
-  it("identity-required 且没有参考时阻止提交", () => {
-    const canvas = canvasFixture({
-      nodes: [{ id: "target", type: "image", data: {} }],
-      edges: []
-    });
-    expect(reasons(canvas, "identity-required")).toContain(IDENTITY_REFERENCE_REQUIRED_REASON);
-  });
-
-  it("identity-required 且参考未 ready 时阻止提交", () => {
-    expect(reasons(canvasWithReference({ status: "generating" }), "identity-required")).toContain(
-      IDENTITY_REFERENCE_REQUIRED_REASON
-    );
-  });
-
-  it("identity-required 且参考 ready 时不产生身份阻止原因", () => {
-    expect(reasons(canvasWithReference(), "identity-required")).not.toContain(
-      IDENTITY_REFERENCE_REQUIRED_REASON
-    );
-  });
-
-  it("optional 任务无参考仍可提交", () => {
-    const canvas = canvasFixture({
-      nodes: [{ id: "target", type: "image", data: {} }],
-      edges: []
-    });
-    expect(reasons(canvas, "optional")).toEqual([]);
+  it("模型下线保留原身份并明确阻止执行", () => {
+    const canvas = canvasFixture({ nodes: [{ id: "target", type: "image", data: {} }], edges: [] });
+    expect(resolveBlockingReasons({ panelKind: "image-generation", nodeId: "target", disabledReason: null, pendingSelection: false, catalog: catalog(), catalogState: { status: "ready", catalog: catalog() }, model: "removed", canvas, panelParameters: {} })).toContain("所选模型 removed 当前不可用，请重新选择模型");
   });
 });

@@ -5,8 +5,8 @@
  * Host 是 `{ nodeId, modelKey }` 草稿的 owner：Panel 只通过 `patchDraft` 写、`draft` 读，
  * 拿不到 raw store。draft 只保存**未提交**输入；已提交状态仍由规范 Canvas 派生。
  *
- * 每个节点还有一个 session-only 的 `selectedModelKey`，用于在切换模型时定位到目标草稿分区；
- * 它不是规范状态，刷新即丢弃（模型最终身份仍由 Host 固定并写入 canonical）。
+ * 本地 selection 只在受控 preferredModelKey 写入确认前覆盖规范选择；
+ * 未提交 prompt/参数继续仅属于各模型草稿分区。
  */
 import type { ModelExecutionDraft, ModelExecutionDraftPatch } from "../../contract/model-interaction.js";
 import { nodeDraftStore } from "../task-execution/drafts.js";
@@ -18,6 +18,7 @@ export type ModelDraftStore = {
   clear(nodeId: string, modelKey: string): void;
   getSelection(nodeId: string): string | null;
   setSelection(nodeId: string, modelKey: string): void;
+  clearSelection(nodeId: string): void;
   subscribe(listener: () => void): () => void;
 };
 
@@ -59,6 +60,9 @@ export function createModelDraftStore(): ModelDraftStore {
       if (modelKey === "") return;
       selected.set(nodeId, modelKey);
       emit();
+    },
+    clearSelection(nodeId) {
+      if (selected.delete(nodeId)) emit();
     },
     subscribe(listener) {
       listeners.add(listener);

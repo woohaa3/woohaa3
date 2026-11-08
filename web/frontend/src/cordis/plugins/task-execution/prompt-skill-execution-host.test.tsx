@@ -76,7 +76,7 @@ class FakeSlots implements SlotsService {
 const CATALOG = catalogFixture([
   { modelKey: "video-model", modelType: "video", interaction: { id: "test-panel", version: 1 } },
   { modelKey: "lang-model", modelType: "language", title: "润色模型" }
-]);
+], { video: "video-model", language: "lang-model" });
 
 let root: Root | null = null;
 

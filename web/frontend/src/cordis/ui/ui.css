@@ -1051,27 +1051,6 @@
  * ------------------------------------------------------------------ */
 .ref-tile-strip-wrap { position: relative; }
 
-/* 身份参考策略状态与切换（change: 2026-11-06-require-identity-reference）。 */
-.ref-policy-status {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin-top: 4px;
-	color: var(--app-web-text-muted);
-	font-size: 11px;
-}
-
-.ref-policy-status[data-identity-required="true"] { color: var(--app-web-text-primary); }
-
-.ref-policy-status__toggle {
-	padding: 0;
-	border: 0;
-	background: none;
-	color: var(--app-interaction-accent);
-	font: inherit;
-	cursor: pointer;
-}
-
 .ref-tile-strip {
 	display: flex;
 	flex-wrap: nowrap;
@@ -1169,7 +1148,6 @@
 .ref-tile:focus-visible .ref-tile__remove { display: inline-flex; }
 .ref-tile__remove:focus-visible { box-shadow: 0 0 0 2px var(--app-interaction-accent); }
 .ref-tile__remove-icon { width: 11px; height: 11px; }
-
 /* 悬浮/聚焦媒体预览：portal 到主题根，定位完全由 Radix wrapper 负责。 */
 .ref-preview {
 	z-index: 60;
@@ -3095,6 +3073,14 @@
 	font-weight: 600;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.canvas-search__result-content {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
 }
 
 .canvas-search__result-meta {

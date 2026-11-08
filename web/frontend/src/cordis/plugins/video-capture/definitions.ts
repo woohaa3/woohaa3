@@ -5,7 +5,7 @@
  * 纯数据 + 纯校验，不 import React。payload 只携带稳定视频身份与同源播放 URL、
  * 目标节点 id 与初始 intents；任何临时 URL/Blob 都不经过 payload 进入规范状态。
  */
-import { isValidStorageKey } from "@woohaa3/contracts";
+import { decodeWorldCaptureDynamicVersionKey, isValidStorageKey } from "@woohaa3/contracts";
 import { objectPayload } from "../../services/dialogs/registry.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
 import type { VideoDialogPayload } from "./types.js";
@@ -22,6 +22,12 @@ export function validateVideoDialogPayload(payload: unknown): { ok: true; payloa
     const targetNodeId = typeof value.targetNodeId === "string" && value.targetNodeId !== "" ? value.targetNodeId : null;
     if (!targetNodeId) return null;
     const normalized: VideoDialogPayload = { videoAssetId, videoStorageKey, videoUrl, targetNodeId };
+    if (value.cameraSource !== undefined) {
+      const source = value.cameraSource as VideoDialogPayload["cameraSource"];
+      const key = decodeWorldCaptureDynamicVersionKey(source?.versionKey);
+      if (!key.ok || source?.cameraId !== key.value.cameraId) return null;
+      normalized.cameraSource = { cameraId: source.cameraId, versionKey: key.value };
+    }
     if (typeof value.posterUrl === "string" && value.posterUrl !== "") normalized.posterUrl = value.posterUrl;
     if (typeof value.title === "string" && value.title !== "") normalized.title = value.title;
     if (Array.isArray(value.initialIntents)) {

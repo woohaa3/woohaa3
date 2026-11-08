@@ -6,6 +6,7 @@
  *
  * @vitest-environment jsdom
  */
+import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -57,6 +58,7 @@ const emptyInstance = {
 
 async function renderSwitcher(options: {
   currentCanvasId?: string;
+  currentDocument?: CanvasSwitcherDeps["currentDocument"];
   entries?: Array<[string, string]>;
   phase?: "synced" | "offline";
   create?: () => Promise<{ ok: boolean; error?: string; canvasId?: string }>;
@@ -77,6 +79,7 @@ async function renderSwitcher(options: {
     session: fakeSession(options.phase),
     slots: options.slots ?? new SlotRegistry(),
     currentCanvasId: () => options.currentCanvasId ?? "a",
+    currentDocument: options.currentDocument,
     switchTo: options.switchTo ?? (() => undefined),
     create: options.create ?? (async () => ({ ok: true, canvasId: "new" })),
     rename: options.rename ?? (async () => ({ ok: true })),
@@ -687,4 +690,16 @@ it("新建完成先清 busy 再关闭真实 DialogHost，失败则保留弹窗",
       }
     }
   } finally { await act(async () => root.unmount()); dispose(); container.remove(); }
+});
+
+
+it("pins the open canonical canvas when a directory page omits it, without replacing other rows", async () => {
+  const canvas = createEmptyWoohaa3ServerCanvas("a", "2026-11-08T00:00:00Z"); canvas.title = "authoritative A";
+  const currentDocument = {getSnapshot:()=>canvas,subscribe:()=>()=>{}};
+  const {markup} = await renderSwitcher({entries:[["b","other B"]],currentDocument});
+  expect(markup).toContain("authoritative A"); expect(markup).toContain("other B"); expect(markup).toContain("当前");
+  const late = await renderSwitcher({entries:[["a","stale title"]],currentDocument});
+  expect(late.markup).toContain("authoritative A"); expect(late.markup).not.toContain("stale title");
+  const switched = await renderSwitcher({currentCanvasId:"b",entries:[["b","new page B"]],currentDocument});
+  expect(switched.markup).toContain("new page B"); expect(switched.markup).not.toContain("authoritative A");
 });

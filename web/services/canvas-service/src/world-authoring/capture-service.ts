@@ -90,6 +90,13 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
   const log = (event: Record<string, unknown>) => options.logger?.(event);
   const stateKey = (canvasId: string, cameraId: string) => `${canvasId}\u0000${cameraId}`;
 
+  function expirePageProgress(state: FramingState): void {
+    if (state.phase === "waiting" && state.pageProgressAt !== undefined && now() - state.pageProgressAt > 90_000) {
+      applyFailure(state, "failed", state.pageProgress ? "page-capture-stalled" : "page-unavailable");
+      state.pageAttemptId = undefined;
+    }
+  }
+
   function ensureState(canvasId: string, cameraId: string): FramingState {
     const key = stateKey(canvasId, cameraId);
     const existing = states.get(key);
@@ -443,6 +450,9 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       state.key = attemptKey;
       state.phase = "waiting";
       state.reason = "page-render-pending";
+      state.pageAttemptId = randomUUID();
+      state.pageProgressAt = now();
+      state.pageProgress = undefined;
       state.stale = hasFrozenContent(state);
       state.lastRequestId = observation.request.requestId;
       state.lastContentFingerprint = observation.request.contentFingerprint;
@@ -454,6 +464,9 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       state.key = attemptKey;
       state.phase = "waiting";
       state.reason = "page-render-pending";
+      state.pageAttemptId = randomUUID();
+      state.pageProgressAt = now();
+      state.pageProgress = undefined;
       state.stale = hasFrozenContent(state);
       state.lastRequestId = observation.request.requestId;
       state.lastContentFingerprint = observation.request.contentFingerprint;
@@ -508,6 +521,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       return { ok: false, code: observed.code, message: observed.message, status: statusOf(state) };
     }
     const state = ensureState(canvasId, cameraId);
+    expirePageProgress(state);
     const observation = observed.observation;
     const observedKey = baseKeyOf(observation);
     if (state.key && worldCaptureVersionKeysEqual(state.key, observedKey)) {
@@ -664,23 +678,47 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       return refreshInternal(canvasId, cameraId);
     },
 
-    status: ({ canvasId, cameraId }) =>
-      states.has(stateKey(canvasId, cameraId))
-        ? statusOf(states.get(stateKey(canvasId, cameraId))!)
-        : emptyStatus(canvasId, cameraId),
+    status: ({ canvasId, cameraId }) => {
+      const state = states.get(stateKey(canvasId, cameraId));
+      if (!state) return emptyStatus(canvasId, cameraId);
+      expirePageProgress(state);
+      return statusOf(state);
+    },
 
     statuses(canvasId) {
       const result: import("@woohaa3/contracts").WorldCaptureFramingStatus[] = [];
       for (const state of states.values()) {
-        if (state.canvasId === canvasId) result.push(statusOf(state));
+        if (state.canvasId === canvasId) { expirePageProgress(state); result.push(statusOf(state)); }
       }
       return result;
+    },
+
+    reportPageProgress(canvasId, input) {
+      const state = states.get(stateKey(canvasId, input.cameraId));
+      if (disposed || !state || !input.attemptId || state.pageAttemptId !== input.attemptId || state.phase !== "waiting"
+        || !["rendering", "encoding", "uploading", "failed"].includes(input.stage)) return false;
+      if (input.completedFrames !== undefined && (!Number.isInteger(input.completedFrames) || input.completedFrames < 0)) return false;
+      if (input.totalFrames !== undefined && (!Number.isInteger(input.totalFrames) || input.totalFrames <= 0
+        || (input.completedFrames ?? 0) > input.totalFrames)) return false;
+      const previous = state.pageProgress;
+      const stages = ["rendering", "encoding", "uploading", "failed"];
+      if (previous && (stages.indexOf(input.stage) < stages.indexOf(previous.stage)
+        || (input.stage === previous.stage && (input.completedFrames ?? 0) < (previous.completedFrames ?? 0)))) return false;
+      if (!previous || previous.stage !== input.stage || (input.completedFrames ?? 0) > (previous.completedFrames ?? 0)) {
+        state.pageProgressAt = now();
+      }
+      state.pageProgress = { ...input };
+      const reason = input.reason && /^[a-z0-9-]{1,80}$/.test(input.reason) ? input.reason : "capture-unavailable";
+      if (input.stage === "failed") { applyFailure(state, "failed", reason); state.pageAttemptId = undefined; }
+      else state.reason = `page-${input.stage}${input.totalFrames ? `:${input.completedFrames ?? 0}/${input.totalFrames}` : ""}`;
+      return true;
     },
 
     pendingPageCaptures(canvasId) {
       const pending: PendingPageCapture[] = [];
       for (const state of states.values()) {
         if (state.canvasId !== canvasId) continue;
+        expirePageProgress(state);
         if (state.phase !== "waiting" || !state.key) continue;
         const output = state.observation?.request.output;
         const observation = state.observation;
@@ -688,6 +726,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         pending.push({
           canvasId: state.canvasId,
           cameraId: state.cameraId,
+          attemptId: state.pageAttemptId,
           key: state.key,
           width: output?.width ?? 0,
           height: output?.height ?? 0,
@@ -717,6 +756,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         };
       }
       const state = ensureState(canvasId, cameraId);
+      expirePageProgress(state);
       const target = observed.observation;
       const targetKey = baseKeyOf(target);
       const targetRequestId = requestId && nonEmpty(requestId)
@@ -726,7 +766,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         if (state.phase === "ready" && !state.stale && hasFrozenContent(state)) {
           return claims.claim(state, target, targetRequestId);
         }
-        if (!state.attempt) {
+        if (!state.attempt && !(state.phase === "waiting" && state.pageAttemptId)) {
           void startAttempt(state, target).catch(() => undefined);
         }
       } else {
@@ -738,7 +778,8 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
 
       const wait = await waitForFreeze(state, targetKey, signal, freezeTimeoutMs);
       if (wait !== "ready") {
-        if (wait === "timeout" && state.attempt) supersedeAttempt(state);
+        // A consumer's timeout must not cancel the shared producer: another
+        // consumer may still be waiting for this exact frozen version.
         return {
           ok: false,
           code: wait,
@@ -775,11 +816,16 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       }
       const state = ensureState(canvasId, cameraId);
       const observedKey = baseKeyOf(observation);
-      if (!state.key || !worldCaptureVersionKeysEqual(state.key, observedKey)) {
+      if (!state.key || !worldCaptureVersionKeysEqual(state.key, observedKey)
+        || state.phase !== "waiting" || !state.pageAttemptId) {
         supersedeAttempt(state);
         state.key = observedKey;
         state.stale = hasFrozenContent(state);
-        state.phase = "capturing";
+        state.phase = "waiting";
+        state.reason = "page-render-pending";
+        state.pageAttemptId = randomUUID();
+        state.pageProgressAt = now();
+        state.pageProgress = undefined;
       }
       state.observation = observation;
       state.lastRequestId = observation.request.requestId;
@@ -787,12 +833,13 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       return {
         ok: true,
         key: observedKey,
+        attemptId: state.pageAttemptId ??= randomUUID(),
         width: observation.request.output.width,
         height: observation.request.output.height
       };
     },
 
-    async commitPageCapture({ canvasId, cameraId, key, png, width, height }) {
+    async commitPageCapture({ canvasId, cameraId, key, png, width, height, attemptId }) {
       if (disposed) return { ok: false, code: "capture-unavailable", message: "取景服务已关闭" };
       const observed = await observeFromRoom(canvasId, cameraId);
       if (!observed.ok) {
@@ -811,6 +858,10 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         };
       }
       const state = ensureState(canvasId, cameraId);
+      const pageAttemptId = state.pageAttemptId;
+      if (attemptId !== undefined && attemptId !== pageAttemptId) {
+        return { ok: false, code: "superseded", message: "该次取景已被重试替代，请使用当前取景请求" };
+      }
       state.key = observation.key;
       state.lastRequestId = observation.request.requestId;
       state.lastContentFingerprint = observation.request.contentFingerprint;
@@ -838,6 +889,13 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         image
       };
       const saved = options.mediaSave ? await options.mediaSave.save(saveRequest.value) : null;
+      // Saving bytes may outlive a world/camera edit or service shutdown. Re-read
+      // canonical content after I/O before publishing a ready result.
+      const current = await observeFromRoom(canvasId, cameraId);
+      if (disposed || state.pageAttemptId !== pageAttemptId || !current.ok || current.observation.kind !== "static"
+        || !worldCaptureVersionKeysEqual(current.observation.key, key)) {
+        return { ok: false, code: "superseded", message: "保存取景期间画布已变化，请重新取景", status: statusOf(state) };
+      }
       const decision = resolveWorldCaptureOutcome({
         request: observation.request,
         currentKey: observation.key,
@@ -865,7 +923,7 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       return claims.claim(state, observation, `world-capture-claim:${randomUUID()}`);
     },
 
-    async commitPageVideoCapture({ canvasId, cameraId, key, video }) {
+    async commitPageVideoCapture({ canvasId, cameraId, key, video, attemptId }) {
       if (disposed) return { ok: false, code: "capture-unavailable", message: "取景服务已关闭" };
       const observed = await observeFromRoom(canvasId, cameraId);
       if (!observed.ok) {
@@ -880,6 +938,10 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
         return { ok: false, code: "invalid-data", message: "该镜头不是动态取景" };
       }
       const state = ensureState(canvasId, cameraId);
+      const pageAttemptId = state.pageAttemptId;
+      if (attemptId !== undefined && attemptId !== pageAttemptId) {
+        return { ok: false, code: "superseded", message: "该次取景已被重试替代，请使用当前取景请求" };
+      }
       state.key = baseKeyOf(observation);
       state.dynamicKey = observation.key;
       state.kind = "dynamic";
@@ -904,6 +966,11 @@ export function createWorldCaptureService(options: WorldCaptureServiceOptions): 
       const saved = options.videoMediaSave
         ? await options.videoMediaSave.save(saveRequest.value)
         : null;
+      const current = await observeFromRoom(canvasId, cameraId);
+      if (disposed || state.pageAttemptId !== pageAttemptId || !current.ok || current.observation.kind !== "dynamic"
+        || !worldCaptureDynamicKeysEqual(current.observation.key, key)) {
+        return { ok: false, code: "superseded", message: "保存视频取景期间画布已变化，请重新取景", status: statusOf(state) };
+      }
       const outcome: WorldCaptureDynamicProducerOutcome = {
         status: "video",
         requestId: observation.request.requestId,

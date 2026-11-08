@@ -20,6 +20,7 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
   const [center, setCenter] = useState(() => defaultOrbitCenter(session.draft));
   const [selectingCenter, setSelectingCenter] = useState(false);
   const [more, setMore] = useState(false);
+  const [parametersValid, setParametersValid] = useState(true);
   const [flightPending, setFlightPending] = useState(false);
   const escapeAfterFlight = useRef(0);
   const flightRequest = useRef(0);
@@ -97,7 +98,7 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
 
   async function save() {
     const state = worldCameraEditorStore.getSnapshot();
-    if (!state || state.phase === "saving" || live.current.unavailable || !ctx.canvasSession.isWritable()) return;
+    if (!state || !parametersValid || state.phase === "saving" || live.current.unavailable || !ctx.canvasSession.isWritable()) return;
     if (!worldCameraEditorStore.changed()) { worldCameraEditorStore.close(); return; }
     setMore(false); releaseCameraPointer();
     worldCameraEditorStore.patch({ phase: "saving", error: null });
@@ -151,7 +152,7 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
         <strong>{typeof title === "string" && title.trim() ? title : "镜头"}</strong>
         <span>{worldCameraEditorStore.changed() ? "未保存" : "调整中"} · 透视</span>
         <div className="world-camera-editor__header-actions">
-          <IconButton label="保存并退出" title="保存并退出" size="sm" tone="primary" disabled={!editing || mode === "fly" || flightPending} onClick={() => void save()}><CheckIcon /></IconButton>
+          <IconButton label="保存并退出" title="保存并退出" size="sm" tone="primary" disabled={!editing || !parametersValid || mode === "fly" || flightPending} onClick={() => void save()}><CheckIcon /></IconButton>
           <IconButton label="关闭" title="关闭" size="sm" disabled={!editing || mode === "fly" || flightPending} onClick={exit}><CloseIcon /></IconButton>
         </div>
       </header>
@@ -172,9 +173,9 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
             <IconButton label={session.showHelpers ? "查看输出" : "显示辅助线"} title={session.showHelpers ? "查看输出" : "显示辅助线"} size="sm" pressed={!session.showHelpers} onClick={() => worldCameraEditorStore.patch({ showHelpers: !session.showHelpers })}>{session.showHelpers ? <EyeIcon /> : <LayoutGridIcon />}</IconButton>
           </div>
           <div className="world-camera-editor__parameter-row">
-            <CameraParameters camera={session.draft} more={more} onMore={() => setMore(value => !value)} />
+            <CameraParameters camera={session.draft} more={more} onMore={() => setMore(value => !value)} onValidity={setParametersValid} />
             <span className="world-camera-editor__separator" />
-            <Button size="sm" icon={<GameIcon />} loading={flightPending} onClick={() => void startFlight()}>自由移动</Button>
+            <Button size="sm" icon={<GameIcon />} disabled={!parametersValid} loading={flightPending} onClick={() => void startFlight()}>自由移动</Button>
           </div>
         </fieldset>}
         <div className="world-camera-editor__guide">
@@ -183,7 +184,7 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
             <span><kbd>A</kbd> / <kbd>D</kbd> 左移 / 右移</span>
             <span><kbd>Z</kbd> / <kbd>X</kbd> 上升 / 下降</span>
             <span>鼠标转向</span><span><kbd>Shift</kbd> 加速</span><span><kbd>Esc</kbd> 返回构图</span>
-          </> : <span>{notice ?? (selectingCenter ? "点击模型表面设置环绕中心，镜头不会移动" : `${toolHints[tool]} · Shift + 拖拽平移 · 滚轮推拉 · Esc 退出编辑`)}</span>}
+          </> : <span>{!parametersValid ? "机位数值无效，请检查空值或范围；Esc 可还原当前输入。" : notice ?? (selectingCenter ? "点击模型表面设置环绕中心，镜头不会移动" : `${toolHints[tool]} · Shift + 拖拽平移 · 滚轮推拉 · Esc 退出编辑`)}</span>}
         </div>
       </footer>
       <DialogSurfaceRoot open={session.phase !== "editing"} modal dismissible={false} busy={session.phase === "saving"} onOpenChange={() => {}}>
@@ -191,12 +192,12 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
           <Dialog.Header><Dialog.Title>保存镜头调整？</Dialog.Title>
             <Dialog.Description>保存后将更新镜头构图；不保存会恢复进入前的镜头配置。</Dialog.Description>
           </Dialog.Header>
-          {session.error || notice ? <Dialog.Body><p className="world-camera-editor__message">{session.error ?? notice}</p></Dialog.Body> : null}
+          {session.error || notice || !parametersValid ? <Dialog.Body><p className="world-camera-editor__message">{session.error ?? (!parametersValid ? "机位数值无效，请继续调整并检查空值或范围。" : notice)}</p></Dialog.Body> : null}
           <Dialog.Footer>
             {savedWarning ? <Button onClick={() => worldCameraEditorStore.close()}>关闭</Button> : <>
               <Button tone="ghost" disabled={session.phase === "saving"} onClick={() => worldCameraEditorStore.close()}>放弃修改</Button>
               <Button disabled={unavailable || session.phase === "saving"} onClick={resume}>继续调整</Button>
-              <Button tone="primary" disabled={unavailable || session.phase === "saving"} onClick={() => void save()}>{session.phase === "saving" ? "保存中…" : "保存并退出"}</Button>
+              <Button tone="primary" disabled={unavailable || !parametersValid || session.phase === "saving"} onClick={() => void save()}>{session.phase === "saving" ? "保存中…" : "保存并退出"}</Button>
             </>}
           </Dialog.Footer>
         </Dialog.Content>

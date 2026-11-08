@@ -1,38 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 import { WORLD_CAMERA_ASPECT_PRESETS, worldCameraAspectPresetId, worldCameraFramingControl, worldCameraUiSettingsOf, withWorldCameraAspect, withWorldCameraFraming, type WorldCameraData } from "@woohaa3/contracts";
-import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { Button } from "@woohaa3/ui/primitives";
 import { AdjustmentIcon } from "@woohaa3/ui/icons";
 import { SelectInput } from "@woohaa3/ui/forms";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import { cameraAngles, withCameraAngle } from "./composition-motion.js";
 
-function NumberField({ value, onChange, min, max, step = 0.1, title }: {
-  value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number; title?: string;
+function NumberField({ value, onChange, onValidity, min, max, step = 0.1, title }: {
+  value: number; onChange: (value: number) => void; onValidity: (valid: boolean) => void; min?: number; max?: number; step?: number; title?: string;
 }) {
   const [text, setText] = useState(String(Math.round(value * 100) / 100));
   const cancelled = useRef(false);
-  useEffect(() => { setText(String(Math.round(value * 100) / 100)); }, [value]);
-  return <input type="number" title={title} value={text} min={min} max={max} step={step}
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setText(String(Math.round(value * 100) / 100)); }, [value]);
+  return <input type="number" required title={title} value={text} min={min} max={max} step={step}
+    onFocus={() => { focused.current = true; }}
     onChange={event => {
       setText(event.target.value);
       const n = event.target.valueAsNumber;
-      if (Number.isFinite(n) && (min === undefined || n >= min) && (max === undefined || n <= max)) onChange(n);
+      const valid = Number.isFinite(n) && (min === undefined || n >= min) && (max === undefined || n <= max);
+      onValidity(valid);
+      if (valid) onChange(n);
     }}
     onBlur={() => {
+      focused.current = false;
       if (cancelled.current) { cancelled.current = false; return; }
-      const n = text.trim() ? Number(text) : NaN;
-      if (Number.isFinite(n)) onChange(Math.max(min ?? -Infinity, Math.min(max ?? Infinity, n)));
-      setText(String(Math.round(value * 100) / 100));
     }}
     onKeyDown={event => {
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelled.current = true; setText(String(Math.round(value * 100) / 100)); event.currentTarget.blur(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelled.current = true; setText(String(Math.round(value * 100) / 100)); onValidity(true); event.currentTarget.blur(); }
       if (event.key === "Enter") event.currentTarget.blur();
     }} />;
 }
 
-export function CameraParameters({ camera, more, onMore }: {
-  camera: WorldCameraData; more: boolean; onMore: () => void;
+export function CameraParameters({ camera, more, onMore, onValidity }: {
+  camera: WorldCameraData; more: boolean; onMore: () => void; onValidity: (valid: boolean) => void;
 }) {
+  const invalid = useRef(new Set<string>());
+  const validity = (field: string, valid: boolean) => {
+    if (valid) invalid.current.delete(field); else invalid.current.add(field);
+    onValidity(invalid.current.size === 0);
+  };
   const settings = worldCameraUiSettingsOf(camera);
   const framing = worldCameraFramingControl(settings);
   const angles = cameraAngles(camera);
@@ -44,7 +51,7 @@ export function CameraParameters({ camera, more, onMore }: {
   return <>
     <label className="world-camera-editor__framing" title="垂直视野">
       <span>视野 FoV</span>
-      <NumberField value={framing.value} min={framing.min} max={framing.max} onChange={value => update(withWorldCameraFraming(settings, value))} />
+      <NumberField value={framing.value} min={framing.min} max={framing.max} onValidity={valid => validity("fov", valid)} onChange={value => update(withWorldCameraFraming(settings, value))} />
       <span>°</span>
       <input type="range" min={framing.min} max={framing.max} step={0.1} value={framing.value}
         onChange={event => update(withWorldCameraFraming(settings, Number(event.target.value)))} />
@@ -54,18 +61,18 @@ export function CameraParameters({ camera, more, onMore }: {
         ...(worldCameraAspectPresetId(settings) === "custom" ? [{ value: "custom", label: "自定义" }] : [])]}
       onValueChange={value => update(withWorldCameraAspect(settings, value))} /></div>
     <div className="world-camera-editor__more-anchor">
-      <IconButton label={more ? "收起设置" : "更多"} title={more ? "收起设置" : "更多"} size="sm" pressed={more} data-camera-more-trigger onClick={onMore}><AdjustmentIcon /></IconButton>
-      {more ? <div className="world-camera-editor__popover" data-camera-popover>
+      <Button size="sm" aria-pressed={more} data-camera-more-trigger onClick={onMore}><AdjustmentIcon />机位精调</Button>
+      <div className="world-camera-editor__popover" data-camera-popover={more ? "" : undefined} style={more ? undefined : { display: "none" }}>
         <strong>机位精调</strong>
         <div className="world-camera-editor__fields">
           {([ ["u", "横向 U"], ["v", "纵向 V"], ["h", "高度"] ] as const).map(([axis, label]) =>
-            <label key={axis}><span>{label} · m</span><NumberField value={camera.position[axis]} onChange={value => updateCamera({ ...camera, position: { ...camera.position, [axis]: value } })} /></label>)}
+            <label key={axis}><span>{label} · m</span><NumberField value={camera.position[axis]} onValidity={valid => validity(axis, valid)} onChange={value => updateCamera({ ...camera, position: { ...camera.position, [axis]: value } })} /></label>)}
           {([ ["yaw", "朝向"], ["pitch", "俯仰"], ["roll", "横滚"] ] as const).map(([axis, label]) =>
-            <label key={axis}><span>{label} · °</span><NumberField value={angles[axis]} min={axis === "pitch" ? -89.9 : -180} max={axis === "pitch" ? 89.9 : 180} onChange={value => updateCamera(withCameraAngle(camera, axis, value))} /></label>)}
+            <label key={axis}><span>{label} · °</span><NumberField value={angles[axis]} min={axis === "pitch" ? -89.9 : -180} max={axis === "pitch" ? 89.9 : 180} onValidity={valid => validity(axis, valid)} onChange={value => updateCamera(withCameraAngle(camera, axis, value))} /></label>)}
         </div>
         <div className="world-camera-editor__presets"><span>视野预设</span>{[35, 60, 90].map(value => <Button key={value} size="sm" onClick={() => update(withWorldCameraFraming(settings, value))}>{value}°</Button>)}</div>
 
-      </div> : null}
+      </div>
     </div>
   </>;
 }

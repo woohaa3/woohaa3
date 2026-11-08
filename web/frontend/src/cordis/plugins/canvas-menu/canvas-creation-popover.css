@@ -3,7 +3,7 @@
   --canvas-create-3d: var(--app-web-elevated);
   width: 304px;
   max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 24px);
+  max-height: min(calc(100dvh - 24px), var(--radix-popover-content-available-height, 100dvh));
   box-sizing: border-box;
   padding: 0;
   overflow: auto;

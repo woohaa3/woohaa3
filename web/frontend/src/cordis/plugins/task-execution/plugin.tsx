@@ -8,6 +8,7 @@
  *
  * 视频编辑能力由 optional `video-capture` Plugin 以 `VIDEO_EDIT_SERVICE` 提供。
  */
+import { Button } from "@woohaa3/ui/primitives";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { useSyncExternalStore, type ReactNode } from "react";
@@ -201,6 +202,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
               dialogs={ctx.dialogs}
               catalog={ctx.taskCatalog}
               registry={ctx.modelInteractions}
+              editService={ctx.canvasEdit}
               presentation={presentation}
               runtime={runtime}
               onPresentationIntent={submitPresentationIntent}
@@ -317,6 +319,14 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (!camera.ok) return null;
           return (
             <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
+              <Button size="sm" disabled={!writable} onClick={() => {
+                if (!ctx.canvasSession.isWritable() || ctx.canvasRuntime.isFocused() || worldCameraEditorStore.getSnapshot()) return;
+                const latest = workingCanvasOf(woohaa3CanvasStore.getState());
+                const current = decodeWorldCamera(latest?.nodeData[route.nodeId]?.worldCamera);
+                if (latest?.id !== canvasId || !current.ok) return;
+                ctx.canvasRuntime.cancelTransientGesture();
+                worldCameraEditorStore.begin(canvasId, route.nodeId, current.value);
+              }}>机位精调</Button>
               <AuthoringGenerateHost
                 canvasId={canvasId}
                 nodeId={route.nodeId}

@@ -16,7 +16,7 @@ import { VIDEO_FRAME_EPSILON_SECONDS } from "@woohaa3/contracts";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { mediaUrlFor } from "../../services/paths.js";
 import type { FrameCaptureSource } from "./capture-source.js";
-import type { CapturedFrameEntry, FrameAddReceipt } from "./types.js";
+import type { CapturedFrameEntry, FrameAddReceipt, VideoDialogPayload } from "./types.js";
 import type { CanvasSession, MediaRemoteService } from "../../contracts.js";
 
 /** 浏览器安全错误 → 可恢复的用户提示。 */
@@ -135,7 +135,7 @@ export class OpenCaptureFrames {
    * 截帧添加动作：逐帧独立上传 + 原子提交；返回逐项回执。
    * 成功项保留在 `addedFrames`，重试时直接返回既有回执，不重复导入（design D3）。
    */
-  async addFrames(frames: readonly CapturedFrameEntry[], targetNodeId: string, signal?: AbortSignal): Promise<readonly FrameAddReceipt[]> {
+  async addFrames(frames: readonly CapturedFrameEntry[], targetNodeId: string, signal?: AbortSignal, source?: VideoDialogPayload): Promise<readonly FrameAddReceipt[]> {
     if (this.disposed) {
       return frames.map((frame) => failedReceipt(frame.id, frame.timeSeconds, "视频截帧能力已释放"));
     }
@@ -146,7 +146,7 @@ export class OpenCaptureFrames {
         receipts.push(cached);
         continue;
       }
-      receipts.push(await this.addOneFrame(frame, index, targetNodeId, signal));
+      receipts.push(await this.addOneFrame(frame, index, targetNodeId, signal, source));
     }
     return receipts;
   }
@@ -155,7 +155,8 @@ export class OpenCaptureFrames {
     frame: CapturedFrameEntry,
     index: number,
     targetNodeId: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    source?: VideoDialogPayload
   ): Promise<FrameAddReceipt> {
     if (this.disposed || signal?.aborted || (this.deps.resolveNodePosition && !this.deps.resolveNodePosition(targetNodeId))) {
       return failedReceipt(frame.id, frame.timeSeconds, "截帧来源已失效，请重新进入");
@@ -176,6 +177,16 @@ export class OpenCaptureFrames {
     });
     if (!uploaded.ok) return failedReceipt(frame.id, frame.timeSeconds, uploaded.error);
     const asset = frameAsset(uploaded.media, frame.timeSeconds);
+    asset.id = `asset-video-frame-${frame.id}`;
+    asset.metadata = {
+      ...asset.metadata,
+      sourceTimeSeconds: frame.timeSeconds,
+      ...(source ? { sourceVideoAssetId: source.videoAssetId, sourceVideoStorageKey: source.videoStorageKey } : {}),
+      ...(source?.cameraSource ? {
+        sourceCameraId: source.cameraSource.cameraId,
+        sourceCameraVersionKey: JSON.stringify(source.cameraSource.versionKey)
+      } : {})
+    };
     // 上传完成后目标可能已被删除/会话释放：再次核对可写性，阻止迟到提交。
     if (this.disposed || signal?.aborted || (this.deps.resolveNodePosition && !this.deps.resolveNodePosition(targetNodeId))) {
       return failedReceipt(frame.id, frame.timeSeconds, "截帧来源已失效，请重新进入");

@@ -540,6 +540,22 @@ async function post(base: string, path: string, body: unknown): Promise<{ status
 }
 
 describe("T10 continuous capture and generation input freeze", () => {
+  it("opening a restored canvas schedules capture without editing or starting a generation", async () => {
+    const harness = await openHarness();
+    const registry = harness.service.sync!.registry;
+    const restored = await registry.resolve(CANVAS_ID);
+    const before = restored.exportCanvas();
+    expect(harness.capture.statuses(CANVAS_ID)).toEqual([]);
+    const lease = await registry.acquire(CANVAS_ID);
+    try {
+      expect(harness.capture.pendingPageCaptures(CANVAS_ID)).toEqual([
+        expect.objectContaining({ cameraId: CAMERA_ID, kind: "static", attemptId: expect.any(String) })
+      ]);
+      expect(restored.exportCanvas()).toEqual(before);
+      expect(harness.taskSubmits).toHaveLength(0);
+    } finally { lease.release(); }
+  });
+
   it("freezes a page-rendered connected camera and delivers its pixels to the Provider", async () => {
     const harness = await openHarness({ realTask: true });
     const room = await harness.service.sync!.registry.resolve(CANVAS_ID);
@@ -598,17 +614,16 @@ describe("T10 continuous capture and generation input freeze", () => {
     }]);
     const repeated = await post(server.base, `/api/canvases/${CANVAS_ID}/runs`, request);
     expect(repeated.status, JSON.stringify(repeated.body)).toBe(202);
-    // Task prepares references before its worker-key deduplication. Both
-    // preparations must retain the same pixels; Canvas still records one job.
-    expect(harness.providerReferences).toHaveLength(2);
-    expect(harness.providerReferences[1]).toEqual(harness.providerReferences[0]);
+    // Acknowledgement recovery returns the original acceptance without preparing
+    // inputs or submitting the same paid run a second time.
+    expect(harness.providerReferences).toHaveLength(1);
     const rejected = await post(server.base, `/api/canvases/${CANVAS_ID}/runs`, {
       ...request, runId: "run-expired-explicit", jobId: "job-expired-explicit", worldCapture: frozen.binding
     });
     expect(rejected.status).toBe(400);
     expect(rejected.body.code).toBe("COMMAND_REJECTED");
     expect(rejected.body.message).toContain("取景冻结结果已过期");
-    expect(harness.providerReferences).toHaveLength(2);
+    expect(harness.providerReferences).toHaveLength(1);
     expect((await canonical(harness)).jobs.map(job => job.id)).toEqual(["job-aged-camera"]);
     stopPage();
   });
@@ -619,18 +634,18 @@ describe("T10 continuous capture and generation input freeze", () => {
     const server = await startServer(harness);
     const prepared = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-page-prepare`, { cameraId: CAMERA_ID });
     expect(prepared.status, JSON.stringify(prepared.body)).toBe(200);
-    const { key, width, height } = prepared.body as { key: unknown; width: number; height: number };
+    const { key, width, height, attemptId } = prepared.body as { key: unknown; width: number; height: number; attemptId: string };
 
     const pngBase64 = Buffer.from(pngBytes(width, height)).toString("base64");
     const commit = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-page-commit`, {
-      cameraId: CAMERA_ID, key, pngBase64, width, height
+      cameraId: CAMERA_ID, attemptId, key, pngBase64, width, height
     });
     expect(commit.status, JSON.stringify(commit.body)).toBe(200);
     expect((commit.body as { binding?: { key?: { cameraId?: string } } }).binding?.key?.cameraId).toBe(CAMERA_ID);
 
     clock += 11 * 60_000;
     const nextCommit = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-page-commit`, {
-      cameraId: CAMERA_ID, key, pngBase64, width, height
+      cameraId: CAMERA_ID, attemptId, key, pngBase64, width, height
     });
     expect(nextCommit.status, JSON.stringify(nextCommit.body)).toBe(200);
     expect(nextCommit.body.binding.requestId).not.toBe(commit.body.binding.requestId);
@@ -646,19 +661,58 @@ describe("T10 continuous capture and generation input freeze", () => {
     // rejected instead of freezing a picture of the old world.
     await patchModelScript(harness, "model-a", "scene.box({ id: 'body', size: [4, 4, 4] });");
     const stale = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-page-commit`, {
-      cameraId: CAMERA_ID, key, pngBase64, width, height
+      cameraId: CAMERA_ID, attemptId, key, pngBase64, width, height
     });
     expect(stale.status, JSON.stringify(stale.body)).toBe(409);
     expect((stale.body as { code?: string }).code).toBe("superseded");
+  });
+
+  it("rejects an old page attempt after a same-version retry, including a late media save", async () => {
+    const gate = deferred<void>();
+    let saving = false;
+    const harness = await openHarness({ saveDelay: async () => { saving = true; await gate.promise; } });
+    const prepared = await harness.capture.preparePageCapture({ canvasId: CANVAS_ID, cameraId: CAMERA_ID });
+    if (!prepared.ok) throw new Error(prepared.message);
+    const input = { canvasId: CANVAS_ID, cameraId: CAMERA_ID, attemptId: prepared.attemptId,
+      key: prepared.key, png: pngBytes(prepared.width, prepared.height), width: prepared.width, height: prepared.height };
+    const commit = harness.capture.commitPageCapture(input);
+    await waitFor(() => saving);
+    await harness.capture.refresh({ canvasId: CANVAS_ID, cameraId: CAMERA_ID });
+    const current = harness.capture.pendingPageCaptures(CANVAS_ID)[0]!;
+    expect(current.key).toEqual(prepared.key);
+    expect(current.attemptId).not.toBe(prepared.attemptId);
+    gate.resolve();
+    expect(await commit).toMatchObject({ ok: false, code: "superseded" });
+    expect(await harness.capture.commitPageCapture(input)).toMatchObject({ ok: false, code: "superseded" });
+    expect(harness.capture.status({ canvasId: CANVAS_ID, cameraId: CAMERA_ID }).phase).not.toBe("ready");
+    expect(harness.taskSubmits).toHaveLength(0);
+  });
+
+  it("rejects a page render when canonical content changes during media saving", async () => {
+    const gate = deferred<void>();
+    let saving = false;
+    const harness = await openHarness({ saveDelay: async () => { saving = true; await gate.promise; } });
+    const prepared = await harness.capture.preparePageCapture({ canvasId: CANVAS_ID, cameraId: CAMERA_ID });
+    if (!prepared.ok) throw new Error(prepared.message);
+    const commit = harness.capture.commitPageCapture({ canvasId: CANVAS_ID, cameraId: CAMERA_ID,
+      key: prepared.key, png: pngBytes(prepared.width, prepared.height), width: prepared.width, height: prepared.height });
+    await waitFor(() => saving);
+    await patchModelScript(harness, "model-a", "scene.box({ id: 'body', size: [5, 5, 5] });");
+    gate.resolve();
+    expect(await commit).toMatchObject({ ok: false, code: "superseded" });
+    const status = harness.capture.status({ canvasId: CANVAS_ID, cameraId: CAMERA_ID });
+    expect(status.key?.worldContentVersion).not.toBe(prepared.key.worldContentVersion);
+    expect(status.phase).not.toBe("ready");
+    expect(harness.taskSubmits).toHaveLength(0);
   });
 
   it("rejects a page capture whose pixel size does not match the canonical output", async () => {
     const harness = await openHarness({ realTask: true });
     const server = await startServer(harness);
     const prepared = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-page-prepare`, { cameraId: CAMERA_ID });
-    const { key, width, height } = prepared.body as { key: unknown; width: number; height: number };
+    const { key, width, height, attemptId } = prepared.body as { key: unknown; width: number; height: number; attemptId: string };
     const wrong = await post(server.base, `/api/canvases/${CANVAS_ID}/captures-page-commit`, {
-      cameraId: CAMERA_ID, key,
+      cameraId: CAMERA_ID, attemptId, key,
       pngBase64: Buffer.from(pngBytes(Math.max(1, width - 8), height)).toString("base64"),
       width: Math.max(1, width - 8), height
     });

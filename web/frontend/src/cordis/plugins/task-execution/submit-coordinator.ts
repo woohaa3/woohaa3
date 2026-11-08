@@ -12,7 +12,7 @@
  * 因此「请求返回后页面即可关闭」「终态只由服务端写入」是结构性保证。
  */
 import type { CanvasTaskCatalog, CanvasTaskModelType } from "@woohaa3/contracts";
-import { CANVAS_TASK_LIMITS } from "@woohaa3/contracts";
+import { canvasModelCapabilities } from "@woohaa3/contracts";
 import type { ExecutionLaunchEvent, ExecutionOrigin } from "./execution-launch.js";
 import type { Woohaa3CanvasStoreState } from "../../services/canvas-state/index.js";
 import type { CanvasRunRequest, CanvasRunResult } from "../../contracts.js";
@@ -110,8 +110,9 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
       return { ok: false, error: `模型 ${input.modelKey} 类型与节点不匹配` };
     }
     if (input.prompt.trim().length === 0) return { ok: false, error: "请先输入提示词" };
-    if (input.prompt.length > CANVAS_TASK_LIMITS.promptMaxChars) {
-      return { ok: false, error: `提示词超过 ${CANVAS_TASK_LIMITS.promptMaxChars} 字上限` };
+    const promptLimit = canvasModelCapabilities(model).limits?.promptMaxChars;
+    if (promptLimit !== undefined && input.prompt.length > promptLimit) {
+      return { ok: false, error: `提示词超过所选模型的 ${promptLimit} 字上限` };
     }
 
     // T10: freeze the exact framing before announcing acceptance. A failed, cancelled

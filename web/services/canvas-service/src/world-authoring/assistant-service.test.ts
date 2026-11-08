@@ -6,6 +6,7 @@ import type {
   WorldToolContext
 } from "@woohaa3/contracts";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { worldObjectVersion } from "./authority.js";
 import { createAssistantWorldService } from "./assistant-service.js";
 import { InMemoryAssistantHostCompletionRepository } from "./host-completions.js";
 import type { CanvasRoom } from "../sync/room.js";
@@ -77,6 +78,7 @@ function harness(overrides: {
   hostCompletions?: InMemoryAssistantHostCompletionRepository;
   /** Override the initial canonical canvas (for tests needing scene-area data etc.). */
   canvas?: ServerCanvas;
+  commitFailure?: Record<string, unknown>;
 } = {}) {
   const context = overrides.context ?? contextFor();
   const revoked: string[] = [];
@@ -90,6 +92,7 @@ function harness(overrides: {
     },
     async submitDerived<T>(input: { derive: (canvas: ServerCanvas) => T | Promise<T> }): Promise<Record<string, unknown>> {
       const derived = await input.derive(current);
+      if (overrides.commitFailure) return overrides.commitFailure;
       return { ok: true, status: "accepted", commandId: "cmd-1", revision: 2, noop: false, update: null, derived };
     }
   } as unknown as CanvasRoom;
@@ -309,7 +312,7 @@ describe("assistant world authority", () => {
       }
     });
     expect(written).toMatchObject({ ok: true, cameraId: "asset-camera-1", nodeId: "asset-camera-node-1" });
-    // 定位点在导演区外时不再拒绝，而是扩大导演区把镜头包进去（同一原子批次）。
+    const before = JSON.stringify(canvas);
     const outside = await service.write({
       contextId: issued.context.contextId,
       operation: {
@@ -320,7 +323,8 @@ describe("assistant world authority", () => {
         settings: { ...settings, position: { u: 50, v: 50, h: 1 } }
       }
     });
-    expect(outside).toMatchObject({ ok: true, cameraId: "asset-camera-2", nodeId: "asset-camera-node-2" });
+    expect(outside).toMatchObject({ ok: false, code: "outside-scope", message: expect.stringContaining("u=50") });
+    expect(JSON.stringify(canvas)).toBe(before);
   });
 
   it("returns the camera view so a wrong framing is visible after a successful write", async () => {
@@ -927,4 +931,23 @@ describe("assistant world authority", () => {
     expect(recovered.ok && recovered.runs).toHaveLength(1);
     expect(recovered.ok && recovered.runs[0]?.runId).toBe("run-1");
   });
+});
+
+
+it("explains a move rejected by the spatial authority with actual and authorized footprints", async () => {
+  const canvas = canvasFixture();
+  canvas.nodeData.area = {sceneArea:{kind:"scene-area",version:"shared-world-v1",areaId:"area-1",scopeVersion:"scope-1",
+    animationOrigin:{u:0,v:0},bounds:{min:{u:0,v:0},max:{u:10,v:10}}}};
+  const before = JSON.stringify(canvas);
+  const identity = {kind:"instance" as const,instanceId:"instance-1"};
+  const version = worldObjectVersion(canvas,identity)!;
+  const {service} = harness({canvas,context:contextFor(scope,[{...identity,version}]),
+    commitFailure:{ok:false,code:"spatial-rejected",spatialReason:"outside-scope",message:"空间写入资格无效"}});
+  const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:scope.scope});
+  if(!issued.ok) throw Error(issued.message);
+  const result = await service.write({contextId:issued.context.contextId,operation:{kind:"set-model-transform",operationId:"move-outside",
+    instanceId:identity.instanceId,expectedVersion:version,transform:{version:"shared-world-v1",position:{u:1000,v:1000,h:0},rotation:[0,0,0,1],scale:1}}});
+  expect(result).toMatchObject({ok:false,code:"outside-scope",message:expect.stringContaining("instance-1 移动后占地 u=[1000, 1002]")});
+  expect(!result.ok && result.message).toContain("u=[0, 10]");
+  expect(!result.ok && result.message).toContain("重新授权"); expect(JSON.stringify(canvas)).toBe(before);
 });

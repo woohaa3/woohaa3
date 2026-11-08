@@ -52,35 +52,84 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
       // 渲染里主动出图并提交，使直连镜头与显式生成的冻结都立刻拿到当前帧，不依赖原生 renderer。
       let running = false;
       let disposed = false;
+      let lastDynamic = "";
+      const abort = new AbortController();
+      const progress = new Map<string, { key: string; label: string; reason?: string; failed?: boolean; retryAt?: number }>();
+      const keyOf = (item: PageCapturePendingEntry) => JSON.stringify([item.attemptId, item.dynamicKey ?? item.key]);
+      const eligible = (item: PageCapturePendingEntry) => !disposed
+        && (!options.canvasId || item.canvasId === options.canvasId) && item.width > 0 && item.height > 0
+        && (progress.get(item.cameraId)?.key !== keyOf(item) || (progress.get(item.cameraId)?.retryAt ?? 0) <= Date.now());
+      const update = (item: PageCapturePendingEntry, label: string,
+        stage: "rendering" | "encoding" | "uploading" = "rendering", completedFrames?: number, totalFrames?: number) => {
+        if (disposed) return;
+        progress.set(item.cameraId, { key: keyOf(item), label });
+        if (item.attemptId) void ctx.canvasRemote.reportPageCaptureProgress?.({ cameraId: item.cameraId, attemptId: item.attemptId,
+          stage, ...(completedFrames !== undefined ? { completedFrames, totalFrames } : {}) }, abort.signal);
+      };
+      const fail = (item: PageCapturePendingEntry, reason = "capture-unavailable") => {
+        if (!disposed) {
+          progress.set(item.cameraId, { key: keyOf(item), label: "取景失败 · 重试", reason, failed: true, retryAt: Date.now() + 10_000 });
+          if (item.attemptId) void ctx.canvasRemote.reportPageCaptureProgress?.({ cameraId: item.cameraId, attemptId: item.attemptId, stage: "failed", reason }, abort.signal);
+        }
+      };
+      const removeCaptureAction = ctx.slots.register("canvas.node-action", {
+        id: "world-camera-capture-progress", owner: WORLD_CAMERAS_PLUGIN_ID, order: -5,
+        describe: ({ nodeId, writable }) => {
+          const camera = readWorldCamera(workingCanvasOf(woohaa3CanvasStore.getState()), nodeId);
+          const canonical = camera && worldCameraShotStore.get(camera.cameraId);
+          const state = camera && (progress.get(camera.cameraId) ?? (canonical?.phase === "failed"
+            ? { label: "取景失败 · 重试", reason: canonical.reason, failed: true } : null));
+          return state ? { label: state.label, enabled: !!state.failed && writable,
+            ...(state.failed ? { reason: `取景未完成（${state.reason}），可重试当前版本` } : {}) } : null;
+        },
+        activate: ({ nodeId, writable }) => {
+          if (!writable || !ctx.canvasSession.isWritable()) return;
+          const camera = readWorldCamera(workingCanvasOf(woohaa3CanvasStore.getState()), nodeId);
+          if (camera && (progress.get(camera.cameraId)?.failed || worldCameraShotStore.get(camera.cameraId)?.phase === "failed")) {
+            void (async () => {
+              const retried = await ctx.canvasRemote.retryPageCapture(camera.cameraId, abort.signal);
+              if (retried && !disposed) { progress.delete(camera.cameraId); await drain(); }
+            })();
+          }
+        }
+      });
+      const captureStatic = async (item: PageCapturePendingEntry): Promise<void> => {
+        if (!eligible(item)) return;
+        try {
+          update(item, "正在取景");
+          const frame = await ctx.canvasRuntime.captureWorldCamera!({ cameraId: item.cameraId, width: item.width, height: item.height });
+          if (disposed) return;
+          if (!frame.ok) { fail(item, frame.code); return; }
+          update(item, "正在保存取景", "uploading");
+          const committed = await ctx.canvasRemote.commitPageCapture({
+            cameraId: item.cameraId, attemptId: item.attemptId, key: item.key, png: frame.png, width: item.width, height: item.height, signal: abort.signal
+          });
+          if (!committed.ok) fail(item, committed.code); else progress.delete(item.cameraId);
+        } catch {
+          fail(item);
+        }
+      };
+      const captureStatics = async (): Promise<void> => {
+        const pending = await ctx.canvasRemote.listPendingPageCaptures(abort.signal);
+        if (!pending.ok || disposed) return;
+        for (const item of pending.captures) if (item.kind !== "dynamic") await captureStatic(item);
+      };
       const drain = async (): Promise<void> => {
         if (running || disposed) return;
         running = true;
         try {
           const runtime = ctx.canvasRuntime;
-          if (!runtime?.captureWorldCamera) return;
-          const pending = await ctx.canvasRemote.listPendingPageCaptures();
+          if (!runtime?.captureWorldCamera || runtime.getStatus().phase !== "ready" || !runtime.runtime()?.isReady()) return;
+          const pending = await ctx.canvasRemote.listPendingPageCaptures(abort.signal);
           if (!pending.ok) return;
           for (const item of pending.captures) {
-            if (disposed) return;
-            if (options.canvasId && item.canvasId !== options.canvasId) continue;
-            if (!(item.width > 0) || !(item.height > 0)) continue;
-            if (item.kind === "dynamic" && item.dynamicKey) {
-              await recordDynamic(item);
-              continue;
-            }
-            const frame = await runtime.captureWorldCamera({ cameraId: item.cameraId, width: item.width, height: item.height });
-            if (disposed) return;
-            if (!frame.ok) {
-              console.warn(`[world-cameras] 页面取景渲染失败 camera=${item.cameraId} code=${frame.code}`);
-              continue;
-            }
-            const committed = await ctx.canvasRemote.commitPageCapture({
-              cameraId: item.cameraId, key: item.key, png: frame.png, width: item.width, height: item.height
-            });
-            if (!committed.ok) {
-              console.warn(`[world-cameras] 页面取景提交失败 camera=${item.cameraId} code=${committed.code} ${committed.error}`);
-            }
+            if (item.kind !== "dynamic") await captureStatic(item);
           }
+          // One recording at a time owns animation sampling. Rotate failed/long cameras fairly.
+          const dynamic = pending.captures.filter(item => item.kind === "dynamic" && item.dynamicKey && eligible(item));
+          const previous = dynamic.findIndex(item => item.cameraId === lastDynamic);
+          const item = dynamic[(previous + 1) % dynamic.length];
+          if (item && !disposed) { lastDynamic = item.cameraId; await recordDynamic(item); }
         } catch {
           // 失败留在待取景清单里，下一拍重试。
         } finally {
@@ -95,11 +144,21 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         const runtime = ctx.canvasRuntime;
         const key = item.dynamicKey!;
         const fps = item.fps ?? key.fps;
+        let renderFailure: string | undefined;
         try {
+          let lastStaticPass = Date.now();
           const frames = async function* (): AsyncGenerator<Uint8Array> {
             const total = worldCaptureDynamicFrameCount(key);
             for (let index = 0; index < total; index += 1) {
-              if (disposed) return;
+              if (disposed) throw new Error("cancelled");
+              // Static cameras may proceed between samples, always with the animation override released.
+              if (Date.now() - lastStaticPass >= 400) {
+                runtime.setCaptureAnimationTimes?.(null);
+                await nextFrames();
+                await captureStatics();
+                lastStaticPass = Date.now();
+              }
+              update(item, `录制取景 ${index + 1}/${total}`, "rendering", index + 1, total);
               const time = worldCaptureFrameTime(key, index);
               if (item.animationNodeId) {
                 runtime.setCaptureAnimationTimes?.(new Map([[item.animationNodeId, time]]));
@@ -110,32 +169,38 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
                 width: item.width,
                 height: item.height
               });
-              if (!frame?.ok) throw new Error(frame?.code ?? "capture-unavailable");
+              if (!frame?.ok) {
+                renderFailure = frame?.code ?? "capture-unavailable";
+                throw new Error(renderFailure);
+              }
               yield frame.rgba;
             }
+            update(item, "正在编码取景", "encoding");
           };
+          update(item, "准备录制取景");
           const encoded = await encodeWorldCameraVideo({
             width: item.width,
             height: item.height,
             fps,
-            frames: frames()
+            frames: frames(), signal: abort.signal
           });
           if (!encoded.ok) {
-            console.warn(`[world-cameras] 动态镜头编码失败 camera=${item.cameraId} code=${encoded.code} ${encoded.message}`);
+            fail(item, renderFailure ?? encoded.code);
             return;
           }
+          if (disposed) return;
+          update(item, "正在保存视频取景", "uploading");
           const committed = await ctx.canvasRemote.commitPageVideoCapture({
             cameraId: item.cameraId,
+            attemptId: item.attemptId,
             key,
             mp4: encoded.mp4,
             width: encoded.width,
-            height: encoded.height
+            height: encoded.height, signal: abort.signal
           });
-          if (!committed.ok) {
-            console.warn(`[world-cameras] 动态镜头提交失败 camera=${item.cameraId} code=${committed.code} ${committed.error}`);
-          }
-        } catch (error) {
-          console.warn(`[world-cameras] 动态镜头录制失败 camera=${item.cameraId} ${error instanceof Error ? error.message : String(error)}`);
+          if (!committed.ok) fail(item, committed.code); else progress.delete(item.cameraId);
+        } catch {
+          fail(item);
         } finally {
           runtime.setCaptureAnimationTimes?.(null);
         }
@@ -157,6 +222,9 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
       void drain();
       return () => {
         disposed = true;
+        abort.abort();
+        removeCaptureAction();
+        progress.clear();
         clearInterval(timer);
         if (scheduled !== null) clearTimeout(scheduled);
         offScene?.();
@@ -166,11 +234,12 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
       // 卡片状态：只读拉取宿主取景状态（动态镜头为 preview/ready/stale/failed）。
       let disposed = false;
       let pending = false;
+      const abort = new AbortController();
       const pull = async (): Promise<void> => {
         if (disposed || pending) return;
         pending = true;
         try {
-          const result = await ctx.canvasRemote.listWorldCaptureStatuses();
+          const result = await ctx.canvasRemote.listWorldCaptureStatuses(abort.signal);
           if (!disposed && result.ok) worldCameraShotStore.set(result.statuses);
         } catch {
           // 状态拉取失败保留上一帧呈现，不影响画布渲染。
@@ -183,6 +252,7 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
       void pull();
       return () => {
         disposed = true;
+        abort.abort();
         clearInterval(timer);
         offScene?.();
         worldCameraShotStore.clear();

@@ -1,10 +1,3 @@
-/**
- * 身份参考策略的权威提交门禁与快照
- * （change: 2026-11-06-require-identity-reference，任务 2.2 / 2.3）。
- *
- * 使用真实 CanvasRoom：断言阻止发生在 durable begin 之前，参考快照固定
- * assetId / sourceNodeId / slotId / order，并把同一组稳定身份交给 Task。
- */
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
@@ -19,7 +12,7 @@ import { CanvasRoom } from "../sync/index.js";
 import { InMemoryYjsDocumentRepository } from "../sync/in-memory-yjs-repository.js";
 
 const NOW = "2026-11-06T00:00:00.000Z";
-const CANVAS = "canvas-identity";
+const CANVAS = "canvas-retry";
 const STORAGE_KEY = `sha256-${"a".repeat(64)}`;
 
 const BINDINGS: CanvasTaskInputBinding[] = [
@@ -44,13 +37,12 @@ const MODEL = {
   inputSchema: {},
   defaultInput: {},
   bindings: BINDINGS,
-  referencePolicy: "identity-required" as const,
   taskTimeoutMs: 1000
 };
 
 const ASSET: StoredAsset = {
   id: "asset-a",
-  title: "角色参考",
+  title: "参考图片",
   mediaKind: "image",
   source: "generated",
   status: "ready",
@@ -64,7 +56,7 @@ const ASSET: StoredAsset = {
 };
 
 async function roomWith(options: {
-  policy?: "optional" | "identity-required";
+  legacyMetadata?: boolean;
   withAsset?: boolean;
   withEdge?: boolean;
 } = {}): Promise<CanvasRoom> {
@@ -72,7 +64,7 @@ async function roomWith(options: {
   const room = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
   await room.initialize({
     canvas: createEmptyWoohaa3ServerCanvas(CANVAS, NOW),
-    roomEpoch: "epoch-identity",
+    roomEpoch: "epoch-retry",
     createdAt: NOW
   });
   const commands: unknown[] = [
@@ -83,7 +75,7 @@ async function roomWith(options: {
       nodeData: {
         taskKind: "image-generation",
         taskStatus: "idle",
-        ...(options.policy ? { referencePolicy: options.policy } : {}),
+        ...(options.legacyMetadata ? { referencePolicy: "identity-required" } : {}),
         inputMapping: [{ sourceNodeId: "src", role: "reference_image", slotId: "slot-a", sortKey: "0" }]
       }
     },
@@ -93,7 +85,7 @@ async function roomWith(options: {
   const submitted = await room.submit({
     protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
     canvasId: CANVAS,
-    commandId: "seed-identity",
+    commandId: "seed-retry",
     baseRevision: 0,
     actorId: "test",
     commands: commands as never
@@ -127,83 +119,51 @@ async function run(serviceInstance: CanvasRunService) {
     runId: "run-identity",
     jobId: "job-run-identity",
     modelKey: "m",
-    prompt: "N07 同一短黑发女性近景",
+    prompt: "参考图片生成",
     parameters: {}
   });
 }
 
-describe("身份参考策略", () => {
-  it("identity-required 且没有参考时在任何 durable 写入前拒绝", async () => {
-    const room = await roomWith({ policy: "identity-required", withEdge: false, withAsset: false });
+describe("生成请求幂等重试", () => {
+  it("旧节点遗留的身份参考字段不再阻止普通无参考图片提交", async () => {
+    const room = await roomWith({ legacyMetadata: true, withEdge: false, withAsset: false });
     const submitted: Array<{ inputs: unknown[] }> = [];
-    const outcome = await run(service(room, submitted, catalog()));
-
-    expect(outcome).toMatchObject({ ok: false, code: "identity-reference-required" });
-    expect(submitted).toHaveLength(0);
-    const exported = room.exportCanvas();
-    expect(exported.ok).toBe(true);
-    if (!exported.ok) return;
-    expect(exported.canvas.jobs).toHaveLength(0);
-    expect(exported.canvas.nodeData.target?.taskStatus).toBe("idle");
-  });
-
-  it("参考被删除/失效时拒绝并要求重新选择，不退化为无参考生成", async () => {
-    const room = await roomWith({ policy: "identity-required", withAsset: false });
-    const submitted: Array<{ inputs: unknown[] }> = [];
-    const outcome = await run(service(room, submitted, catalog()));
-
-    expect(outcome).toMatchObject({ ok: false, code: "identity-reference-invalid" });
-    expect(outcome.ok ? "" : outcome.message).toContain("重新选择");
-    expect(submitted).toHaveLength(0);
-  });
-
-  it("ready 参考提交时固定 assetId、来源节点、slot 与顺序", async () => {
-    const room = await roomWith({ policy: "identity-required" });
-    const submitted: Array<{ inputs: unknown[] }> = [];
-    const outcome = await run(service(room, submitted, catalog()));
-
-    expect(outcome).toMatchObject({ ok: true });
-    expect(submitted).toHaveLength(1);
-    expect(submitted[0]!.inputs).toEqual([
-      expect.objectContaining({
-        assetId: "asset-a",
-        role: "reference_image",
-        sourceNodeId: "src",
-        slotId: "slot-a",
-        order: 0
-      })
-    ]);
-
-    const exported = room.exportCanvas();
-    expect(exported.ok).toBe(true);
-    if (!exported.ok) return;
-    const job = exported.canvas.jobs.find((entry) => entry.id === "job-run-identity");
-    expect(job?.references).toEqual([
-      expect.objectContaining({
-        assetId: "asset-a",
-        sourceNodeId: "src",
-        slotId: "slot-a",
-        order: 0
-      })
-    ]);
-  });
-
-  it("optional 任务无参考仍可提交", async () => {
-    const room = await roomWith({ policy: "optional", withEdge: false, withAsset: false });
-    const submitted: Array<{ inputs: unknown[] }> = [];
-    const outcome = await run(service(room, submitted, catalog({ referencePolicy: "optional" })));
-
-    expect(outcome).toMatchObject({ ok: true });
+    expect(await run(service(room, submitted, catalog()))).toMatchObject({ ok: true });
     expect(submitted).toHaveLength(1);
     expect(submitted[0]!.inputs).toEqual([]);
   });
 
-  it("模型声明 identity-required 同样生效（节点未显式设置）", async () => {
-    const room = await roomWith({ withEdge: false, withAsset: false });
+  it("acknowledges an accepted run after references change without resubmitting or replacing its frozen inputs", async () => {
+    const room = await roomWith();
     const submitted: Array<{ inputs: unknown[] }> = [];
-    const outcome = await run(service(room, submitted, catalog()));
-
-    expect(outcome).toMatchObject({ ok: false, code: "identity-reference-required" });
-    expect(submitted).toHaveLength(0);
+    const instance = service(room, submitted, catalog());
+    expect(await run(instance)).toMatchObject({ ok: true });
+    const exported = room.exportCanvas();
+    if (!exported.ok) throw new Error(exported.message);
+    const original = structuredClone(exported.canvas.jobs);
+    expect((await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: CANVAS,
+      commandId: "replace-reference-after-acceptance", baseRevision: exported.canvas.revision, actorId: "test",
+      commands: [{ type: "nodeData.patch", nodeId: "target", value: { inputMapping: [] } },
+        { type: "edge.remove", edgeId: "e1" }]
+    })).ok).toBe(true);
+    // A retry does not depend on the latest catalog or input validity.
+    expect(await run(service(room, submitted, { available: false, reason: "offline", models: [], defaultModels: {} })))
+      .toMatchObject({ ok: true, workerTaskKey: "run-identity" });
+    expect(submitted).toHaveLength(1);
+    const after = room.exportCanvas();
+    expect(after.ok && after.canvas.jobs).toEqual(original);
   });
+
+  it("concurrent retries submit the durable run to Task only once", async () => {
+    const room = await roomWith();
+    const submitted: Array<{ inputs: unknown[] }> = [];
+    const instance = service(room, submitted, catalog());
+    const outcomes = await Promise.all([run(instance), run(instance)]);
+    expect(outcomes.every(outcome => outcome.ok)).toBe(true);
+    expect(submitted).toHaveLength(1);
+    expect(await instance.run({ canvasId: CANVAS, nodeId: "target", runId: "run-identity", jobId: "other-job",
+      modelKey: "m", prompt: "changed", parameters: {} })).toMatchObject({ ok: false, code: "run-identity-conflict" });
+    expect(submitted).toHaveLength(1);
+  });
+
 });

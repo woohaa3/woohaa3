@@ -95,8 +95,9 @@ export function capabilityForModel(
 ): ReferenceInputCapability | null {
   const models = allModelsForPanel(catalog, panelKind);
   if (models.length === 0) return null;
-  const model =
-    models.find((entry) => entry.modelKey === modelKey) ?? models[0];
+  const model = modelKey
+    ? models.find((entry) => entry.modelKey === modelKey)
+    : models[0];
   if (!model) return null;
   // bindings 是唯一权威输入契约。
   return summarizeBindings(catalogModelBindings(model));

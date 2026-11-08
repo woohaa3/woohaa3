@@ -31,6 +31,7 @@ import {
 import { decodeWorldCaptureGenerationBinding } from "../canvas/world-capture-pipeline-contract.js";
 import { worldCaptureReferenceInput, withWorldCaptureTaskInput } from "./world-capture-input.js";
 import type { TaskExecutionDetail, TaskExecutionState, TaskHistoryQuery } from "./history.js";
+import { canvasModelCapabilities } from "./model-capabilities.js";
 
 export const DEFAULT_TASK_INTERNAL_BASE_PATH = "/internal/v1";
 
@@ -130,34 +131,12 @@ function readInputs(raw: unknown): DecodeResult<CanvasTaskInput[]> {
     if (mediaKind === null) {
       return fail("malformed-request", `inputs[${index}] 的 mediaKind 不合法`);
     }
-    const slotId =
-      entry.slotId === undefined ? undefined : isBoundedId(entry.slotId) ? entry.slotId : null;
-    if (slotId === null) {
-      return fail("malformed-request", `inputs[${index}] 的 slotId 不合法`);
-    }
-    const sourceNodeId =
-      entry.sourceNodeId === undefined ? undefined : isBoundedId(entry.sourceNodeId) ? entry.sourceNodeId : null;
-    if (entry.sourceNodeId !== undefined && sourceNodeId === null) {
-      return fail("malformed-request", `inputs[${index}] 的 sourceNodeId 不合法`);
-    }
-    const order =
-      entry.order === undefined
-        ? undefined
-        : typeof entry.order === "number" && Number.isInteger(entry.order) && entry.order >= 0
-          ? entry.order
-          : null;
-    if (order === null) {
-      return fail("malformed-request", `inputs[${index}] 的 order 必须是非负整数`);
-    }
     inputs.push({
       assetId: entry.assetId,
       role: entry.role,
       storageKey: entry.storageKey,
       mediaType: entry.mediaType,
-      ...(mediaKind ? { mediaKind } : {}),
-      ...(slotId ? { slotId } : {}),
-      ...(sourceNodeId ? { sourceNodeId } : {}),
-      ...(order !== undefined ? { order } : {})
+      ...(mediaKind ? { mediaKind } : {})
     });
   }
   return { ok: true, value: inputs };
@@ -173,7 +152,7 @@ export function decodeTaskSubmitRequest(
   body: unknown,
   options: { maxPromptChars?: number } = {}
 ): DecodeResult<TaskSubmitRequest> {
-  const maxPromptChars = options.maxPromptChars ?? 8000;
+  const maxPromptChars = options.maxPromptChars;
   if (!isJsonObject(body)) return fail("malformed-request", "请求体必须是 JSON 对象");
 
   const workerTaskKey = body.workerTaskKey;
@@ -206,7 +185,7 @@ export function decodeTaskSubmitRequest(
     return fail("malformed-request", "interaction 必须是合法的 {id,version}");
   }
   if (typeof body.prompt !== "string") return fail("malformed-request", "prompt 必须是字符串");
-  if (body.prompt.length > maxPromptChars) {
+  if (maxPromptChars !== undefined && body.prompt.length > maxPromptChars) {
     return fail("limit-exceeded", `prompt 超过 ${maxPromptChars} 字上限`);
   }
 
@@ -283,6 +262,10 @@ export function checkModelCapability(
 ): { ok: true } | ModelCapabilityFailure {
   if (model.modelType !== request.modelType) {
     return capabilityFail("unsupported", `模型 ${model.modelKey} 类型与请求不一致`);
+  }
+  const promptLimit = canvasModelCapabilities(model).limits?.promptMaxChars;
+  if (promptLimit !== undefined && request.prompt.length > promptLimit) {
+    return capabilityFail("limit-exceeded", `提示词超过所选模型的 ${promptLimit} 字上限`);
   }
   if (request.inputs.length === 0) return { ok: true };
   const bindings = catalogModelBindings(model);

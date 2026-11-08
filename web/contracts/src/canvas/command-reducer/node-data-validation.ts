@@ -1,5 +1,4 @@
 import { decodeMediaContentRef } from "../media-content.js";
-import { isCanvasReferencePolicy } from "../../task/reference-policy.js";
 import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, isCompositeAssetNodeType, readCompositeAssetExtensionId } from "../domain/core/composite-asset-identity.js";
 /**
  * 命令 reducer 的 nodeData 字段校验与自包含 3D 内容归一化。
@@ -23,17 +22,6 @@ import { reject, type CommandApplyResult, type WorkingState } from "./types.js";
  * 非法/危险 intent（data URL、object URL、临时签名 URL、Blob、越界时间、超限等）使整批命令
  * 以稳定错误失败，而不是被静默丢弃后执行语义不同的任务。校验通过后写回归一化（稳定排序）值。
  */
-/**
- * 身份参考策略只接受两个稳定值；非法值让整批命令失败，而不是静默回落成 optional。
- */
-export function validateReferencePolicyPatch(value: CanvasNodeData): CommandApplyResult | null {
-  if (value.referencePolicy === undefined) return null;
-  if (!isCanvasReferencePolicy(value.referencePolicy)) {
-    return reject("invalid-reference-policy", "referencePolicy 只允许 optional 或 identity-required");
-  }
-  return null;
-}
-
 export function validateVideoEditIntentsPatch(value: CanvasNodeData): CommandApplyResult | null {
   if (value.videoEditIntents === undefined) return null;
   const normalized = normalizeVideoEditIntents(value.videoEditIntents);

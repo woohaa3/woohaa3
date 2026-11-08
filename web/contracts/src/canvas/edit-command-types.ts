@@ -34,10 +34,10 @@ export type EditNodeField = (typeof EDIT_NODE_FIELDS)[number];
 /**
  * 节点业务字段（nodeData）白名单。
  *
- * 仅允许名称与稳定项目关联，精确恢复字段缺失；不拥有任务进度或其它业务数据。
+ * 仅允许名称、下次执行模型与稳定项目关联，精确恢复字段缺失；不拥有任务进度或其它业务数据。
  * 结构化字段（prompt/parameters/taskStatus 等）由各自权威路径管理，撤销不得回退。
  */
-export const EDIT_NODE_DATA_FIELDS = ["title", "projectStorageKey", "inputHash", "activeBuildId", "sharedWorldInstance"] as const;
+export const EDIT_NODE_DATA_FIELDS = ["title", "preferredModelKey", "projectStorageKey", "inputHash", "activeBuildId", "sharedWorldInstance"] as const;
 export type EditNodeDataField = (typeof EDIT_NODE_DATA_FIELDS)[number];
 export const EDIT_NODE_DATA_GUARD_FIELDS = [...EDIT_NODE_DATA_FIELDS, "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelSourceKind", "modelAssetId", "modelPlacement"] as const;
 export type EditNodeDataGuardField = (typeof EDIT_NODE_DATA_GUARD_FIELDS)[number];

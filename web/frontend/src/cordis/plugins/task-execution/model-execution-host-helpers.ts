@@ -3,14 +3,11 @@
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1）。
  */
 import type { CanvasSession } from "../../contracts.js";
-import type {
-  CanvasReferencePolicy,
-  CanvasTaskCatalogModel,
-  CanvasTaskModelType,
-  ServerCanvas
-} from "@woohaa3/contracts";
-import { planConnectEdge, planDeleteEdge } from "../../../extension-api/command-planner.js";
+import type { CanvasTaskCatalogModel, CanvasTaskModelType, ServerCanvas } from "@woohaa3/contracts";
+import { planConnectEdge } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
+import type { ReferenceItem } from "./reference-items.js";
+import { planReferenceChange } from "./reference-command-plan.js";
 
 /** 参考必须已就绪，避免把类型未知或上游缺失的槽位写进提示词。 */
 export function canMentionReference(
@@ -28,36 +25,30 @@ export function addReference(session: CanvasSession, target: string, source: str
   ).ok;
 }
 
-/**
- * 切换节点级身份参考策略（受控 Canvas 命令）。
- *
- * `nodeData.patch` 合并现有字段，不重写 prompt/参数/输入映射。
- */
-export function setReferencePolicy(
-  session: CanvasSession,
-  nodeId: string,
-  referencePolicy: CanvasReferencePolicy
-): boolean {
-  if (!session.isWritable()) return false;
-  return session.submitCommands(
-    [{ type: "nodeData.patch", nodeId, value: { referencePolicy } }],
-    `web-ref-policy-${Date.now().toString(36)}`
-  ).ok;
-}
-
 /** 删除目标节点与来源节点之间的参考连线（受控 Canvas 命令）。 */
 export function removeReference(
   session: CanvasSession,
   canvas: ServerCanvas | null,
   target: string,
-  source: string
+  source: string,
+  slotId = ""
 ): void {
   if (!session.isWritable() || !canvas) return;
-  const edge = canvas.document.edges.find(
-    (candidate) => candidate.target === target && candidate.source === source
-  );
-  if (!edge) return;
-  session.submitCommands(planDeleteEdge(edge.id), `web-ref-remove-${Date.now().toString(36)}`);
+  changeReferences(session, canvas, target, [{ sourceNodeId: source, slotId }]);
+}
+
+export function changeReferences(session: CanvasSession, canvas: ServerCanvas | null, target: string,
+  remove: readonly Pick<ReferenceItem, "slotId" | "sourceNodeId">[], replacement?: string,
+  onFailure?: (message: string) => void): boolean {
+  if (!session.isWritable() || !canvas) { onFailure?.("画布当前只读，无法修改参考"); return false; }
+  const commands = planReferenceChange(canvas, target, { remove, ...(replacement ? { replacement } : {}) });
+  if (!commands) { onFailure?.("参考已变化，请重新选择"); return false; }
+  const result = session.submitCommands(commands, `web-ref-change-${crypto.randomUUID()}`);
+  if (!result.ok) { onFailure?.(result.reason); return false; }
+  void result.handle.settled.then(receipt => {
+    if (receipt.state === "rejected") onFailure?.(receipt.error ?? "参考修改未保存，请重新选择");
+  }).catch(() => onFailure?.("参考修改未确认，请检查画布连接"));
+  return true;
 }
 
 export function mentionTypeFor(

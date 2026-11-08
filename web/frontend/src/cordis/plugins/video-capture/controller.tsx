@@ -42,6 +42,8 @@ export type VideoDialogsController = {
    * 不优先 `edit_video` input mapping。
    */
   openOwnOutputFrameCapture(input: { canvas: ServerCanvas | null; nodeId: string }): { ok: boolean; error?: string };
+  /** Host-resolved immutable camera video; uses the same frame picker/import owner. */
+  openFrozenVideoFrameCapture(payload: VideoDialogPayload): { ok: boolean; error?: string };
   dispose(): void;
 };
 
@@ -162,7 +164,7 @@ export function createVideoDialogsController(deps: VideoDialogsControllerDeps): 
   const disposeCapture = deps.dialogs.registerDialog(VIDEO_FRAME_CAPTURE_DIALOG_ID, {
     definition: frameCaptureDefinition,
     renderer: createFrameCaptureRenderer({
-      onAddFrames: ({ targetNodeId, frames, signal }) => captureFrames.addFrames(frames, targetNodeId, signal)
+      onAddFrames: ({ targetNodeId, frames, signal, source }) => captureFrames.addFrames(frames, targetNodeId, signal, source)
     })
   });
   const disposeEdit = deps.dialogs.registerDialog(VIDEO_EDIT_DIALOG_ID, {
@@ -223,6 +225,11 @@ export function createVideoDialogsController(deps: VideoDialogsControllerDeps): 
     },
     openOwnOutputFrameCapture({ canvas, nodeId }) {
       return openOwnOutputFrameCapture(canvas, nodeId);
+    },
+    openFrozenVideoFrameCapture(payload) {
+      if (!deps.session.isWritable()) return { ok: false, error: "画布当前只读" };
+      const opened = session.openFrameCapture(payload);
+      return opened.ok ? { ok: true } : { ok: false, error: opened.error };
     },
     dispose() {
       captureFrames.dispose();

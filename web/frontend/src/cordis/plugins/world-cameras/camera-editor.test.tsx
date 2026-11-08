@@ -112,6 +112,26 @@ it("preserves the draft on a save conflict", async () => {
   expect(document.body.textContent).toContain("镜头");
 });
 
+it("keeps invalid precision input editable and blocks saving, including after hiding the popover", async () => {
+  await renderEditor();
+  await click("机位精调");
+  const field = host.querySelectorAll<HTMLInputElement>('[data-camera-popover] input')[2]!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => { setValue.call(field, ""); field.dispatchEvent(new Event("input", { bubbles: true })); });
+  const save = host.querySelector<HTMLButtonElement>('button[aria-label="保存并退出"]')!;
+  expect(save.disabled).toBe(true);
+  expect(worldCameraEditorStore.getSnapshot()?.draft.position.h).toBe(camera.position.h);
+  expect(host.textContent).toContain("机位数值无效");
+  await click("机位精调");
+  expect(save.disabled).toBe(true);
+  await click("机位精调");
+  expect(field.value).toBe("");
+  await act(async () => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect(field.value).toBe(String(Math.round(camera.position.h * 100) / 100));
+  expect(save.disabled).toBe(false);
+  expect(ctx.canvasRemote.saveWorldCamera).not.toHaveBeenCalled();
+});
+
 it("does not overwrite a camera changed externally while editing", async () => {
   await renderEditor();
   await act(async () => {
@@ -152,10 +172,10 @@ it("keeps helpers and orbit tools local, and closes More before requesting edito
   await click("选择环绕中心");
   expect(worldCameraEditorStore.changed()).toBe(false);
   expect(worldCameraEditorStore.getSnapshot()?.showHelpers).toBe(false);
-  await click("更多");
-  expect(host.textContent).toContain("机位精调");
+  await click("机位精调");
+  expect(host.querySelector("[data-camera-popover]")).toBeTruthy();
   await exit();
-  expect(host.textContent).not.toContain("机位精调");
+  expect(host.querySelector("[data-camera-popover]")).toBeNull();
   expect(worldCameraEditorStore.getSnapshot()?.phase).toBe("editing");
 });
 

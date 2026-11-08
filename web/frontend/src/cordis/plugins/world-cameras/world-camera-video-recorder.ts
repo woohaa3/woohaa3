@@ -19,12 +19,14 @@ type VideoEncoderLike = {
 };
 type VideoFrameLike = { close(): void };
 type VideoFrameConstructor = new (data: Uint8Array, init: Record<string, unknown>) => VideoFrameLike;
-type VideoEncoderConstructor = new (init: { output: (chunk: EncodedChunkLike, metadata: EncoderMetadata) => void; error: (error: Error) => void }) => VideoEncoderLike;
+type VideoEncoderConstructor = {
+  new (init: { output: (chunk: EncodedChunkLike, metadata: EncoderMetadata) => void; error: (error: Error) => void }): VideoEncoderLike;
+  isConfigSupported(config: Record<string, unknown>): Promise<{ supported?: boolean }>;
+};
 
 type WebCodecs = {
   VideoEncoder?: VideoEncoderConstructor;
   VideoFrame?: VideoFrameConstructor;
-  isConfigSupported?: (config: Record<string, unknown>) => Promise<{ supported?: boolean }>;
 };
 
 export type WorldCameraVideoResult =
@@ -47,9 +49,8 @@ function webCodecs(): WebCodecs {
 export async function worldCameraVideoEncodingAvailable(width: number, height: number, fps: number): Promise<boolean> {
   const codecs = webCodecs();
   if (!codecs.VideoEncoder || !codecs.VideoFrame) return false;
-  if (!codecs.isConfigSupported) return true;
   try {
-    const support = await codecs.isConfigSupported(configFor(width, height, fps));
+    const support = await codecs.VideoEncoder.isConfigSupported(configFor(width, height, fps));
     return support.supported === true;
   } catch {
     return false;
@@ -57,14 +58,21 @@ export async function worldCameraVideoEncodingAvailable(width: number, height: n
 }
 
 function configFor(width: number, height: number, fps: number): Record<string, unknown> {
+  const blocks = Math.ceil(width / 16) * Math.ceil(height / 16);
+  // AVC level limits apply to both frame size and macroblocks/second.
+  const level = blocks <= 3600 && blocks * fps <= 108000 ? "1f"
+    : blocks <= 8192 && blocks * fps <= 245760 ? "28"
+      : blocks <= 36864 && blocks * fps <= 983040 ? "33" : "34";
   return {
-    // Baseline profile：Chrome/Edge 的软硬件编码都覆盖，容器只需 AVC。
-    codec: "avc1.42001f",
+    codec: `avc1.4200${level}`,
     width,
     height,
     bitrate: Math.max(2_000_000, Math.round(width * height * fps * 0.12)),
     framerate: fps,
     avc: { format: "avc" },
+    // Encoding is local CPU work; scene rendering still uses the real GPU.
+    // Some supported hardware configurations never drain their encode queue.
+    hardwareAcceleration: "prefer-software",
     latencyMode: "quality"
   };
 }
@@ -108,6 +116,19 @@ export async function encodeWorldCameraVideo(input: {
       failure.error = error;
     }
   });
+  const flush = () => new Promise<void>((resolve, reject) => {
+    const finish = (error?: unknown) => {
+      clearTimeout(timer);
+      input.signal?.removeEventListener("abort", cancelled);
+      if (error) reject(error); else resolve();
+    };
+    const cancelled = () => finish(new Error("视频录制已取消"));
+    // Bound one encoder batch, not the total duration of a progressing recording.
+    const timer = setTimeout(() => finish(new Error("视频编码停止推进，请重试取景")), 30_000);
+    input.signal?.addEventListener("abort", cancelled, { once: true });
+    if (input.signal?.aborted) { cancelled(); return; }
+    void encoder.flush().then(() => finish(), finish);
+  });
 
   try {
     encoder.configure(configFor(width, height, fps));
@@ -132,16 +153,17 @@ export async function encodeWorldCameraVideo(input: {
       }
       index += 1;
       // 让编码队列与页面渲染交替，避免长动画把所有帧堆进内存。
-      while (encoder.encodeQueueSize > 4 && !input.signal?.aborted) {
-        await new Promise((resolve) => setTimeout(resolve, 4));
-      }
+      if (encoder.encodeQueueSize > 4) await flush();
     }
     if (input.signal?.aborted) return { ok: false, code: "cancelled", message: "视频录制已取消" };
-    await encoder.flush();
+    await flush();
     if (failure.error) return { ok: false, code: "capture-encode-failed", message: failure.error.message };
     const avcC = description ?? deriveAvcC(samples);
     if (!avcC || samples.length === 0) {
       return { ok: false, code: "capture-encode-failed", message: "编码器没有输出可封装的视频帧" };
+    }
+    if (samples.length !== index) {
+      return { ok: false, code: "capture-encode-failed", message: "编码器未保留全部采样帧，请重新取景" };
     }
     const mp4 = buildMp4Video({ width, height, fps, avcC, samples });
     if (!mp4) return { ok: false, code: "capture-encode-failed", message: "MP4 封装失败" };
@@ -157,7 +179,7 @@ export async function encodeWorldCameraVideo(input: {
   } catch (error) {
     return {
       ok: false,
-      code: failure.error ? "capture-encode-failed" : "capture-render-failed",
+      code: input.signal?.aborted ? "cancelled" : "capture-encode-failed",
       message: error instanceof Error ? error.message : String(error)
     };
   } finally {

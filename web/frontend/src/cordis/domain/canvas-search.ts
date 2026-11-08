@@ -10,7 +10,7 @@
 import type { ServerCanvas, CanvasNodeData } from "@woohaa3/contracts";
 import { contentTypeLabelForNode, resolveNodeDisplayName } from "@woohaa3/contracts";
 
-export type CanvasSearchKind = "text" | "image" | "video" | "audio" | "model3d" | "composite-asset";
+export type CanvasSearchKind = "text" | "image" | "video" | "audio" | "model3d" | "composite-asset" | "scene-area" | "world-camera" | "workflow-group-2d";
 
 export type CanvasSearchResult = {
   nodeId: string;

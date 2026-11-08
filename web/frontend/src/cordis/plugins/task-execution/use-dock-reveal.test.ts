@@ -138,3 +138,11 @@ describe("执行面板遮挡避让", () => {
     }
   });
 });
+
+it("下方避让为底边与超大锚点保留编辑和主操作空间，不追踪完全离屏对象", async () => {
+  const { belowPanelRevealOffset } = await import("./dock-reveal.js");
+  const area = {left: 0, right: 1280, top: 0, bottom: 800};
+  expect(belowPanelRevealOffset({left: 400, right: 650, top: 560, bottom: 760}, area, 260)).toBe(232);
+  expect(belowPanelRevealOffset({left: 400, right: 650, top: -300, bottom: 1000}, area, 260)).toBe(472);
+  expect(belowPanelRevealOffset({left: 400, right: 650, top: 810, bottom: 1000}, area, 260)).toBe(0);
+});

@@ -15,6 +15,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
 import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
+import { belowPanelRevealOffset } from "./dock-reveal.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
@@ -55,7 +56,14 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
   const lastPlacement = useRef<AnchoredPanel["placement"] | undefined>(undefined);
   useEffect(() => {
     if (!runtime || !ref.current) return;
+    const occlusionSelector = ".model-editor-dock[data-inspector], .focus-workspace__panel, .canvas-control-panel";
     let frame = 0;
+    let userControlled = false;
+    const takeControl = (event: Event) => {
+      if (event.target instanceof Node && ref.current?.contains(event.target)) return;
+      if (event instanceof WheelEvent || event instanceof PointerEvent && event.button !== 0
+        || event instanceof KeyboardEvent && event.code === "Space") { userControlled = true; }
+    };
     const applyLayout = () => {
       const dock = ref.current;
       const canvas = document.getElementById("bevy-canvas");
@@ -72,6 +80,21 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
+      // Locate may bring an initially offscreen anchor into view over several frames.
+      // Keep reserving room during programmatic movement; a navigation gesture yields
+      // control for the rest of this panel's lifetime.
+      if (!userControlled && !fixtureArea) {
+        const offset = belowPanelRevealOffset(
+          { ...node, right: node.left + node.width, bottom: node.top + node.height },
+          { ...area, right: area.left + area.width, bottom: area.top + area.height },
+          360
+        );
+        const controller = runtime.controller();
+        if (offset > 1 && controller) {
+          const viewport = controller.viewport();
+          controller.panViewportTo({ ...viewport, y: viewport.y - offset }, { durationMs: 0 });
+        }
+      }
       // 节点面板统一优先落在锚点下方：3D 模型/镜头不再翻到模型上方遮挡对象，2D 节点也不随
       // 视口在「上/下/贴边」之间跳。下方确实放不下时依次退到侧面、再退到视口边缘。
       const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, "below");
@@ -104,11 +127,11 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
     const app = document.querySelector<HTMLElement>(".app");
     const observedOcclusions = new Set<HTMLElement>();
     let mutations: MutationObserver | undefined;
-    const visibleOcclusions = () => Array.from(document.querySelectorAll<HTMLElement>(".model-editor-dock[data-inspector], .focus-workspace__panel"))
+    const visibleOcclusions = () => Array.from(document.querySelectorAll<HTMLElement>(occlusionSelector))
       .filter((element) => getComputedStyle(element).display !== "none" && getComputedStyle(element).visibility !== "hidden")
       .map((element) => { const rect = element.getBoundingClientRect(); return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }; });
     const observeOcclusions = () => {
-      const next = new Set(document.querySelectorAll<HTMLElement>(".model-editor-dock[data-inspector], .focus-workspace__panel"));
+      const next = new Set(document.querySelectorAll<HTMLElement>(occlusionSelector));
       for (const occlusion of observedOcclusions) if (!next.has(occlusion)) { observer.unobserve(occlusion); observedOcclusions.delete(occlusion); }
       for (const occlusion of next) {
         observedOcclusions.add(occlusion);
@@ -122,8 +145,14 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       observeOcclusions();
     }
     window.addEventListener("resize", refresh);
+    // Navigation gestures belong to this application surface, including keyboard
+    // events on its canvas. Portals outside it must not cancel the reveal.
+    const navigationSurface = app ?? canvas;
+    navigationSurface?.addEventListener("wheel", takeControl, true);
+    navigationSurface?.addEventListener("pointerdown", takeControl, true);
+    navigationSurface?.addEventListener("keydown", takeControl, true);
     refresh();
-    return () => { cancelAnimationFrame(frame); unsubscribeViewport(); unsubscribeScene?.(); unsubscribeFrame?.(); observer.disconnect(); mutations?.disconnect(); window.removeEventListener("resize", refresh); };
+    return () => { cancelAnimationFrame(frame); unsubscribeViewport(); unsubscribeScene?.(); unsubscribeFrame?.(); observer.disconnect(); mutations?.disconnect(); window.removeEventListener("resize", refresh); navigationSurface?.removeEventListener("wheel", takeControl, true); navigationSurface?.removeEventListener("pointerdown", takeControl, true); navigationSurface?.removeEventListener("keydown", takeControl, true); };
   }, [runtime, nodeId]);
   return <div ref={ref} className="node-execution-dock" data-node-id={nodeId} data-presentation="compact" style={runtime ? { visibility: "hidden" } : undefined}>{children}</div>;
 }

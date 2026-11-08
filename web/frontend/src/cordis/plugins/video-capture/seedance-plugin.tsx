@@ -18,6 +18,10 @@ import { createVideoDialogsController, resolveOwnReadyVideo, type VideoDialogsCo
 import { SeedanceVideoPanel } from "./seedance-panel.js";
 import type { ModelPanelBinding } from "../../contract/model-interaction.js";
 import type { CanvasNodeData, ServerCanvas, VideoEditIntent } from "@woohaa3/contracts";
+import { decodeWorldCamera, worldCameraShotContext } from "@woohaa3/contracts";
+import { worldCameraShotStore } from "../../services/world-camera-shot-store.js";
+import { mediaUrlFor } from "../../services/paths.js";
+import type { VideoDialogPayload } from "./types.js";
 
 export const SEEDANCE_INTERACTION_PLUGIN_ID = "seedance-video-interaction";
 export const SEEDANCE_VIDEO_INTERACTION_ID = "seedance-video";
@@ -76,6 +80,24 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
         }
       });
 
+      const removeStillAction = ctx.slots.register("canvas.node-action", {
+        id: "world-camera-still-frame",
+        owner: SEEDANCE_INTERACTION_PLUGIN_ID,
+        order: 5,
+        describe: ({ nodeId, writable }) => {
+          const canvas = woohaa3CanvasStore.getState().canvas;
+          const camera = decodeWorldCamera(canvas?.nodeData[nodeId]?.worldCamera);
+          if (!camera.ok || !canvas || worldCameraShotContext(canvas, camera.value)?.kind !== "dynamic") return null;
+          const enabled = writable && !!cameraFramePayload(canvas, nodeId);
+          return { label: "取静帧", enabled, ...(!enabled ? { reason: writable ? "等待镜头视频就绪后取静帧" : "画布当前只读" } : {}) };
+        },
+        activate: ({ nodeId, writable }) => {
+          if (!writable || !ctx.canvasSession.isWritable()) return;
+          const payload = cameraFramePayload(woohaa3CanvasStore.getState().canvas, nodeId);
+          if (payload) videoDialogs.openFrozenVideoFrameCapture(payload);
+        }
+      });
+
       // Panel + Dialog 的 disposer 由同一 scope 收集；部分激活失败时 Cordis 反序回滚。
       const disposePanel = ctx.modelInteractions.register({
         id: SEEDANCE_VIDEO_INTERACTION_ID,
@@ -110,6 +132,7 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
         () => () => {
           offFrameCapture();
           removeEditAction();
+          removeStillAction();
           videoDialogs.dispose();
           disposePanel();
         },
@@ -121,6 +144,28 @@ export function seedanceVideoInteractionExtension(): Plugin.Function<void> {
       inject: ["dialogs", "mediaRemote", "canvasSession", "canvasScope", "modelInteractions", "slots"]
     }
   );
+}
+
+/** The chosen source remains an immutable video even if the live camera changes. */
+export function cameraFramePayload(canvas: ServerCanvas | null, nodeId: string): VideoDialogPayload | null {
+  if (!canvas) return null;
+  const camera = decodeWorldCamera(canvas.nodeData[nodeId]?.worldCamera);
+  if (!camera.ok) return null;
+  const status = worldCameraShotStore.get(camera.value.cameraId);
+  const shot = worldCameraShotContext(canvas, camera.value);
+  if (!status || status.canvasId !== canvas.id || status.phase !== "ready" || status.stale
+    || status.key?.cameraSettingsVersion !== camera.value.settingsVersion || !status.video || !status.dynamicKey
+    || shot?.kind !== "dynamic" || !shot.animation || status.dynamicKey.animation.areaId !== shot.animation.areaId
+    || status.dynamicKey.animation.scriptRevision !== shot.animation.scriptRevision
+    || status.dynamicKey.animation.sourceHash !== shot.animation.sourceHash) return null;
+  return {
+    videoAssetId: status.video.mediaId,
+    videoStorageKey: status.video.storageKey,
+    videoUrl: mediaUrlFor(status.video.storageKey, canvas.id),
+    targetNodeId: nodeId,
+    title: "镜头取静帧",
+    cameraSource: { cameraId: camera.value.cameraId, versionKey: structuredClone(status.dynamicKey) }
+  };
 }
 
 function summarizeIntents(videoDialogs: VideoDialogsController, nodeId: string): readonly string[] {

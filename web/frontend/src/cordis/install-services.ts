@@ -351,17 +351,6 @@ export async function installCanvasPageServices(
 
   const canvasRemote = createCanvasRemote({
     canvasId,
-    /**
-     * 页面渲染取景路径：惰性读取 `canvasRuntime`（页面插件可能后于服务安装装载），
-     * 由运行时在同一 Bevy App 内离屏渲染并编码 PNG；缺省时 freeze 直接失败，不回退原生。
-     */
-    renderWorldCapture: async ({ cameraId, width, height }) => {
-      const runtime = ctx.get("canvasRuntime" as never) as {
-        captureWorldCamera?(input: { cameraId: string; width: number; height: number }): Promise<{ ok: true; png: Uint8Array } | { ok: false; code: string }>;
-      } | undefined;
-      if (!runtime?.captureWorldCamera) return { ok: false, code: "renderer-unavailable" };
-      return runtime.captureWorldCamera({ cameraId, width, height });
-    },
     ...options.canvasRemoteOptions
   });
   const taskRemote = createTaskRemote(options.taskRemoteOptions);

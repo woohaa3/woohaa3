@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
-import { act } from "react";
+import { act, useEffect } from "react";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { DialogHost } from "./DialogHost.js";
@@ -57,7 +57,9 @@ import { AlertDialog } from "@woohaa3/ui/dialogs";
 import type { DialogRendererProps } from "./renderer-registry.js";
 
 function AlertProbe({ instance, requestClose, setBusy }: DialogRendererProps) {
-  void setBusy;
+  // Real media dialogs report their busy state from an effect. The host callback
+  // changes on render, so repeated identical reports must not notify the store.
+  useEffect(() => { setBusy(instance.busy); }, [setBusy, instance.busy]);
   const payload = instance.payload as { title: string; description: string };
   return (
     <AlertDialog

@@ -6,7 +6,7 @@
  * 打开时解析，只在 session 内存在）、session 内捕获帧 Blob，以及一次性回传的 intents。
  * canonical 状态只保存稳定媒体身份（由 `@woohaa3/contracts` 的 video-edit contract 强制）。
  */
-import type { VideoEditIntent } from "@woohaa3/contracts";
+import type { VideoEditIntent, WorldCaptureDynamicVersionKey } from "@woohaa3/contracts";
 
 /** dialog 打开时注入的稳定视频身份与会话播放地址。 */
 export type VideoDialogPayload = {
@@ -26,6 +26,7 @@ export type VideoDialogPayload = {
   initialIntents?: readonly VideoEditIntent[];
   /** 预选的 intent id（重开某个 chip）。 */
   initialIntentId?: string;
+  cameraSource?: { cameraId: string; versionKey: WorldCaptureDynamicVersionKey };
 };
 
 /** 会话内的一帧捕获结果。 */
@@ -62,6 +63,7 @@ export type FrameAddAction = (input: {
   targetNodeId: string;
   frames: readonly CapturedFrameEntry[];
   signal?: AbortSignal;
+  source?: VideoDialogPayload;
 }) => Promise<readonly FrameAddReceipt[]>;
 
 /** 编辑 dialog 的确认动作契约（由 Plugin 注入实现：稳定化 preview 后一次性回传）。 */

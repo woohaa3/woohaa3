@@ -36,6 +36,10 @@ const service = await createCanvasService({
   yjsRepository,
   enableCanvasStorage: true,
   enableYjsSync: true,
+  accessRuntime: {
+    enabled: false,
+    instance: { kind: "instance", id: "instance:process-test", ownerId: "instance:process-test", credentialOwnerId: "instance:process-test" }
+  },
   // run/cancel 与 projector 需要 catalog；从 Task Service 的只读 catalog 拉取。
   // 懒求值，避免 Canvas 启动时 Task 尚不可达导致进程退出。
   resolveCatalog: async () => {

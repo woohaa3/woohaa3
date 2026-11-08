@@ -5,6 +5,7 @@
  * preview/ready/stale/failed。不进入 Y.Doc、不写规范数据、不参与生成。
  */
 import type { WorldCaptureFramingStatus, WorldCameraShotPhase } from "@woohaa3/contracts";
+import { worldCaptureVersionKeysEqual, worldCaptureDynamicKeysEqual } from "@woohaa3/contracts";
 
 let statuses: ReadonlyMap<string, WorldCaptureFramingStatus> = new Map();
 const listeners = new Set<() => void>();
@@ -57,7 +58,10 @@ function sameStatuses(
       other.reason !== status.reason ||
       other.width !== status.width ||
       other.height !== status.height ||
-      other.key?.outputVersion !== status.key?.outputVersion ||
+      (other.key === null || status.key === null ? other.key !== status.key : !worldCaptureVersionKeysEqual(other.key, status.key)) ||
+      other.input?.mediaId !== status.input?.mediaId ||
+      (other.dynamicKey === undefined || status.dynamicKey === undefined ? other.dynamicKey !== status.dynamicKey
+        : !worldCaptureDynamicKeysEqual(other.dynamicKey, status.dynamicKey)) ||
       other.video?.mediaId !== status.video?.mediaId
     ) {
       return false;

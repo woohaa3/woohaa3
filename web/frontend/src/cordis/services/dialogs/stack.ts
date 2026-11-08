@@ -130,7 +130,7 @@ export function setDialogBusy(
 ): { stack: DialogStack; updated: boolean } {
   let updated = false;
   const next = stack.map((instance) => {
-    if (instance.instanceId !== instanceId) return instance;
+    if (instance.instanceId !== instanceId || instance.busy === busy) return instance;
     updated = true;
     return { ...instance, busy };
   });

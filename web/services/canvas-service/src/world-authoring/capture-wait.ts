@@ -35,11 +35,8 @@ export async function waitForFreeze(
     if (Date.now() >= deadline) return "timeout";
     const attempt = state.attempt;
     const remaining = Math.max(1, deadline - Date.now());
-    await Promise.race([
-      attempt?.promise ?? Promise.resolve(),
-      delay(Math.min(100, remaining))
-    ]);
-    if (!state.attempt) await delay(0);
+    if (attempt) await Promise.race([attempt.promise, delay(Math.min(100, remaining))]);
+    else await delay(Math.min(100, remaining));
   }
 }
 

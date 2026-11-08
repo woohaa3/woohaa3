@@ -4,7 +4,6 @@ import type { Woohaa3CanvasDocument,
 import type { VideoEditIntent } from "../../video/video-edit.js";
 import type { ModelCamera } from "../model-cameras.js";
 import type { ImageEditDocument } from "../image-edit.js";
-import type { CanvasTaskInput } from "../../task/dto.js";
 
 export type GenerationKind = "text" | "image" | "video" | "audio";
 export type GenerationStatus = "idle" | "queued" | "running" | "success" | "failed" | "draft" | "ready" | "archived";
@@ -33,13 +32,6 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   taskKind?: string;
   prompt?: string;
   panelPrompt?: string;
-  /**
-   * 节点级身份参考策略（change: 2026-11-06-require-identity-reference）。
-   *
-   * 缺省时沿用所选模型声明的 `referencePolicy`，再缺省为 optional。身份敏感预设
-   * （角色/商品系列）写 `identity-required`；用户可在执行面板显式切回 optional。
-   */
-  referencePolicy?: import("../../task/reference-policy.js").CanvasReferencePolicy;
   inputMapping?: CanvasNodeInputMapping[];
   status?: GenerationStatus;
   taskStatus?: "idle" | "pending" | "processing" | "successed" | "failed" | "cancelled" | "unknown";
@@ -50,6 +42,8 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
   activeRunId?: string;
   /** 最近一次执行使用的稳定 modelKey。 */
   modelKey?: string;
+  /** 用户保存的下次执行模型；独立于最近一次任务及其参数草稿。 */
+  preferredModelKey?: string;
   progress?: number;
   /** `null` 表示显式清除上一次的错误（同一次提交里清掉失败态再进入 processing）。 */
   error?: string | null;
@@ -201,13 +195,6 @@ export type StoredJob = {
    * acceptance and never rewritten by later canvas changes.
    */
   worldCapture?: import("../world-capture-pipeline-contract.js").WorldCaptureGenerationBinding;
-  /**
-   * 提交时固定的参考输入快照（change: 2026-11-06-require-identity-reference）。
-   *
-   * 只含稳定引用与输入槽身份（assetId / sourceNodeId / slotId / order），
-   * 不随之后画布连线变化而改写，供历史与诊断追溯“这次用了哪张素材”。
-   */
-  references?: CanvasTaskInput[];
   status: GenerationStatus;
   error?: string;
   updatedAt: string;

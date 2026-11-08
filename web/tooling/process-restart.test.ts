@@ -337,7 +337,7 @@ describeOrSkip("进程级重启演练（任务 8.2）", () => {
     void serverCanvasToYDoc;
   }, 30_000);
 
-  it("Canvas begin 后退出：Task 仍在执行并持久化终态，Canvas 重启后补偿投影", async () => {
+  it("图片任务 begin 后 Canvas 退出：Task 持久化失败终态，重启后补偿且不重复付费", async () => {
     const dir = tempDir();
     const providerLog = path.join(dir, "provider.log");
     writeFileSync(providerLog, "");
@@ -356,7 +356,8 @@ describeOrSkip("进程级重启演练（任务 8.2）", () => {
       MEDIA_URL: "http://127.0.0.1:1",
       PROVIDER_LOG: providerLog,
       MODELS_CONFIG: modelsConfig,
-      WORKER_DELAY_MS: "1200"
+      WORKER_DELAY_MS: "1200",
+      WORKER_FAIL: "1"
     };
     const canvasEnv = {
       CANVAS_DB: canvasDb,
@@ -375,7 +376,9 @@ describeOrSkip("进程级重启演练（任务 8.2）", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ canvasId })
     });
-    await enableYjs(canvasPort, canvasId, emptyCanvas(canvasId));
+    const initial = emptyCanvas(canvasId);
+    initial.document.nodes[0]!.type = "image";
+    expect((await enableYjs(canvasPort, canvasId, initial)).ok).toBe(true);
 
     // 从权威 Y.Doc 解析输入需要画布处于 yjs 模式（enableYjs 已写入 durable syncMode）。
     const run = await fetch(`http://127.0.0.1:${canvasPort}/api/canvases/${canvasId}/runs`, {
@@ -385,9 +388,9 @@ describeOrSkip("进程级重启演练（任务 8.2）", () => {
         nodeId: "text-1",
         runId: "run-proc-c3",
         jobId: "job-proc-c3",
-        modelKey: "litellm:gemini-2.5-flash",
+        modelKey: "litellm:fixture-image",
         prompt: "begin 后退出",
-        parameters: { model: "gemini-2.5-flash" }
+        parameters: {}
       })
     });
     expect(run.status).toBe(202);
@@ -404,11 +407,11 @@ describeOrSkip("进程级重启演练（任务 8.2）", () => {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
       const node = reader.doc.getMap("nodeData").get("text-1") as { taskStatus?: string } | undefined;
-      if (node?.taskStatus === "successed") break;
+      if (node?.taskStatus === "failed") break;
       await sleep(100);
     }
     const projected = reader.doc.getMap("nodeData").get("text-1") as { taskStatus?: string } | undefined;
-    expect(projected?.taskStatus).toBe("successed");
+    expect(projected?.taskStatus).toBe("failed");
     // provider 仍只执行一次（补偿只投影，不重跑）。
     expect(readFileSync(providerLog, "utf8").split("\n").filter(Boolean)).toEqual(["run-proc-c3"]);
     reader.ws.close();

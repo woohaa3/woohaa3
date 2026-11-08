@@ -413,3 +413,17 @@ describe("T10 generation input freeze at click time", () => {
     expect(requests[0]!.worldCapture).toBeUndefined();
   });
 });
+
+it("submits long Chinese text once using the selected model limit, and retains explicit model rejection", async () => {
+  const run = vi.fn(async (_request: unknown) => ({ ok: false as const, code: "unavailable", error: "controlled rejection" }));
+  const coordinator = createSubmitCoordinator({ store: { getState: () => ({ canvas: canvasWithNode() }) }, client: { run, cancel: async () => ({ ok: true }) } });
+  const selected = catalog();
+  selected.models[0]!.capabilityFacts = { limits: { promptMaxChars: 48000 } };
+  const input = { nodeId: "text-1", modelKey: "gemini-2.5-flash", prompt: "长中文提示词".repeat(4000), parameters: {}, catalog: selected, expectedModelType: "image" as const };
+  expect(await coordinator.submit(input)).toMatchObject({ ok: false, error: "controlled rejection" });
+  expect(run).toHaveBeenCalledOnce();
+  expect(run.mock.calls[0]![0]).toMatchObject({ prompt: input.prompt });
+  selected.models[0]!.capabilityFacts = { limits: { promptMaxChars: 1200 } };
+  expect(await coordinator.submit(input)).toMatchObject({ ok: false, error: "提示词超过所选模型的 1200 字上限" });
+  expect(run).toHaveBeenCalledOnce();
+});

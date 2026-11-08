@@ -12,7 +12,6 @@ import { isMediaLocator, type MediaLocator } from "../../../media/storage.js";
 import type { CanvasTaskModelType } from "../../../task/dto.js";
 import type { ModelInteractionDescriptor } from "../../../task/model-identity.js";
 import type { GenerationModelCapabilityFacts } from "../../../task/model-capabilities.js";
-import type { CanvasReferencePolicy } from "../../../task/reference-policy.js";
 import { isValidStorageKey } from "../../../validation.js";
 
 /** 模型级 prompt 要求（design D4）：required 保持既有规则，optional/none 允许纯素材工作流。 */
@@ -56,11 +55,6 @@ export type GenerationModelDefinition = {
   notice?: string;
   /** 参考输入声明（role/mediaKind/binding 等）；结构由生成模块校验。 */
   capabilities?: Record<string, unknown>;
-  /**
-   * 身份一致性参考策略；缺省 optional。节点设置优先。
-   * （change: 2026-11-06-require-identity-reference）
-   */
-  referencePolicy?: CanvasReferencePolicy;
   /**
    * 模型事实能力（change: 2026-10-20-declare-generation-model-capabilities）。
    *
@@ -171,8 +165,6 @@ export type GenerationModelDescription = {
   capabilities?: Record<string, unknown>;
   /** 模型事实能力；缺省 = 未声明（消费者按不支持处理）。 */
   capabilityFacts?: GenerationModelCapabilityFacts;
-  /** 身份一致性参考策略；缺省 optional（change: 2026-11-06-require-identity-reference）。 */
-  referencePolicy?: CanvasReferencePolicy;
   promptRequirement?: PromptRequirement;
   cancel?: GenerationCancelCapability;
 };

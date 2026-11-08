@@ -66,8 +66,8 @@ export function createFrameCaptureRenderer({ onAddFrames, story }: CreatorDeps) 
       source,
       instanceId: instance.instanceId,
       targetNodeId: payload.targetNodeId,
-      onAddFrames,
-      onAllAdded: requestClose,
+      onAddFrames: input => onAddFrames({ ...input, source: payload }),
+      onAllAdded: () => { setBusy(false); requestClose(); },
       ...(initial ? { initial } : {})
     });
     useEffect(() => {

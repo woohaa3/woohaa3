@@ -115,8 +115,6 @@ export interface ExecutionPanelData {
 	title?: string;
 	panelPrompt?: string;
 	taskStatus?: ExecutionPanelStatus;
-	/** 视频节点从未提交过任务：显示「未提交 · 待配置」而不是空状态。 */
-	unsubmitted?: boolean;
 	progress?: number;
 	errorMessage?: string;
 	parameters?: Record<string, unknown>;

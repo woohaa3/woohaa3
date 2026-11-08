@@ -24,7 +24,7 @@ import { ModelInteractionService } from "../../services/model-interaction-servic
 import { DialogService } from "../../services/dialogs/service.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { CatalogState, TaskCatalogService } from "../../contracts.js";
-import type { CanvasTaskCatalog } from "@woohaa3/contracts";
+import type { CanvasNodeData, CanvasTaskCatalog } from "@woohaa3/contracts";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -57,7 +57,7 @@ const CATALOG = catalogFixture([
 let root: Root | null = null;
 
 function canvasWithVideoNode() {
-  return canvasFixture({ nodes: [{ id: NODE_ID, type: "video", data: { prompt: "镜头缓推" } }] });
+  return canvasFixture({ nodes: [{ id: NODE_ID, type: "video", data: { prompt: "镜头缓推", preferredModelKey: "video-model" } }] });
 }
 
 function canvasWithoutVideoNode() {
@@ -302,12 +302,111 @@ describe("ModelExecutionHost 视频参数门禁", () => {
   });
 });
 
-describe("ModelExecutionHost 未提交视频节点", () => {
-  it("从未提交的视频节点向 Panel 标记 unsubmitted", async () => {
-    const panel = await mountVideoHost(
-      videoCatalog({ defaults: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 } }),
-      vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }))
-    );
-    expect(panel.unsubmitted).toBe(true);
+describe("model choice persistence", () => {
+  it.each<{ name: string; data: CanvasNodeData; expected: string }>([
+    { name: "新建图片", data: {}, expected: "first-image" },
+    { name: "已有图片", data: { modelKey: "saved-image" }, expected: "saved-image" },
+    { name: "显式选择图片", data: { preferredModelKey: "saved-image" }, expected: "saved-image" }
+  ])("目录未配置默认模型时 $name 能打开面板并以正确模型提交", async ({ data, expected }) => {
+    const nodeId = "image-node";
+    woohaa3CanvasStore.getState().hydrate(canvasFixture({ nodes: [{ id: nodeId, type: "image", data }] }));
+    const catalog = catalogFixture(["first-image", "saved-image"].map(modelKey => ({
+      modelKey, modelType: "image" as const, interaction: { id: "test-panel", version: 1 }
+    })));
+    let panel: ModelPanelProps | undefined;
+    const registry = new ModelInteractionService();
+    registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => {
+      panel = props;
+      return <output>{props.model.modelKey}</output>;
+    } });
+    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={nodeId} session={{} as never}
+      writable runClient={{} as never} dialogs={new DialogService()} catalog={new StubCatalogService(catalog)}
+      registry={registry} draftStore={createModelDraftStore()} submitCoordinator={{ submit, cancel: vi.fn() }} />);
+    expect(host.textContent).not.toContain("无法解析");
+    expect(panel!.model.modelKey).toBe(expected);
+    expect(submit).not.toHaveBeenCalled();
+    await act(async () => { await panel!.submit({ prompt: "一张产品照片", parameters: {} }); });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ nodeId, modelKey: expected }));
   });
+
+  it("keeps an unavailable identity and offers an explicit model recovery without starting a run", async () => {
+    const canvas = canvasWithVideoNode(); canvas.nodeData[NODE_ID]!.preferredModelKey = "removed-model";
+    woohaa3CanvasStore.getState().hydrate(canvas);
+    const run = vi.fn();
+    const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
+      writable runClient={{ run } as never} dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
+      registry={registryWithPanel()} draftStore={createModelDraftStore()} />);
+    expect(host.textContent).toContain("removed-model");
+    expect(host.textContent).toContain("下线");
+    expect(host.querySelector('button[aria-label="选择生成模型"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="video-panel"]')).toBeNull();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it("keeps the failed choice and prompt without a retry control, then follows canonical undo", async () => {
+    let panel: ModelPanelProps | undefined;
+    const drafts = createModelDraftStore();
+    const models = catalogFixture([
+      { modelKey: "video-model", modelType: "video", interaction: { id: "test-panel", version: 1 } },
+      { modelKey: "second-model", modelType: "video", interaction: { id: "test-panel", version: 1 } }
+    ]);
+    const registry = new ModelInteractionService();
+    registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.model.modelKey}</output>; } });
+    const record = vi.fn(async (_commands: unknown) => ({ ok: false as const, reason: "offline" }));
+    const snapshot = { pending: [] };
+    const submit = vi.fn();
+    const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
+      writable runClient={{} as never} dialogs={new DialogService()} catalog={new StubCatalogService(models)}
+      registry={registry} draftStore={drafts} editService={{ record, subscribe: () => () => {}, getSnapshot: () => snapshot } as never}
+      submitCoordinator={{ submit, cancel: vi.fn() }} />);
+    await act(async () => panel!.patchDraft({ prompt: "preserved" }));
+    await act(async () => panel!.patchDraft({ parameters: { model: "second-model", durationSeconds: 7 } }));
+    expect(panel!.model.modelKey).toBe("second-model");
+    expect(panel!.draft.prompt).toBe("preserved");
+    expect(record.mock.calls[0]![0]).toEqual([{ type: "nodeData.patch", nodeId: NODE_ID, value: { preferredModelKey: "second-model" },
+      expectedNodeData: { [NODE_ID]: canvasWithVideoNode().nodeData[NODE_ID] } }]);
+    expect(host.textContent).not.toContain("模型选择未保存");
+    expect(host.textContent).not.toContain("重试保存");
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    const canonical = canvasWithVideoNode(); canonical.nodeData[NODE_ID]!.preferredModelKey = "second-model";
+    await act(async () => woohaa3CanvasStore.getState().hydrate(canonical));
+    expect(drafts.getSelection(NODE_ID)).toBeNull();
+    expect(host.textContent).not.toContain("offline");
+    const undo = canvasWithVideoNode(); undo.nodeData[NODE_ID]!.preferredModelKey = "video-model";
+    await act(async () => woohaa3CanvasStore.getState().hydrate(undo));
+    expect(panel!.model.modelKey).toBe("video-model");
+  });
+});
+
+
+it("keeps a rejected configuration for the existing edit history without retrying or starting a run", async () => {
+  let panel: ModelPanelProps | undefined;
+  const models = catalogFixture([
+    {modelKey:"video-model",modelType:"video",interaction:{id:"test-panel",version:1}},
+    {modelKey:"second-model",modelType:"video",interaction:{id:"test-panel",version:1}}
+  ]);
+  const registry = new ModelInteractionService();
+  registry.register({id:"test-panel",version:1,owner:"test",Panel: props => {panel=props;return <output>{props.draft.prompt}</output>;}});
+  let snapshot = {pending: [] as Array<{id:string;state:string;error?:string}>};
+  const listeners = new Set<() => void>();
+  const record = vi.fn(async (_commands: unknown) => ({ok:true as const,entry:{id:"choice"}}));
+  const skipConflict = vi.fn(); const submit = vi.fn();
+  const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
+    writable runClient={{} as never} dialogs={new DialogService()} catalog={new StubCatalogService(models)} registry={registry}
+    draftStore={createModelDraftStore()} editService={{record,skipConflict,getSnapshot:()=>snapshot,subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>listeners.delete(fn);}} as never}
+    submitCoordinator={{submit,cancel:vi.fn()}} />);
+  await act(async()=>panel!.patchDraft({prompt:"unsent",parameters:{model:"second-model"}}));
+  await act(async()=>{
+    const remote = canvasWithVideoNode(); remote.nodeData[NODE_ID]!.title = "changed elsewhere";
+    woohaa3CanvasStore.getState().hydrate(remote);
+    snapshot = {pending:[{id:"choice",state:"conflict",error:"stale baseline"}]}; listeners.forEach(fn=>fn());
+  });
+  expect(host.textContent).not.toContain("模型选择未保存");
+  expect(host.textContent).not.toContain("重试保存");
+  expect(skipConflict).not.toHaveBeenCalled();
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0]![0]).toMatchObject([{expectedNodeData:{[NODE_ID]:canvasWithVideoNode().nodeData[NODE_ID]}}]);
+  expect(panel!.draft.prompt).toBe("unsent"); expect(submit).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { bytesToBase64, captureRequestSignal, postPageCommit } from "./canvas-remote-capture.js";
 /**
  * Canvas Remote adapter（change: adopt-frontend-cordis-plugin-runtime，design D4）。
  *
@@ -16,6 +17,7 @@ import {
 } from "@woohaa3/contracts/canvas-yjs";
 import {
   decodeWorldAuthoringFailure,
+  decodeWorldCaptureGenerationBinding,
   decodeWorldAuthoringResponse,
   type WorldAuthoringResponseRoute
 } from "@woohaa3/contracts";
@@ -77,15 +79,6 @@ export type CanvasRemoteOptions = {
   nodeHistoryBasePath?: string;
   /** 画布任务活动 base path；测试可注入。 */
   taskActivityBasePath?: string;
-  /**
-   * 页面内世界镜头捕获渲染器（页面渲染路径）。缺省时 `freezeWorldCapture` 直接失败，
-   * 不回退原生 renderer。
-   */
-  renderWorldCapture?: (input: {
-    cameraId: string;
-    width: number;
-    height: number;
-  }) => Promise<{ ok: true; png: Uint8Array } | { ok: false; code: string }>;
   fetchImpl?: typeof globalThis.fetch;
   /** WebSocket 构造器；测试可注入 fake。 */
   webSocketImpl?: typeof globalThis.WebSocket;
@@ -102,59 +95,6 @@ export type CanvasRemoteOptions = {
 };
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-
-/** Uint8Array → base64（分块避免参数上限）；无 DOM 时用 Buffer 兜底。 */
-function bytesToBase64(bytes: Uint8Array): string {
-  const bufferCtor = (globalThis as { Buffer?: { from(input: Uint8Array): { toString(encoding: string): string } } }).Buffer;
-  if (bufferCtor) return bufferCtor.from(bytes).toString("base64");
-  let binary = "";
-  const chunk = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
-  }
-  return btoa(binary);
-}
-
-/** 把页面渲染的 PNG 提交给宿主校验、保存并冻结；返回 binding 或稳定错误。 */
-async function postPageCommit(
-  captureBase: string,
-  fetchImpl: typeof globalThis.fetch,
-  input: { cameraId: string; key: unknown; png: Uint8Array; width: number; height: number; signal?: AbortSignal }
-): Promise<CanvasCaptureFreezeResult> {
-  let committed: Response;
-  try {
-    committed = await fetchImpl(`${captureBase}-page-commit`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        cameraId: input.cameraId,
-        key: input.key,
-        pngBase64: bytesToBase64(input.png),
-        width: input.width,
-        height: input.height
-      }),
-      ...(input.signal ? { signal: input.signal } : {})
-    });
-  } catch {
-    return { ok: false, code: "capture-unavailable", error: "无法连接取景服务" };
-  }
-  const committedBody = (await committed.json().catch(() => null)) as Record<string, unknown> | null;
-  if (committedBody && committedBody.ok === true && committedBody.binding && typeof committedBody.binding === "object") {
-    return {
-      ok: true,
-      binding: committedBody.binding as import("@woohaa3/contracts").WorldCaptureGenerationBinding
-    };
-  }
-  return {
-    ok: false,
-    code: typeof committedBody?.code === "string" ? committedBody.code : `http-${committed.status}`,
-    error: typeof committedBody?.message === "string" && committedBody.message !== ""
-      ? committedBody.message
-      : `取景冻结失败（HTTP ${committed.status}）`,
-    ...(committedBody?.requestedKey ? { requestedKey: committedBody.requestedKey as import("@woohaa3/contracts").WorldCaptureVersionKey } : {}),
-    ...(committedBody?.currentKey ? { currentKey: committedBody.currentKey as import("@woohaa3/contracts").WorldCaptureVersionKey } : {})
-  };
-}
 
 function decodeWorldResponse(response: Response, value: unknown, route: WorldAuthoringResponseRoute): unknown {
   if (!record(value)) throw new Error("invalid response");
@@ -411,60 +351,32 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
     },
 
     async freezeWorldCapture(input) {
-      const renderer = options.renderWorldCapture;
-      if (!renderer) {
-        return { ok: false, code: "renderer-unavailable", error: "当前页面没有可用的世界镜头渲染器" };
-      }
-      // 1. 预备：由宿主给出当前 canonical 取景的版本键与精确输出尺寸。
-      let prepared: Response;
+      // The page producer owns rendering. Every consumer waits on the host's same
+      // version/attempt instead of starting another capture or rejecting video.
       try {
-        prepared = await fetchImpl(`${captureBase}-page-prepare`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ cameraId: input.cameraId }),
+        const response = await fetchImpl(`${captureBase}-freeze`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cameraId: input.cameraId, ...(input.requestId ? { requestId: input.requestId } : {}) }),
           ...(input.signal ? { signal: input.signal } : {})
         });
+        const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+        const binding = response.ok && body?.ok === true ? decodeWorldCaptureGenerationBinding(body.binding) : null;
+        if (binding?.ok && binding.value.key.canvasId === options.canvasId && binding.value.key.cameraId === input.cameraId) {
+          return { ok: true, binding: binding.value };
+        }
+        return { ok: false, code: typeof body?.code === "string" ? body.code : "capture-not-ready",
+          error: typeof body?.message === "string" ? body.message : "取景未完成，请检查当前镜头状态后重试" };
       } catch {
-        return { ok: false, code: "capture-unavailable", error: "无法连接取景服务" };
+        return { ok: false, code: input.signal?.aborted ? "cancelled" : "capture-unavailable",
+          error: input.signal?.aborted ? "取景等待已取消" : "无法连接取景服务" };
       }
-      const preparedBody = (await prepared.json().catch(() => null)) as Record<string, unknown> | null;
-      if (
-        !preparedBody ||
-        preparedBody.ok !== true ||
-        typeof preparedBody.width !== "number" ||
-        typeof preparedBody.height !== "number" ||
-        preparedBody.key === undefined
-      ) {
-        return {
-          ok: false,
-          code: typeof preparedBody?.code === "string" ? preparedBody.code : `http-${prepared.status}`,
-          error: typeof preparedBody?.message === "string" && preparedBody.message !== ""
-            ? preparedBody.message
-            : `取景预备失败（HTTP ${prepared.status}）`
-        };
-      }
-      const width = Math.trunc(preparedBody.width);
-      const height = Math.trunc(preparedBody.height);
-      // 2. 页面渲染：与页面镜头卡片同一 Bevy 运行时，不含等距网格。
-      const rendered = await renderer({ cameraId: input.cameraId, width, height });
-      if (!rendered.ok) {
-        return { ok: false, code: rendered.code, error: "页面渲染取景失败" };
-      }
-      // 3. 提交：宿主校验版本仍当前后经可信 Media 保存并冻结。
-      return postPageCommit(captureBase, fetchImpl, {
-        cameraId: input.cameraId,
-        key: preparedBody.key,
-        png: rendered.png,
-        width,
-        height,
-        ...(input.signal ? { signal: input.signal } : {})
-      });
     },
 
-    async listPendingPageCaptures(): Promise<PageCapturePendingResult> {
+    async listPendingPageCaptures(signal): Promise<PageCapturePendingResult> {
       let response: Response;
       try {
         response = await fetchImpl(`${captureBase}-page-pending`, {
+          signal: captureRequestSignal(signal),
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({})
@@ -479,6 +391,22 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       return { ok: false, code: `http-${response.status}`, error: `读取待取景失败（HTTP ${response.status}）` };
     },
 
+    async reportPageCaptureProgress(input, signal) {
+      try {
+        const response = await fetchImpl(`${captureBase}-page-progress`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), signal: captureRequestSignal(signal, 10_000)
+        });
+        return response.ok;
+      } catch { return false; }
+    },
+    async retryPageCapture(cameraId, signal) {
+      try {
+        const response = await fetchImpl(`${captureBase}-refresh`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cameraId }), signal: captureRequestSignal(signal, 10_000)
+        });
+        return response.ok;
+      } catch { return false; }
+    },
     async commitPageCapture(input): Promise<CanvasCaptureFreezeResult> {
       return postPageCommit(captureBase, fetchImpl, input);
     },
@@ -487,10 +415,12 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       let response: Response;
       try {
         response = await fetchImpl(`${captureBase}-page-commit-video`, {
+          signal: captureRequestSignal(input.signal, 90_000),
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             cameraId: input.cameraId,
+            attemptId: input.attemptId,
             key: input.key,
             mp4Base64: bytesToBase64(input.mp4),
             width: input.width,
@@ -511,10 +441,11 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       };
     },
 
-    async listWorldCaptureStatuses(): Promise<WorldCaptureStatusResult> {
+    async listWorldCaptureStatuses(signal): Promise<WorldCaptureStatusResult> {
       let response: Response;
       try {
         response = await fetchImpl(`${captureBase}-status`, {
+          signal: captureRequestSignal(signal),
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({})

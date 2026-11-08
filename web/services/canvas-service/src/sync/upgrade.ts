@@ -67,6 +67,8 @@ export type SyncUpgradeOptions = {
   generateRoomEpoch?: () => string;
   /** 命令 durable 成功后的观察者（透传到 room；change: 模型编辑历史）。 */
   onCommitted?: (input: { canvasId: string; canvas: ServerCanvas; commands: readonly unknown[] }) => void;
+  /** 用户打开已加载的画布时观察规范内容；不作为编辑/历史提交。 */
+  onClientAcquired?: (room: import("./room.js").CanvasRoom) => void;
   /** revision delta 观察者（透传到 room；change: add-agent-canvas-authoring-mcp）。 */
   onDelta?: (input: { canvasId: string; before: ServerCanvas; after: ServerCanvas }) => void;
   /**
@@ -170,10 +172,13 @@ export function createSyncUpgradeHandler(options: SyncUpgradeOptions): SyncUpgra
     ...(upstream
       ? {
           // 只有真的被客户端打开过才挂上游（内部对账/历史加载不算），见 onClientAcquired 的说明。
-          onClientAcquired: (room) => upstream.attach(room),
           seedFromUpstream: (canvasId: string) => upstream.fetchSnapshot(canvasId)
         }
       : {}),
+    onClientAcquired: (room) => {
+      options.onClientAcquired?.(room);
+      return upstream?.attach(room);
+    },
     ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
     ...(options.generateRoomEpoch ? { generateRoomEpoch: options.generateRoomEpoch } : {}),
     ...(options.onCommitted ? { onCommitted: options.onCommitted } : {}),

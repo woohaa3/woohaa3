@@ -39,6 +39,31 @@ const cases: Array<{ route: string; body?: unknown; success: unknown; invoke: (r
 ];
 
 describe("world authoring remote", () => {
+  it("freezes through the shared host attempt, validates identity and does not start page rendering", async () => {
+    const key = { canvasId: "c", cameraId: "cam", worldContentVersion: "world", cameraSettingsVersion: "settings", bindingVersion: "binding", outputVersion: "output" };
+    const binding = { version: "world-capture-generation-binding-v2", requestId: "request-1", key,
+      contentFingerprint: "0123456789abcdef", input: { key, mediaId: "media", checksum: "a".repeat(64) } };
+    let body: unknown = { ok: true, binding };
+    let status = 200;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe("/api/canvases/c/captures-freeze");
+      expect(JSON.parse(init!.body as string)).toEqual({ cameraId: "cam", requestId: "consumer-1" });
+      return new Response(JSON.stringify(body), { status });
+    });
+    const remote = createCanvasRemote({ canvasId: "c", fetchImpl: fetchImpl as typeof fetch });
+    expect(await remote.freezeWorldCapture({ cameraId: "cam", requestId: "consumer-1" })).toMatchObject({ ok: true, binding });
+    body = { ok: true, binding: { ...binding, key: { ...key, cameraId: "other-camera" } } };
+    expect(await remote.freezeWorldCapture({ cameraId: "cam", requestId: "consumer-1" })).toMatchObject({ ok: false });
+    status = 409; body = { ok: false, code: "superseded", message: "版本已变化" };
+    expect(await remote.freezeWorldCapture({ cameraId: "cam", requestId: "consumer-1" })).toMatchObject({ ok: false, code: "superseded", error: "版本已变化" });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    const cancelled = new AbortController(); cancelled.abort();
+    const disconnected = createCanvasRemote({ canvasId: "c", fetchImpl: vi.fn(async (_url, init) => {
+      expect(init?.signal).toBe(cancelled.signal); throw new Error("aborted");
+    }) as typeof fetch });
+    expect(await disconnected.freezeWorldCapture({ cameraId: "cam", signal: cancelled.signal })).toMatchObject({ ok: false, code: "cancelled" });
+  });
+
   it.each(cases)("round trips and handles failures for $route", async ({ route, body, success, invoke }) => {
     let payload: unknown = success;
     let status = 200;

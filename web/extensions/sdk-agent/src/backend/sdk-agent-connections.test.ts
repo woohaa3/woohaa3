@@ -147,3 +147,16 @@ it("cancels the matching candidate and reports an unknown execution after restar
   expect((await running).status).not.toBe("succeeded");
   await expect(f.create().cancel!(cancel)).rejects.toThrow("无法确认");
 });
+
+it.each(["outside-scope", "spatial-rejected", "write-forbidden", "version-conflict", "lease-conflict", "not-ready"])("目标授权失败保留 %s，脱敏且不启动模型", async (code) => {
+  const f = fixture();
+  const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, {
+    service: f.service, allowHttp: false, allowedHosts: ["api.openai.com"],
+    transports: { "codex-agent-sdk": { run: f.run } }, mcpServerUrl: "http://127.0.0.1:1/mcp",
+    tools: { authorize: vi.fn(), issue: async () => { throw Object.assign(new Error("对象 model-a 超出范围，请调整导演区 real-key-never-given-to-sdk https://private.invalid/path token=secret"), { code }); }, revoke: vi.fn() }
+  });
+  const outcome = await adapter.run(f.input({ intent: { action: "modify", mode: "world", canvasId: "canvas", nodeId: "area", worldScope: { kind: "scene-area", areaId: "area" }, prompt: "修改", model: "fixture" } }));
+  expect(outcome).toMatchObject({ status: "failed", error: { code, message: expect.stringContaining("对象 model-a 超出范围") } });
+  expect(JSON.stringify(outcome)).not.toMatch(/real-key-never-given-to-sdk|private.invalid|token=secret/);
+  expect(f.run).not.toHaveBeenCalled();
+});

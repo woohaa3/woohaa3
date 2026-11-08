@@ -12,6 +12,18 @@ function runtime() {
 }
 
 describe("画布页面 renderer 生命周期", () => {
+  it("退出期间迟到的捕获字节不能作为当前 renderer 的成功结果", async () => {
+    let finish!: (value: unknown) => void;
+    const requestWorldCapture = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const renderer = { ...runtime(), requestWorldCapture } as unknown as BevyRuntime;
+    const outgoing = host(async () => renderer);
+    await outgoing.load();
+    const capture = outgoing.captureWorldCameraRaw({ cameraId: "camera", width: 32, height: 32 });
+    await vi.waitFor(() => expect(requestWorldCapture).toHaveBeenCalledOnce());
+    outgoing.dispose();
+    finish({ ok: true, rgba: new Uint8Array(32 * 32 * 4), width: 32, height: 32 });
+    await expect(capture).resolves.toEqual({ ok: false, code: "renderer-unavailable" });
+  });
   it("同页重复 load 只创建一个 renderer，切换后释放旧实例并使用新实例", async () => {
     const first = runtime(); const second = runtime();
     const loadFirst = vi.fn(async () => first);

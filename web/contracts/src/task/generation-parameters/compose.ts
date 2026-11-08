@@ -132,7 +132,6 @@ export function composePresetCard(card: PresetCard): ComposedPresetCard {
     inputSchema,
     defaultInput: defaults,
     bindings: referenceInputCapabilityFromDescription({ inputSchema, defaultInput: defaults }).bindings,
-    ...(card.referencePolicy ? { referencePolicy: card.referencePolicy } : {}),
     taskTimeoutMs: 8 * 60_000,
     ...(card.limits !== undefined ? { capabilityFacts: { limits: card.limits } } : {})
   };

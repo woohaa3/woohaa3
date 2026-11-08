@@ -199,11 +199,12 @@ export async function handleCapturePageCommit(
     return true;
   }
   const cameraId = readCameraId(body);
+  const attemptId = typeof body.attemptId === "string" && body.attemptId ? body.attemptId : undefined;
   const key = decodeWorldCaptureVersionKey(body.key);
   const pngBase64 = typeof body.pngBase64 === "string" ? body.pngBase64 : "";
   const width = typeof body.width === "number" && Number.isInteger(body.width) && body.width > 0 ? body.width : 0;
   const height = typeof body.height === "number" && Number.isInteger(body.height) && body.height > 0 ? body.height : 0;
-  if (!cameraId || !key.ok || pngBase64 === "" || width === 0 || height === 0) {
+  if (!attemptId || !cameraId || !key.ok || pngBase64 === "" || width === 0 || height === 0) {
     sendError(res, 400, "INVALID_COMMAND_BATCH", "页面取景提交字段不合法");
     return true;
   }
@@ -215,6 +216,7 @@ export async function handleCapturePageCommit(
   const outcome: WorldCaptureFreezeOutcome = await options.worldCapture.commitPageCapture({
     canvasId,
     cameraId,
+    attemptId,
     key: key.value,
     png,
     width,
@@ -272,11 +274,12 @@ export async function handleCapturePageCommitVideo(
     return true;
   }
   const cameraId = readCameraId(body);
+  const attemptId = typeof body.attemptId === "string" && body.attemptId ? body.attemptId : undefined;
   const key = decodeWorldCaptureDynamicVersionKey(body.key);
   const mp4Base64 = typeof body.mp4Base64 === "string" ? body.mp4Base64 : "";
   const width = typeof body.width === "number" && Number.isInteger(body.width) && body.width > 0 ? body.width : 0;
   const height = typeof body.height === "number" && Number.isInteger(body.height) && body.height > 0 ? body.height : 0;
-  if (!cameraId || !key.ok || mp4Base64 === "" || width === 0 || height === 0) {
+  if (!attemptId || !cameraId || !key.ok || mp4Base64 === "" || width === 0 || height === 0) {
     sendError(res, 400, "INVALID_COMMAND_BATCH", "页面视频取景提交字段不合法");
     return true;
   }
@@ -288,6 +291,7 @@ export async function handleCapturePageCommitVideo(
   const outcome = await options.worldCapture.commitPageVideoCapture({
     canvasId,
     cameraId,
+    attemptId,
     key: key.value,
     video: {
       bytes: new Uint8Array(mp4),
@@ -342,3 +346,13 @@ export type WorldCaptureFreezeReply = {
   code: string;
   message: string;
 };
+
+export async function handleCapturePageProgress(
+  req: IncomingMessage, res: ServerResponse, canvasId: string, options: CanvasRequestHandlerOptions
+): Promise<boolean> {
+  const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
+  if ("canvasId" in body || !options.worldCapture || !options.worldCapture.reportPageProgress(canvasId, body as unknown as import("@woohaa3/contracts").WorldCapturePageProgress)) {
+    sendError(res, 409, "SUPERSEDED", "取景请求已变化，请重新读取当前取景状态");
+  } else sendJson(res, 200, { ok: true });
+  return true;
+}

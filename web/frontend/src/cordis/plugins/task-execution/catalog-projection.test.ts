@@ -59,7 +59,7 @@ const CATALOG: CanvasTaskCatalog = catalogFixture([
     },
     defaultInput: { prompt: "", urls: [], maxTokens: 2048 }
   }
-]);
+], { image: "gpt-image-2" });
 
 describe("panelModelConfigForCatalog", () => {
   it("模型选项不附加参考输入和分辨率介绍，Provider独立展示", () => {
@@ -132,14 +132,14 @@ describe("默认模型", () => {
     );
   });
 
-  it("配置的默认模型不在启用集合里时回落到第一个（不产生幽灵默认）", () => {
+  it("配置的默认模型不在启用集合里时以首个可用模型初始化", () => {
     const catalog = catalogFixture([{ modelKey: "gpt-image-2", modelType: "image" }], {
       image: "no-longer-enabled"
     });
     expect(panelModelConfigForCatalog(catalog, "image-generation").defaultModel).toBe("gpt-image-2");
   });
 
-  it("没有声明时用该类型第一个模型", () => {
+  it("没有声明默认模型时以首个可用模型初始化", () => {
     const catalog = catalogFixture([{ modelKey: "gpt-image-2", modelType: "image" }]);
     expect(panelModelConfigForCatalog(catalog, "image-generation").defaultModel).toBe("gpt-image-2");
   });
@@ -167,8 +167,8 @@ describe("capabilityForModel", () => {
     });
   });
 
-  it("未知模型回落到该类型的第一个模型（而不是给出别模型的限制）", () => {
-    expect(capabilityForModel(CATALOG, "text-generation", "no-such-model")?.maxItems).toBe(16);
+  it("未知模型不借用其他模型的能力", () => {
+    expect(capabilityForModel(CATALOG, "text-generation", "no-such-model")).toBeNull();
   });
 
   it("该类型没有模型时返回 null", () => {
