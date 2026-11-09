@@ -64,12 +64,15 @@ export function installSceneAreaPlayback(runtime: CanvasRuntimeService, canvas: 
   };
   const lost = () => { scrub = null; };
   const block = (event: MouseEvent) => { if (scrub || hit(event)) consume(event); };
+  // Hovering the native player must leave trackpad pan/pinch with the canvas.
+  // Freeze the viewport only while a scrub owns its accepted world-space track.
+  const wheel = (event: WheelEvent) => { if (scrub) consume(event); };
   canvas.addEventListener("pointerdown", down, true);
   canvas.addEventListener("pointermove", move, true);
   canvas.addEventListener("pointerup", finish, true);
   canvas.addEventListener("pointercancel", finish, true);
   canvas.addEventListener("lostpointercapture", lost, true);
-  canvas.addEventListener("wheel", block, { capture: true, passive: false });
+  canvas.addEventListener("wheel", wheel, { capture: true, passive: false });
   canvas.addEventListener("dblclick", block, true);
   return () => {
     const pointerId = scrub?.pointerId;
@@ -80,7 +83,7 @@ export function installSceneAreaPlayback(runtime: CanvasRuntimeService, canvas: 
     canvas.removeEventListener("pointerup", finish, true);
     canvas.removeEventListener("pointercancel", finish, true);
     canvas.removeEventListener("lostpointercapture", lost, true);
-    canvas.removeEventListener("wheel", block, true);
+    canvas.removeEventListener("wheel", wheel, true);
     canvas.removeEventListener("dblclick", block, true);
   };
 }

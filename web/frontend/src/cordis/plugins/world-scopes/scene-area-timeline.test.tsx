@@ -55,6 +55,37 @@ it("scrubs along the native rotated track and resumes at the release coordinate"
   pointer(f.canvas,"pointerup",70,30); expect(f.transport.snapshot()).toMatchObject({time:3,playing:true});
   expect(f.canvas.hasPointerCapture(1)).toBe(false);
 });
+it("passes trackpad pan and pinch over every player control to the canvas", () => {
+  const f = fixture(), downstream = vi.fn();
+  f.canvas.addEventListener("wheel", downstream);
+  for (const control of ["play", "loop", "track", "body"]) {
+    f.target(control);
+    for (const delta of [{ deltaX: 12, deltaY: 0 }, { deltaX: 0, deltaY: 12 }, { deltaY: -12, ctrlKey: true }]) {
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 50, clientY: 50, ...delta });
+      f.canvas.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+  }
+  expect(downstream).toHaveBeenCalledTimes(12);
+  expect(f.queryPoint).not.toHaveBeenCalled();
+  expect(f.transport.snapshot()).toMatchObject({ nodeId: "a", time: 0, playing: false });
+});
+it.each(["pointerup", "pointercancel", "lostpointercapture"])("blocks viewport gestures only during a scrub, until %s", (finish) => {
+  const f = fixture(), downstream = vi.fn();
+  f.canvas.addEventListener("wheel", downstream);
+  f.target("track", "a");
+  pointer(f.canvas, "pointerdown");
+  const wheel = () => {
+    const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 12 });
+    f.canvas.dispatchEvent(event);
+    return event;
+  };
+  expect(wheel().defaultPrevented).toBe(true);
+  expect(downstream).not.toHaveBeenCalled();
+  pointer(f.canvas, finish);
+  expect(wheel().defaultPrevented).toBe(false);
+  expect(downstream).toHaveBeenCalledTimes(1);
+});
 it("cancel restores the initial playhead and ignores other pointers", () => {
   const f=fixture(); f.target("track","a"); f.transport.seek(1);
   pointer(f.canvas,"pointerdown"); pointer(f.canvas,"pointermove",90,10,2);
