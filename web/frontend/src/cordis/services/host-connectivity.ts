@@ -10,6 +10,11 @@
  *
  * 探测按退避重试（1s → 2s → 4s … 上限 15s），宿主长时间不可达时一直保持 `reconnecting`，
  * 不伪造在线状态。只有失败信号进来才开始探测；在线时不轮询。
+ *
+ * 撤除遮罩只有「探测成功」一条通路，所以循环本身必须能自愈：
+ * - 到点的退避不能被在飞探测悄悄吃掉（HTTP 侧探活会占住 `probing`，它的结果按代次丢弃）；
+ * - 每次探测带看门狗（缺省 5s），fetch 在重启窗口里挂住也不能永久占住 `probing`；
+ * - 重连期间同源请求成功会打断已经变长的退避，恢复不必等满 15s。
  */
 
 export type HostConnectivityPhase = "online" | "reconnecting" | "restarted";
@@ -39,6 +44,8 @@ export type HostConnectivityOptions = {
   failureThreshold?: number;
   initialBackoffMs?: number;
   maxBackoffMs?: number;
+  /** 单次探测的看门狗（缺省 5s）：宿主重启窗口里请求可能被挂住，超时按不可达处理。 */
+  probeTimeoutMs?: number;
   setTimer?: (callback: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
 };
@@ -73,12 +80,15 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
   const threshold = Math.max(1, options.failureThreshold ?? 2);
   const initialBackoff = options.initialBackoffMs ?? 1000;
   const maxBackoff = options.maxBackoffMs ?? 15_000;
+  const probeTimeout = Math.max(0, options.probeTimeoutMs ?? 5_000);
   const setTimer = options.setTimer ?? ((callback, ms) => globalThis.setTimeout(callback, ms));
   const clearTimer = options.clearTimer ?? ((handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>));
   const listeners = new Set<() => void>();
   let snapshot: HostConnectivitySnapshot = ONLINE;
   let consecutiveFailures = 0;
   let timer: unknown = null;
+  /** 当前退避时长，仅用于判断「等待是否已经长到值得打断」。 */
+  let timerDelay = 0;
   let probing = false;
   let disposed = false;
   /** 本次 reconnecting 的代次：迟到的探测结果不覆盖新状态。 */
@@ -97,26 +107,75 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
 
   const schedule = (delay: number) => {
     if (disposed || timer !== null) return;
+    timerDelay = delay;
     timer = setTimer(() => {
       timer = null;
+      timerDelay = 0;
       void runProbe();
     }, delay);
   };
 
+  /**
+   * 打断当前退避、立刻探一次（只在等待已经变长时才值得）。
+   *
+   * 短退避（1–2s）等得起，频繁打断只会把节奏弄乱；退避长到 4s 以上时用户正对着遮罩，
+   * 此时有同源请求成功说明宿主已经在应答，立刻探活能让恢复几乎瞬时完成。
+   */
+  const preemptBackoff = () => {
+    if (disposed || snapshot.phase !== "reconnecting") return;
+    if (timer === null || timerDelay <= initialBackoff) return;
+    clearTimer(timer);
+    timer = null;
+    timerDelay = 0;
+    schedule(0);
+  };
+
   const backoffFor = (attempts: number) => Math.min(maxBackoff, initialBackoff * 2 ** Math.max(0, attempts - 1));
 
+  /**
+   * 带看门狗的单次探测。fetch 在宿主重启窗口里可能被挂住（ingress 转发超时是 120s），
+   * 而 `probing` 是全局互斥位：挂住一次就会挡住所有后续探测，遮罩再也撤不掉。
+   * 超时按不可达处理，并让迟到的结果直接作废。
+   */
+  const runProbeOnce = async (): Promise<HostProbeResult> => {
+    const call = (async () => {
+      try {
+        return await options.probe();
+      } catch {
+        return { reachable: false } as HostProbeResult;
+      }
+    })();
+    if (probeTimeout === 0) return call;
+    let watchdog: unknown = null;
+    const timedOut = new Promise<HostProbeResult>((resolve) => {
+      watchdog = setTimer(() => resolve({ reachable: false }), probeTimeout);
+    });
+    try {
+      return await Promise.race([call, timedOut]);
+    } finally {
+      if (watchdog !== null) clearTimer(watchdog);
+    }
+  };
+
   const runProbe = async () => {
-    if (disposed || probing || snapshot.phase !== "reconnecting") return;
+    if (disposed || snapshot.phase !== "reconnecting") return;
+    if (probing) {
+      /**
+       * 到点的退避撞上在飞探测：**不能**把这一拍丢掉。
+       *
+       * HTTP 侧探活（`verifyReachability`）也会占住 `probing`，而它带的是旧代次，结果按
+       * `current !== generation` 丢弃——两者叠加就等于「定时器已清空、在飞探测必然作废」，
+       * `reconnecting` 再没有任何通路被撤除（只有探测成功能撤除）。这里按最短间隔补一拍，
+       * 让循环直到有探测真正落地为止都保持心跳。
+       */
+      schedule(initialBackoff);
+      return;
+    }
     probing = true;
     const current = generation;
     const attempts = snapshot.attempts + 1;
     publish({ ...snapshot, attempts });
-    let result: HostProbeResult;
-    try {
-      result = await options.probe();
-    } catch {
-      result = { reachable: false };
-    }
+    const result = await runProbeOnce();
     probing = false;
     if (disposed || current !== generation || snapshot.phase !== "reconnecting") return;
     if (!result.reachable) {
@@ -144,12 +203,7 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
     if (disposed || probing) return;
     probing = true;
     const current = generation;
-    let result: HostProbeResult;
-    try {
-      result = await options.probe();
-    } catch {
-      result = { reachable: false };
-    }
+    const result = await runProbeOnce();
     probing = false;
     if (disposed || current !== generation || snapshot.phase !== "online") return;
     if (!result.reachable) {
@@ -182,6 +236,9 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
       if (probing) return;
       if (ok) {
         consecutiveFailures = 0;
+        // 重连期间有同源请求成功 = 宿主已在应答：打断长退避立刻收尾。
+        // 这只会**加速结束**重连，不会让单次抖动闪出遮罩。
+        preemptBackoff();
         return;
       }
       if (snapshot.phase !== "online") return;

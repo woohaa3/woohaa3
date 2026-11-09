@@ -15,21 +15,49 @@ function manualTimers() {
       const index = pending.indexOf(handle as (typeof pending)[number]);
       if (index >= 0) pending.splice(index, 1);
     },
+    /** 按到期先后触发最早的一个（探测看门狗与退避可能同时在队列里）。 */
     async fire() {
-      const entry = pending.shift();
+      let index = 0;
+      for (let i = 1; i < pending.length; i += 1) {
+        if ((pending[i]?.ms ?? 0) < (pending[index]?.ms ?? 0)) index = i;
+      }
+      const entry = pending.splice(index, 1)[0];
       entry?.callback();
-      // 让 probe 的 await 链跑完。
-      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+      // 让 probe 的 await 链（含看门狗竞速）跑完。
+      for (let i = 0; i < 20; i += 1) await Promise.resolve();
       return entry?.ms;
     }
   };
 }
 
-function setup(results: HostProbeResult[], pinned: string | null = "r1") {
+/** 可控探测：结果按队列返回，`hang()` 挂住的那次用来模拟重启窗口里被吊住的请求。 */
+function controllableProbe() {
+  const queue: Array<Promise<HostProbeResult>> = [];
+  return {
+    succeed(next: HostProbeResult = { reachable: true, releaseId: "r1" }) {
+      queue.push(Promise.resolve(next));
+    },
+    hang() {
+      let settle!: (result: HostProbeResult) => void;
+      queue.push(new Promise<HostProbeResult>((resolve) => {
+        settle = resolve;
+      }));
+      return settle;
+    },
+    probe: async (): Promise<HostProbeResult> => (await queue.shift()) ?? { reachable: false }
+  };
+}
+
+/** 让探测的 await 链（含看门狗竞速）跑完。 */
+async function flush() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+}
+
+function harness(probe: () => Promise<HostProbeResult>, pinned: string | null = "r1") {
   const timers = manualTimers();
   let reopened = 0;
   const service = createHostConnectivityService({
-    probe: async () => results.shift() ?? { reachable: false },
+    probe,
     pinnedReleaseId: () => pinned,
     reopenCanvas: (next) => {
       expect(next.releaseId).toBe("r2");
@@ -39,6 +67,11 @@ function setup(results: HostProbeResult[], pinned: string | null = "r1") {
     clearTimer: timers.clearTimer
   });
   return { service, timers, reopened: () => reopened };
+}
+
+function setup(results: HostProbeResult[], pinned: string | null = "r1") {
+  const { service, timers, reopened } = harness(async () => results.shift() ?? { reachable: false }, pinned);
+  return { service, timers, reopened };
 }
 
 describe("HostConnectivity", () => {
@@ -138,6 +171,64 @@ describe("HostConnectivity", () => {
     expect(timers.pending).toHaveLength(1);
     service.dispose();
     expect(timers.pending).toHaveLength(0);
+  });
+
+  it("退避到点撞上在飞探测时不丢拍：循环保持心跳，探测落地后仍能撤除遮罩", async () => {
+    // 回归：退出安全模式。HTTP 侧探活占住 probing 且结果按代次作废，若到点的退避被
+    // `if (probing) return` 吃掉，定时器已清空 → 再没有任何通路撤除 reconnecting，
+    // 页面永远停在「正在重新连接本机服务…」，只有强制刷新（模块状态重置）才恢复。
+    const probe = controllableProbe();
+    const { service, timers } = harness(probe.probe);
+
+    // HTTP 侧探活先挂住，占住 probing（真实场景：轮询失败触发的 verifyReachability）。
+    const settle = probe.hang();
+    service.reportHttp(false);
+    service.reportHttp(false);
+    await flush();
+    expect(service.getSnapshot().phase).toBe("online");
+
+    // 这一拍进入重连；退避到期时 probing 仍被上面那次探活占着。
+    service.reportTransport("closed");
+    await timers.fire();
+    expect(service.getSnapshot().phase).toBe("reconnecting");
+    // 关键：被挡下的那一拍必须重新排上退避，而不是留下空循环。
+    expect(timers.pending.filter((entry) => entry.ms <= 1_000)).toHaveLength(1);
+
+    // 那次探活终于返回（结果按代次作废），循环从这一拍继续。
+    settle({ reachable: false });
+    await flush();
+    probe.succeed({ reachable: true, releaseId: "r1" });
+    await timers.fire();
+    expect(service.getSnapshot().phase).toBe("online");
+  });
+
+  it("探测被吊住也按不可达处理：看门狗超时后照常退避，恢复时仍撤除遮罩", async () => {
+    const probe = controllableProbe();
+    const { service, timers } = harness(probe.probe);
+    service.expectRestart();
+    probe.hang();
+    await timers.fire();
+    // 探测挂住：队列里只剩看门狗，probing 不会被永久占住。
+    expect(service.getSnapshot().phase).toBe("reconnecting");
+    expect(timers.pending.map((entry) => entry.ms)).toEqual([5_000]);
+    await timers.fire();
+    // 超时按不可达 → 重新排上退避。
+    expect(timers.pending.map((entry) => entry.ms)).toEqual([1_000]);
+    expect(service.getSnapshot().phase).toBe("reconnecting");
+    probe.succeed({ reachable: true, releaseId: "r1" });
+    await timers.fire();
+    expect(service.getSnapshot().phase).toBe("online");
+  });
+
+  it("重连期间同源请求成功会打断长退避，恢复不必等满 15s", async () => {
+    const { service, timers } = setup([]);
+    service.expectRestart();
+    // 退避已累积到 15s：用户正对着遮罩。
+    for (let i = 0; i < 6; i += 1) await timers.fire();
+    expect(timers.pending.map((entry) => entry.ms)).toEqual([15_000]);
+    // 宿主已经在应答（同源轮询成功），立刻探活收尾。
+    service.reportHttp(true);
+    expect(timers.pending.map((entry) => entry.ms)).toEqual([0]);
   });
 });
 
