@@ -1017,7 +1017,11 @@ export type TaskFailure = Message<"woohaa.generation.v1alpha1.TaskFailure"> & {
   code: string;
 
   /**
-   * 可展示、已脱敏的固定短语。客户端优先按 `code` 出本地文案；不得透传上游正文。
+   * 可展示、已脱敏的固定短语。客户端优先用这一条，拿不到时按 `code` 出本地文案。
+   *
+   * worker 派发的失败（如 `worker-lost`）必须靠它区分处置：本地码表对这类码只有一句
+   * 笼统的话，而服务端知道到底是「算力节点失联」还是「服务端重启中断」。这里只允许
+   * 固定短语，不得透传上游正文、主机名、对象键或凭据。
    *
    * @generated from field: string message = 2;
    */

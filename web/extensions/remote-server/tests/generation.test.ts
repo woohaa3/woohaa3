@@ -628,11 +628,70 @@ describe("服务端托管生成：提交 / 轮询 / 取消", () => {
     const model = provider.languageModel("server-text-1");
     const started = await model.doStart!(prepared as never);
     await model.doStatus!({ operation: started.operation });
-    await expect(model.doStatus!({ operation: started.operation })).rejects.toMatchObject({
+    // 终态失败按 error 状态返回（不是抛错）：core 会立刻把作业记录落成 failed 并带上
+    // code/retryable；抛错会让核心把它当成瞬时错误多轮重试。
+    await expect(model.doStatus!({ operation: started.operation })).resolves.toMatchObject({
+      status: "error",
       code: "catalog-changed",
-      message: "模型目录已变化，请重新选择模型"
+      error: "模型目录已变化，请重新选择模型",
+      retryable: false
     });
     expect(fake.generation.tasks.size).toBe(1);
+  });
+
+  it("失败短语与 retryable 取自服务端，而不是本地文案表", async () => {
+    const { harness } = activateWithCatalog({
+      models: [imageModel()],
+      taskResult: { kind: "failed", code: "worker-lost", retryable: false, message: "执行任务的算力节点已失联" }
+    });
+    await loginAndRefresh(harness);
+    const registration = harness.providers[0];
+    const prepared = await registration?.prepareInput?.({
+      providerModelId: "server-image-1",
+      modelType: "image",
+      prompt: "p",
+      parameters: {},
+      references: [],
+      canvasId: "canvas-remote-1",
+      taskKey: "task-key-worker-lost"
+    });
+    const provider = pptaskOf(harness);
+    const model = provider.imageModel("server-image-1");
+    const started = await model.doStart!(prepared as never);
+    await model.doStatus!({ operation: started.operation });
+    await expect(model.doStatus!({ operation: started.operation })).resolves.toMatchObject({
+      status: "error",
+      code: "worker-lost",
+      error: "执行任务的算力节点已失联",
+      retryable: false
+    });
+  });
+
+  it("服务端没给 message 时按稳定码回退到本地短语", async () => {
+    const { harness } = activateWithCatalog({
+      models: [textModel()],
+      taskResult: { kind: "failed", code: "unavailable" }
+    });
+    await loginAndRefresh(harness);
+    const registration = harness.providers[0];
+    const prepared = await registration?.prepareInput?.({
+      providerModelId: "server-text-1",
+      modelType: "language",
+      prompt: "p",
+      parameters: {},
+      references: [],
+      canvasId: "canvas-remote-1",
+      taskKey: "task-key-no-message"
+    });
+    const provider = pptaskOf(harness);
+    const model = provider.languageModel("server-text-1");
+    const started = await model.doStart!(prepared as never);
+    await model.doStatus!({ operation: started.operation });
+    await expect(model.doStatus!({ operation: started.operation })).resolves.toMatchObject({
+      status: "error",
+      code: "unavailable",
+      error: "远端服务暂不可用"
+    });
   });
 
   it("SubmitTask 稳定拒绝（FAILED）时从 GetTask 读回稳定码", async () => {

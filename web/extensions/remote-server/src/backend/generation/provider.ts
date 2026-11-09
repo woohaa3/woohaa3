@@ -10,7 +10,8 @@
  * 三条边界：
  * 1. **不在 operation 里放令牌**：operation 会随调度记录持久化；会话每次现取。
  * 2. **不发签名 URL**：提交只带 `storage_key` / `asset_id`，服务端按画布作用域读自己的对象。
- * 3. **不透传远端正文**：失败只出稳定码与稳定短语。
+ * 3. **不透传远端正文**：失败只出稳定码、稳定短语与 `retryable`。短语来自 proto 里约定的
+ *    "可展示、已脱敏的固定短语"（`TaskFailure.message`），不是上游返回的原始正文。
  */
 import { isMediaLocator,
   GENERIC_MODEL_INTERACTION_ID,
@@ -32,19 +33,31 @@ import type {
 import type { RemoteSession } from "../session.js";
 // 失败码来自契约生成物（api/proto 的 GenerationFailure 枚举），不在本文件写字面量。
 import { GENERATION_FAILURE } from "../../../../../../api/gen/es/woohaa/errors/v1alpha1/wirecodes_gen.js";
-import { generationFailureText, generationRpcErrorText, isRemoteGenerationModelType, asRecord, decodeCancelResponse, decodeSubmitResponse, decodeTask, REMOTE_GENERATION_PROVIDER_ID, type GenerationAdmission } from "./protocol.js";
+import { generationFailureText, generationRpcErrorText, isRemoteGenerationModelType, asRecord, decodeCancelResponse, decodeSubmitResponse, decodeTask, REMOTE_GENERATION_PROVIDER_ID, type DecodedTaskFailure, type GenerationAdmission } from "./protocol.js";
 import { convergeGenerationParameters } from "./parameters.js";
 import { translateParameters } from "./model-families.js";
 import type { GenerationClient, GenerationSessionRef } from "./client.js";
 
-/** 稳定错误：`code` 会由 pptask 的 `serializeError` 落进任务记录，界面/诊断只展示稳定短语。 */
+/**
+ * 稳定错误：`code` 会由 pptask 的 `serializeError` 落进任务记录，界面/诊断只展示稳定短语。
+ *
+ * `retryable` 来自服务端的判定（`TaskFailure.retryable`），只在服务端明确给出时才带：
+ * 缺省意味着"按错误类别推断"，不能当成 false，否则一次没带该字段的旧服务端会让所有
+ * 瞬时失败都变成不可重试。
+ *
+ * 为什么必须带到 worker：`worker-lost` 是不可重试的（换台机器重试也没用，而且要避免
+ * 重复计费），而它和 `unavailable` 在 worker 眼里都是"一次 provider 失败"。只看正文时
+ * worker 会把"算力节点失联"当成瞬时错误重试 5 次，白白占着队列。
+ */
 export class RemoteGenerationError extends Error {
   readonly code: string;
+  readonly retryable: boolean | undefined;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, retryable?: boolean) {
     super(message);
     this.name = "RemoteGenerationError";
     this.code = code;
+    this.retryable = retryable;
   }
 }
 
@@ -216,14 +229,22 @@ function readOperation(value: unknown): RemoteOperation {
 /** doStatus 的返回：与 pptask 的三种 status 同形，结果按模型类型装成文本或稳定媒体。 */
 type RemoteStatus =
   | { status: "pending"; phase: "queued" | "running"; progress?: number }
-  | { status: "error"; error: string }
+  | { status: "error"; error: string; code?: string; retryable?: boolean }
   | { status: "completed"; content?: Array<{ type: "text"; text: string }>; media?: GenerationStableMediaResult["media"] };
 
 /**
  * GetTask → pptask 状态。
  *
- * `unknown`/`cancelled` 都按稳定失败抛出（带 `code`），这样任务记录里留下的是稳定码而不是
- * 远端正文；瞬态传输错误同样抛出，由 worker 的有界重试兜住。
+ * 两类"失败"必须分开：
+ * - **任务级失败**（服务端已记终态）返回 `status: "error"`，随状态带出稳定码、可重试标记
+ *   与**服务端的固定短语**。它是任务的结论，不是"这次轮询出错"：按抛错处理会先被核心当成
+ *   瞬时错误重试若干轮（每次都是同一个终态），用户要多等几个轮询周期才看到失败。
+ * - **传输/RPC 级失败**仍然抛出：那才是真瞬态，交给核心的有界重试兜住；写成任务失败会让
+ *   一次网络抖动变成"生成失败"。
+ *
+ * 短语直接用服务端给的那一条：`worker-lost`（算力节点失联）与 `unavailable`（服务端重启）
+ * 的处置完全不同，本地文案表只能给一句笼统的话。远端正文依旧不透传——这条短语本身是
+ * proto 约定的"可展示、已脱敏的固定短语"，缺省时回退到本地文案表。
  */
 async function pollRemoteTask(
   options: RemoteGenerationProviderOptions,
@@ -265,16 +286,31 @@ async function pollRemoteTask(
         media: { ...task.media.media, storageKey: task.media.media.storageKey ?? "" }
       };
     }
-    case "failed": {
-      const code = task.failure?.code ?? GENERATION_FAILURE.unsupported;
-      throw new RemoteGenerationError(code, generationFailureText(code));
-    }
+    case "failed":
+      return taskFailureStatus(task.failure);
     case "cancelled":
-      throw new RemoteGenerationError("cancelled", "服务端任务已取消");
+      return { status: "error", error: "服务端任务已取消", code: "cancelled" };
     case "unspecified":
     default:
-      throw new RemoteGenerationError("unspecified-state", "服务端返回了未设置的任务状态");
+      return { status: "error", error: "服务端返回了未设置的任务状态", code: "unspecified-state" };
   }
+}
+
+/**
+ * 把服务端的失败事实装成 pptask 的 error 状态。
+ *
+ * 短语优先用服务端给的固定短语，缺省时按码回退（旧服务端不带 message 时行为不变）。
+ * `retryable` 原样带出、不在这里下判断：它描述的是"重新提交这件事值不值得"，由调度层
+ * 决定要不要再跑一次（`worker-lost` 明确不值得，而它的短语里有"失联"，按正文猜会重试）。
+ */
+function taskFailureStatus(failure: DecodedTaskFailure | null): RemoteStatus {
+  const code = failure?.code ?? GENERATION_FAILURE.unsupported;
+  return {
+    status: "error",
+    error: failure?.message ?? generationFailureText(code),
+    code,
+    ...(failure?.retryable === undefined ? {} : { retryable: failure.retryable })
+  };
 }
 
 /** SubmitTask：把已编译输入送出去，返回可持久化的任务句柄。 */
@@ -302,10 +338,11 @@ async function startRemoteTask(
   // 稳定拒绝（key-reused / canvas-not-shared / catalog-changed …）以 FAILED 状态返回：
   // 稳定码在 GetTask 的 error.code 里（proto 注释 D1/D8）。
   if (response.state === "failed") {
+    // 稳定拒绝也走 TaskFailure：短语与 retryable 同样从那里取，缺省时按码回退。
     const detail = await options.client.getTask(session, { taskId: response.taskId });
-    const task = detail.ok ? decodeTask(detail.value) : null;
-    const code = task?.failure?.code ?? GENERATION_FAILURE.unsupported;
-    throw new RemoteGenerationError(code, generationFailureText(code));
+    const failure = detail.ok ? decodeTask(detail.value).failure : null;
+    const code = failure?.code ?? GENERATION_FAILURE.unsupported;
+    throw new RemoteGenerationError(code, failure?.message ?? generationFailureText(code), failure?.retryable);
   }
   const operation: RemoteOperation = {
     taskId: response.taskId,
