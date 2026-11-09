@@ -288,16 +288,28 @@ function verifyMacSignature({ artifacts, signing }) {
   }
 
   // 装了票据才算公证通过。tauri 在 `--bundles app,dmg` 时把票据打进 DMG，
-  // `.app` 自身可能没有，所以两个产物都试，以 Gatekeeper 的实际判定收尾。
+  // `.app` 自身可能没有，所以两个产物都试。
+  //
+  // 判据是 `stapler validate`（读包内票据，不看缓存），**不是** `spctl`：spctl 查本机
+  // Gatekeeper 缓存，CI 机器评估过同一路径的旧 ad-hoc 包后会持续返回 rejected，
+  // 曾把已经 Accepted 并装订好的产物误判成失败。spctl 只作诊断输出。
   const targets = [app, dmg].filter(Boolean);
   const stapled = targets.filter(target => capture("/usr/bin/xcrun", ["stapler", "validate", target.path]) !== null);
-  const accepted = targets.filter(target => capture("/usr/bin/spctl", ["--assess", "--type", "exec", "-vv", target.path]) !== null);
+  for (const target of targets) {
+    const assessment = capture("/usr/bin/spctl", ["--assess", "--type", "exec", "-vv", target.path]);
+    if (!assessment) console.log(`[desktop] spctl 未放行 ${target.name}（缓存可能过期；以已装订票据为准）`);
+  }
   if (signing.notarization) {
-    if (accepted.length === 0) throw new Error(`Gatekeeper 拒绝了已公证的产物：${relative((app ?? dmg).path)}；检查公证是否成功、票据是否装订。`);
-    console.log(`[desktop] 公证核对：Gatekeeper 放行 ${accepted.map(target => target.name).join(" / ")}（stapled：${stapled.map(target => target.name).join(" / ") || "无"}）`);
+    if (stapled.length === 0) {
+      throw new Error(
+        `已公证的产物没有装订票据：${targets.map(target => relative(target.path)).join(" / ")}；` +
+          "确认公证返回 Accepted 且 stapler staple 成功。"
+      );
+    }
+    console.log(`[desktop] 公证核对：票据已装订 ${stapled.map(target => target.name).join(" / ")}`);
     return;
   }
-  console.log(`[desktop] 公证核对：未公证（Gatekeeper 放行 ${accepted.length}/${targets.length}），首次打开会被拦截`);
+  console.log(`[desktop] 公证核对：未公证（票据 ${stapled.length}/${targets.length}），首次打开会被拦截`);
 }
 
 function frontendBuildSteps(standalone) {
