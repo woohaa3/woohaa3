@@ -25,15 +25,46 @@ pnpm desktop:bundle --build-frontend --bundles app # macOS application bundle
 pnpm desktop:bundle --dry-run
 ```
 
+Release packaging (`desktop:bundle` with a non-development release id, and `desktop:release`) requires a pinned extension-trust anchor: pass `WOOHAA3_EXTENSION_TRUST_CONFIG=/path/to/extension-trust.json`, or set `WOOHAA_DESKTOP_TRUST_UNAMANAGED=1` to state explicitly that this build ships no v2 root and falls back to v1 bare-key verification. Without either, `prepareDesktopHost` fails after the native builds. CI entry points set the opt-out explicitly so a release does not fail mid-packaging.
+
 The bundled extension set is **directory-authoritative**: every extension package under `web/extensions/` (a directory with a `package.json` whose name starts with `@woohaa3/extension-`) ships with the host. There is no separate inventory file. Non-plugin shared packages live in `web/framework/` and test fixtures in `web/test-fixtures/`, so they are never scanned as extensions.
 
 Bundling does not decide the enable state. `remote-server` ships with `site.defaultEnabled: false`, so it stays off until someone enables it in Settings and configures a server address; a fresh install never shows a dead "server access" entry.
 
 `dev-performance` is a browser-only extension under `web/extensions/`: it supplies the FPS / Draw Call readout merged into the window bar. The packaged app is a `--mode desktop` production build with no `woohaa-development` HTML marker, so the extension registers on the desktop host regardless of that marker, and `getFrameCounters` is exposed for the desktop shell as well as dev builds. Browser production and preview builds still do not register the readout or expose frame counters.
 
-The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. Platform code signing and notarization require the publisher's own credentials; updater signatures are a separate requirement. See [Windows build and lifecycle checks](WINDOWS.md).
+The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. See [Windows build and lifecycle checks](WINDOWS.md).
+
+## macOS signing and notarization
+
+A Developer ID signature alone still leaves Gatekeeper blocking the first launch of a downloaded build, so distribution outside the App Store needs both signing and notarization:
+
+```sh
+APPLE_SIGNING_IDENTITY=<40-hex SHA-1 fingerprint> \
+APPLE_API_KEY=<key id> \
+APPLE_API_ISSUER=<issuer id> \
+APPLE_API_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<key id>.p8 \
+pnpm desktop:bundle --build-frontend --bundles app,dmg
+```
+
+- `APPLE_SIGNING_IDENTITY` accepts a certificate name or its 40-character SHA-1 fingerprint. Reissued certificates keep the same name, so a name can match several keychain entries and `codesign` reports `ambiguous`; a fingerprint never does. Omitting the variable (or setting `-`) produces an ad-hoc signature. `scripts/build-desktop.mjs` reads it from the environment, so editing `bundle.macOS.signingIdentity` in `tauri.conf.json` is not enough.
+- Notarization uses `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH`, or `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` with an app-specific password. Supplying a partial pair fails before compilation.
+- Native modules inside `desktop-host.tar.gz` (currently dsh's `node-addon-require-builtin`) sit outside the bundle, so tauri never signs them. The build signs them with the same identity **before** archiving, which is why the archive hash in `desktop-runtime.json` is computed afterwards. Without that, a Developer ID `woohaa-node` cannot load them ("mapping process and mapped file have different Team IDs") and notarization rejects unsigned nested binaries.
+- `desktop/entitlements.plist` carries `com.apple.security.cs.disable-library-validation` as well as `allow-jit`: ad-hoc builds cannot sign the extracted addon at all, and the host must still load it there.
+- The build verifies the result instead of trusting the bundler log: `codesign --verify --deep --strict`, a `Developer ID Application` authority plus `TeamIdentifier`, `stapler validate`, and `spctl --assess`. A notarized build fails the run when Gatekeeper still rejects it; an unnotarized one records the gap in `manifest.json` notes rather than claiming success.
+
+CI uses `scripts/ci/release-macos.sh` in the parent repository. The Developer ID certificate+key (`developer-id.p12` plus `developer-id.p12.password`), the Apple ID (`apple-id`) and its app-specific password (`apple-app-password`) ship in `scripts/ci/signing/`, so a CI run needs no injected secrets; the script loads them at startup and exports `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID` itself. That directory lives in the internal parent repository — never in this public submodule, where `.gitignore` blocks `*.p12` and `*.p8`. Individual developer accounts often have no App Store Connect "Team Keys" page, which is why notarization uses an Apple ID app-specific password rather than an API key. After building, the script re-checks the app, DMG and nested modules, so a notarized build that Gatekeeper still rejects never reaches the upload step.
 
 Update builds require an explicit HTTPS `WOOHAA_DESKTOP_UPDATE_ENDPOINT`, matching `WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY` and updater signing key. `pnpm desktop:release --build-frontend` reads the private key from `WOOHAA_DESKTOP_SIGNING_KEY` or `~/.config/woohaa-release/updater.key`, with the public key in the adjacent `.pub` file. Supply an endpoint such as `https://updates.example.com/macos-arm64/latest.json`. Upload versioned artifacts first and the index last; keep signing keys outside the repository and upload directory.
+
+`build-profile.json` already pins an updater public key, so packaging always marks the bundle as an updater artifact and `tauri build` fails with `A public key has been found, but no private key` unless `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) is set. Create the pair once and keep it out of Git:
+
+```sh
+mkdir -p ~/.config/woohaa-release && chmod 700 ~/.config/woohaa-release
+npx tauri signer generate --write-keys ~/.config/woohaa-release/updater.key
+```
+
+The printed public key replaces `desktop.update.publicKeys[0]` in `build-profile.json`; losing the private key permanently breaks the update path for already-installed clients, because the installed app only trusts the pinned public key.
 
 A configured application checks updates before starting the data-writing host. Failed checks allow the installed version to run; a discovered update must finish downloading, validating and installing before entering the application. Download or installation failure offers retry or exit.
 
