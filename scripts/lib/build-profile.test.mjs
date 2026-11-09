@@ -44,6 +44,20 @@ test("合法 profile 解码通过", () => {
   assert.equal(decoded.ok, true);
 });
 
+test("桌面 v1 信任兼容必须由 profile 显式启用，且只接受布尔值", () => {
+  assert.equal(loadBuildProfile({ repoRoot: sandbox(validProfile()) }).resolved.allowUnmanagedExtensionTrust, false);
+  for (const enabled of [false, true]) {
+    const loaded = loadBuildProfile({ repoRoot: sandbox(validProfile({ desktop: { allowUnmanagedExtensionTrust: enabled } })) });
+    assert.equal(loaded.ok, true);
+    assert.equal(loaded.resolved.allowUnmanagedExtensionTrust, enabled);
+  }
+  for (const value of ["true", "1", 1, null]) {
+    const decoded = decodeBuildProfile(validProfile({ desktop: { allowUnmanagedExtensionTrust: value } }));
+    assert.equal(decoded.ok, false);
+    assert.ok(decoded.errors.some(error => error.path === "$.desktop.allowUnmanagedExtensionTrust"));
+  }
+});
+
 test("未知字段直接失败（严格模式）", () => {
   const decoded = decodeBuildProfile(validProfile({ extraBucket: "x" }));
   assert.equal(decoded.ok, false);

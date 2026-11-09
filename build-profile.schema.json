@@ -53,6 +53,11 @@
           "type": "boolean",
           "default": false,
           "description": "为 true 时允许 desktop:bundle 不带更新源打包，产物标注 updater: unconfigured。"
+        },
+        "allowUnmanagedExtensionTrust": {
+          "type": "boolean",
+          "default": false,
+          "description": "显式允许桌面发行包沿用 v1 扩展签名校验；提供 WOOHAA3_EXTENSION_TRUST_CONFIG 时仍优先固定并校验 v2 根。"
         }
       }
     },

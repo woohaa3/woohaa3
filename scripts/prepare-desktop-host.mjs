@@ -38,12 +38,15 @@ export async function prepareDesktopNode(){
 /**
  * 校验并返回随包固定的信任配置（release desktop 的唯一 anchor 来源）。
  * 缺省返回 null；build 不是 development 时缺 anchor 直接失败，避免发布版静默退回
- * v1 裸 key 行为。WOOHAA_DESKTOP_TRUST_UNAMANAGED=1 是显式的“本次不启用 v2”开关。
+ * v1 裸 key 行为。build profile 的 allowUnmanagedExtensionTrust 或
+ * WOOHAA_DESKTOP_TRUST_UNAMANAGED=1 显式声明“本次不启用 v2”；固定根始终优先。
  */
-export function resolveDesktopTrustConfig({env=process.env,build='development'}={}){
+export function resolveDesktopTrustConfig({env=process.env,build='development',allowUnmanaged=false}={}){
  const trustConfig=env.WOOHAA3_EXTENSION_TRUST_CONFIG;
  if(!trustConfig){
-  if(build!=='development'&&env.WOOHAA_DESKTOP_TRUST_UNAMANAGED!=='1')throw new Error("发布版桌面必须固定扩展信任根：设置 WOOHAA3_EXTENSION_TRUST_CONFIG；确认本次不启用 v2 时显式设 WOOHAA_DESKTOP_TRUST_UNAMANAGED=1");
+  const override=env.WOOHAA_DESKTOP_TRUST_UNAMANAGED;
+  const unmanaged=override===undefined||override===''?allowUnmanaged===true:override==='1';
+  if(build!=='development'&&!unmanaged)throw new Error("发布版桌面必须固定扩展信任根：设置 WOOHAA3_EXTENSION_TRUST_CONFIG；确认本次不启用 v2 时在 build profile 设 desktop.allowUnmanagedExtensionTrust=true，或显式设 WOOHAA_DESKTOP_TRUST_UNAMANAGED=1"+(override!==undefined&&override!==''?`（当前 WOOHAA_DESKTOP_TRUST_UNAMANAGED=${JSON.stringify(override)}，只接受精确值 1）`:''));
   return null;
  }
  const config=readTrustDocument(path.resolve(trustConfig));exact(config,["schemaVersion","domains"]);requireTrust(config.schemaVersion===2&&Array.isArray(config.domains)&&config.domains.length>0,"invalid-trust-config");
@@ -52,6 +55,9 @@ export function resolveDesktopTrustConfig({env=process.env,build='development'}=
  return config;
 }
 export async function prepareDesktopHost({output=path.join(root,'.local/desktop-host'),frontend=path.join(root,'web/frontend/dist'),build='development',runtimeReleaseVersion}={}){
+ const buildProfile=loadBuildProfile({repoRoot:path.dirname(root),env:process.env});
+ if(!buildProfile.ok)throw new Error('build profile 校验失败：'+buildProfile.errors.map(error=>`${error.path}: ${error.message}`).join('; '));
+ const trustConfig=resolveDesktopTrustConfig({env:process.env,build,allowUnmanaged:buildProfile.resolved.allowUnmanagedExtensionTrust});
  const appVersion=runtimeReleaseVersion??JSON.parse(fs.readFileSync(path.join(root,'desktop/tauri.conf.json'),'utf8')).version;
  const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
  const {node,nodeSha256:actual}=await prepareDesktopNode();
@@ -64,7 +70,6 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  for(const entry of fs.readdirSync(path.join(root,'scripts/lib')))if(entry.endsWith('.mjs')&&!entry.includes('.test.'))fs.copyFileSync(path.join(root,'scripts/lib',entry),path.join(output,'scripts/lib',entry));
  fs.mkdirSync(path.join(output,"scripts/lib/extension-trust"),{recursive:true});
  for(const file of ["encoding.mjs","verify.mjs","store.mjs","runtime.mjs"])fs.copyFileSync(path.join(root,"scripts/lib/extension-trust",file),path.join(output,"scripts/lib/extension-trust",file));
- const trustConfig=resolveDesktopTrustConfig({env:process.env,build});
  if(trustConfig)fs.writeFileSync(path.join(output,"extension-trust.json"),JSON.stringify(trustConfig));
  fs.copyFileSync(path.join(root,'scripts/desktop-host.mjs'),path.join(output,'scripts/desktop-host.mjs'));
  fs.copyFileSync(path.join(root,'scripts/extensions-preflight.mjs'),path.join(output,'scripts/extensions-preflight.mjs'));
@@ -72,7 +77,6 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  copyRuntimeFiles(frontend,path.join(output,'frontend'));
  copyRuntimeFiles(path.join(root,'web/contracts/src/base-path'),path.join(output,'web/contracts/src/base-path'));
  fs.copyFileSync(path.join(root,'web/services/task-service/pptask.models.json'),path.join(output,'models.json'));
- const buildProfile=loadBuildProfile({repoRoot:path.dirname(root),env:process.env});
  const siteDefaults=buildProfile.ok?buildProfile.resolved.siteExtensionDefaults:{};
  const extensions=[];
  // 入包扩展以目录位置为权威：`web/extensions/` 下的每个扩展都进桌面包，不再维护单独清单。

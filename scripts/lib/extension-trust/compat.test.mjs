@@ -54,6 +54,23 @@ test("desktop packaging rejects a missing anchor for release builds and validate
   assert.equal(config.domains.length, 1);
 });
 
+test("explicit release profile allows v1 without a CI shell, while configured roots and environment remain authoritative", t => {
+  assert.equal(resolveDesktopTrustConfig({ env: {}, build: "release", allowUnmanaged: true }), null);
+  for (const value of ["0", "false", "yes", " 1 "]) {
+    assert.throws(() => resolveDesktopTrustConfig({ env: { WOOHAA_DESKTOP_TRUST_UNAMANAGED: value }, build: "release", allowUnmanaged: true }), /当前 WOOHAA_DESKTOP_TRUST_UNAMANAGED=/);
+  }
+  const dir = temp("profile-anchor-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "trust.json");
+  const f = fixture(Math.floor(Date.now() / 1000));
+  const config = { schemaVersion: 2, domains: [{ root: f.root, floors: f.floors, extensionIds: ["photocraft"] }] };
+  fs.writeFileSync(file, JSON.stringify(config));
+  const args = { env: { WOOHAA3_EXTENSION_TRUST_CONFIG: file, WOOHAA_DESKTOP_TRUST_UNAMANAGED: "1" }, build: "release", allowUnmanaged: true };
+  assert.equal(JSON.stringify(resolveDesktopTrustConfig(args)), JSON.stringify(config));
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 2, domains: [] }));
+  assert.throws(() => resolveDesktopTrustConfig(args), /invalid-trust-config/);
+});
+
 function certifiedTree(dir, f, descriptor = { extensionId: "photocraft", version: "1.0.0" }) {
   const src = path.join(dir, "src");
   fs.mkdirSync(src);

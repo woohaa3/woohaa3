@@ -112,6 +112,10 @@ Do not publish v2 artifacts to existing users before the host/service gates are 
   publicKey, publisherId and expiresAt. They authorize only the named v1 archive, never a CA.
 - Browser hosts use `WOOHAA3_EXTENSION_TRUST_CONFIG`. Desktop builds embed that public file
   as `extension-trust.json`; release desktop hosts ignore inherited root overrides.
+  Release packaging requires this pinned root unless the build profile explicitly sets
+  `desktop.allowUnmanagedExtensionTrust: true` or the environment sets
+  `WOOHAA_DESKTOP_TRUST_UNAMANAGED=1`. A supplied root is always validated; invalid roots
+  never fall back to v1. The packaging CLI checks this before compiling frontend/native code.
 - Public `testdata/vectors.json` contains ephemeral test evidence and a v2 archive,
   shared with the private Go consumer. Never trust the `test-only` domain in production.
 - The server integrates the same verifier with its durable administration service and

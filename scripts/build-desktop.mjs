@@ -22,7 +22,7 @@
  * - 不启用 `gpu-debug`（design D8 要求发行构建不携带 Bevy pass 名称）。
  */
 import { readSourceIdentity } from "./lib/source-identity.mjs";
-import { prepareDesktopHost } from "./prepare-desktop-host.mjs";
+import { prepareDesktopHost, resolveDesktopTrustConfig } from "./prepare-desktop-host.mjs";
 import { standaloneBundleConfig, createHostArchive, nodeArtifact, prepareStartupFrontend } from "./lib/desktop-host-package.mjs";
 import { spawnSync } from "node:child_process";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
@@ -382,6 +382,10 @@ async function runBuild(options) {
     throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
   }
   console.log(`[desktop] ${describeBuildProfile(buildProfile)}`);
+  if (!options.dryRun && !options.uiUrl) {
+    const trustConfig = resolveDesktopTrustConfig({ env: process.env, build: resolvedReleaseId, allowUnmanaged: buildProfile.resolved.allowUnmanagedExtensionTrust });
+    console.log(`[desktop] extension trust: ${trustConfig ? "v2 pinned root" : "v1 compatibility (explicit build profile or environment)"}`);
+  }
   // 签名/公证在编译之前判定：证书歧义与凭据半套不该等到 tauri 打完包才报。
   const signing = options.dryRun ? null : macSigning();
   if (signing) console.log(describeMacSigning(signing));
