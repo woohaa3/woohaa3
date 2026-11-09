@@ -11,8 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   StorageObjectNotFoundError,
   type HostExtensionContext,
-  type StorageBackend,
-  type StorageExposer
+  type StorageBackend
 } from "@woohaa3/contracts";
 import { createLocalBackend, createLocalStoragePlugin } from "../src/backend.js";
 
@@ -182,137 +181,24 @@ describe("delete", () => {
   });
 });
 describe("插件形状", () => {
-  const createCtx = (cosSecrets: { secretId?: string; secretKey?: string } = {}) => {
+  it("本地存储只提供文件读写，卸载时注销后端", async () => {
     const registered: StorageBackend[] = [];
-    const exposers: StorageExposer[] = [];
-    const logs: Array<Record<string, unknown>> = [];
     const disposers: Array<() => void> = [];
     const ctx = {
-      storage: {
-        register(registeredBackend: StorageBackend) {
-          registered.push(registeredBackend);
-          return () => {
-            const index = registered.indexOf(registeredBackend);
-            if (index >= 0) registered.splice(index, 1);
-          };
-        }
-      },
-      exposer: {
-        register(exposer: StorageExposer) {
-          exposers.push(exposer);
-          return () => {
-            const index = exposers.indexOf(exposer);
-            if (index >= 0) exposers.splice(index, 1);
-          };
-        }
-      },
-      log: {
-        scope: () => (event: Record<string, unknown>) => {
-          logs.push(event);
-        }
-      },
-      config: {
-        section: () => cosSecrets
-      },
-      effect: (callback: () => () => void) => {
-        disposers.push(callback());
-      }
+      storage: { register(backend: StorageBackend) {
+        registered.push(backend);
+        return () => { registered.splice(registered.indexOf(backend), 1); };
+      } },
+      log: { scope: () => () => {} },
+      effect: (callback: () => () => void) => { disposers.push(callback()); }
     } as unknown as HostExtensionContext;
-    return { ctx, registered, exposers, logs, disposers };
-  };
-
-  it("元数据与 litellm-provider 同形，apply 经 ctx.effect 注册并可在卸载时注销", async () => {
     const plugin = createLocalStoragePlugin();
-    expect(plugin.name).toBe("local-storage");
-    expect(plugin.label).toBe("本地存储");
-    expect(plugin.configPrefix).toBe("storage.local");
-    expect(plugin.inject).toEqual(["log", "storage", "exposer", "config"]);
-    expect(plugin.Config.fields.root.default).toBe(".woohaa3/storage");
-    // 内置临时图床默认开启；桶信息缺失时如实不可用，不会虚构凭据。
-    expect(plugin.Config.fields.publicEnabled.default).toBe(true);
-
-    const { ctx, registered, exposers, logs, disposers } = createCtx();
-    await plugin.apply(ctx, { root, publicEnabled: false });
-
-    expect(registered.map((item) => item.backendId)).toEqual(["local"]);
-    // 「完全本地」的能力边界：没有 presign。
+    expect(plugin.inject).toEqual(["log", "storage"]);
+    expect(Object.keys(plugin.Config.fields)).toEqual(["root"]);
+    await plugin.apply(ctx, { root });
+    expect(registered.map(item => item.backendId)).toEqual(["local"]);
     expect(registered[0]?.presign).toBeUndefined();
-    expect(registered[0]?.label).toBe("本地存储");
-    expect(logs[0]).toMatchObject({ event: "local-storage-activated", backendId: "local" });
-    expect(logs.some((event) => event.event === "local-public-disabled")).toBe(true);
-    expect(exposers).toEqual([]);
-
-    disposers.forEach((dispose) => dispose());
+    disposers.forEach(dispose => dispose());
     expect(registered).toEqual([]);
-  });
-
-  it("开启内置临时图床后注册 local-public 提供者，作为自动模式的内置后备", async () => {
-    const plugin = createLocalStoragePlugin();
-    const { ctx, registered, exposers, logs } = createCtx();
-    await plugin.apply(ctx, {
-      root,
-      publicEnabled: true,
-      publicSecretId: "id",
-      publicSecretKey: "key",
-      publicBucketName: "fixture-bucket-1234567890",
-      publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
-      publicPrefix: "fixture-prefix"
-    });
-
-    // 公开桶不是存储后端：它不出现在「主存储」下拉里。
-    expect(registered.map((item) => item.backendId)).toEqual(["local"]);
-    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
-    expect(exposers[0]).toMatchObject({
-      ownerExtensionId: "local-storage",
-      requiresReplica: false,
-      temporaryHosting: { category: "builtin" }
-    });
-    expect(logs).toContainEqual(
-      expect.objectContaining({ event: "local-public-activated", exposerId: "local-public" })
-    );
-  });
-
-  it("桶信息齐全但凭据缺失时按公开读写匿名注册", async () => {
-    const plugin = createLocalStoragePlugin();
-    const { ctx, exposers, logs } = createCtx();
-    await plugin.apply(ctx, {
-      root,
-      publicEnabled: true,
-      publicBucketName: "fixture-bucket-1234567890",
-      publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
-      publicPrefix: "fixture-prefix"
-    });
-
-    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
-    expect(logs.some((event) => event.event === "local-public-activated")).toBe(true);
-  });
-
-  it("公开桶没配凭据时回落到 storage.cos 的共享凭据", async () => {
-    const plugin = createLocalStoragePlugin();
-    const { ctx, exposers, logs } = createCtx({ secretId: "shared-id", secretKey: "shared-key" });
-    await plugin.apply(ctx, {
-      root,
-      publicEnabled: true,
-      publicBucketName: "fixture-bucket-1234567890",
-      publicBucketUrl: "https://fixture-bucket-1234567890.cos.ap-guangzhou.myqcloud.com",
-      publicPrefix: "fixture-prefix"
-    });
-
-    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
-    expect(logs.some((event) => event.event === "local-public-activated")).toBe(true);
-  });
-
-  it("缺桶信息时注册未就绪候选（不猜桶、不参与自动选择）", async () => {
-    const plugin = createLocalStoragePlugin();
-    const { ctx, exposers, logs } = createCtx();
-    await plugin.apply(ctx, { root, publicEnabled: true, publicSecretId: "id", publicSecretKey: "key" });
-
-    expect(exposers.map((item) => item.exposerId)).toEqual(["local-public"]);
-    expect(exposers[0]!.temporaryHosting?.ready?.()).toBe(false);
-    expect(logs).toContainEqual({
-      event: "local-public-unconfigured",
-      missing: ["publicBucketName", "publicBucketUrl", "publicPrefix"]
-    });
-    expect(logs.some((event) => event.event === "local-public-registered-unconfigured")).toBe(true);
   });
 });

@@ -44,6 +44,7 @@ import { fetchSdpppxCatalog, type SdpppxTemplate } from "./backend/catalog.js";
 import { createSdpppxLoginFlow, type SdpppxLoginFlow } from "./backend/login-flow.js";
 import { createSdpppxProvider, type SdpppxProviderRuntime } from "./backend/provider.js";
 import { createSdpppxReferenceUploader, type SdpppxReferenceUploader } from "./backend/reference.js";
+import { createSdpppxTemporaryExposer } from "./backend/temporary-hosting.js";
 import { registerSdpppxRoutes } from "./backend/routes.js";
 import { SdpppxHttpError } from "./backend/http.js";
 
@@ -61,6 +62,9 @@ export type SdpppxExtensionOptions = {
   store?: SessionStore;
   jobRepository?: unknown;
   pollIntervalMs?: number;
+  /** 临时图床 I/O 覆盖（仅测试用）。 */
+  mediaUpload?: (input: import("./backend/media-upload.js").SdpppxMediaUploadInput) => Promise<import("./backend/media-upload.js").SdpppxMediaUploadResult>;
+  mediaProbe?: (input: import("./backend/media-upload.js").SdpppxMediaProbeInput) => Promise<import("./backend/media-upload.js").SdpppxMediaProbeResult>;
 };
 
 const BALANCE_CACHE_MS = 60_000;
@@ -91,7 +95,7 @@ export function createSdpppxProviderPlugin(
     icon: "identity",
     configPrefix: `extensions.${SDPPPX_PLUGIN_ID}`,
     modelTypes: ["image", "video"],
-    inject: ["log", "generation"],
+    inject: ["log", "generation", "storage", "exposer"],
     Config: SDPPPX_CONFIG,
     health: () => {
       const config = readSdpppxConfig(envOf(), options.deployment);
@@ -353,6 +357,19 @@ export function createSdpppxProviderPlugin(
       };
 
       ctx.effect(() => ctx.generation.register(registration));
+      // 临时图床：独立媒体端点 + 匿名读取核验；就绪只看部署配置与当前登录会话，
+      // 模板目录为空或刷新失败都不影响上传资格。
+      const temporary = createSdpppxTemporaryExposer({
+        storage: ctx.storage,
+        config,
+        session,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        ...(options.mediaUpload ? { upload: options.mediaUpload } : {}),
+        ...(options.mediaProbe ? { probe: options.mediaProbe } : {}),
+        log: (event) => log(event)
+      });
+      ctx.effect(() => ctx.exposer.register(temporary));
+      ctx.effect(() => () => temporary.dispose(), "sdpppx-temporary-hosting");
       ctx.effect(() => () => {
         flow.dispose();
         runtime.clear();

@@ -69,6 +69,13 @@ export const SETTING_DEFINITIONS = {
     label: "主存储后端",
     description: "媒体与任务读写字节的后端 id（缺省 local）；后端由扩展层插件注册"
   },
+  "exposer.order": {
+    kind: "string",
+    default: "",
+    reload: "hot",
+    label: "临时图床优先顺序",
+    description: "按优先级排列的图床来源 ID，以逗号分隔；未指定的来源按扩展默认顺序追加"
+  },
   "exposer.primary": {
     kind: "string",
     default: "auto",

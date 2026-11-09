@@ -15,6 +15,8 @@ SDPPPX 接入：宿主侧完成微信扫码登录与 Supabase 会话，登录后
 | `src/backend/schema.ts` | Formily 表单 → woohaa3 输入 schema |
 | `src/backend/provider.ts` | `@sdppp/pptask` 任务提交、轮询、取消与结果映射 |
 | `src/backend/reference.ts` | 参考素材上传与宿主侧允许名单 |
+| `src/backend/media-upload.ts` | `/media/upload` 独立适配：20 MiB / 图片视频校验、响应结构、匿名有界读取核验 |
+| `src/backend/temporary-hosting.ts` | `sdpppx-temporary` 临时图床来源：登录就绪、singleflight、授权代次与迟到结果处理 |
 | `src/frontend/` | 登录弹窗、账号管理、AI 助手供应商登录入口与设置面板 |
 
 **浏览器永远不接触令牌。** `/session`、扫码状态与设置面板只返回状态、昵称、头像、余额、到期时间；Authing token 与 Supabase access/refresh token 只存在宿主文档里，不进入响应、日志或诊断。二维码图片由宿主取回后转成 `data:image/png;base64,...` 下发。
@@ -57,6 +59,31 @@ SDPPPX 接入：宿主侧完成微信扫码登录与 Supabase 会话，登录后
 - 登出清会话、目录与余额缓存，并递增 `epoch`；登出后迟到的扫码/刷新结果被丢弃。
 - 应用启动**不弹登录**。登录入口在 AI 助手的供应商列表（「sdpppx」）；只有用户点选供应商、确认未登录后才打开微信扫码弹窗。
 - 关闭、切换页面或点击「稍后」都会取消进行中的扫码，不留下无人轮询的 pending；入口保留，可随时再次打开。
+
+## 临时图床
+
+登录后本扩展额外注册稳定来源 `sdpppx-temporary`（显示名「SDPPPX 临时图床」），供生成任务把稳定素材换成外部可读地址：
+
+| 项 | 值 |
+| --- | --- |
+| 端点 | `${SDPPPX_BASE_URL}/media/upload`（POST 原始二进制；不用 `/tasks/upload`） |
+| 鉴权 | 当前登录会话的 Bearer；不发送 `X-Tenant-ID`、provider、filename |
+| 类型 / 上限 | `image/*`、`video/*`；非空且 ≤ 20 MiB（旧模板上传的 32 MiB 不适用） |
+| 成功响应 | `{ code: 0, data: { url, media_type, size } }`；顶层 `url`、内部 key、字段缺失都判失败 |
+| 就绪条件 | 部署参数完整 **且** 当前登录会话可用；模板目录为空或刷新失败不影响 |
+| 有效窗口 | **未知**：上游不返回期限，来源声明 `validitySeconds: null` |
+| 并发 | 按 画布 / `namespace/key` / 实际大小与 MIME / owner / SDPPPX userId / 授权代次 / baseUrl 合并 |
+| 缓存 | 首版**不缓存**跨请求地址；上传失败或取消后下一次独立需求重新上传 |
+
+上传成功后还会用**不带任何 SDPPPX 凭据**的 Range 读取核验地址可匿名访问（逐跳出网守卫、拒绝私网/非 HTTPS、拒绝 HTML/JSON 错误与空内容、MIME 必须与本次类型一致）。匿名 403 只说明地址不可读，**不会**清登录态；上传 401 才走既有会话失效路径，403 视为权限拒绝。
+
+上游没有 TTL，也没有保留承诺，因此：
+
+- 不要求未来有效性的请求可以用这个来源；
+- 任何正数有效窗口要求（例如标准参考输入的 900 秒）都会把它排除在候选外：自动模式按既有规则走符合条件的其他来源或内置后备，手动指定时返回真实原因；
+- 不把宿主缺省的一天当成上游承诺，也不建立地址缓存。
+
+已知上游问题：存储文档记录部分对象上传后约 10 秒 ACL 变为 private、匿名读取 403，原因未定位。即时匿名读取通过不等于整个任务窗口可读；真实长窗口与跨提供商拉取仍需授权环境验收，见本 change 的 verification。
 
 ## 模板与任务
 

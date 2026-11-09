@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "本地对象存储后端插件：向 ctx.storage 注册 backendId=local 的本地文件后端（无 presign，缺省主存储），可选注册公开临时桶提供者（local-public）。",
+  "description": "本地对象存储后端插件：向 ctx.storage 注册 backendId=local 的本地文件后端（无 presign，缺省主存储）。",
   "exports": {
     "./backend": {
       "types": "./src/backend.ts",
@@ -20,8 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@woohaa3/contracts": "workspace:*",
-    "cos-nodejs-sdk-v5": "^3.0.0"
+    "@woohaa3/contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

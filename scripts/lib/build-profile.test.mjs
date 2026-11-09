@@ -10,7 +10,6 @@ import {
   describeBuildProfile,
   joinUrl,
   loadBuildProfile,
-  publicBucketDefines,
   updateEndpointFor,
   updaterPlatformKey
 } from "./build-profile.mjs";
@@ -87,7 +86,6 @@ test("没有 profile 时返回空 resolved，而不是假默认值", () => {
   assert.equal(loaded.profile.profileId, "empty");
   assert.equal(loaded.resolved.runtimeCdnUrl, "");
   assert.equal(loaded.resolved.updateEndpointTemplate, "");
-  assert.equal(publicBucketDefines(loaded.resolved), null);
 });
 
 test("committed 与 local 的优先级：local 覆盖 committed", () => {
@@ -148,12 +146,12 @@ test("resolved.extensionDefaults 与 cdnBaseUrl", () => {
   assert.equal(loaded.resolved.cdnBaseUrl, "https://cos.example.com/");
 });
 
-test("buildDefines 合并公开桶与官方信任根；都没有时为 null", () => {
+test("buildDefines 注入官方信任根；没有常量时为 null", () => {
   const withBoth = loadBuildProfile({
-    repoRoot: sandbox(validProfile({ publicBucket: { bucketName: "b", bucketUrl: "https://b.example.com", prefix: "p" } }))
+    repoRoot: sandbox(validProfile())
   });
   const defines = buildDefines(withBoth.resolved);
-  assert.deepEqual(Object.keys(defines).sort(), ["__WOOHAA3_OFFICIAL_TRUST_KEYS__", "__WOOHAA3_PUBLIC_BUCKET__"]);
+  assert.deepEqual(Object.keys(defines).sort(), ["__WOOHAA3_OFFICIAL_TRUST_KEYS__"]);
   assert.deepEqual(defines.__WOOHAA3_OFFICIAL_TRUST_KEYS__, [{ keyId: KEY_ID, publicKey: PUBKEY }]);
 
   const empty = loadBuildProfile({ repoRoot: sandbox({ schemaVersion: 1, profileId: "bare" }) });
@@ -161,7 +159,7 @@ test("buildDefines 合并公开桶与官方信任根；都没有时为 null", ()
 });
 
 test("settings 默认值解码并进入 buildDefines；非法键与密钥字段被拒", () => {
-  const settings = { "exposer.primary": "local-public", "storage.local.publicEnabled": true };
+  const settings = { "exposer.primary": "auto", "storage.primary": "local" };
   const loaded = loadBuildProfile({ repoRoot: sandbox(validProfile({ settings })) });
   assert.deepEqual(loaded.resolved.settingDefaults, settings);
   assert.deepEqual(buildDefines(loaded.resolved).__WOOHAA3_SETTING_DEFAULTS__, settings);
@@ -170,11 +168,6 @@ test("settings 默认值解码并进入 buildDefines；非法键与密钥字段�
   assert.equal(decodeBuildProfile(validProfile({ settings: { "provider.token": "x" } })).ok, false);
 });
 
-test("publicBucket 派生构建期常量", () => {
-  const loaded = loadBuildProfile({
-    repoRoot: sandbox(validProfile({ publicBucket: { bucketName: "b", bucketUrl: "https://b.example.com", prefix: "p" } }))
-  });
-  assert.deepEqual(publicBucketDefines(loaded.resolved), {
-    __WOOHAA3_PUBLIC_BUCKET__: { bucketName: "b", bucketUrl: "https://b.example.com", prefix: "p" }
-  });
+test("已移除的公开桶构建配置被拒绝", () => {
+  assert.equal(decodeBuildProfile(validProfile({ publicBucket: { bucketName: "b", bucketUrl: "https://b.example.com", prefix: "p" } })).ok, false);
 });

@@ -6,6 +6,7 @@ import type { SdpppxAccountService } from "../src/frontend/account-service.js";
 import { SdpppxLoginDialog } from "../src/frontend/login-dialog.js";
 import { SdpppxProviderBalance } from "../src/frontend/provider-balance.js";
 import { SdpppxProviderLogin } from "../src/frontend/provider-login.js";
+import { SdpppxHostingSource } from "../src/frontend/hosting-source.js";
 import { SdpppxSettingsPanel } from "../src/frontend/settings-panel.js";
 import {
   EMPTY_SDPPPX_SNAPSHOT,
@@ -230,6 +231,76 @@ describe("SdpppxSettingsPanel", () => {
     });
     expect(refreshModels).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="sdpppx-settings-feedback"]')?.textContent).toContain("2 个模板");
+    unmount();
+  });
+});
+
+describe("SDPPPX 临时图床来源面板", () => {
+  it("未登录时只显示登录入口，不自动登录也不上传", async () => {
+    const { service } = fakeService({ snapshot: { ...EMPTY_SDPPPX_SNAPSHOT, status: "anonymous" } });
+    const openLogin = vi.fn();
+    const { container, unmount } = await mount(
+      createElement(SdpppxHostingSource, { service, onOpenLogin: openLogin, onOpenAccount: vi.fn() })
+    );
+    expect(container.querySelector('[data-testid="sdpppx-hosting-source"]')?.getAttribute("data-state")).toBe("anonymous");
+    expect(container.textContent).toContain("登录 SDPPPX 后可使用临时图床");
+    expect(service.refresh).not.toHaveBeenCalled();
+    expect(service.startLogin).not.toHaveBeenCalled();
+    expect(openLogin).not.toHaveBeenCalled();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="sdpppx-hosting-source"] button')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(openLogin).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("已登录显示账号并转到既有账号管理入口", async () => {
+    const { service } = fakeService();
+    const openAccount = vi.fn();
+    const { container, unmount } = await mount(
+      createElement(SdpppxHostingSource, { service, onOpenLogin: vi.fn(), onOpenAccount: openAccount })
+    );
+    expect(container.querySelector('[data-testid="sdpppx-hosting-source"]')?.getAttribute("data-state")).toBe("authenticated");
+    expect(container.textContent).toContain("小伍");
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="sdpppx-hosting-source"] button')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(openAccount).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("会话过期时提示重新扫码，仍走登录入口", async () => {    const { service } = fakeService({
+      snapshot: { ...EMPTY_SDPPPX_SNAPSHOT, status: "anonymous", notice: SDPPPX_ERROR_CODES.sessionExpired }
+    });
+    const openLogin = vi.fn();
+    const { container, unmount } = await mount(
+      createElement(SdpppxHostingSource, { service, onOpenLogin: openLogin, onOpenAccount: vi.fn() })
+    );
+    expect(container.querySelector('[data-testid="sdpppx-hosting-source"]')?.getAttribute("data-state")).toBe("expired");
+    expect(container.textContent).toContain("重新扫码");
+    unmount();
+  });
+
+  it("从未登录切到已登录后刷新一次路由快照，不主动上传", async () => {
+    const { service } = fakeService({ snapshot: { ...EMPTY_SDPPPX_SNAPSHOT, status: "anonymous" } });
+    const onSaved = vi.fn();
+    const { container, unmount } = await mount(
+      createElement(SdpppxHostingSource, { service, onOpenLogin: vi.fn(), onOpenAccount: vi.fn(), onSaved })
+    );
+    expect(onSaved).not.toHaveBeenCalled();
+    await act(async () => {
+      service.setSnapshotForTest(sessionSnapshot());
+    });
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(service.refresh).not.toHaveBeenCalled();
+    // 幂等：再次渲染同一状态不重复刷新。
+    await act(async () => {
+      service.setSnapshotForTest(sessionSnapshot());
+    });
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="sdpppx-hosting-source"]')?.getAttribute("data-state")).toBe("authenticated");
     unmount();
   });
 });

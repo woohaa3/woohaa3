@@ -628,6 +628,17 @@ export type SlotContributionMap = {
     providerId: string;
     render: ComponentType;
   };
+  /**
+   * 临时图床来源的「如何让它就绪」面板（可选）。
+   *
+   * 能力中心按候选的 `ownerExtensionId` 找到该贡献并渲染，替代通用的凭据表单。用于来源的
+   * 就绪条件不是可编辑配置、而是扩展自己的账号状态（例如需要先扫码登录）的场景；宿主不按
+   * 扩展 ID 分支，也不在只读列表里替扩展发起登录。
+   */
+  "agent-assistant.hosting-source": {
+    ownerExtensionId: string;
+    render: ComponentType<{ onSaved?: () => void }>;
+  };
   "provider-credentials.top": { render: ComponentType<{ requestClose?: () => void }> };
   /**
    * 设置弹窗「插件详情」里的扩展自带设置面板

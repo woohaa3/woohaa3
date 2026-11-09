@@ -49,7 +49,17 @@ export const SDPPPX_ERROR_CODES = {
   taskFailed: "sdpppx-task-failed",
   taskCancelled: "sdpppx-task-cancelled",
   taskTimeout: "sdpppx-task-timeout",
-  uploadFailed: "sdpppx-upload-failed"
+  uploadFailed: "sdpppx-upload-failed",
+  /** 临时图床专用（change: 2026-11-09-add-sdpppx-media-temporary-hosting）。 */
+  mediaUnsupported: "sdpppx-media-unsupported",
+  mediaInvalidResponse: "sdpppx-media-invalid-response",
+  mediaForbidden: "sdpppx-media-forbidden",
+  mediaRateLimited: "sdpppx-media-rate-limited",
+  mediaUploadFailed: "sdpppx-media-upload-failed",
+  mediaUploadUnavailable: "sdpppx-media-unavailable",
+  mediaNotReadable: "sdpppx-media-not-readable",
+  mediaCancelled: "sdpppx-media-cancelled",
+  mediaStale: "sdpppx-media-stale"
 } as const;
 
 export type SdpppxErrorCode = (typeof SDPPPX_ERROR_CODES)[keyof typeof SDPPPX_ERROR_CODES];

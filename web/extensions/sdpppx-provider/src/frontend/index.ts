@@ -34,6 +34,7 @@ import {
 import { SDPPPX_FRONTEND_METADATA } from "./metadata.js";
 import { createSdpppxProviderLoginRenderer } from "./provider-login.js";
 import { createSdpppxProviderBalanceRenderer } from "./provider-balance.js";
+import { createSdpppxHostingSourceRenderer } from "./hosting-source.js";
 import {
   registerSdpppxSettingsPanel,
   sdpppxSettingsExtension
@@ -99,6 +100,16 @@ export function sdpppxProviderExtension(): ReturnType<typeof defineExtensionPlug
       });
       ctx.effect(() => () => removeProviderBalance(), "sdpppx-provider-balance");
 
+      // 临时图床来源的就绪条件是账号登录态；能力中心按候选 owner 找到这里。
+      const removeHostingSource = ctx.slots.register("agent-assistant.hosting-source", {
+        id: `${SDPPPX_PLUGIN_ID}-hosting-source`,
+        owner: SDPPPX_PLUGIN_ID,
+        priority: 30,
+        ownerExtensionId: SDPPPX_PLUGIN_ID,
+        render: createSdpppxHostingSourceRenderer(service, openLogin, openAccount)
+      });
+      ctx.effect(() => () => removeHostingSource(), "sdpppx-hosting-source");
+
       registerSdpppxSettingsPanel(ctx, service);
       ctx.effect(() => () => service.dispose(), "sdpppx-account-service");
     },
@@ -132,6 +143,7 @@ export {
 } from "./login-dialog.js";
 export { SDPPPX_FRONTEND_METADATA } from "./metadata.js";
 export { SdpppxProviderLogin, createSdpppxProviderLoginRenderer } from "./provider-login.js";
+export { SdpppxHostingSource, createSdpppxHostingSourceRenderer } from "./hosting-source.js";
 export { SdpppxProviderBalance } from "./provider-balance.js";
 export { SdpppxSettingsPanel } from "./settings-panel.js";
 export { sdpppxSettingsExtension } from "./settings-plugin.js";

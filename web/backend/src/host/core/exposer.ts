@@ -8,11 +8,11 @@
  * 解析顺序（change: 2026-11-07-add-runninghub-llm-and-provider-temporary-hosting）：
  * ① 画布显式覆盖：指定 id 只用该来源；空串表示禁用。
  * ② 全局显式来源（`exposer.primary`，旧键 `storage.expose`）：只用该来源。
- * ③ 自动：先选符合当前请求的提供商临时图床（优先级升序、再按 exposerId 字典序），
- *    没有时选 Woohaa3 内置临时图床。当前主存储能 presign **不抢占**自动候选，
+ * ③ 自动：按用户保存顺序选择符合请求的临时图床，未列出的按扩展优先级 / ID 追加。
+ *    当前主存储能 presign **不抢占**自动候选，
  *    它仍可作为手动选择。
  *
- * 自动模式选中的提供商出现可恢复失败时，符合条件的内置来源最多回退一次；手动选择不静默改投。
+ * 自动模式按同一顺序尝试合格来源，每个来源最多一次；兼容的显式指定仍不静默改投。
  * 一次请求会冻结来源 owner 与凭据 epoch，变化即按请求失效处理。
  */
 import {
@@ -33,6 +33,8 @@ import type { HostPlugin } from "../context.js";
 export type ExposerSettings = {
   /** 全局显式来源 id；自动模式返回 undefined。 */
   expose(): string | undefined;
+  /** 用户保存的来源顺序；每次选择现读，支持配置热更新。 */
+  order?(): readonly string[];
 };
 
 export type ExposerRegistryOptions = {
@@ -117,6 +119,16 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
     }
   };
 
+  /** 来源的就绪说明；抛错或非字符串一律当作没有说明，不污染只读投影。 */
+  const noteOf = (candidate: Candidate): string | null => {
+    try {
+      const value = candidate.declaration.statusNote?.();
+      return typeof value === "string" && value.trim() !== "" ? value : null;
+    } catch {
+      return null;
+    }
+  };
+
   const mediaKindOf = (facts: RequestFacts): string | undefined => {
     if (facts.mediaKind) return facts.mediaKind;
     const contentType = facts.contentType ?? "";
@@ -137,14 +149,26 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
       if (!kind || !constraints.mediaKinds.includes(kind)) return false;
     }
     if (constraints?.maxBytes !== undefined && facts.sizeBytes !== undefined && facts.sizeBytes > constraints.maxBytes) return false;
-    const validity = candidate.declaration.validitySeconds ?? FALLBACK_VALIDITY_SECONDS;
-    if (facts.requiredValiditySeconds !== undefined && facts.requiredValiditySeconds > validity) return false;
+    const required = facts.requiredValiditySeconds;
+    if (required !== undefined) {
+      const declared = candidate.declaration.validitySeconds;
+      if (declared === null) {
+        // 来源明确不承诺窗口：只有「不要求未来有效性」的请求可以继续用它。
+        if (required > 0) return false;
+      } else if (required > (declared ?? FALLBACK_VALIDITY_SECONDS)) {
+        return false;
+      }
+    }
     return true;
   };
 
-  const sortCandidates = (list: Candidate[]): Candidate[] =>
-    [...list].sort((left, right) =>
-      left.priority - right.priority || left.exposer.exposerId.localeCompare(right.exposer.exposerId));
+  const sortCandidates = (list: Candidate[]): Candidate[] => {
+    const order = [...new Set(options.settings.order?.() ?? [])];
+    const rank = new Map(order.map((id, index) => [id, index]));
+    return [...list].sort((left, right) =>
+      (rank.get(left.exposer.exposerId) ?? Infinity) - (rank.get(right.exposer.exposerId) ?? Infinity)
+      || left.priority - right.priority || left.exposer.exposerId.localeCompare(right.exposer.exposerId));
+  };
 
   const deriveFacts = async (input: StorageExposeInput): Promise<RequestFacts> => {
     const facts: RequestFacts = {
@@ -199,9 +223,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
     const manual = selectedIdOf();
     if (manual) return { mode: "manual", source: "manual", id: manual };
     const candidates = sortCandidates(temporaryCandidates());
-    const providers = candidates.filter(candidate => candidate.declaration.category === "provider" && accepts(candidate, facts));
-    const builtins = candidates.filter(candidate => candidate.declaration.category === "builtin" && accepts(candidate, facts));
-    const selected = providers[0] ?? builtins[0];
+    const selected = candidates.find(candidate => accepts(candidate, facts));
     return selected
       ? { mode: "auto", source: "auto", autoCandidate: selected, id: selected.exposer.exposerId }
       : { mode: "auto", source: "auto", error: "没有可用的临时图床，请检查提供商配置" };
@@ -217,6 +239,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
       configured: configured(candidate),
       available: accepts(candidate, facts),
       selected: route.id === candidate.exposer.exposerId,
+      statusNote: noteOf(candidate),
       lastError: lastFailure?.exposerId === candidate.exposer.exposerId ? lastFailure.message : null
     }));
 
@@ -349,29 +372,23 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         }
       }
 
-      // 自动模式：冻结来源身份与凭据 epoch，失败最多回退内置一次。
-      const selected = route.autoCandidate!;
-      const exposer = selected.exposer;
-      const epoch = exposer.temporaryHosting?.credentialEpoch?.() ?? null;
-      try {
-        return await run(exposer, input, epoch);
-      } catch (error) {
-        recordFailure(exposer, error);
-        if (requestInvalid(error, facts.signal)) throw error;
-        const builtin = sortCandidates(temporaryCandidates())
-          .find(candidate => candidate.declaration.category === "builtin" && accepts(candidate, facts));
-        if (!builtin || builtin.exposer.exposerId === exposer.exposerId) throw error;
-        log({ event: "exposer-temporary-fallback", from: exposer.exposerId, to: builtin.exposer.exposerId });
-        const builtinEpoch = builtin.exposer.temporaryHosting?.credentialEpoch?.() ?? null;
+      // 按同一份排序快照依次尝试符合请求条件的来源，每个来源最多一次。
+      const candidates = sortCandidates(temporaryCandidates()).filter(candidate => accepts(candidate, facts))
+        .map(candidate => ({ exposer: candidate.exposer, epoch: candidate.declaration.credentialEpoch?.() ?? null }));
+      const failures: Array<{ id: string; error: unknown }> = [];
+      for (const { exposer, epoch } of candidates) {
         try {
-          return await run(builtin.exposer, input, builtinEpoch);
-        } catch (fallbackError) {
-          recordFailure(builtin.exposer, fallbackError);
-          throw new StorageExposeUnavailableError(
-            `临时图床不可用：${exposer.exposerId}：${messageOf(error)}；${builtin.exposer.exposerId}：${messageOf(fallbackError)}`
-          );
+          ensureLease(exposer, epoch);
+          if (failures.length) log({ event: "exposer-temporary-fallback", from: failures.at(-1)!.id, to: exposer.exposerId });
+          return await run(exposer, input, epoch);
+        } catch (error) {
+          recordFailure(exposer, error);
+          if (requestInvalid(error, facts.signal)) throw error;
+          failures.push({ id: exposer.exposerId, error });
         }
       }
+      if (failures.length === 1) throw failures[0]!.error;
+      throw new StorageExposeUnavailableError(`临时图床不可用：${failures.map(failure => `${failure.id}：${messageOf(failure.error)}`).join("；")}`);
     },
     temporaryHosting(query?: TemporaryHostingQuery) {
       const facts: RequestFacts = {
@@ -441,7 +458,13 @@ export const exposerPlugin: HostPlugin = {
       return typeof legacy === "string" && legacy.trim() !== "" ? legacy.trim() : undefined;
     };
     const service = createExposerRegistry({
-      settings: { expose: readPrimary },
+      settings: {
+        expose: readPrimary,
+        order: () => {
+          const value = ctx.config.get("exposer.order");
+          return typeof value === "string" ? value.split(",").map(id => id.trim()).filter(Boolean) : [];
+        }
+      },
       storage: ctx.storage,
       logger: log
     });

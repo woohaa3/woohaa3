@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type { AgentConnectionView, ServiceConnectionView, TemporaryHostingRouteView } from "@woohaa3/contracts";
 import { Button, SettingsFeedback, Tooltip } from "@woohaa3/ui";
-import { AgentIcon, BackIcon, BoxIcon, ChevronRightIcon, CloudIcon, ImageIcon, LinkIcon, MusicIcon, PlusIcon, VideoIcon } from "@woohaa3/ui/icons";
+import { AgentIcon, BackIcon, BoxIcon, ChevronRightIcon, CloudIcon, ImageIcon, LinkIcon, MusicIcon, PlusIcon, StarIcon, VideoIcon } from "@woohaa3/ui/icons";
+import type { BackendSettingsStore } from "../settings/backend-settings-store.js";
+import { HostingProviderList } from "./hosting-provider-list.js";
 import type { McpPanelSnapshot } from "./mcp-connection-panel.js";
 import { capabilitySuppliers, type ActiveCapability, type CapabilityKind, type CapabilitySupplier } from "./capability-directory.js";
 
@@ -12,7 +14,7 @@ const capabilities = [
   { id: "video", label: "视频", description: "视频生成", icon: VideoIcon },
   { id: "audio", label: "音频", description: "语音与音频生成", icon: MusicIcon },
   { id: "model3d", label: "3D", description: "3D 内容生成", icon: BoxIcon },
-  { id: "hosting", label: "临时图床", description: "临时外链与上传", icon: CloudIcon },
+  { id: "hosting", label: "临时图床", description: "给模型提供临时图片访问地址", icon: CloudIcon },
 ] as const;
 
 function hostingCount(route: TemporaryHostingRouteView | null): string {
@@ -21,13 +23,13 @@ function hostingCount(route: TemporaryHostingRouteView | null): string {
   return `已配置 ${providers.size} 个提供商`;
 }
 
-export function CapabilityOverview({ local, remote, sources, loading, connectionError, sourceLoading, sourceError, mcp, contextual, onNavigate, onAdd, onOpenSource, onUse, onRetry, temporaryHosting, settingsLoading, settingsError, onRetrySettings, onOpenHostingOwner, onConfigureHosting }: {
+export function CapabilityOverview({ local, remote, sources, loading, connectionError, sourceLoading, sourceError, mcp, contextual, onNavigate, onAdd, onOpenSource, onUse, onRetry, temporaryHosting, settingsLoading, settingsError, onRetrySettings, onOpenHostingOwner, onConfigureHosting, hostingSettingsStore }: {
   local: AgentConnectionView[]; remote: AgentConnectionView[]; sources: ServiceConnectionView[]; loading: boolean; connectionError: string | null; sourceLoading: boolean;
   sourceError: string | null; mcp: McpPanelSnapshot | null; contextual: boolean; onNavigate: (page: CapabilityPage) => void;
   onAdd: (capability?: ActiveCapability) => void; onOpenSource: (id: string) => void; onUse: (connectionId: string) => void; onRetry: () => void;
   temporaryHosting: TemporaryHostingRouteView | null; settingsLoading: boolean; settingsError: string | null;
   onRetrySettings: () => void; onOpenHostingOwner: (ownerExtensionId: string) => void;
-  onConfigureHosting: () => void;
+  onConfigureHosting: () => void; hostingSettingsStore?: BackendSettingsStore;
 }) {
   const [selected, select] = useState<CapabilityKind | null>(null);
   const capability = capabilities.find(item => item.id === selected);
@@ -47,6 +49,7 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
     const value = counts(kind, rows);
     return kind === "agent" ? `已配置 ${value.local} 个本地 Agent · 已配置 ${value.suppliers} 个提供商` : `已配置 ${value.suppliers} 个提供商`;
   };
+  const hostingCandidates = temporaryHosting?.candidates.filter(candidate => candidate.configured) ?? [];
   const hostingUnavailable = settingsError ? null : temporaryHosting?.error ?? null;
 
   if (capability) {
@@ -61,15 +64,10 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
           : null}
         {settingsLoading ? <p>正在读取临时图床…</p> : null}
         {!settingsLoading && !settingsError && temporaryHosting ? <>
-          {temporaryHosting.candidates.length ? <section className="agent-assistant__capability-suppliers">
-              <ul className="agent-assistant__list">{temporaryHosting.candidates.map(candidate => <li key={candidate.exposerId}>
-                <div className="agent-assistant__identity"><strong>{candidate.label}</strong><p>{candidate.configured ? "已配置" : "未配置"}{candidate.selected ? " · 当前选择" : ""}</p>{candidate.lastError ? <SettingsFeedback tone="warning">最近失败：{candidate.lastError}</SettingsFeedback> : null}</div>
-                <div className="agent-assistant__actions">{candidate.ownerExtensionId ? <Button size="sm" tone="ghost" onClick={() => onOpenHostingOwner(candidate.ownerExtensionId!)}>配置</Button> : null}</div>
-              </li>)}</ul>
-            </section> : null}
-          {temporaryHosting.lastFailure && !temporaryHosting.candidates.some(candidate => candidate.lastError) ? <SettingsFeedback tone="warning">最近失败：{temporaryHosting.lastFailure.message}</SettingsFeedback> : null}
+          <HostingProviderList route={temporaryHosting} store={hostingSettingsStore} onOpenOwner={onOpenHostingOwner} />
+          {temporaryHosting.lastFailure && !hostingCandidates.some(candidate => candidate.lastError) ? <SettingsFeedback tone="warning">最近失败：{temporaryHosting.lastFailure.message}</SettingsFeedback> : null}
         </> : null}
-        {temporaryHosting && !temporaryHosting.candidates.length ? <div className="agent-assistant__empty-note">还没有可用的临时图床来源。</div> : null}
+        {!settingsLoading && !settingsError && temporaryHosting && !hostingCandidates.length ? <div className="agent-assistant__empty-note">尚未配置临时图床来源。</div> : null}
       </> : <>
         <p className="agent-assistant__capability-summary">{capability.description} · {status(capability.id as ActiveCapability, rows)}</p>
         {failed(capability.id) ? <SettingsFeedback tone="danger">{failed(capability.id)} <Button size="sm" onClick={onRetry}>重试</Button></SettingsFeedback> : null}
@@ -104,7 +102,7 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
       const active = item.id !== "model3d" && item.id !== "hosting" ? item.id : null;
       const value = active ? counts(active, rows) : { local: 0, suppliers: 0 };
       const tooltip = item.id === "hosting"
-        ? temporaryHosting?.candidates.map(candidate => <span key={candidate.exposerId}><strong>{candidate.label}</strong><span>{candidate.lastError ? "最近调用失败" : candidate.configured ? "已配置" : "未配置"}{candidate.selected ? " · 当前选择" : ""}</span></span>)
+        ? hostingCandidates.length ? hostingCandidates.map((candidate, index) => <span key={candidate.exposerId}><strong className="agent-assistant__hosting-name">{candidate.label}{index === 0 ? <span className="agent-assistant__hosting-priority" title="优先使用"><StarIcon size={14} /></span> : null}</strong><span>{candidate.lastError ? "最近调用失败" : candidate.configured ? "已配置" : "未配置"}</span></span>) : "尚未配置提供商，点击查看详情。"
         : counted.length ? counted.map(row => <span key={row.id}><strong>{row.name}</strong><span>{row.status}</span></span>) : "尚未配置提供商，点击查看详情。";
       const empty = active !== null && !pending(item.id) && !failed(item.id) && value.local + value.suppliers === 0;
       const chooseAgent = empty && item.id === "agent" && !rows.length;

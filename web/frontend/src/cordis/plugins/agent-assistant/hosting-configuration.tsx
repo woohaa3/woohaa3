@@ -1,7 +1,6 @@
-import { useState } from "react";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
 import { Button, SettingsFeedback } from "@woohaa3/ui";
-import { SelectInput } from "@woohaa3/ui/forms";
+import { useSlot } from "../../host.js";
 import type { BackendSettingsStore } from "../settings/backend-settings-store.js";
 import { ConnectionSettingsForm } from "../settings/provider-settings-cards.js";
 import { providerConfigGroups, settingsPartition } from "../settings/plugin-groups.js";
@@ -10,6 +9,13 @@ import { providerConfigGroups, settingsPartition } from "../settings/plugin-grou
 export function HostingOwnerConfiguration({ ownerId, snapshot, store, onSaved }: {
   ownerId: string; snapshot: SettingsSnapshot; store: BackendSettingsStore; onSaved: () => void;
 }) {
+  // 来源的就绪条件可能不是设置项（例如要求先登录账号）：有专用贡献时交给扩展自己。
+  const contributions = useSlot("agent-assistant.hosting-source");
+  const contribution = contributions.find(entry => entry.ownerExtensionId === ownerId);
+  if (contribution) {
+    const Source = contribution.render;
+    return <Source onSaved={onSaved} />;
+  }
   const provider = providerConfigGroups(snapshot).find(group => group.id === ownerId);
   const group = provider ?? settingsPartition(snapshot).groups.find(group => group.id === ownerId);
   if (!group?.entries.length) return <SettingsFeedback tone="warning">当前来源没有可编辑的配置。请检查扩展是否已启用。</SettingsFeedback>;
@@ -17,36 +23,13 @@ export function HostingOwnerConfiguration({ ownerId, snapshot, store, onSaved }:
     primaryKeys={provider ? undefined : group.entries.filter(entry => entry.kind === "boolean").map(entry => entry.key)} />;
 }
 
-/** Editing the policy never uploads media or changes the selected provider's credentials. */
-export function HostingRouteConfiguration({ snapshot, store, onSaved }: {
-  snapshot: SettingsSnapshot; store: BackendSettingsStore; onSaved: () => void;
+/** Unconfigured sources can be set up here; priority is edited in the provider list. */
+export function HostingSourceConfiguration({ snapshot, onOpenOwner }: {
+  snapshot: SettingsSnapshot; onOpenOwner: (ownerId: string) => void;
 }) {
-  const route = snapshot.extensionPoints?.temporaryHosting;
-  const entry = snapshot.settings.find(item => item.key === "exposer.primary");
-  const current = route?.mode === "manual" ? route.selectedId ?? String(entry?.value ?? "auto") : String(entry?.value || "auto");
-  const [draft, setDraft] = useState(current);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const options = [
-    { value: "auto", label: "自动" },
-    ...(snapshot.extensionPoints?.exposer ?? []).map(item => ({ value: item.id, label: item.label })),
-  ];
-  if (!options.some(option => option.value === draft)) options.push({ value: draft, label: `${draft}（未注册）` });
-  const locked = !entry || entry.lockedBy !== null;
-  const save = async () => {
-    if (locked || busy || draft === current) return;
-    setBusy(true); setError(null);
-    try {
-      const result = await store.save({ "exposer.primary": draft });
-      if (result.ok) onSaved();
-      else setError(result.issues.find(issue => issue.key === "exposer.primary")?.message ?? result.error);
-    } catch { setError("保存失败，请重试。"); }
-    finally { setBusy(false); }
-  };
-  return <form className="provider-connection" onSubmit={event => { event.preventDefault(); void save(); }}>
-    <SelectInput label="临时图床来源" value={draft} options={options} onValueChange={value => { setDraft(value); setError(null); }} disabled={locked || busy} />
-    {entry?.lockedBy ? <p>由环境变量 {entry.lockedBy} 锁定。</p> : !entry ? <SettingsFeedback tone="warning">当前宿主未提供临时图床配置。</SettingsFeedback> : null}
-    {error ? <SettingsFeedback tone="danger">{error}</SettingsFeedback> : null}
-    <div className="provider-connection__actions"><Button size="sm" tone="primary" type="submit" loading={busy} disabled={locked || busy || draft === current}>保存</Button></div>
-  </form>;
+  const candidates = snapshot.extensionPoints?.temporaryHosting?.candidates.filter(candidate => !candidate.configured && candidate.ownerExtensionId) ?? [];
+  return candidates.length ? <ul className="agent-assistant__list">{candidates.map(candidate => <li key={candidate.exposerId}>
+    <div className="agent-assistant__identity"><strong>{candidate.label}</strong><p>{candidate.statusNote ?? "未配置"}</p></div>
+    <Button size="sm" tone="ghost" onClick={() => onOpenOwner(candidate.ownerExtensionId!)}>配置</Button>
+  </li>)}</ul> : <p className="agent-assistant__empty-note">所有图床提供商均已配置。</p>;
 }

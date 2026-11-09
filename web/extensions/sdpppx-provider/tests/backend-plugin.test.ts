@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GenerationProvider, HostExtensionContext } from "@woohaa3/contracts";
+import type { GenerationProvider, HostExtensionContext, StorageExposer } from "@woohaa3/contracts";
 import { createSdpppxProviderPlugin } from "../src/backend.js";
 import { createMemorySessionStore, type SdpppxSession } from "../src/backend/session.js";
 import {
@@ -33,6 +33,7 @@ function createContext() {
   const routes = new Map<string, RegisteredRoute>();
   const disposers: Array<() => void> = [];
   let provider: GenerationProvider | null = null;
+  const exposers = new Map<string, StorageExposer>();
   const ctx = {
     log: { scope: () => () => undefined },
     generation: {
@@ -40,6 +41,22 @@ function createContext() {
         provider = next;
         return () => {
           provider = null;
+        };
+      }
+    },
+    storage: {
+      bucket: () => ({
+        head: async () => null,
+        get: async () => {
+          throw Object.assign(new Error("missing"), { code: "STORAGE_OBJECT_NOT_FOUND" });
+        }
+      })
+    },
+    exposer: {
+      register: (next: StorageExposer) => {
+        exposers.set(next.exposerId, next);
+        return () => {
+          exposers.delete(next.exposerId);
         };
       }
     },
@@ -60,6 +77,10 @@ function createContext() {
     ctx,
     routes,
     disposers,
+    exposers,
+    dispose: () => {
+      for (const disposer of disposers.reverse()) disposer();
+    },
     provider: () => provider
   };
 }
@@ -254,8 +275,7 @@ describe("SDPPPX host plugin assembly", () => {
     expect(registration.models.map((model) => model.providerModelId)).toEqual(["tpl-1"]);
   });
 
-  it("目录刷新失败保留旧目录，只更新诊断", async () => {
-    let fail = false;
+  it("目录刷新失败保留旧目录，只更新诊断", async () => {    let fail = false;
     const { fetchImpl } = createFetch(({ url }) => {
       if (url.includes("/rest/v1/tasks_template")) {
         return fail
@@ -286,5 +306,96 @@ describe("SDPPPX host plugin assembly", () => {
     });
     expect(registration.models.map((model) => model.providerModelId)).toEqual(before);
     expect(registration.available).toBe(true);
+  });
+
+  it("注册 sdpppx-temporary：未登录时不可用、有说明，且模板目录为空不影响就绪判定", async () => {
+    const { ctx, exposers } = createContext();
+    const plugin = createSdpppxProviderPlugin({
+      env: FULL_ENV,
+      now: () => NOW,
+      store: createMemorySessionStore()
+    });
+    await plugin.apply(ctx, {});
+    const exposer = exposers.get("sdpppx-temporary");
+    expect(exposer).toMatchObject({
+      label: "SDPPPX 临时图床",
+      ownerExtensionId: "sdpppx-provider",
+      requiresReplica: false
+    });
+    expect(exposer?.temporaryHosting).toMatchObject({
+      category: "provider",
+      priority: 10,
+      validitySeconds: null,
+      constraints: { mediaKinds: ["image", "video"], maxBytes: 20 * 1024 * 1024 }
+    });
+    expect(exposer?.temporaryHosting?.ready?.()).toBe(false);
+    expect(exposer?.temporaryHosting?.statusNote?.()).toBe("未登录 SDPPPX");
+    // 只读查询不上传、不弹登录、不触发目录刷新。
+    expect(exposer?.temporaryHosting?.credentialEpoch?.()).toBe(0);
+  });
+
+  it("恢复已登录会话后图床就绪，即使模板目录为空；登出后回到未登录", async () => {
+    const { fetchImpl } = createFetch(({ url }) => {
+      if (url.includes("/rest/v1/tasks_template")) return jsonResponse([]);
+      return textResponse("unexpected", { status: 500 });
+    });
+    const { ctx, routes, exposers } = createContext();
+    const plugin = createSdpppxProviderPlugin({
+      env: FULL_ENV,
+      now: () => NOW,
+      store: createMemorySessionStore(SESSION),
+      fetchImpl
+    });
+    await plugin.apply(ctx, {});
+    const exposer = exposers.get("sdpppx-temporary")!;
+    await vi.waitFor(() => expect(exposer.temporaryHosting?.ready?.()).toBe(true));
+    expect(exposer.temporaryHosting?.statusNote?.()).toBeNull();
+
+    await invoke(routes.get(SDPPPX_LOGOUT_ROUTE)!, {});
+    expect(exposer.temporaryHosting?.ready?.()).toBe(false);
+    expect(exposer.temporaryHosting?.statusNote?.()).toBe("未登录 SDPPPX");
+  });
+
+  it("扩展释放后注销临时图床来源并中断进行中的准备", async () => {
+    const { ctx, exposers, dispose } = createContext();
+    const plugin = createSdpppxProviderPlugin({
+      env: FULL_ENV,
+      now: () => NOW,
+      store: createMemorySessionStore(SESSION)
+    });
+    await plugin.apply(ctx, {});
+    expect(exposers.has("sdpppx-temporary")).toBe(true);
+    dispose();
+    expect(exposers.has("sdpppx-temporary")).toBe(false);
+  });
+
+  it("既有模板上传协议未被改写：注册对象仍走 uploadReference", async () => {
+    const { fetchImpl, calls } = createFetch(({ url }) => {
+      if (url.includes("/rest/v1/tasks_template")) return jsonResponse([]);
+      if (url.includes("/tasks/upload")) return jsonResponse({ url: "https://sdpppx.example.com/uploaded.png" });
+      return textResponse("unexpected", { status: 500 });
+    });
+    const { ctx, provider } = createContext();
+    const plugin = createSdpppxProviderPlugin({
+      env: FULL_ENV,
+      now: () => NOW,
+      store: createMemorySessionStore(SESSION),
+      fetchImpl
+    });
+    await plugin.apply(ctx, {});
+    const registration = provider()!;
+    const uploaded = await registration.uploadReference!({
+      reference: { role: "reference_image", mediaType: "image/png" },
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+      storageKey: "media/sha256-a.png"
+    });
+    expect(uploaded).toMatchObject({ url: "https://sdpppx.example.com/uploaded.png" });
+    const uploadCalls = calls.filter(call => call.url.includes("/tasks/upload"));
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0]!.url).toContain("provider=grsai");
+    expect((uploadCalls[0]!.init.headers as Record<string, string>)["X-Tenant-ID"]).toBeTruthy();
+    // 没有调用新的 /media/upload。
+    expect(calls.some(call => call.url.includes("/media/upload"))).toBe(false);
   });
 });

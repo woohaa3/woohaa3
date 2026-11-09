@@ -56,14 +56,14 @@ function memoryBackend(
   };
 }
 
-function setup(values: { primary?: string; expose?: string } = {}, backends: readonly StorageBackend[] = []) {
+function setup(values: { primary?: string; expose?: string; order?: string[] } = {}, backends: readonly StorageBackend[] = []) {
   const storage: HostStorageService = createStorageRegistry({
     settings: { primary: () => values.primary ?? "local" }
   });
   for (const backend of backends) storage.register(backend);
   const logs: Array<Record<string, unknown>> = [];
   const exposer = createExposerRegistry({
-    settings: { expose: () => values.expose },
+    settings: { expose: () => values.expose, order: () => values.order ?? [] },
     storage,
     logger: (event) => logs.push(event)
   });
@@ -395,8 +395,7 @@ describe("临时图床自动路由", () => {
     expect(await exposer.expose({ namespace: "media", key: "clip.mp4" })).toBe("https://builtin.invalid");
   });
 
-  it("无素材的配置查询保留受类型限制的提供商，实际请求仍按素材筛选", async () => {
-    const { storage, exposer } = setup({ primary: "local" }, [memoryBackend("local")]);
+  it("无素材的配置查询保留受类型限制的提供商，实际请求仍按素材筛选", async () => {    const { storage, exposer } = setup({ primary: "local" }, [memoryBackend("local")]);
     const upload = vi.fn(async () => "https://images.invalid/a");
     exposer.register(providerExposer("images-only", upload, 1, {
       temporaryHosting: { category: "provider", priority: 1, constraints: { mediaKinds: ["image"] } }
@@ -414,8 +413,68 @@ describe("临时图床自动路由", () => {
     expect(await exposer.expose({ namespace: "media", key: "image.png" })).toBe("https://images.invalid/a");
   });
 
-  it("自动模式提供商可恢复失败只回退内置一次，下一次请求重新解析", async () => {
+  it("明确未知窗口的来源可服务无窗口要求的请求，但被正数窗口要求排除", async () => {
     const local = memoryBackend("local");
+    const { storage, exposer } = setup({ primary: "local" }, [local]);
+    await storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
+    const upload = vi.fn(async () => "https://unknown.invalid/a");
+    exposer.register(providerExposer("unknown-window", upload, 1, {
+      temporaryHosting: { category: "provider", priority: 1, validitySeconds: null, ready: () => true }
+    }));
+    exposer.register(builtinExposer("builtin", async () => "https://builtin.invalid/a"));
+
+    // 不要求未来有效窗口时仍可用；不能被宿主缺省一天「补齐」成承诺。
+    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://unknown.invalid/a");
+    expect(upload).toHaveBeenCalledTimes(1);
+
+    // 900 秒要求下候选被排除，自动路由走符合条件的内置来源。
+    expect(exposer.available("media", undefined, { requiredValiditySeconds: 900 })).toBe(true);
+    expect(exposer.temporaryHosting({ request: { requiredValiditySeconds: 900 } }).selectedId).toBe("builtin");
+    expect(await exposer.expose({ namespace: "media", key: "a.png", request: { requiredValiditySeconds: 900 } }))
+      .toBe("https://builtin.invalid/a");
+    expect(upload).toHaveBeenCalledTimes(1);
+
+    // 手动指定时明确失败，不静默改投。
+    const manual = setup({ primary: "local", expose: "unknown-window" }, [local]);
+    manual.exposer.register(providerExposer("unknown-window", async () => { throw new Error("无法满足 900 秒的有效窗口"); }, 1, {
+      temporaryHosting: { category: "provider", priority: 1, validitySeconds: null, ready: () => true }
+    }));
+    await expect(manual.exposer.expose({ namespace: "media", key: "a.png", request: { requiredValiditySeconds: 900 } }))
+      .rejects.toThrow(/900/);
+  });
+
+  it("同优先级按稳定 ID 字典序选择，与注册顺序无关", async () => {
+    const { storage, exposer } = setup({ primary: "local" }, [memoryBackend("local")]);
+    await storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
+    const calls: string[] = [];
+    exposer.register(providerExposer("sdpppx-temporary", async () => { calls.push("sdpppx"); return "https://sdpppx.invalid/a"; }, 10));
+    exposer.register(providerExposer("runninghub-temporary", async () => { calls.push("runninghub"); return "https://rh.invalid/a"; }, 10));
+    // 先注册 SDPPPX 也不改变结果：同优先级按 exposerId 字典序。
+    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://rh.invalid/a");
+    expect(calls).toEqual(["runninghub"]);
+    expect(exposer.temporaryHosting().candidates.map(candidate => candidate.exposerId))
+      .toEqual(["runninghub-temporary", "sdpppx-temporary"]);
+  });
+
+  it("能力中心投影来源自己的就绪说明，且不因此发起上传", async () => {
+    const { exposer } = setup({ primary: "local" }, [memoryBackend("local")]);
+    const upload = vi.fn(async () => "https://x.invalid/a");
+    exposer.register(providerExposer("sdpppx-temporary", upload, 10, {
+      temporaryHosting: {
+        category: "provider",
+        priority: 10,
+        validitySeconds: null,
+        ready: () => false,
+        statusNote: () => "未登录 SDPPPX"
+      }
+    }));
+    const view = exposer.temporaryHosting();
+    expect(view.candidates[0]).toMatchObject({ configured: false, available: false, statusNote: "未登录 SDPPPX" });
+    expect(view.error).toMatch(/没有可用的临时图床/);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("按列表顺序回退到下一个提供商，下一次请求从头解析", async () => {    const local = memoryBackend("local");
     const { storage, exposer, logs } = setup({ primary: "local" }, [local]);
     await storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
     let providerAttempts = 0;
@@ -424,14 +483,14 @@ describe("临时图床自动路由", () => {
     exposer.register(providerExposer("second", async () => { otherAttempts += 1; return "https://second.invalid"; }, 2));
     exposer.register(builtinExposer("builtin", async () => "https://builtin.invalid/a"));
 
-    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://builtin.invalid/a");
+    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://second.invalid");
     expect(providerAttempts).toBe(1);
-    expect(otherAttempts).toBe(0);
+    expect(otherAttempts).toBe(1);
     expect(logs.some(event => event.event === "exposer-temporary-fallback")).toBe(true);
     expect(exposer.temporaryHosting().lastFailure).toMatchObject({ exposerId: "first" });
 
     // 失败只影响本次请求：下一次独立请求仍先试提供商。
-    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://builtin.invalid/a");
+    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://second.invalid");
     expect(providerAttempts).toBe(2);
   });
 
@@ -608,4 +667,49 @@ describe("exposerPlugin", () => {
     // 缺对外地址能力不该拖垮宿主：本插件从不登记就绪检查。
     expect(readiness).toHaveLength(0);
   });
+});
+
+
+it("声明 COS 图床后按配置展示、自动选择并先复制素材再签名，显式选择保持兼容", async () => {
+  const cos = memoryBackend("cos", { presign: true });
+  const values = { primary: "local", expose: undefined as string | undefined };
+  const { storage, exposer } = setup(values, [memoryBackend("local"), cos]);
+  const unregister = exposer.register({
+    exposerId: "cos", label: "COS / S3 对象存储", ownerExtensionId: "cos-storage",
+    requiresReplica: true, targetBackendId: "cos",
+    temporaryHosting: { category: "provider", priority: 100, validitySeconds: 900, ready: () => true },
+    expose: input => cos.presign!(`${input.namespace}/${input.key}`, { expiresSeconds: input.expiresSeconds ?? 900 }, input.scope)
+  });
+  expect(exposer.list().filter(item => item.exposerId === "cos")).toHaveLength(1);
+  expect(exposer.temporaryHosting()).toMatchObject({ selectedId: "cos", candidates: [
+    { exposerId: "cos", configured: true, available: true, selected: true, ownerExtensionId: "cos-storage" }
+  ] });
+  await storage.bucket("media").put("reference.png", Uint8Array.of(1, 2, 3), "image/png");
+  const input = { namespace: "media", key: "reference.png", expiresSeconds: 900 };
+  expect(await exposer.expose(input)).toBe("https://cos.invalid/media/reference.png?expires=900");
+  expect(cos.objects.get("media/reference.png")).toEqual({ bytes: Uint8Array.of(1, 2, 3), contentType: "image/png" });
+  values.expose = "cos";
+  expect(exposer.temporaryHosting()).toMatchObject({ mode: "manual", selectedId: "cos" });
+  expect(await exposer.expose(input)).toBe("https://cos.invalid/media/reference.png?expires=900");
+  unregister();
+  expect(exposer.temporaryHosting().candidates).toEqual([]);
+});
+
+
+it("用户排序控制快照与调用优先级，热更新后立即生效并跳过不符合请求的来源", async () => {
+  const values = { primary: "local", order: ["removed", "cos", "cos", "images-only"] };
+  const { storage, exposer } = setup(values, [memoryBackend("local")]);
+  await storage.bucket("media").put("clip.mp4", Uint8Array.of(1), "video/mp4");
+  exposer.register({ exposerId: "cos", requiresReplica: false,
+    temporaryHosting: { category: "provider", priority: 100, validitySeconds: 900 }, expose: async () => "https://cos.invalid" });
+  exposer.register({ exposerId: "images-only", requiresReplica: false,
+    temporaryHosting: { category: "provider", priority: 10, constraints: { mediaKinds: ["image"] } }, expose: async () => "https://images.invalid" });
+  expect(exposer.temporaryHosting().candidates.map(item => item.exposerId)).toEqual(["cos", "images-only"]);
+  expect(await exposer.expose({ namespace: "media", key: "clip.mp4" })).toBe("https://cos.invalid");
+  values.order = ["images-only", "cos"];
+  expect(exposer.temporaryHosting().selectedId).toBe("images-only");
+  expect(exposer.temporaryHosting().candidates.map(item => item.exposerId)).toEqual(values.order);
+  expect(await exposer.expose({ namespace: "media", key: "clip.mp4" })).toBe("https://cos.invalid");
+  exposer.unregister("images-only");
+  expect(exposer.temporaryHosting().selectedId).toBe("cos");
 });

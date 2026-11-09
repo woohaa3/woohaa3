@@ -106,6 +106,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Star,
   Sun,
   Trash,
   Undo2,
@@ -225,6 +226,7 @@ export const SearchIcon = withDefaults(Search);
 export const SettingsIcon = withDefaults(Settings2);
 export const AppSettingsIcon = withDefaults(Settings);
 export const SparklesIcon = withDefaults(Sparkles);
+export const StarIcon = withDefaults(Star);
 export const ActivityIcon = withDefaults(Activity);
 export const FileImageIcon = withDefaults(FileImage);
 export const FileTextIcon = withDefaults(FileText);

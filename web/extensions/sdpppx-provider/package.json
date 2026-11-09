@@ -37,6 +37,7 @@
     "@sdppp/pptask": "workspace:*",
     "@woohaa3/contracts": "workspace:*",
     "@woohaa3/frontend": "workspace:*",
+    "@woohaa3/provider-sdk": "workspace:*",
     "@woohaa3/ui": "workspace:*",
     "react": "^18.3.1"
   },

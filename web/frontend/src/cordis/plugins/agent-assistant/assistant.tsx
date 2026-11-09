@@ -10,7 +10,7 @@ import { UiPortalScope } from "@woohaa3/ui/primitives";
 import { McpConnectionPanel, type McpPanelSnapshot } from "./mcp-connection-panel.js";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import { providerConfigGroups } from "../settings/plugin-groups.js";
-import { HostingOwnerConfiguration, HostingRouteConfiguration } from "./hosting-configuration.js";
+import { HostingOwnerConfiguration, HostingSourceConfiguration } from "./hosting-configuration.js";
 import { PluginIconMark } from "../settings/plugin-icons.js";
 import { CapabilityOverview, type CapabilityPage } from "./capability-pages.js";
 import type { ActiveCapability } from "./capability-directory.js";
@@ -123,6 +123,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
               temporaryHosting={settingsState?.status === "ready" ? settingsState.snapshot.extensionPoints?.temporaryHosting ?? null : null}
               settingsLoading={settingsState?.status === "loading"}
               settingsError={settingsState?.status === "error" ? settingsState.error : settingsState?.status === "unauthorized" ? "临时图床配置由管理员管理。" : null}
+              hostingSettingsStore={settingsStore}
               onRetrySettings={() => void settingsStore?.load()}
               onOpenHostingOwner={ownerId => setHostingConfiguration({ ownerId })}
               onConfigureHosting={() => setHostingConfiguration({})} />
@@ -146,7 +147,7 @@ export function AgentAssistant({ service, payload, onClose, settingsStore, onCon
             : "临时图床配置"} onClose={() => setHostingConfiguration(null)}>
             {settingsState?.status === "ready" && settingsStore ? hostingConfiguration.ownerId
               ? <HostingOwnerConfiguration ownerId={hostingConfiguration.ownerId} snapshot={settingsState.snapshot} store={settingsStore} onSaved={hostingSaved} />
-              : <HostingRouteConfiguration snapshot={settingsState.snapshot} store={settingsStore} onSaved={hostingSaved} />
+              : <HostingSourceConfiguration snapshot={settingsState.snapshot} onOpenOwner={ownerId => setHostingConfiguration({ ownerId })} />
               : <SettingsFeedback tone="warning">{settingsState?.status === "error" ? settingsState.error : "临时图床配置暂不可用。"}<Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback>}
           </AssistantDrawer> : null}
         </div>
