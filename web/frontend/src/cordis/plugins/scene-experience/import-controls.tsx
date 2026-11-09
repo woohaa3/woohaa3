@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@woohaa3/ui/primitives';
+import { randomId } from '@woohaa3/contracts';
 import { createScenePackageClient, markSceneEntry, type SceneJob } from './scene-experience.js';
 import './scene-experience.css';
 const defaultClient = createScenePackageClient();
@@ -28,7 +29,7 @@ export function ScenePackageImport({openCanvas,client=defaultClient}:{openCanvas
     if(!upload.current) return;
     active.current?.abort();const controller=new AbortController();active.current=controller;
     opened.current=false;setBusy(true);setMessage('正在上传并校验场景包…');setDuplicate(false);setJob(null);
-    if(copy) upload.current.id=crypto.randomUUID();
+    if(copy) upload.current.id=randomId();
     try {
       const response=await client.importFile(upload.current.file,upload.current.id,copy,controller.signal);
       if(controller.signal.aborted) return;
@@ -53,7 +54,7 @@ export function ScenePackageImport({openCanvas,client=defaultClient}:{openCanvas
     <div className="scene-experience__actions">
       <input ref={fileInput} type="file" accept=".woohaa-scene" disabled={!available||busy} onChange={event=>{
         const file=event.currentTarget.files?.[0];if(!file)return;
-        upload.current={file,id:crypto.randomUUID()};void run();event.currentTarget.value='';
+        upload.current={file,id:randomId()};void run();event.currentTarget.value='';
       }} />
       {duplicate && job?.phase==='ready' ? <><Button size="sm" onClick={()=>openCanvas(job.canvasId)}>打开已有画布</Button><Button size="sm" onClick={()=>void run(true)}>导入副本</Button></> : null}
       {!busy && upload.current && !duplicate && job?.phase!=='ready' && job?.phase!=='cancelled' && job?.error?.retryable!==false ? <Button size="sm" onClick={()=>void run()}>重试本次导入</Button> : null}

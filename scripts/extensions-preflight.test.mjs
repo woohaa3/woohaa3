@@ -275,3 +275,60 @@ test("preflightDirectory：内置根（非受管）不受这些规则影响", as
   });
   assert.deepEqual((await preflightDirectory(dir)).errors, []);
 });
+
+/** 构造一个最小扩展目录，按需放入运行期条目并声明 `files`。 */
+function filesFixture({ present, files }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-files-"));
+  const pkg = { name: "@woohaa3/extension-x", version: "0.1.0", type: "module" };
+  if (files !== undefined) pkg.files = files;
+  fs.writeFileSync(path.join(dir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  for (const entry of present) {
+    if (entry.includes(".")) {
+      fs.mkdirSync(path.dirname(path.join(dir, entry)), { recursive: true });
+      fs.writeFileSync(path.join(dir, entry), "");
+    } else {
+      fs.mkdirSync(path.join(dir, entry), { recursive: true });
+      fs.writeFileSync(path.join(dir, entry, ".keep"), "");
+    }
+  }
+  return dir;
+}
+
+test("packageFilesProblems：files 漏写运行期目录时失败，并说清后果", async () => {
+  const { packageFilesProblems } = await import("./extensions-preflight.mjs");
+  const dir = filesFixture({
+    present: ["extension.json", "assets/icon.png", "browser-dist/artifact-manifest.json", "dist", "src"],
+    files: ["dist", "src"]
+  });
+  try {
+    const problems = packageFilesProblems([{ extensionId: "demo", dir }]);
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0].extensionId, "demo");
+    // 三条遗漏都要报出来，措辞里点明「pnpm deploy 不会复制」这个根因。
+    assert.match(problems[0].message, /extension\.json/);
+    assert.match(problems[0].message, /assets/);
+    assert.match(problems[0].message, /browser-dist/);
+    assert.match(problems[0].message, /pnpm deploy --prod 不会复制/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("packageFilesProblems：声明完整或目录里本就没有该条目时通过", async () => {
+  const { packageFilesProblems } = await import("./extensions-preflight.mjs");
+  const complete = filesFixture({
+    present: ["extension.json", "assets", "browser-dist", "dist"],
+    files: ["dist", "browser-dist", "extension.json", "assets"]
+  });
+  // 后端扩展：没有 assets / browser-dist，只声明存在的条目即可。
+  const backendOnly = filesFixture({ present: ["extension.json", "dist"], files: ["dist", "extension.json"] });
+  // 无 files 字段：npm 默认打包全部文件，不存在漏复制。
+  const noFilesField = filesFixture({ present: ["extension.json", "dist"] });
+  try {
+    assert.deepEqual(packageFilesProblems([{ extensionId: "complete", dir: complete }]), []);
+    assert.deepEqual(packageFilesProblems([{ extensionId: "backend-only", dir: backendOnly }]), []);
+    assert.deepEqual(packageFilesProblems([{ extensionId: "no-files", dir: noFilesField }]), []);
+  } finally {
+    for (const dir of [complete, backendOnly, noFilesField]) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

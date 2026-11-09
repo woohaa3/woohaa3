@@ -54,6 +54,9 @@ core.[0-9]*
 
 # local dev runtime (sqlite dev database, probes)
 .local/
+# web host 单文件产物（scripts/prepare-web-host.mjs --single-file 的输出）：上百 MB 的
+# 可执行文件，纯构建产物，不入库；分发走 release 流程。
+/woohaa-web-host*
 # 本地 dev/preview 从仓库根启动后端时，generation 存储缺省落在 cwd
 /generation-models.sqlite
 

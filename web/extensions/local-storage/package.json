@@ -12,7 +12,8 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "extension.json"
   ],
   "scripts": {
     "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend",

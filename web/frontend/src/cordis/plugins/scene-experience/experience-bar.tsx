@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Button } from '@woohaa3/ui/primitives';
+import { randomId } from '@woohaa3/contracts';
 import { useService } from '../../react.js';
 import { appBuildVersion } from '../../services/build-info.js';
 import { sceneDiagnosticsSnapshot } from '../canvas-runtime/scene-diagnostics.js';
@@ -112,7 +113,7 @@ export function SceneExperienceBar({canvasId,surfaceRef,ready,hidden=false}:{can
   async function restore() {
     if(!receipt)return;
     operation.current?.abort();const abort=new AbortController();operation.current=abort;
-    setRestoring(true);setConfirmRestore(false);resetId.current??=crypto.randomUUID();
+    setRestoring(true);setConfirmRestore(false);resetId.current??=randomId();
     try {
       let job=(await client.reset(canvasId,resetId.current,abort.signal)).job;
       while(!['ready','failed','cancelled'].includes(job.phase)) {

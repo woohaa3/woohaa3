@@ -2,6 +2,7 @@ import {
   GLB_MEDIA_TYPE,
   hasReadyMediaAsset,
   isGlbModelNodeData,
+  randomId,
   readGlbModelAssetId,
   type ServerCanvas,
   type StoredAsset
@@ -69,7 +70,7 @@ export class NodeDownloadService {
         }
       } else if (node.type === "image" || node.type === "video") {
         const asset = data?.mediaContent
-          ? await this.options.mediaContent?.resolve(nodeId, "resolvePreview", `download:${crypto.randomUUID()}`)
+          ? await this.options.mediaContent?.resolve(nodeId, "resolvePreview", `download:${randomId()}`)
           : canvas.assets.find(asset => asset.id === data?.outputAssetId);
         if (!asset || asset.status !== "ready" || !hasReadyMediaAsset(asset) || asset.mediaKind !== node.type) throw new Error("资源尚未就绪，暂时无法下载");
         blob = await (this.options.readMedia ?? readCanonicalMedia)(asset, abort.signal, canvas.id);

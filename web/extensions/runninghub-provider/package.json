@@ -20,7 +20,10 @@
   },
   "files": [
     "dist",
-    "src"
+    "browser-dist",
+    "src",
+    "extension.json",
+    "assets"
   ],
   "scripts": {
     "build": "node ../../scripts/build-package.mjs --entry src/frontend/index.ts --outdir dist --platform browser --entry-name frontend && node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",

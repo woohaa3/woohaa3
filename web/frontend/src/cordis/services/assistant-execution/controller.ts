@@ -1,4 +1,6 @@
 /** Page-owned input state. A pending request survives layout unmounts and never adopts later edits. */
+import { randomId } from "@woohaa3/contracts";
+
 export type AssistantDraftValue = {
   connection?: import("@woohaa3/contracts").AgentConnectionBinding;
   prompt: string;
@@ -88,12 +90,12 @@ export function createAssistantInputController<Input, Accepted>(initial: Partial
     submit(input: Input, port: AssistantSubmissionPort<Input, Accepted>) {
       // Even if the user edited the draft, retry means the original frozen intent.
       if (!state.pending && !state.busy) update({ pending: {
-        requestId: `assistant:${crypto.randomUUID()}`, input: structuredClone(input), revision: state.revision,
+        requestId: `assistant:${randomId()}`, input: structuredClone(input), revision: state.revision,
       } });
       return run(port, false);
     },
     submitIndependent(input: Input, port: AssistantSubmissionPort<Input, Accepted>) {
-      const requestId = `assistant:${crypto.randomUUID()}`;
+      const requestId = `assistant:${randomId()}`;
       update({ notice: null, submissions: [...state.submissions, { requestId, input: structuredClone(input), revision: state.revision, busy: false }] });
       return runIndependent(requestId, port);
     },

@@ -15,6 +15,7 @@
  */
 import {
   normalizeVideoEditIntents,
+  randomId,
   sortVideoEditIntents,
   type CanvasCommand,
   type CanvasNodeData,
@@ -55,7 +56,7 @@ export class VideoDialogsSession {
     if (result.ok) this.editTargets.set(result.instanceId, {
       nodeId: payload.targetNodeId,
       // Dialog 实例计数在页面重载后重新开始，不能作为持久命令的唯一身份。
-      commandId: `web-video-edit-${crypto.randomUUID()}`
+      commandId: `web-video-edit-${randomId()}`
     });
     return result;
   }

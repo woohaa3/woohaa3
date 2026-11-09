@@ -15,7 +15,7 @@ import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { planDeleteNodes } from "../../../extension-api/command-planner.js";
 import type { InteractionCore } from "./interaction-core.js";
-import { managedNodeRelationOf, partitionManagedNodeDeletion } from "@woohaa3/contracts";
+import { managedNodeRelationOf, partitionManagedNodeDeletion, randomId } from "@woohaa3/contracts";
 
 /** 页内剪贴板 fallback 的全局键。 */
 export const MEMORY_CLIPBOARD_KEY = "__canvasMemoryClipboard";
@@ -70,7 +70,7 @@ export function createKeyboardShortcuts(core: InteractionCore) {
     }).map(n => n.id);
     if (!liveIds.length) return buildClipboardText();
     if (!options.mediaContent) throw Error("媒体内容 provider 未就绪，无法复制");
-    const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, crypto.randomUUID());
+    const frozen = await options.mediaContent.freeze(copyable.canvasState, liveIds, randomId());
     const frozenPayload = buildCanvasCopyPayload(frozen, copyable.others, );
     if (!frozenPayload) return null;
     const text = serializeCanvasCopyPayload(frozenPayload);

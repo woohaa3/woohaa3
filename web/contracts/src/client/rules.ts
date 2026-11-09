@@ -5,6 +5,7 @@
  * 有限 transport retry、correlation ID 与日志脱敏语义。这里只放**纯规则函数**，不做任何
  * I/O：真正的 `fetch` 由各服务的 client 注入，因此 contracts 保持无副作用（design D7）。
  */
+import { randomId } from "./random-id.js";
 import { CORRELATION_ID_HEADER,
   SERVICE_TOKEN_HEADER,
   WOOHAA3_PROTOCOL_VERSION,
@@ -43,9 +44,7 @@ export function createCorrelationId(generate: () => string = defaultId): string 
 }
 
 function defaultId(): string {
-  const random = globalThis.crypto?.randomUUID?.();
-  if (random) return random;
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return randomId();
 }
 
 /**

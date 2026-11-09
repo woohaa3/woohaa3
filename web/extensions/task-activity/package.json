@@ -16,6 +16,7 @@
   },
   "files": [
     "dist",
+    "browser-dist",
     "src"
   ],
   "scripts": {

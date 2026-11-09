@@ -1,5 +1,5 @@
 /** Page-scoped open content resolution. Only confirmed immutable assets enter the existing media pipeline. */
-import { decodeMediaContentRef, type CanvasCommand, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { decodeMediaContentRef, randomId, type CanvasCommand, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import type { MediaContentContext, MediaContentKind, MediaContentProvider, MediaContentService, MediaContentSource, MediaContentState } from "../../extension-api/media-content.js";
 const identity = (v: unknown): string => JSON.stringify(v);
 export function createMediaContentService(options: {
@@ -107,7 +107,7 @@ export function createMediaContentService(options: {
     repairs.set(nodeId, key);
     const expectedNodeData = Object.fromEntries([...new Set([nodeId, ...source.dependencyNodeIds])].map(id => [id, canvas.nodeData[id] ?? null]));
     void options.submit([{ type: "nodeData.patch", nodeId, expectedNodeData,
-      value: { outputAssetId: asset.id, status: "ready" } }], `media-content-repair:${nodeId}:${crypto.randomUUID()}`).then(
+      value: { outputAssetId: asset.id, status: "ready" } }], `media-content-repair:${nodeId}:${randomId()}`).then(
       () => {
         if (repairs.get(nodeId) === key) repairs.delete(nodeId);
         clearRetry(nodeId);
@@ -167,7 +167,7 @@ export function createMediaContentService(options: {
           const expectedNodeData = Object.fromEntries([...new Set([node.id, ...source.dependencyNodeIds])].map(id => [id, latest.nodeData[id] ?? null]));
           if (describe(latest, ref, node.type as MediaContentKind).sourceIdentity !== source.sourceIdentity) return;
           await options.submit([{ type: "nodeData.patch", nodeId: node.id, expectedNodeData,
-            value: { outputAssetId: asset.id, status: "ready" } }, { type: "asset.upsert", asset }], `media-content:${node.id}:${crypto.randomUUID()}`);
+            value: { outputAssetId: asset.id, status: "ready" } }, { type: "asset.upsert", asset }], `media-content:${node.id}:${randomId()}`);
           if (!disposed && attempts.get(node.id) === fingerprint) { states.set(node.id, { status: "ready", asset, sourceIdentity: source.sourceIdentity }); clearRetry(node.id); notify(); }
         } catch (error) {
           // 失败可能来自宿主重连或并发写回冲突；清掉本次指纹，下一轮画布变化/provider

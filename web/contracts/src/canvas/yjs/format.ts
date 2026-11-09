@@ -12,6 +12,8 @@
  * - 渲染帧版本：单页面渲染通道的本地单调版本
  */
 
+import { randomId } from "../../client/random-id.js";
+
 /** Y.Doc 内部格式版本；与 asset-canvas-v1（JSON 格式）独立演进。 */
 export const YJS_CANVAS_FORMAT_VERSION = "woohaa3-ycanvas-v2" as const;
 export type YjsCanvasFormatVersion = typeof YJS_CANVAS_FORMAT_VERSION;
@@ -27,9 +29,8 @@ export { YJS_SYNC_PROTOCOL_VERSION, type YjsSyncProtocolVersion } from "../sync-
  * 即必须丢弃本地 cache 重新同步），而不是靠消息 sequence 推断。
  */
 export type CanvasRoomEpoch = string;
-
 /** 生成一个新的 room epoch。调用方注入实现以便测试确定性。 */
-export function createRoomEpoch(generate: () => string = () => crypto.randomUUID()): CanvasRoomEpoch {
+export function createRoomEpoch(generate: () => string = () => randomId()): CanvasRoomEpoch {
   return generate();
 }
 

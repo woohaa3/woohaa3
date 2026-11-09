@@ -15,6 +15,7 @@
 import { CommandLifecycleRegistry, CanvasDatabase, IndexedDbYjsCacheRepository, WorkingProjectionStore, applyYjsCacheToDoc, createCanonicalProjectionCache, validateYjsCache, woohaa3CanvasStore, type CanvasSyncStatus } from "./canvas-state/index.js";
 import * as Y from "yjs";
 import type { CanvasAccess, CanvasCommand, ServerCanvas, TelemetryEventInput } from "@woohaa3/contracts";
+import { randomIdHex } from "@woohaa3/contracts";
 import { yDocToServerCanvas, YJS_SYNC_PROTOCOL_VERSION, YJS_CANVAS_FORMAT_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import type { CommandResultPayload } from "@woohaa3/contracts/canvas-yjs";
 import { ReadonlyCanvasProvider, type ReadonlyProviderState } from "./yjs/readonly-provider.js";
@@ -36,16 +37,10 @@ export const DEFAULT_CANVAS_ID = "woohaa3-default-canvas";
 
 /**
  * 一次画布会话的关联标识：32 位小写十六进制，与 trace_id 同形状。
- *
- * 不用 crypto.randomUUID()：它在非安全上下文（局域网 http）里不可用，而画布
- * 完全可能通过这种地址打开。getRandomValues 没有这个限制。
+ * 不在非安全上下文（局域网 http）里失效——实现见 `randomIdHex()`。
  */
 function createTelemetrySessionId(): string {
-  const bytes = new Uint8Array(16);
-  const webCrypto = globalThis.crypto;
-  if (webCrypto && typeof webCrypto.getRandomValues === "function") webCrypto.getRandomValues(bytes);
-  else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return randomIdHex();
 }
 
 /**

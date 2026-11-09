@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
+import { randomId } from "@woohaa3/contracts";
 import { useSlot } from "../../host.js";
 import { useOptionalService } from "../../react.js";
 import { Button, IconButton, SettingsFeedback, ServiceLogo } from "@woohaa3/ui";
@@ -383,7 +384,7 @@ function ServiceSources({ service, connections, contributions, payload, settings
             return <div key={otherId}><p>可能与「{other.name}」重复。相同地址也可以是不同账号；只在确认同一授权时合并。</p><Button size="sm" onClick={() => {
               const key = JSON.stringify([id, otherId, source.configRevision, other.configRevision]);
               let operationId = mergeOperations.current.get(key);
-              if (!operationId) { operationId = crypto.randomUUID(); mergeOperations.current.set(key, operationId); }
+              if (!operationId) { operationId = randomId(); mergeOperations.current.set(key, operationId); }
               setConfirmation({ action: "merge", operationId, retainedId: id, removedId: otherId, retained: source, removed: other });
             }}>保留此来源并合并 {other.bindings.length} 个绑定</Button></div>;
           })}

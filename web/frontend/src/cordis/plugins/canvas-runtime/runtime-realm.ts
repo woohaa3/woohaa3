@@ -1,5 +1,6 @@
 import type { BevyModule } from "./bevy-runtime-types.js";
 import { appPublicUrl } from "../../services/app-base-path.js";
+import { randomId } from "@woohaa3/contracts";
 
 declare const __WOOHAA_NATIVE_ONLY__: boolean;
 
@@ -78,7 +79,7 @@ export async function createRuntimeRealm(target: typeof globalThis, fault: (reas
     cleanups.push(() => target.clearTimeout(timer));
     host.prepend(iframe);
     // A same-origin bootstrap handoff survives the document navigation via the parent.
-    const token = crypto.randomUUID();
+    const token = randomId();
     const registry = target as typeof globalThis & { __rendererRealms?: Map<string, { ready(module: BevyModule): void; fault(reason: string): void }> };
     registry.__rendererRealms ??= new Map();
     registry.__rendererRealms.set(token, {

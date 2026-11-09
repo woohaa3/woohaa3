@@ -50,6 +50,46 @@ export const DEFAULT_REPO_ROOT = path.resolve(HERE, "..");
 export const REQUIRED_SLOTS = FOUNDATION_SLOT_NAMES;
 
 /**
+ * `package.json` 的 `files` 必须覆盖扩展运行期要用到的目录。
+ *
+ * 为什么需要在预检里失败：`pnpm deploy --prod`（release 装配与桌面随包宿主都用它）只复制
+ * `files` 列出的条目。漏写不会在构建期报错，而是在部署后表现为：
+ * - 缺 `extension.json` → 扫描器**静默跳过**该扩展（「装了却没注册」，例如
+ *   `storage.primary=local` 未注册导致 readiness 永远 503）；
+ * - 缺 `assets/` → 扩展声明的品牌图形不存在，**启动期直接失败**；
+ * - 缺 `browser-dist/` → 前端产物缺失，扩展界面加载不出来。
+ * 2026-11 实测 14 个扩展踩了这个坑，所以这里按「文件存在但未声明」判失败。
+ *
+ * 目录里不存在的条目不算问题：扩展可以没有前端产物或没有图形资产。
+ */
+export function packageFilesProblems(extensions) {
+  const required = ["extension.json", "assets", "browser-dist"];
+  const problems = [];
+  for (const extension of extensions) {
+    const manifestFile = path.join(extension.dir, "package.json");
+    if (!fs.existsSync(manifestFile)) continue;
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    } catch {
+      continue; // 非法 JSON 由其它检查报错
+    }
+    // 没有 `files` 时 npm 打包会包含全部文件，不存在漏复制问题。
+    if (!Array.isArray(manifest.files)) continue;
+    const missing = required.filter(
+      (entry) => fs.existsSync(path.join(extension.dir, entry)) && !manifest.files.includes(entry)
+    );
+    if (missing.length === 0) continue;
+    problems.push({
+      extensionId: extension.extensionId,
+      directory: extension.dir,
+      message: `package.json 的 files 未声明运行期必需的 ${missing.join("、")}：pnpm deploy --prod 不会复制它们（缺 extension.json 会被静默跳过，缺 assets 会让启动失败）`
+    });
+  }
+  return problems;
+}
+
+/**
  * 收集预检问题（纯函数：只读宿主结果与扩展目录）。
  *
  * `slotDeclarations` 传入时额外校验槽位覆盖（change:
@@ -80,6 +120,7 @@ export function collectPreflightProblems(host, { slotDeclarations = null } = {})
     for (const message of iconAssets.errors) errors.push({ extensionId: "品牌图形", directory: "", message });
   }
   errors.push(...contentDeclarationCollisions(host.registrations));
+  errors.push(...packageFilesProblems(host.scan.extensions));
   for (const extension of host.scan.extensions) {
     const built = hasBrowserArtifact(extension.dir);
     const hasSources = hasBrowserEntry(extension.dir);

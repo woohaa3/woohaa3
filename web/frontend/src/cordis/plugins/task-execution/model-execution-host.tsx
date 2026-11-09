@@ -18,7 +18,7 @@ import { ExecutionPanelShell } from "../../ui/index.js";
 import { ExecutionPanelSurface, resolveExecutionPanelSurface } from "./execution-panel-surface.js";
 import { Button } from "@woohaa3/ui";
 import { AssistantModelSelector } from "@woohaa3/ui/assistant";
-import { resolveModelSubmissionParameters } from "@woohaa3/contracts";
+import { randomId, resolveModelSubmissionParameters } from "@woohaa3/contracts";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
 import { createSubmitCoordinator } from "./submit-coordinator.js";
@@ -82,7 +82,7 @@ function executionButtonOrigin(button: HTMLButtonElement | null): ExecutionOrigi
   const style = button.ownerDocument.defaultView!.getComputedStyle(button);
   const radius = Number.parseFloat(style.borderTopLeftRadius) || 0;
   return {
-    x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, token: crypto.randomUUID(),
+    x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, token: randomId(),
     surface: { width: rect.width, height: rect.height,
       radius: style.borderTopLeftRadius.endsWith("%") ? Math.min(rect.width, rect.height) * radius / 100 : radius,
       color: style.backgroundColor === "rgba(0, 0, 0, 0)" || style.backgroundColor === "transparent"

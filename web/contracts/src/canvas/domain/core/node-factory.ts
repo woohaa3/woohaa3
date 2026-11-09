@@ -1,5 +1,6 @@
 import type { Woohaa3CanvasNode } from "./canvas-runtime";
 import { woohaa3CanvasGridSize } from "./grid";
+import { randomId } from "../../../client/random-id.js";
 
 type Woohaa3CanvasPosition = {
   x: number;
@@ -131,12 +132,9 @@ function stableIdPrefix(prefix: string): string {
   return trimmed.length > 0 ? trimmed : "id";
 }
 
-/** 生成高熵后缀；优先 Web Crypto，回退到时间戳 + 随机。 */
+/** 生成高熵后缀；统一走 `randomId()`（安全上下文无关，见 `client/random-id`）。 */
 function highEntropySuffix(): string {
-  const cryptoRef = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (typeof cryptoRef?.randomUUID === "function") return cryptoRef.randomUUID();
-  const random = Math.random().toString(36).slice(2, 10);
-  return `${Date.now().toString(36)}-${random}`;
+  return randomId();
 }
 
 function createUniqueWoohaa3CanvasNodeId(prefix: string, existingIds: Set<string>): string {

@@ -4,6 +4,7 @@
  */
 import type { CanvasSession } from "../../contracts.js";
 import type { CanvasTaskCatalogModel, CanvasTaskModelType, ServerCanvas } from "@woohaa3/contracts";
+import { randomId } from "@woohaa3/contracts";
 import { planConnectEdge } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
 import type { ReferenceItem } from "./reference-items.js";
@@ -43,7 +44,7 @@ export function changeReferences(session: CanvasSession, canvas: ServerCanvas | 
   if (!session.isWritable() || !canvas) { onFailure?.("画布当前只读，无法修改参考"); return false; }
   const commands = planReferenceChange(canvas, target, { remove, ...(replacement ? { replacement } : {}) });
   if (!commands) { onFailure?.("参考已变化，请重新选择"); return false; }
-  const result = session.submitCommands(commands, `web-ref-change-${crypto.randomUUID()}`);
+  const result = session.submitCommands(commands, `web-ref-change-${randomId()}`);
   if (!result.ok) { onFailure?.(result.reason); return false; }
   void result.handle.settled.then(receipt => {
     if (receipt.state === "rejected") onFailure?.(receipt.error ?? "参考修改未保存，请重新选择");

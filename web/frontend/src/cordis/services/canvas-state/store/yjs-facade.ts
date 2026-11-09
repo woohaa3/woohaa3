@@ -12,6 +12,8 @@
  * - selection / 拖拽 preview / 表单 draft 属于本地瞬时状态，不进入这里的命令路径。
  */
 
+import { randomId } from "@woohaa3/contracts";
+
 /** 命令生命周期状态（design D9；observed 由 working projection 的 effect satisfaction 驱动）。 */
 export type CommandLifecycle =
   | "pending"
@@ -72,7 +74,7 @@ export class CommandLifecycleRegistry {
   constructor(options: CommandLifecycleRegistryOptions) {
     this.derivedRevision = options.derivedRevision;
     this.onChange = options.onChange;
-    this.generateCommandId = options.generateCommandId ?? (() => crypto.randomUUID());
+    this.generateCommandId = options.generateCommandId ?? (() => randomId());
   }
 
   /** 开启一个待提交命令。传入 commandId 时复用它（wire 必须与登记一致）。 */
