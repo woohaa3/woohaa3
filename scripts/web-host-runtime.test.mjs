@@ -74,9 +74,19 @@ test('base path mount strips the prefix once and serves the same assets', async 
       basePath: '/tools/woohaa/',
       backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {} }
     });
-    assert.equal((await fetch(`${server.origin}/tools/woohaa/`)).status, 200);
+    const entry = await fetch(`${server.origin}/tools/woohaa/`);
+    await entry.text();
+    assert.equal(entry.status, 200);
     // 前缀外请求不进入应用（也不走 SPA 回退）。
-    assert.equal((await fetch(`${server.origin}/`)).status, 404);
+    //
+    // 根路径是例外：子路径部署下它现在重定向到 basePath（见下面的专项用例），
+    // 因为运维习惯直接访问 `http://host:port/`。这里验证的是**除根路径外**
+    // 的前缀外请求仍是 404，不会落到应用或 SPA 回退。
+    for (const outside of ['/other', '/tools/other/']) {
+      const response = await fetch(`${server.origin}${outside}`, { redirect: 'manual' });
+      await response.text();
+      assert.equal(response.status, 404, `${outside} 应在前缀外被拒`);
+    }
     await server.close();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -134,5 +144,50 @@ test('dangling pnpm links are pruned so the tree stays portable', () => {
     assert.ok(fs.existsSync(path.join(root, 'pkg/real.js')));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('子路径部署：根路径重定向到 basePath，且保留 query', async () => {
+  const dir = fixture();
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      basePath: '/tools/woohaa/',
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {} }
+    });
+    // 运维习惯访问根路径；子路径部署下裸 404 不友好，重定向更符合预期。
+    // 必须消费响应体：`redirect: 'manual'` 下若只读 header 就丢弃响应，连接不会归还，
+    // 随后的 server.close()（等全部连接结束）会一直挂着。
+    const root = await fetch(`${server.origin}/`, { redirect: 'manual' });
+    await root.text();
+    assert.equal(root.status, 302);
+    assert.equal(root.headers.get('location'), '/tools/woohaa/');
+
+    const withQuery = await fetch(`${server.origin}/?a=1&b=2`, { redirect: 'manual' });
+    await withQuery.text();
+    assert.equal(withQuery.headers.get('location'), '/tools/woohaa/?a=1&b=2');
+
+    // 子路径本身仍是 200，不被重定向影响。
+    assert.equal((await fetch(`${server.origin}/tools/woohaa/`)).status, 200);
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('根路径部署：不重定向（basePath=/ 时根就是应用入口）', async () => {
+  const dir = fixture();
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      basePath: '/',
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {} }
+    });
+    const root = await fetch(`${server.origin}/`, { redirect: 'manual' });
+    await root.text();
+    assert.equal(root.status, 200);
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

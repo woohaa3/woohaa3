@@ -51,6 +51,18 @@ export async function startWebHostServer({
       send(res, 503, 'host is shutting down');
       return;
     }
+    // 挂在子路径时，根路径重定向到应用入口。
+    //
+    // 运维和用户习惯直接访问 `http://host:port/`；子路径部署下那个地址本来只会得到
+    // 一个 404（前缀外请求不进应用）。重定向比 404 更符合预期，也不影响挂载语义
+    // ——根路径本身不在应用范围内，这里只是一个便利入口。
+    const rawPath = (req.url ?? '/').split('?')[0];
+    if (basePath !== '/' && (rawPath === '/' || rawPath === '')) {
+      const query = (req.url ?? '').includes('?') ? `?${(req.url ?? '').split('?').slice(1).join('?')}` : '';
+      res.writeHead(302, { location: `${basePath}${query}`, 'content-length': '0' });
+      res.end();
+      return;
+    }
     // 公开挂载边界：只剥离一次前缀；前缀外请求不进后端也不走 SPA 回退。
     const action = applyHttpMount(basePath, req);
     if (interceptHttpMount(req, res, action)) return;
