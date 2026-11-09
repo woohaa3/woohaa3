@@ -17,7 +17,7 @@ import { lazy, Suspense } from "react";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { definePlugin } from "../../plugin.js";
-import { ALERT_DIALOG_ID } from "../../services/dialogs/alert-dialog.js";
+import { createDiscardConfirmation } from "./discard-confirmation.js";
 import { createBackendSettingsStore, withRuntimeStateRefresh } from "./backend-settings-store.js";
 import { providerExtensionIds } from "./plugin-groups.js";
 import { createExtensionManagerFacade } from "../extension-manager/facade.js";
@@ -257,59 +257,8 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
        * 用共享 AlertDialog（保留「继续编辑」为默认安全动作）；结果按子实例身份结算，父实例已释放
        * 或已变化时丢弃迟到结果。
        */
-      const confirmDiscard = (instanceId: string, description: string) =>
-        new Promise<boolean>((resolve) => {
-          const actionKey = `settings-discard:${instanceId}`;
-          let abandon = false;
-          /*
-           * 确认弹窗自己的实例 id：注册动作时还不知道，`open` 之后才回填。
-           * 动作必须**先于** `open` 注册 —— 渲染时就会 `resolveAlertAction(actionKey)`，
-           * 晚一步注册那一次渲染拿到的就是 null。
-           */
-          let childId: string | null = null;
-          const disposeAction = ctx.dialogs.registerAlertAction(actionKey, async () => {
-            abandon = true;
-            /*
-             * 确认成功后**必须由这里关掉确认弹窗**。
-             *
-             * `AlertDialog` 的约定是「成功时不自己关闭，由调用方按 instanceId 关闭」
-             * （见 services/dialogs/AlertDialog.tsx 顶部注释）。漏掉这一步就是死锁:
-             * 下面的 `unsubscribe` 要等弹窗消失才 resolve，而关闭弹窗的代码又写在
-             * resolve 之后的 `.then` 里 —— 两边互相等待，用户看到的是按钮全部变灰、
-             * 弹窗再也关不掉（实测就是这么卡住的）。
-             *
-             * 用 `close()` 而不是 `requestClose()`:`requestClose` 在 busy 时会被拒绝，
-             * 而确认成功后弹窗正处在 busy。（node-merge 的合并确认也是同一个写法。）
-             */
-            if (childId) ctx.dialogs.close(childId);
-            return { ok: true };
-          });
-          const opened = ctx.dialogs.open({
-            dialogId: ALERT_DIALOG_ID,
-            payload: {
-              title: "放弃未保存的修改？",
-              description,
-              confirmLabel: "放弃修改",
-              cancelLabel: "继续编辑",
-              danger: true,
-              actionKey
-            }
-          });
-          if (!opened.ok) {
-            disposeAction();
-            resolve(false);
-            return;
-          }
-          const openedChildId: string = opened.instance.instanceId;
-          childId = openedChildId;
-          const unsubscribe = ctx.dialogs.subscribe(() => {
-            if (ctx.dialogs.find(openedChildId)) return;
-            unsubscribe();
-            disposeAction();
-            // 父实例已释放（页面离开等）时不算放弃：调用方拿到 false 就什么都不做。
-            resolve(abandon && ctx.dialogs.find(instanceId) !== null);
-          });
-        });
+      const discardConfirmation = createDiscardConfirmation(ctx.dialogs);
+      const confirmDiscard = discardConfirmation.confirm;
 
       // 关闭 guard：所有关闭来源（Header X / Escape / 遮罩 / 业务 requestClose）共用。
       const disposeGuard = ctx.dialogs.registerCloseGuard(SETTINGS_DIALOG_ID, (dialog) => {
@@ -444,6 +393,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
         () => () => {
           disposed = true;
           hooks.__settings = undefined;
+          discardConfirmation.dispose();
           closeOwnedDialogs();
           disposeDialog();
           disposeGuard();
