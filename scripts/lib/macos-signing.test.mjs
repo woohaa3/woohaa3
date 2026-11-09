@@ -95,7 +95,7 @@ test("ad-hoc 身份不做公证", () => {
 
 test("公证凭据：两种模式互斥，且缺项要指名", () => {
   const keyPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "notary-")), "AuthKey.p8");
-  fs.writeFileSync(keyPath, "-----BEGIN PRIVATE KEY-----");
+  fs.writeFileSync(keyPath, "test-key-placeholder");
   try {
     assert.equal(notarizationCredentials({}), null);
     assert.deepEqual(

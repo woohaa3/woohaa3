@@ -11,7 +11,7 @@
  * macOS 签名/公证：
  * - `APPLE_SIGNING_IDENTITY` 给 40 位 SHA-1 指纹（同名证书会歧义）即用 Developer ID 签名；
  *   不给或给 `-` 是 ad-hoc。
- * - 公证由 tauri 驱动 `notarytool`，需要 `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH`
+ * - App 公证由 tauri 驱动，DMG 随后独立提交 `notarytool` 并装订，需要 `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH`
  *   或 `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID`。
  * - 宿主动作树里的 Mach-O 在 bundle 之外，由本脚本在打归档前用同一身份签掉。
  *
@@ -54,6 +54,7 @@ import {
   validateIconSource
 } from "./lib/desktop-release.mjs";
 import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
+import { notarizeMacDiskImages } from "./lib/macos-notarization.mjs";
 import {
   ADHOC_IDENTITY,
   describeMacSigning,
@@ -287,8 +288,8 @@ function verifyMacSignature({ artifacts, signing }) {
     if (!/^TeamIdentifier=\S+/m.test(details)) throw new Error(`产物缺少 TeamIdentifier：${relative(app.path)}`);
   }
 
-  // 装了票据才算公证通过。tauri 在 `--bundles app,dmg` 时把票据打进 DMG，
-  // `.app` 自身可能没有，所以两个产物都试。
+  // Tauri 公证并装订 App；随后生成的 DMG 由 notarizeMacDiskImages 独立公证。
+  // 每个分发目标都必须有票据，不能用 App 的票据代替 DMG 的票据。
   //
   // 判据是 `stapler validate`（读包内票据，不看缓存），**不是** `spctl`：spctl 查本机
   // Gatekeeper 缓存，CI 机器评估过同一路径的旧 ad-hoc 包后会持续返回 rejected，
@@ -296,13 +297,16 @@ function verifyMacSignature({ artifacts, signing }) {
   const targets = [app, dmg].filter(Boolean);
   const stapled = targets.filter(target => capture("/usr/bin/xcrun", ["stapler", "validate", target.path]) !== null);
   for (const target of targets) {
-    const assessment = capture("/usr/bin/spctl", ["--assess", "--type", "exec", "-vv", target.path]);
+    const assessment = capture("/usr/bin/spctl", target.path.endsWith(".dmg")
+      ? ["--assess", "--type", "open", "--context", "context:primary-signature", "-vv", target.path]
+      : ["--assess", "--type", "exec", "-vv", target.path]);
     if (!assessment) console.log(`[desktop] spctl 未放行 ${target.name}（缓存可能过期；以已装订票据为准）`);
   }
   if (signing.notarization) {
-    if (stapled.length === 0) {
+    const missing = targets.filter(target => !stapled.includes(target));
+    if (missing.length > 0) {
       throw new Error(
-        `已公证的产物没有装订票据：${targets.map(target => relative(target.path)).join(" / ")}；` +
+        `已公证的产物没有装订票据：${missing.map(target => relative(target.path)).join(" / ")}；` +
           "确认公证返回 Accepted 且 stapler staple 成功。"
       );
     }
@@ -484,6 +488,8 @@ async function runBuild(options) {
       const bundledNode = path.join(app.path, "Contents/MacOS/woohaa-node");
       if (fs.existsSync(bundledNode)) run(bundledNode, ["--input-type=module", "-e", "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(':memory:'); db.close(); console.log('bundled Node',process.versions.node)"]);
     }
+    // stapling mutates the DMG: finish it before hashing or copying any artifact.
+    notarizeMacDiskImages({ artifacts: collected, signing });
     verifyMacSignature({ artifacts: collected, signing });
   }
   const artifacts = [];
