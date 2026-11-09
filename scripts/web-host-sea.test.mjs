@@ -104,3 +104,33 @@ test('sea main is CommonJS because SEA cannot run an ESM entry', () => {
   // 必须用 pathToFileURL + 绝对路径动态 import：SEA 里相对 import() 一律找不到模块。
   assert.match(source, /pathToFileURL/);
 });
+
+/**
+ * 构建期常量未被替换是**静默**故障：esbuild 不报错，标识符原样留在产物里，
+ * 运行期 `typeof X === "undefined"` 走进空分支，默认配置（公开桶/信任根/默认设置）
+ * 悄悄为空。部署脚本因此要在装配时当场拦住。
+ */
+test('findUnreplacedDefines：识别未替换的裸标识符', async () => {
+  const { findUnreplacedDefines } = await import('./prepare-web-host.mjs');
+  const keys = ['__WOOHAA3_PUBLIC_BUCKET__', '__WOOHAA3_SETTING_DEFAULTS__'];
+  const dirty = 'const a = typeof __WOOHAA3_PUBLIC_BUCKET__ !== "object";';
+  assert.deepEqual(findUnreplacedDefines(dirty, keys), ['__WOOHAA3_PUBLIC_BUCKET__']);
+});
+
+test('findUnreplacedDefines：不误报 esbuild 自己的 define 标记', async () => {
+  const { findUnreplacedDefines } = await import('./prepare-web-host.mjs');
+  const keys = ['__WOOHAA3_PUBLIC_BUCKET__'];
+  // 替换成功后产物里会留这些内部标记，它们不代表未替换。
+  const clean = [
+    '// <define:__WOOHAA3_PUBLIC_BUCKET__>',
+    '  "<define:__WOOHAA3_PUBLIC_BUCKET__>"() {',
+    'const a = {"bucketName":"woohaa3temp"};'
+  ].join('\n');
+  assert.deepEqual(findUnreplacedDefines(clean, keys), []);
+});
+
+test('findUnreplacedDefines：同名子串不算未替换', async () => {
+  const { findUnreplacedDefines } = await import('./prepare-web-host.mjs');
+  // 例如 `x__WOOHAA3_PUBLIC_BUCKET__` 不是同一个标识符。
+  assert.deepEqual(findUnreplacedDefines('const a = x__WOOHAA3_PUBLIC_BUCKET__;', ['__WOOHAA3_PUBLIC_BUCKET__']), []);
+});

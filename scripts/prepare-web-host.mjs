@@ -38,7 +38,7 @@ import { createRequire } from 'node:module';import {
 } from './lib/desktop-host-package.mjs';
 import { prepareWebHostNode, webNodeArtifact } from './lib/web-host-node.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
-import { loadBuildProfile } from './lib/build-profile.mjs';
+import { loadBuildProfile, buildDefines, describeBuildProfile } from './lib/build-profile.mjs';
 import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -71,7 +71,46 @@ export function resolveWebHostLayout(clientRoot = CLIENT_ROOT) {
  * `mainFields`/`conditions` 必须按 import 优先：`jsonc-parser` 的 `main` 是 UMD 目录，
  * 内联时会留下 `require('./impl/format')` 这类运行时相对路径，打包即坏。
  */
-export async function bundleBackend({ entry, outfile, sourcemap = true }) {
+/**
+ * 校验一个已构建的产物里没有残留「未替换的构建期常量」。
+ *
+ * 为什么需要：esbuild 的 `define` 是文本替换，缺 `WOOHAA3_DEFINES` 时不报错，
+ * 标识符原样留在产物里，运行期 `typeof X === "undefined"` 静默走进空分支——
+ * 表现是默认配置（公开桶、信任根、默认设置）悄悄为空。
+ *
+ * esbuild 替换成功后会留下 `// <define:X>` 注释与 `"<define:X>"()` 内部函数名，
+ * 它们不代表未替换，必须排除。返回未替换的键名（空数组表示干净）。
+ */
+export function findUnreplacedDefines(bundledText, keys) {
+  return keys.filter((key) => {
+    const pattern = new RegExp(`(^|[^\\w:<-])${key}\\b`);
+    return bundledText
+      .split('\n')
+      .some((line) => !line.includes(`<define:${key}>`) && pattern.test(line));
+  });
+}
+
+/**
+ * 读取 `WOOHAA3_DEFINES` 并转成 esbuild 的 `define`。
+ *
+ * 这段与 `web/scripts/build-package.mjs` 的口径一致：键名是产物里的标识符，值必须是
+ * JS 表达式文本（用 JSON 字面量）。**不读这个变量的构建入口会静默丢掉全部运行时默认配置**
+ * ——esbuild 不报错，标识符原样留在产物里，`typeof X === "undefined"` 于是走空分支。
+ */
+function readDefines(env = process.env) {
+  const raw = env.WOOHAA3_DEFINES;
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('WOOHAA3_DEFINES 不是合法 JSON（应由 build-profile 的 buildDefines 生成）');
+  }
+  if (parsed === null || typeof parsed !== 'object') return {};
+  return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, JSON.stringify(value)]));
+}
+
+export async function bundleBackend({ entry, outfile, sourcemap = true, env = process.env }) {
   // esbuild 只装在 `web/` workspace 里（客户端的打包口径都在那边）；client 根没有它的依赖。
   const requireFromWeb = createRequire(path.join(CLIENT_ROOT, 'web/package.json'));
   const esbuild = requireFromWeb('esbuild');
@@ -88,6 +127,8 @@ export async function bundleBackend({ entry, outfile, sourcemap = true }) {
     mainFields: ['module', 'main'],
     conditions: ['import', 'module', 'default'],
     loader: { '.css': 'empty', '.node': 'empty' },
+    // 构建期常量（公开桶、官方信任根、默认设置）。与 build-package.mjs 同一来源。
+    define: readDefines(env),
     logLevel: 'error',
     metafile: true
   });
@@ -97,6 +138,18 @@ export async function bundleBackend({ entry, outfile, sourcemap = true }) {
   }
   const size = fs.statSync(outfile).size;
   return { outfile, size, modules: Object.keys(result.metafile.inputs).length };
+}
+
+/** 递归列出目录下的 `.js` / `.mjs`（扩展产物只有这类需要检查）。 */
+function listScripts(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const found = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...listScripts(full));
+    else if (/\.(?:js|mjs|cjs)$/.test(entry.name)) found.push(full);
+  }
+  return found;
 }
 
 /** 复制 `scripts/` 目录（排除测试与本地状态）—— 扩展宿主按整目录相互 import，不能挑文件。 */
@@ -187,7 +240,48 @@ export async function prepareWebHost({
   fs.mkdirSync(output, { recursive: true });
 
   // 1) 后端单文件
+  //
+  // **必须在 bundleBackend 之前注入构建期常量**：`build-package.mjs` 的 esbuild `define`
+  // 只读 `WOOHAA3_DEFINES`，没注入时那些标识符会原样留在产物里（不被替换），运行期
+  // `typeof X === "object"` 恒为 false——表现是**默认配置静默丢失**：settingDefaults
+  // （exposer.primary / storage.local.publicEnabled / 市场信任键）、官方扩展信任根、
+  // 公开桶全部为空，而构建与启动都不报错。桌面链路由 `build-desktop.mjs` 注入，这里同样。
+  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(clientRoot), env: process.env });
+  if (!buildProfile.ok) {
+    const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join('\n');
+    throw new Error(`build profile 校验失败（${buildProfile.path ?? '未知路径'}）：\n${detail}`);
+  }
+  process.stdout.write(`[web-host] ${describeBuildProfile(buildProfile)}\n`);
+  const defines = buildDefines(buildProfile.resolved);
+  if (defines && !process.env.WOOHAA3_DEFINES?.trim()) {
+    process.env.WOOHAA3_DEFINES = JSON.stringify(defines);
+    process.stdout.write(`[web-host] build-profile defines：${Object.keys(defines).join('、')}\n`);
+  } else if (!defines) {
+    process.stdout.write('[web-host] build-profile 没有可注入的常量（公开桶/信任根/默认设置均为空）\n');
+  }
+
   const backend = await bundleBackend({ entry: layout.backendEntry, outfile: path.join(output, 'backend.cjs') });
+
+  // 校验构建期常量真的被内联替换了。
+  //
+  // esbuild 的 `define` 是**文本替换**：键名写错、变量没传，都不会报错——标识符会原样留在
+  // 产物里，运行期 `typeof X === "undefined"` 于是静默走空分支。那正好是「默认配置没生效」
+  // 这类最难查的问题，所以在这里当场拦住。
+  //
+  // 注意排除 esbuild 自己的标记：成功替换后产物里会出现 `// <define:X__>` 注释与
+  // `"<define:X__>"()` 这样的内部函数名，它们**不代表未替换**。这里只匹配「不在
+  // `<define:...>` 里、也不在注释里」的裸标识符。
+  if (defines) {
+    const bundled = fs.readFileSync(path.join(output, 'backend.cjs'), 'utf8');
+    const unreplaced = findUnreplacedDefines(bundled, Object.keys(defines));
+    if (unreplaced.length > 0) {
+      throw new Error(
+        `构建期常量没有被内联替换：${unreplaced.join('、')}\n` +
+          '  说明 WOOHAA3_DEFINES 没传到 esbuild（build-package.mjs 只读这个环境变量）。\n' +
+          '  产物里留着未定义的标识符时不会报错，只会静默丢掉默认配置。'
+      );
+    }
+  }
 
   // 2) 前端静态产物
   //
@@ -214,8 +308,7 @@ export async function prepareWebHost({
   if (fs.existsSync(layout.modelsFile)) fs.copyFileSync(layout.modelsFile, path.join(output, 'models.json'));
 
   // 5) 扩展：逐扩展自包含目录
-  const buildProfile = loadBuildProfile({ repoRoot: path.dirname(clientRoot), env: process.env });
-  const siteDefaults = buildProfile.ok ? buildProfile.resolved.siteExtensionDefaults : {};
+  const siteDefaults = buildProfile.resolved.siteExtensionDefaults;
   const scan = scanExtensions({ repoRoot: clientRoot, env: {} });
   // 扫描根可能是三类，处理方式不同：
   // - 源码根（`web/extensions`、`extensions`）：workspace 成员，用 `pnpm deploy --prod` 装自包含目录；
@@ -281,6 +374,24 @@ export async function prepareWebHost({
     }
     if (siteDefaults[extension.extensionId] !== undefined) {
       applySiteDefaultEnabled({ extensionDir: target, enabled: siteDefaults[extension.extensionId] });
+    }
+    // 扩展产物自己也可能内联了构建期常量（当前只有 `local-storage` 消费公开桶）。
+    // 它们由各包自己的 `build` → `build-package.mjs` 构建，只有**那条链路带
+    // WOOHAA3_DEFINES** 时才会替换。产物里残留未替换标识符说明它是在缺注入的环境里
+    // 构建的（例如干净 checkout 直接装配），此时打包进去等于发一个配置不全的包。
+    if (defines) {
+      const unresolved = [];
+      for (const file of listScripts(path.join(target, 'dist'))) {
+        const unreplaced = findUnreplacedDefines(fs.readFileSync(file, 'utf8'), Object.keys(defines));
+        for (const key of unreplaced) unresolved.push(`${path.relative(target, file)} → ${key}`);
+      }
+      if (unresolved.length > 0) {
+        throw new Error(
+          `扩展 ${extension.extensionId} 的产物含未替换的构建期常量：\n  ${unresolved.join('\n  ')}\n` +
+            '  说明这些扩展是在没注入 WOOHAA3_DEFINES 的环境里构建的。\n' +
+            '  先带 profile 重建扩展产物：pnpm -C client/web run build:plugins（或整体 pnpm build:units）。'
+        );
+      }
     }
     installed.push(extension.extensionId);
   }
