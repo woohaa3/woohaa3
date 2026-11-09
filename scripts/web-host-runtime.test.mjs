@@ -191,3 +191,37 @@ test('根路径部署：不重定向（basePath=/ 时根就是应用入口）', 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('/health/live 自述版本，部署脚本据此核对线上跑的是哪一版', async () => {
+  const dir = fixture();
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {} },
+      version: { commit: 'abc1234', nodeVersion: '24.22.0', extensions: 21, form: 'web-host' }
+    });
+    const live = await (await fetch(`${server.origin}/health/live`)).json();
+    assert.equal(live.status, 'ok');
+    assert.equal(live.commit, 'abc1234');
+    assert.equal(live.nodeVersion, '24.22.0');
+    assert.equal(live.extensions, 21);
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('未提供版本时 /health/live 只回 status，不编造字段', async () => {
+  const dir = fixture();
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {} }
+    });
+    const live = await (await fetch(`${server.origin}/health/live`)).json();
+    assert.deepEqual(live, { status: 'ok' });
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

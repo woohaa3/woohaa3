@@ -27,7 +27,8 @@ export async function startWebHostServer({
   port = 0,
   basePath = '/',
   pageTitle = 'WooHaa3',
-  env = null
+  env = null,
+  version = null
 }) {
   const readiness = await (backend.modules ? backend.modules().canvas.readiness() : backend.readiness());
   if (!readiness.ready) {
@@ -69,7 +70,10 @@ export async function startWebHostServer({
     const url = req.url ?? '/';
     if (req.method === 'GET' || req.method === 'HEAD') {
       if (url === '/health/live') {
-        send(res, 200, JSON.stringify({ status: 'ok' }), 'application/json; charset=utf-8');
+        // 带上版本自述：部署脚本用它核对「目标机跑的版本」与「这次要部署的版本」是否一致，
+        // 也是出现「部署成功但线上还是旧界面」时的第一手证据。
+        const body = version ? { status: 'ok', ...version } : { status: 'ok' };
+        send(res, 200, JSON.stringify(body), 'application/json; charset=utf-8');
         return;
       }
       if (url === '/health/ready') {

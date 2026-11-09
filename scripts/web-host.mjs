@@ -157,7 +157,15 @@ async function main() {
     port,
     basePath,
     pageTitle,
-    env
+    env,
+    // 版本自述：`--status` 与部署验收靠它回答「这台机器跑的是哪一版」，
+    // 不必去猜资源目录路径、也不依赖目标机装了 jq。
+    version: {
+      commit: manifest.commit ?? null,
+      nodeVersion: manifest.nodeVersion ?? null,
+      extensions: Array.isArray(manifest.extensions) ? manifest.extensions.length : null,
+      form: manifest.form ?? null
+    }
   });
 
   const displayHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;

@@ -48,7 +48,14 @@ export function createPayload(resourceRoot, output) {
   }
   fs.mkdirSync(path.dirname(output), { recursive: true });
   const tar = systemTar();
-  execFileSync(tar, systemTarArgs(tar, ['-czf', output, '--exclude=./node', '--exclude=./data', '-C', root, '.'], process.platform), {
+  // 排除项：
+  // - `node/`：运行时是承载它的可执行文件本身；
+  // - `data/`：运行期数据，不属于分发包；
+  // - `.sea-build*/` 与 `*.tar.gz`：本函数自己的中间产物。临时目录默认建在产物旁边，
+  //   若该目录恰好落在资源根内（`--out` 与 `--single-file` 同父目录时就会发生），
+  //   tar 会把自己正在写的 payload 打进去，报「file changed as we read it」并失败。
+  const excludes = ['--exclude=./node', '--exclude=./data', '--exclude=./.sea-build', '--exclude=./.sea-build/*', '--exclude=*.tar.gz'];
+  execFileSync(tar, systemTarArgs(tar, ['-czf', output, ...excludes, '-C', root, '.'], process.platform), {
     stdio: 'inherit',
     env: { ...process.env, COPYFILE_DISABLE: '1' }
   });
@@ -109,19 +116,28 @@ export function injectSeaBlob({ nodeBinary, blob, output, platform = process.pla
  *
  * `nodeBinary` 必须是**固定版本**的 Node（`prepareWebHostNode` 解出来的那个）：
  * SEA 的 blob 与产生它的 Node 版本强绑定，混用会启动即崩。
+ *
+ * `workDir` 缺省放在 output 的**同级**目录而不是其中：若它落在资源根里面，
+ * 打包 payload 时会把自己正在写的文件也读进来（tar 报 `file changed as we read it`）。
  */
 export function buildSingleFile({ resourceRoot, nodeBinary, output, workDir = path.join(path.dirname(output), '.sea-build') }) {
-  fs.rmSync(workDir, { recursive: true, force: true });
-  fs.mkdirSync(workDir, { recursive: true });
-  const payload = createPayload(resourceRoot, path.join(workDir, 'payload.tar.gz'));
-  const mainFile = path.join(workDir, 'sea-main.cjs');
+  // 兜底：显式传入的 workDir 若在资源根内，挪到外面。
+  const resolvedRoot = path.resolve(resourceRoot);
+  let effectiveWorkDir = path.resolve(workDir);
+  if (effectiveWorkDir === resolvedRoot || effectiveWorkDir.startsWith(`${resolvedRoot}${path.sep}`)) {
+    effectiveWorkDir = path.join(path.dirname(resolvedRoot), `.sea-build-${process.pid}`);
+  }
+  fs.rmSync(effectiveWorkDir, { recursive: true, force: true });
+  fs.mkdirSync(effectiveWorkDir, { recursive: true });
+  const payload = createPayload(resourceRoot, path.join(effectiveWorkDir, 'payload.tar.gz'));
+  const mainFile = path.join(effectiveWorkDir, 'sea-main.cjs');
   fs.copyFileSync(SEA_MAIN, mainFile);
-  const blob = path.join(workDir, 'sea-prep.blob');
-  const configFile = path.join(workDir, 'sea-config.json');
+  const blob = path.join(effectiveWorkDir, 'sea-prep.blob');
+  const configFile = path.join(effectiveWorkDir, 'sea-config.json');
   fs.writeFileSync(configFile, `${JSON.stringify(seaConfig({ main: mainFile, payload: payload.path, output: blob }), null, 2)}\n`);
   execFileSync(process.execPath, ['--experimental-sea-config', configFile], { stdio: 'inherit' });
   const injected = injectSeaBlob({ nodeBinary, blob, output });
-  fs.rmSync(workDir, { recursive: true, force: true });
+  fs.rmSync(effectiveWorkDir, { recursive: true, force: true });
   return { ...injected, payload };
 }
 

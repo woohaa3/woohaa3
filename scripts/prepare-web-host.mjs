@@ -166,7 +166,9 @@ export async function prepareWebHost({
   frontend = null,
   includeExtensions = null,
   deployExtension = null,
-  prepareNode = prepareWebHostNode
+  prepareNode = prepareWebHostNode,
+  /** 写进 manifest 的版本标识（部署脚本传入工作区 HEAD）；缺省不写。 */
+  commit = null
 } = {}) {
   const layout = resolveWebHostLayout(clientRoot);
   const output = path.resolve(out ?? path.join(clientRoot, '.local/web-host'));
@@ -303,7 +305,11 @@ export async function prepareWebHost({
     arch: process.arch,
     backend: { entry: 'backend.cjs', bytes: backend.size, modules: backend.modules },
     frontend: path.basename(frontendDir),
-    extensions: installed
+    extensions: installed,
+    // 版本标识：`--status` 与部署脚本靠它回答「目标机上跑的是哪一版」。
+    // 部署脚本用 `--commit` 显式传入（与它校验的工作区一致），避免「打包时的 HEAD」
+    // 与「部署脚本以为的版本」是两次取值、事后对不上。
+    ...(commit ? { commit } : {})
   };
   fs.writeFileSync(path.join(output, 'web-host-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -322,7 +328,8 @@ if (isMain) {
     out,
     nodeCache: path.resolve(arg('node-cache', path.join(CLIENT_ROOT, '.local/web-host-node'))),
     frontend: arg('frontend', null),
-    includeExtensions: arg('extensions', null)?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? null
+    includeExtensions: arg('extensions', null)?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? null,
+    commit: arg('commit', null)
   })
     .then(async (result) => {
       const relative = path.relative(process.cwd(), result.output) || '.';
