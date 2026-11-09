@@ -1,6 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import type { AgentConnectionView, ServiceConnectionView } from "@woohaa3/contracts";
 import { useSlot } from "../../host.js";
+import { ContributionBoundary as Guard } from "../../contribution-boundary.js";
 import { useOptionalService } from "../../react.js";
 import { Button, IconButton, SettingsFeedback, ServiceLogo } from "@woohaa3/ui";
 import { BackIcon, CloseIcon } from "@woohaa3/ui/icons";
@@ -173,7 +174,18 @@ function isLocalConnection(connection: AgentConnectionView) {
   return connection.authMode === "local-login" || connection.runCategory === "local-appserver";
 }
 
-type ConfigurationContribution = { owner?: string; kind: string; render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }> };
+type ConfigurationContribution = {
+  id: string;
+  owner?: string;
+  kind: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  modelTypes?: readonly string[];
+  setupOrder?: number;
+  providerId?: string;
+  render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }>;
+};
 type ProviderTemplate = { id: string; label: string; providerId: string; description: string; icon?: string; website?: string; setupOrder?: number; usesApiKey: boolean; modelTypes: readonly string[] };
 const MODEL_TYPE_LABELS = [["language", "文本"], ["image", "图片"], ["video", "视频"], ["audio", "音频"]] as const;
 
@@ -219,16 +231,24 @@ function ProviderWebsite({ website, children, className = "" }: { website?: stri
 
 function AddConnectionForm({ contributions, onSaved, local, providerGroups = [], settingsStore, initialKind, capability }: {
   local: boolean;
-  contributions: ReadonlyArray<{ kind: string; render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }> }>;
+  contributions: ReadonlyArray<{
+    id: string;
+    kind: string;
+    label: string;
+    description?: string;
+    icon?: string;
+    modelTypes?: readonly string[];
+    setupOrder?: number;
+    render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }>;
+  }>;
   onSaved: (connectionId: string) => void;
   providerGroups?: readonly ProviderTemplate[];
   settingsStore?: BackendSettingsStore;
   initialKind?: string;
   capability?: ActiveCapability;
 }) {
-  const initial = ["api-key", "login"].includes(initialKind ?? "") ? initialKind! : null;
-  const [selectedKind, setSelectedKind] = useState<string | null>(initial);
-  const [visited, setVisited] = useState<string[]>(initial ? [initial] : []);
+  const [selectedKind, setSelectedKind] = useState<string | null>(initialKind ?? null);
+  const [visited, setVisited] = useState<string[]>(initialKind ? [initialKind] : []);
   const addRef = useRef<HTMLDivElement>(null);
   const selectionScrollTop = useRef(0);
   const selectMethod = (id: string) => {
@@ -242,21 +262,37 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
     if (container) container.scrollTop = selectedKind ? 0 : selectionScrollTop.current;
   }, [selectedKind]);
   const providerMethods = local ? [] : providerGroups.filter(group => !capability || group.modelTypes.includes(capability === "agent" ? "language" : capability));
+  const loginProviderMethods = local ? [] : contributions
+    .filter(entry => entry.kind === "provider-login")
+    .filter(entry => !capability || (entry.modelTypes ?? []).includes(capability === "agent" ? "language" : capability))
+    .map(entry => ({ type: "login-provider" as const, id: `login-provider:${entry.id}`, setupOrder: entry.setupOrder ?? 60, label: entry.label, entry }));
   const methods = [
     ...kinds.filter(item => local ? item.id === "installed" : item.id !== "installed" && (!capability || capability === "agent"))
       .map(item => ({ type: "connection" as const, id: item.id, setupOrder: item.setupOrder, item })),
     ...providerMethods.map(group => ({ type: "provider" as const, id: `provider:${group.providerId}`, setupOrder: group.setupOrder ?? 100, group })),
+    ...loginProviderMethods,
   ].sort((a, b) => a.setupOrder - b.setupOrder);
+  const knownSelection = selectedKind && methods.some(method => method.id === selectedKind) ? selectedKind : null;
   const selectedMethod = selectedKind
-    ? kinds.find(item => item.id === selectedKind) ?? providerMethods.find(group => `provider:${group.providerId}` === selectedKind)
+    ? kinds.find(item => item.id === selectedKind)
+      ?? providerMethods.find(group => `provider:${group.providerId}` === selectedKind)
+      ?? loginProviderMethods.find(method => method.id === selectedKind)
     : null;
   const selectedLabel = selectedMethod?.label ?? null;
-  return <div ref={addRef} className="agent-assistant__add" data-step={selectedKind ? "configuration" : "selection"}>
-    <div className="agent-assistant__methods" hidden={selectedKind !== null}>{methods.map(method => {
+  return <div ref={addRef} className="agent-assistant__add" data-step={knownSelection ? "configuration" : "selection"}>
+    <div className="agent-assistant__methods" hidden={knownSelection !== null}>{methods.map(method => {
       const { id } = method;
+      if (method.type === "login-provider") {
+        const { entry } = method;
+        return <div key={id} className="agent-assistant__method agent-assistant__method--provider" data-kind={id} data-selected={knownSelection === id}>
+          <ProviderWebsite><span className="agent-assistant__provider-mark"><PluginIconMark icon={entry.icon} size={22} /></span><strong>{entry.label}</strong></ProviderWebsite>
+          <span className="agent-assistant__method-description">{entry.description ?? "使用已有账号登录并授权。"}</span>
+          <div className="agent-assistant__method-footer"><ModelTypeTags types={entry.modelTypes ?? []} /><div className="agent-assistant__method-actions"><Button size="sm" tone="primary" onClick={() => selectMethod(id)}>配置</Button></div></div>
+        </div>;
+      }
       if (method.type === "provider") {
         const { group } = method;
-        return <div key={id} className="agent-assistant__method agent-assistant__method--provider" data-kind={id} data-selected={selectedKind === id}>
+        return <div key={id} className="agent-assistant__method agent-assistant__method--provider" data-kind={id} data-selected={knownSelection === id}>
           <ProviderWebsite website={group.website}><span className="agent-assistant__provider-mark"><PluginIconMark icon={group.icon} size={22} /></span><strong>{group.label}</strong></ProviderWebsite>
           <span className="agent-assistant__method-description">{group.description || "使用此提供商的现有配置。"}</span>
           <div className="agent-assistant__method-footer"><ModelTypeTags types={group.modelTypes} /><div className="agent-assistant__method-actions">{group.usesApiKey ? <ProviderWebsite website={group.website} className="agent-assistant__get-api-key">获取 API Key</ProviderWebsite> : null}<Button size="sm" tone="primary" onClick={() => selectMethod(id)}>配置</Button></div></div>
@@ -273,21 +309,29 @@ function AddConnectionForm({ contributions, onSaved, local, providerGroups = [],
       </div>;
     })}</div>
     {capability && capability !== "agent" && !providerMethods.length && selectedKind === null ? <p className="agent-assistant__empty-note">当前没有可配置的{MODEL_TYPE_LABELS.find(([type]) => type === capability)?.[1]}提供商扩展。</p> : null}
-    <div className="agent-assistant__forms" hidden={selectedKind === null}>
+    <div className="agent-assistant__forms" hidden={knownSelection === null}>
       <div className="agent-assistant__form-heading">
         <Button size="sm" tone="ghost" icon={<BackIcon size={14} />} onClick={() => setSelectedKind(null)}>返回选择</Button>
         <h3>{selectedLabel}</h3>
       </div>
       {visited.map(id => {
-        const Entry = contributions.find(entry => entry.kind === id)?.render;
+        const contribution = contributions.find(entry => entry.kind === id || (entry.kind === "provider-login" && id === `login-provider:${entry.id}`));
+        const Entry = contribution?.render;
         const providerId = id.startsWith("provider:") ? id.slice("provider:".length) : undefined;
         // Keep the instance and its portal container together under the hidden owner.
-        return <div key={id} data-form-kind={id} hidden={selectedKind !== id} className="agent-assistant__add-form">
+        return <div key={id} data-form-kind={id} hidden={knownSelection !== id} className="agent-assistant__add-form">
           <UiPortalScope>{providerId && settingsStore ? <Suspense fallback={<p>正在读取 Provider 配置…</p>}><GenerationProviders store={settingsStore} compact providerId={providerId} onSaved={() => onSaved(providerId)} /></Suspense> : Entry ? <Entry onSaved={onSaved} /> : <p>当前环境未启用此连接的配置扩展。</p>}</UiPortalScope>
         </div>;
       })}
     </div>
   </div>;
+}
+
+function ProviderBalanceSlot({ providerId, contributions }: { providerId: string | undefined; contributions: ReadonlyArray<{ providerId: string; render: ComponentType }> }) {
+  const entry = providerId ? contributions.find(item => item.providerId === providerId) : undefined;
+  if (!entry) return null;
+  const Balance = entry.render;
+  return <Guard entry={entry} slot="agent-assistant.provider-balance" fallback="hidden"><Balance /></Guard>;
 }
 
 function ServiceSources({ service, connections, contributions, payload, settingsStore, directoryState, addRequest, addCapability, sourceRequest, onSaved, onChoose }: {
@@ -307,6 +351,10 @@ function ServiceSources({ service, connections, contributions, payload, settings
   const settings = useSyncExternalStore(settingsStore?.subscribe ?? (() => () => {}), settingsStore?.getState ?? (() => null));
   const modelsService = useOptionalService("generationModelsStatus");
   const modelState = useSyncExternalStore(modelsService?.subscribe ?? (() => () => {}), modelsService?.getSnapshot ?? (() => null));
+  const loginProviderMethods = contributions
+    .filter(entry => entry.kind === "provider-login")
+    .map(entry => ({ id: `login-provider:${entry.id}`, entry }));
+  const balanceContributions = useSlot("agent-assistant.provider-balance");
   const providerGroups: ProviderTemplate[] = settings?.status === "ready" ? providerConfigGroups(settings.snapshot).flatMap(group => group.providerId ? [{
     id: group.id, label: group.label, providerId: group.providerId, description: group.description, icon: group.icon, website: group.website, setupOrder: group.setupOrder,
     usesApiKey: group.entries.some(entry => entry.secret && entry.key.endsWith(".apiKey")),
@@ -316,10 +364,11 @@ function ServiceSources({ service, connections, contributions, payload, settings
   }] : []) : [];
   useEffect(() => { void settingsStore?.load(); }, [settingsStore]);
   const [addVisited, setAddVisited] = useState(adding);
+  const [initialMethod, setInitialMethod] = useState<string | undefined>();
   const [activeCapability, setActiveCapability] = useState<ActiveCapability | undefined>();
   const handledSourceRequest = useRef<typeof sourceRequest>(null);
   useEffect(() => { if (addRequest) { setActiveCapability(addCapability); setAdding(true); setAddVisited(true); setSelected(null); } }, [addRequest, addCapability]);
-  const showAdd = () => { setActiveCapability(undefined); setAdding(true); setAddVisited(true); setSelected(null); };
+  const showAdd = () => { setActiveCapability(undefined); setInitialMethod(undefined); setAdding(true); setAddVisited(true); setSelected(null); };
   const open = (id: string) => { setSelected(id); setAdding(false); setVisited(current => current.includes(id) ? current : [...current, id]); };
   useEffect(() => {
     if (!payload.connectionId || payload.section) return;
@@ -349,14 +398,18 @@ function ServiceSources({ service, connections, contributions, payload, settings
     <div className="agent-assistant__page-heading"><h2>模型提供商</h2><Button tone="primary" onClick={showAdd}>添加连接</Button></div>
     {loading ? <p>正在读取模型提供商…</p> : null}
     {directoryError ? <SettingsFeedback tone="danger">{directoryError} <Button size="sm" onClick={onSaved}>重新读取</Button></SettingsFeedback> : null}
-    {!loading && !directoryError && !sources.length ? <div className="agent-assistant__empty agent-assistant__empty--service"><h3>添加你的第一个模型提供商</h3><p>添加 API、中转站或账号授权，用于助手与生成。</p><Button size="lg" tone="primary" onClick={showAdd}>添加第一个模型提供商</Button></div> : null}
-    {sources.length ? <ul className="agent-assistant__list agent-assistant__source-list">{sources.map(source => {
+    {!loading && !directoryError && !sources.length && !loginProviderMethods.length ? <div className="agent-assistant__empty agent-assistant__empty--service"><h3>添加你的第一个模型提供商</h3><p>添加 API、中转站或账号授权，用于助手与生成。</p><Button size="lg" tone="primary" onClick={showAdd}>添加第一个模型提供商</Button></div> : null}
+    {sources.length || loginProviderMethods.length ? <ul className="agent-assistant__list agent-assistant__source-list">{loginProviderMethods.map(method => (
+      <li key={method.id}><div className="agent-assistant__identity"><strong><span className="agent-assistant__provider-mark"><PluginIconMark icon={method.entry.icon} size={22} /></span>{method.entry.label}</strong></div><div className="agent-assistant__meta"><ProviderBalanceSlot providerId={method.entry.providerId} contributions={balanceContributions} /><span className="agent-assistant__state" data-tone="neutral">账号登录</span></div><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => { setInitialMethod(method.id); setSelected(null); setAdding(true); setAddVisited(true); }}>配置</Button></div></li>
+    ))}{sources.map(source => {
       const connection = connections.find(item => source.bindings.some(binding => binding.consumerId === item.connectionId));
       const state = serviceSourceState(source);
-      return <li key={source.serviceConnectionId}><div className="agent-assistant__identity"><strong>{source.name}</strong></div><span className="agent-assistant__state" data-tone={state.tone}>{state.label}{source.managedByAdministrator ? " · 只读" : ""}</span><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => open(source.serviceConnectionId)}>配置</Button>{connection && payload.canvasId && payload.nodeId ? <Button size="sm" disabled={!connection.ready} onClick={() => onChoose(connection)}>使用</Button> : null}</div></li>;
+      const providerId = source.bindings.find(binding => binding.consumer === "provider")?.consumerId;
+      const icon = providerGroups.find(group => group.providerId === providerId)?.icon ?? (source.kind === "oauth" ? "identity" : "provider");
+      return <li key={source.serviceConnectionId}><div className="agent-assistant__identity"><strong><span className="agent-assistant__provider-mark"><PluginIconMark icon={icon} size={22} /></span>{source.name}</strong></div><div className="agent-assistant__meta"><ProviderBalanceSlot providerId={providerId} contributions={balanceContributions} /><span className="agent-assistant__state" data-tone={state.tone}>{state.label}{source.managedByAdministrator ? " · 只读" : ""}</span></div><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => open(source.serviceConnectionId)}>配置</Button>{connection && payload.canvasId && payload.nodeId ? <Button size="sm" disabled={!connection.ready} onClick={() => onChoose(connection)}>使用</Button> : null}</div></li>;
     })}</ul> : null}
     {addVisited ? <AssistantDrawer title={activeCapability ? `添加${activeCapability === "agent" ? " Agent" : MODEL_TYPE_LABELS.find(([type]) => type === activeCapability)?.[1]}提供商` : "添加模型提供商"} onClose={back} hidden={!adding} wide>
-      <AddConnectionForm key={`${addRequest}:${activeCapability ?? "all"}`} capability={activeCapability} local={false} initialKind={activeCapability ? undefined : payload.kind} contributions={contributions} providerGroups={providerGroups} settingsStore={settingsStore} onSaved={() => { onSaved(); back(); }} />
+      <AddConnectionForm key={`${addRequest}:${initialMethod ?? activeCapability ?? "all"}`} capability={activeCapability} local={false} initialKind={initialMethod ?? (activeCapability ? undefined : payload.kind)} contributions={contributions} providerGroups={providerGroups} settingsStore={settingsStore} onSaved={() => { onSaved(); back(); }} />
       {settings?.status === "loading" ? <p>正在读取提供商…</p> : settings?.status === "error" ? <SettingsFeedback tone="danger">{settings.error} <Button size="sm" onClick={() => void settingsStore?.load()}>重试</Button></SettingsFeedback> : settings?.status === "unauthorized" ? <p>提供商配置由管理员管理。个人 API 与账号授权仍可使用。</p> : null}
     </AssistantDrawer> : null}
     <AssistantDrawer title={current?.name ?? "连接配置"} onClose={back} hidden={!selected}>

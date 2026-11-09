@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "sdpppx-provider",
+  "site": {
+    "name": "SDPPPX",
+    "description": "sdpppx 微信扫码登录与租户模板生成。登录后把当前租户的模板投影为生成模型。",
+    "version": "0.1.0",
+    "configSchema": { "schemaId": "sdpppx-provider-config", "schemaVersion": 1 },
+    "capabilities": [
+      { "id": "sdpppx.session", "kind": "handler", "description": "登录状态、余额与部署参数读模型", "auth": "authenticated" },
+      { "id": "sdpppx.login-start", "kind": "handler", "description": "发起微信扫码登录", "auth": "authenticated" },
+      { "id": "sdpppx.login-status", "kind": "handler", "description": "轮询扫码登录状态", "auth": "authenticated" },
+      { "id": "sdpppx.login-cancel", "kind": "handler", "description": "取消进行中的扫码登录", "auth": "authenticated" },
+      { "id": "sdpppx.logout", "kind": "handler", "description": "清除本地会话与模型目录", "auth": "authenticated" },
+      { "id": "sdpppx.models-refresh", "kind": "handler", "description": "刷新租户模板模型目录", "auth": "authenticated" }
+    ],
+    "defaultEnabled": true,
+    "order": 21
+  },
+  "metadata": { "module": "./shared", "export": "SDPPPX_PLUGIN_METADATA", "order": 21 },
+  "icon": { "asset": "./assets/icon.svg" },
+  "hostPlugin": { "module": "./backend", "factory": "createSdpppxProviderPlugin", "features": ["provider"], "order": 21 }
+}

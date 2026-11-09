@@ -46,11 +46,12 @@ export const BUSINESS_EXCLUDE_DIRS = new Set([
   "dist",
   "server-dist",
   /**
-   * 扩展浏览器产物（`build-extension-browser.mjs` 产出，已 gitignore）：只排 `dist` 会漏掉它们，
-   * 扩展的 entry/chunk 会被当成业务源码——门禁结论随"有没有构建过"变化，还会把生成的 chunk
-   * 记成超限文件。
+   * 扩展产物（`build-extension-browser.mjs` / `build-extension-backend.mjs` 产出，已 gitignore）：
+   * 只排 `dist` 会漏掉它们，扩展的 entry/chunk 会被当成业务源码——门禁结论随"有没有构建过"
+   * 变化，还会把生成的 chunk 记成超限文件。
    */
   "browser-dist",
+  "backend-dist",
   ".browser-build",
   ".browser-test",
   "target",

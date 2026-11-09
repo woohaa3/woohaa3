@@ -13,6 +13,25 @@ import { api, cleanupHarness, declaredSite, local, oauth, render } from "./plugi
 let root: Root | undefined; let runtime: FrontendRuntime | undefined;
 afterEach(async () => { await cleanupHarness(); act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; });
 
+it("provider-login 贡献同时出现在模型提供商列表，配置直接打开该登录面板", async () => {
+  const f = await render([], false, undefined, { canvasId: "canvas", nodeId: "node" }, {}, undefined, true);
+  await f.click("模型提供商");
+  const list = f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list')!;
+  expect(list.textContent).toContain("Demo 微信登录");
+  const row = [...list.querySelectorAll("li")].find(item => item.textContent?.includes("Demo 微信登录"))!;
+  await act(async () => row.querySelector<HTMLButtonElement>("button")!.click());
+  await act(async () => { await import("../settings/provider-settings-cards.js"); });
+  expect(f.el.textContent).toContain("微信扫码登录");
+});
+
+it("provider-login 贡献作为独立供应商方法出现，并在选中后渲染其面板", async () => {
+  const f = await render([], false, undefined, { kind: "generation", page: "add" }, {}, undefined, true);
+  const methods = [...f.el.querySelectorAll(".agent-assistant__method")].map(item => item.querySelector("strong")?.textContent);
+  expect(methods).toContain("Demo 微信登录");
+  await f.configure("Demo 微信登录");
+  expect(f.el.textContent).toContain("微信扫码登录");
+});
+
 it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", async () => {
   const f = await render();
   expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "模型提供商", "MCP 服务", "生成历史"]);
