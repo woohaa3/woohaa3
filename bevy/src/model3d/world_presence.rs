@@ -205,6 +205,7 @@ pub(crate) fn sync(
                                 commands.entity(entity).insert((
                                     WorldPresenceMarker,
                                     RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                                    bevy::light::NotShadowCaster,
                                     Mesh3d(cube.clone()), MeshMaterial3d(material.clone()),
                                     Transform::from_xyz(point.x, 0.0, point.z).with_scale(scale),
                                     Visibility::Inherited,
@@ -243,6 +244,7 @@ pub(crate) fn sync(
                     .spawn((
                         WorldPresenceMarker,
                         RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                        bevy::light::NotShadowCaster,
                         Mesh3d(cube.clone()),
                         MeshMaterial3d(presence.assets.material(materials, color)),
                         Transform::from_xyz(ground.x, ground.y + height * 0.5, ground.z)
@@ -259,6 +261,7 @@ pub(crate) fn sync(
                     .spawn((
                         WorldPresenceMarker,
                         RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                        bevy::light::NotShadowCaster,
                         Mesh3d(cube.clone()),
                         MeshMaterial3d(presence.assets.material(materials, color)),
                         Transform::from_xyz(ground.x, ground.y + height, ground.z).with_scale(
@@ -301,6 +304,7 @@ fn spawn_aabb_edges(
             .spawn((
                 WorldPresenceMarker,
                 RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                bevy::light::NotShadowCaster,
                 Mesh3d(cube.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::from_translation(translation).with_scale(scale),
@@ -362,6 +366,7 @@ fn spawn_ground_diamond(
             .spawn((
                 WorldPresenceMarker,
                 RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                bevy::light::NotShadowCaster,
                 Mesh3d(cube.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::from_xyz(center.x + dx, center.y, center.z + dz)
@@ -425,8 +430,10 @@ mod tests {
 
     fn marker_count(app: &mut App) -> usize {
         let world = app.world_mut();
-        let mut query = world.query_filtered::<Entity, With<WorldPresenceMarker>>();
-        query.iter(world).count()
+        let mut query = world.query_filtered::<Has<bevy::light::NotShadowCaster>, With<WorldPresenceMarker>>();
+        let markers: Vec<_> = query.iter(world).collect();
+        assert!(markers.iter().all(|excluded| *excluded), "selection and presence helpers must never cast shadows");
+        markers.len()
     }
 
     fn world_node(chrome: NodeChrome) -> GraphNode {

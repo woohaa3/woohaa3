@@ -328,3 +328,11 @@ it("projects the stable geometry ground anchor and omits unknown geometry", () =
   const unknown = prepareModelResource({ sceneVersion: resource.sceneVersion, ops: [] });
   expect(buildCanvasRenderScene({canvas,modelResources:new Map([["model",unknown]])}).nodes.find(n => n.id === "model")?.model?.groundAnchorLocal).toBeUndefined();
 });
+
+
+it("includes the default-on global light in presentation deduplication", () => {
+  const scene = buildCanvasRenderScene({ canvas: fixture() });
+  const missing = renderSceneFingerprint(scene);
+  expect(renderSceneFingerprint({ ...scene, globalLightEnabled: true })).toBe(missing);
+  expect(renderSceneFingerprint({ ...scene, globalLightEnabled: false })).not.toBe(missing);
+});

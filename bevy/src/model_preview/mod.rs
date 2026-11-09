@@ -669,9 +669,9 @@ pub(crate) fn sync(
     });
 }
 
-// Shot cards and ordinary model cards share these lights. Their independent
-// refresh schedules must merge layers, otherwise a focus/overview transition
-// removes shot illumination while its cached layer set still looks current.
+// Accumulate ordinary-preview requests here. The fixed global-light policy
+// narrows its layers to live non-shooting cameras in PostUpdate, so stale slot
+// membership cannot illuminate a shooting camera after lease reuse.
 fn merge_scene_light_layers(world: &mut World, layers: &RenderLayers) {
     let mut lights = world.query_filtered::<Entity, With<DirectionalLight>>();
     let entities: Vec<_> = lights.iter(world).collect();

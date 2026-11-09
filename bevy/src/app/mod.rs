@@ -147,6 +147,7 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
         .init_resource::<canvas2d::text_presentation::PresentationCache>()
+        .add_plugins(model3d::shadows::ModelShadowsPlugin)
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::model_preview::ModelPreviewPlugin)

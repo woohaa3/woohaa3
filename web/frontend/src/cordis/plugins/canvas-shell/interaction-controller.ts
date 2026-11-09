@@ -38,6 +38,7 @@ import { createWorldCameraPreviewState } from "./world-camera-preview.js";
 import { createWorldGroundPreviewState } from "./world-ground-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
+import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
@@ -654,6 +655,7 @@ export function installInteractionController(options: InteractionControllerOptio
     if (state.gesture.kind === "resize" || state.gesture.kind === "model-preview") cancelTransientGesture();
     schedule("node-capabilities");
   });
+  const unsubscribeAppearance = canvasAppearanceStore.subscribe(() => schedule("canvas-appearance"));
   const unsubscribePreview = modelPreviewStore.subscribe(() => schedule("model-preview"));
   const unsubscribeCameraEditor = worldCameraEditorStore.subscribe(() => schedule("world-camera-editor"));
   const disposeDiagnostics = installCanvasDiagnostics({ core, target, state, activeViewport, setSelection, model,
@@ -842,6 +844,7 @@ export function installInteractionController(options: InteractionControllerOptio
       hoverNodeStore.invalidatePlayback();
       frameLoop.dispose();
       unsubscribeCapabilities?.();
+      unsubscribeAppearance();
       unsubscribePreview();
       unsubscribeCameraEditor();
       modelPreviewStore.clear();

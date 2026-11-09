@@ -46,21 +46,13 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
         brightness: 600.0,
         ..default()
     });
-    commands.spawn((
-        DirectionalLight {
-            color: Color::srgb_u8(255, 245, 223),
-            illuminance: 4_000.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform {
-            translation: Vec3::new(180.0, 260.0, 300.0),
-            rotation: crate::isometric_grid::canvas_camera_rotation(),
-            scale: Vec3::ONE,
-        },
-        // 灯光也覆盖截图层（7）：preview/capture 相机只渲染该层，否则模型在预览里不被照亮。
+    crate::model3d::shadows::install_light(
+        commands,
+        crate::model3d::shadows::world_light_rotation(),
         model_light_layers(),
-    ));
+        true,
+        crate::model3d::CANVAS_UNITS_PER_METER,
+    );
     camera
 }
 

@@ -365,6 +365,7 @@ fn spawn_camera(
         let entity = commands
             .spawn((
                 WorldCameraMarker,
+                bevy::light::NotShadowCaster,
                 Mesh3d(cube.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::from_translation(translation)

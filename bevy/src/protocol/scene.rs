@@ -294,6 +294,9 @@ pub(crate) struct Scene {
     /// change: 2026-10-07-remove-residual-compatibility —— 必填；缺失/非法由接受点拒绝，
     /// 不再回退 generated 默认（默认 preset 仍由 canonical token source 供明确初始化/测试使用）。
     pub(crate) theme: Theme,
+    /// Local presentation preference; missing preserves the default-on light.
+    #[serde(default, rename = "globalLightEnabled")]
+    pub(crate) global_light_enabled: Option<bool>,
     /// 模型聚焦瞬时投影（change: add-model-focus-viewing）。缺失即普通正交画布。
     #[serde(default, rename = "modelFocus")]
     pub(crate) model_focus: Option<ModelFocus>,

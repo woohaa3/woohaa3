@@ -7,7 +7,7 @@ use crate::model3d::scene;
 use crate::protocol::ModelOp;
 use crate::renderer_protocol::{CaptureOptions, RENDERER_PROTOCOL_VERSION, RenderRequest};
 
-fn request(ops: Vec<ModelOp>, extent: f32, capture: CaptureOptions) -> RenderRequest {
+pub(super) fn request(ops: Vec<ModelOp>, extent: f32, capture: CaptureOptions) -> RenderRequest {
     RenderRequest {
         protocol_version: RENDERER_PROTOCOL_VERSION.to_owned(),
         request_id: "req".to_owned(),

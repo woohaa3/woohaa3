@@ -60,6 +60,7 @@ impl GroundGrid {
                 let material = materials.add(crate::isometric_grid::grid_material(color));
                 let entity = commands
                     .spawn((
+                        bevy::light::NotShadowCaster,
                         Mesh3d(mesh.clone()),
                         MeshMaterial3d(material.clone()),
                         NoFrustumCulling,

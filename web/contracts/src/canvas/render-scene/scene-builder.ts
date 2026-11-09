@@ -488,6 +488,7 @@ export function renderSceneFingerprint(scene: CanvasRenderScene): string {
     JSON.stringify(scene.executingScopes ?? []),
     `vp=${scene.viewport.x},${scene.viewport.y},${scene.viewport.zoom}`,
     `theme=${scene.theme.fingerprint}`,
+    `globalLight=${scene.globalLightEnabled ?? true}`,
     scene.draft ? `draft=${scene.draft.source},${scene.draft.side},${scene.draft.x},${scene.draft.y}` : "draft=",
     scene.marquee
       ? `marquee=${scene.marquee.x},${scene.marquee.y},${scene.marquee.width},${scene.marquee.height}`

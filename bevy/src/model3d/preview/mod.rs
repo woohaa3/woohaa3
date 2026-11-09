@@ -23,3 +23,6 @@ pub use stdio::{render_request_json, run_stdio};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod shadow_tests;

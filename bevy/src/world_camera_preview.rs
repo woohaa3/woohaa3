@@ -276,6 +276,7 @@ pub(crate) fn sync(
                 let camera_entity = commands
                     .spawn((
                         Camera3d::default(),
+                        crate::model3d::shadows::camera_lighting(),
                         Camera {
                             order: -10,
                             is_active: false,
@@ -372,8 +373,6 @@ pub(crate) fn sync(
         keep.insert(instance_id.to_owned());
     }
     bindings.retain(&scene.0, &models, &mut commands, &mut pool, &keep);
-    let active_layers: Vec<usize> = bindings.layers().collect();
-    crate::world_camera_binding::merge_light_layers(&mut commands, &active_layers);
     // Remove cards whose node disappeared (or became a non-camera).
     let stale: Vec<String> = previews
         .cards
@@ -816,7 +815,8 @@ mod tests {
     #[test]
     fn unbound_camera_renders_the_whole_world_layer() {
         let app = run_sync(camera_scene(serde_json::Value::Null));
-        assert!(preview_camera_layers(&app).intersects(&RenderLayers::layer(0)));
+        assert!(preview_camera_layers(&app).intersects(&RenderLayers::layer(crate::world_camera_binding::WORLD_LAYER)));
+        assert!(!preview_camera_layers(&app).intersects(&RenderLayers::layer(0)));
     }
 
     #[test]

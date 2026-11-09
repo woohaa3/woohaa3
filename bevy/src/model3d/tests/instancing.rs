@@ -2,7 +2,7 @@ use super::*;
 use crate::model3d::{batch_strategy::BatchStrategy, instancing::Instances};
 
 #[test]
-fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
+fn explicit_requests_recover_shadow_capable_entities_and_keep_shared_ownership() {
     let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
         "sceneVersion":"woohaa-model-scene-ir-v2", "signature":"instances", "extent":4,
         "ops": (0..8).map(|i| serde_json::json!({ "t":"box", "id":format!("p{i}"),
@@ -24,17 +24,13 @@ fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
     world.resource_mut::<ModelVisuals>().batching_strategy = BatchStrategy::Explicit;
     run_sync(&mut world, &scene, &resources);
     let models = world.resource::<ModelVisuals>();
-    assert_eq!(models.roots["a"].entities.len(), 2);
-    assert_eq!(
-        models.roots["a"]
-            .instance_parts
-            .values()
-            .map(|ids| ids.len())
-            .sum::<usize>(),
-        8
-    );
-    let entity = *models.roots["a"].instance_parts.keys().next().unwrap();
-    assert_eq!(world.get::<Instances>(entity).unwrap().parts[3], "p3");
+    assert_eq!(models.roots["a"].entities.len(), 9);
+    assert!(models.roots["a"].instance_parts.is_empty());
+    assert_eq!(models.roots["a"].part_entities.len(), 8);
+    for &entity in models.roots["a"].part_entities.values() {
+        assert!(world.get::<Instances>(entity).is_none());
+        assert!(world.get::<MeshMaterial3d<StandardMaterial>>(entity).is_some());
+    }
     let mesh = models.roots["a"].mesh_handles[0].clone();
     assert_eq!(mesh, models.roots["b"].mesh_handles[0]);
     let budget: serde_json::Value = serde_json::from_str(&models.budget_json(
@@ -71,7 +67,7 @@ fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
     let models = world.resource::<ModelVisuals>();
     assert!(models.roots["a"].instance_parts.is_empty());
     assert_eq!(models.roots["a"].part_entities.len(), 8);
-    assert_eq!(models.roots["b"].instance_parts.len(), 1);
+    assert!(models.roots["b"].instance_parts.is_empty());
     assert!(crate::model3d::demand::update(
         &mut world.resource_mut::<ModelVisuals>(),
         &scene,
@@ -91,9 +87,8 @@ fn explicit_roots_share_mesh_preserve_parts_and_restore_for_high_consumers() {
 }
 
 #[test]
-fn local_playback_replaces_only_one_instance_block_and_restores_standard_material() {
+fn explicit_fallback_playback_keeps_unique_parts_and_standard_materials() {
     use super::playback_representation::{fixture, playback};
-    use crate::model3d::instancing::InstanceMaterial;
     let (mut scene, resources) = fixture();
     scene.nodes[0].model_preview =
         serde_json::from_value(serde_json::json!({"azimuth":0,"elevation":0.4,"distanceScale":1}))
@@ -102,39 +97,19 @@ fn local_playback_replaces_only_one_instance_block_and_restores_standard_materia
     world.resource_mut::<ModelVisuals>().batching_strategy = BatchStrategy::Explicit;
     run_sync(&mut world, &scene, &resources);
     let root = &world.resource::<ModelVisuals>().roots["film"];
-    let affected = root.part_batches["p0"];
-    let unaffected: Vec<_> = root
-        .instance_parts
-        .keys()
-        .filter(|id| **id != affected)
-        .copied()
-        .collect();
+    let affected = root.part_entities["p0"];
+    let unaffected = root.part_entities["p1"];
     let anchor = root.entities[0];
-    // Reproduce the opt-in material system's completed conversion, without a GPU.
-    world
-        .entity_mut(affected)
-        .remove::<MeshMaterial3d<StandardMaterial>>()
-        .insert(MeshMaterial3d::<InstanceMaterial>(Handle::default()));
     scene.animation_playback = Some(playback(Some("p0")));
     run_sync(&mut world, &scene, &resources);
     let root = &world.resource::<ModelVisuals>().roots["film"];
     assert_eq!(root.entities[0], anchor);
     assert!(root.part_entities.contains_key("p0"));
-    assert_eq!(root.batches.len(), 1);
-    for entity in unaffected {
-        assert!(root.instance_parts.contains_key(&entity));
-    }
-    assert!(!world.entity(affected).contains::<Instances>());
-    assert!(
-        !world
-            .entity(affected)
-            .contains::<MeshMaterial3d<InstanceMaterial>>()
-    );
-    assert!(
-        world
-            .entity(affected)
-            .contains::<MeshMaterial3d<StandardMaterial>>()
-    );
+    assert!(root.batches.is_empty());
+    assert!(root.instance_parts.is_empty());
+    assert_eq!(root.part_entities["p1"], unaffected);
+    assert!(world.get::<Instances>(affected).is_none());
+    assert!(world.get::<MeshMaterial3d<StandardMaterial>>(affected).is_some());
     let count = world.entities().len();
     scene.animation_playback = None;
     run_sync(&mut world, &scene, &resources);

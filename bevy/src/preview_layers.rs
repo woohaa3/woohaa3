@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 /// 以及「已注册但没有卡片视图」的模型根停放层 31。
 ///
 /// `1` 同时是 transform gizmo 与 shot gizmo；`2` 是片场小相机；`7` 是 capture。
-pub const RESERVED_LAYERS: [usize; 8] = [0, 1, 2, 3, 4, 7, 8, PARKED_LAYER];
+pub const RESERVED_LAYERS: [usize; 9] = [0, 1, 2, 3, 4, 7, 8, WORLD_CAMERA_CONTENT_LAYER, PARKED_LAYER];
 
 /// 没有卡片视图的模型根停放在此层：任何预览/主相机都不看它，但仍保留合法渲染层身份。
 pub const PARKED_LAYER: usize = 31;
@@ -29,6 +29,10 @@ pub const PARKED_LAYER: usize = 31;
 ///
 /// 这样捕获不需要临时把网格挪走，避免连续录制逐帧开关图层造成网格闪烁。
 pub const GRID_LAYER: usize = 10;
+
+/// Shared-world geometry as seen by shooting cameras. The global canvas light
+/// never includes this layer; main-canvas geometry keeps layer 0 as well.
+pub const WORLD_CAMERA_CONTENT_LAYER: usize = 11;
 
 /// 可出租层区间起点：高于全部保留层。
 pub const SLOT_BASE: usize = 32;

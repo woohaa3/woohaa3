@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn ordinary_preview_refresh_preserves_shot_camera_illumination() {
+fn ordinary_preview_refresh_preserves_other_pending_preview_layers() {
     let mut world = World::new();
     let light = world
         .spawn((

@@ -42,23 +42,16 @@ const PREVIEW_FRAME_DISTANCE_FACTOR: f32 = 4.4 / 1.732_050_8;
 const PREVIEW_ORTHO_ASPECT: f32 = 1.6 / 1.732_050_8;
 
 /// 固定预览灯光：一个环境光 + 一个方向光，脚本不可修改。
-fn setup_lights(commands: &mut Commands, shared_world: bool) {
+fn setup_lights(commands: &mut Commands, shared_world: bool, shadows_enabled: bool) {
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 600.0,
         ..default()
     });
-    commands.spawn((
-        DirectionalLight {
-            color: Color::srgb_u8(255, 245, 223),
-            illuminance: 4_000.0,
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(180.0, 260.0, 300.0).with_rotation(if shared_world {
-            crate::isometric_grid::canvas_camera_rotation()
-        } else { Quat::IDENTITY }),
-    ));
+    crate::model3d::shadows::install_light(commands,
+        if shared_world { crate::model3d::shadows::world_light_rotation() } else { Quat::IDENTITY },
+        default(), shadows_enabled,
+        if shared_world { crate::model3d::CANVAS_UNITS_PER_METER } else { 1.0 });
 }
 
 /// 背景色：透明（alpha 0）或 `#rrggbb`。
@@ -327,6 +320,10 @@ pub fn render_rgba(request: &RenderRequest, capture: &CaptureOptions) -> Result<
 
 /// 返回 RGBA8 像素（自顶向下）。
 fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u8>, String> {
+    run_render_with_shadows(request, capture, true)
+}
+
+pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &CaptureOptions, shadows_enabled: bool) -> Result<Vec<u8>, String> {
     let width = capture.width;
     let height = capture.height;
     let pixels: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
@@ -352,6 +349,16 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
         }
     }
 
+    // Inspect the actual selected adapter before PBR initializes pipelines. A
+    // software driver must never produce native evidence or native output.
+    let settings = bevy::render::settings::WgpuSettings::default();
+    let render_resources = bevy::tasks::block_on(bevy::render::renderer::initialize_renderer(
+        settings.backends.unwrap_or_default(), None, &settings,
+    ));
+    if format!("{:?}", render_resources.2.device_type) == "Cpu" {
+        return Err(format!("native renderer requires a hardware GPU; detected {} ({:?})",
+            render_resources.2.name, render_resources.2.backend));
+    }
     let mut app = App::new();
     #[cfg(feature = "recording-gpu")]
     app.add_systems(
@@ -376,12 +383,11 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 ..default()
             })
             .set(RenderPlugin {
-                render_creation: bevy::render::settings::RenderCreation::Automatic(
-                    Default::default(),
-                ),
+                render_creation: bevy::render::settings::RenderCreation::Manual(Box::new(render_resources)),
                 ..default()
             }),
     );
+    app.add_plugins(crate::model3d::shadows::ModelShadowsPlugin);
     app.add_plugins(ScheduleRunnerPlugin::run_loop(
         std::time::Duration::from_millis(8),
     ));
@@ -449,7 +455,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 TextureUsages::COPY_SRC | TextureUsages::RENDER_ATTACHMENT;
             let image = images.add(image);
 
-            setup_lights(&mut commands, world.is_some());
+            setup_lights(&mut commands, world.is_some(), shadows_enabled);
             if let Some(world) = &world {
                 for (instance, model, decoded) in &world_models {
                     let textures = decoded.iter().map(|(id, image)| (id.clone(), images.add(image.clone()))).collect();
@@ -458,6 +464,7 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
                 }
                 commands.spawn((
                     Camera3d::default(),
+                    crate::model3d::shadows::camera_lighting(),
                     Camera { clear_color: ClearColorConfig::Custom(background), ..default() },
                     RenderTarget::Image(image.clone().into()),
                     crate::world_camera_view::pose(&world.camera),
