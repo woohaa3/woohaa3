@@ -154,7 +154,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
     label: "RunningHub",
     configPrefix: "providers.runninghub",
     setupOrder: 20,
-    website: "https://www.runninghub.ai?inviteCode=rh-v1272",
+    website: "https://www.runninghub.ai/zh-cn/call-api/bill-task?tab=keys&type=shared&inviteCode=rh-v1272",
     modelTypes: ["language", "image", "video"],
     inject: ["log", "generation", "gateway", "access", "storage", "exposer"],
     modelRefresh: {
