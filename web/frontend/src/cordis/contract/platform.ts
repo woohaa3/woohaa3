@@ -604,9 +604,29 @@ export type SlotContributionMap = {
     render: ComponentType<{ canvasId: string; active: boolean; onClose: () => boolean }>;
   };
   "agent-assistant.configuration": {
-    kind: "login" | "installed" | "api-key";
+    kind: "login" | "installed" | "api-key" | "provider-login";
     label: string;
+    /** Optional explanatory copy for provider-login methods. */
+    description?: string;
+    /** Optional brand/glyph icon for provider-login methods. */
+    icon?: string;
+    /** Optional generated-model capability tags, used by the capability-filtered provider list. */
+    modelTypes?: readonly import("@woohaa3/contracts").CanvasTaskModelType[];
+    /** Optional sort order among provider methods. */
+    setupOrder?: number;
+    /** Provider id this login method belongs to; provider-balance rows are matched by it. */
+    providerId?: string;
     render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }>;
+  };
+  /**
+   * 提供商列表行里的余额读数（可选）。
+   *
+   * 宿主在「模型提供商」列表按 `providerId` 找到该贡献并渲染；扩展自己决定读取方式与展示
+   * 文案，宿主不认识任何具体供应商的余额接口。没有贡献或没有可读余额时不占位。
+   */
+  "agent-assistant.provider-balance": {
+    providerId: string;
+    render: ComponentType;
   };
   "provider-credentials.top": { render: ComponentType<{ requestClose?: () => void }> };
   /**
