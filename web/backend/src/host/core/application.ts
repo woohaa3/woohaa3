@@ -463,6 +463,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         const release = service.serviceConnections()?.forExtension(extensionId).registerSource(createSiteProviderSource({
           providerId, extensionId, label: plugin.label, prefix: plugin.configPrefix, settings: ctx.config,
           provider: () => generation.resolve(providerId),
+          policy: () => generation.policy.snapshot(),
         }));
         if (release) releases.push(release);
         const provider = generation.resolve(providerId);

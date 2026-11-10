@@ -4,11 +4,52 @@ import path from "node:path";
 import { expect, it } from "vitest";
 import type { GenerationProvider } from "@woohaa3/contracts";
 import { createSettingsService } from "../../settings/settings-service.js";
-import { createSiteProviderSource } from "./service-connection-sources.js";
+import { createSiteProviderSource, enabledAssistantModels } from "./service-connection-sources.js";
 import { createServiceConnectionRegistry } from "../../../../services/application-service/src/service-connections/registry.js";
 import { createConnectionService } from "../../../../services/agent-connections/src/index.js";
 import { createSdkServiceSource, withServiceSources } from "../../../../extensions/sdk-agent/src/backend/service-source.js";
 import { createInMemoryDocumentStore, createInMemorySecretStore } from "../../../../services/agent-connections/src/test-doubles.js";
+
+it("excludes models the site policy does not enable from the assistant directory", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-policy-"));
+  const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
+  const fields = { apiKey: { kind: "string", secret: true, reload: "hot", label: "Key", description: "Key" } } as const;
+  const settings = await createSettingsService({ ...files, env: {} });
+  settings.register("providers.demo", fields, "Demo", "demo");
+  const provider = () => ({
+    providerId: "demo", extensionId: "demo", available: true,
+    models: [
+      { providerModelId: "llm/enabled", modelType: "language" },
+      { providerModelId: "llm/disabled", modelType: "language" },
+      { providerModelId: "llm/absent", modelType: "language" },
+      { providerModelId: "llm/tombstoned", modelType: "language" },
+      { providerModelId: "api/image", modelType: "image" }
+    ],
+    languageCapabilities: () => ({ tools: true, streaming: true }),
+    serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" }
+  } as unknown as GenerationProvider);
+  const policy = { initialized: true, revision: 3, models: [
+    { modelKey: "demo:llm/enabled", enabled: true },
+    { modelKey: "demo:llm/disabled", enabled: false },
+    { modelKey: "demo:llm/tombstoned", enabled: true, tombstone: true },
+    { modelKey: "demo:api/image", enabled: true }
+  ] };
+  try {
+    const adapter = createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider, policy: () => policy });
+    const source = (await adapter.get("admin", "demo"))!;
+    const assistant = source.bindings.find(binding => binding.bindingId === "provider-assistant:demo");
+    // 只有策略里启用且未 tombstone 的语言模型能当助手；策略里没有该行的模型同样不算启用。
+    expect(assistant?.modelKeys).toEqual(["llm/enabled"]);
+    expect(source.capabilities.filter(capability => capability.purpose === "discussion").map(capability => capability.modelId)).toEqual(["llm/enabled"]);
+
+    // 策略未初始化时与任务目录一致：全开。
+    const open = enabledAssistantModels(provider(), { initialized: false, revision: 0, models: [] });
+    expect(open.map(model => model.providerModelId)).toEqual(["llm/enabled", "llm/disabled", "llm/absent", "llm/tombstoned"]);
+  } finally {
+    settings.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 it("turns a declared assistant protocol into a discussion Agent binding only with language models", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-source-"));
