@@ -294,6 +294,30 @@ describe("translateParameters", () => {
     ).toEqual({ voice: "nova", response_format: "wav", speed: 4 });
   });
 
+  /**
+   * 音乐生成走的是另一条上游路由（`/v1/audio/music`），它只认 lyrics。
+   *
+   * 现场事故：`lyria3` 拿到上一个 MiniMax 语音任务的 `voice=male-qn-qingse` 后直接 500。
+   * 这里断言翻译层不会再把这些键送出去——即使上层因为旧草稿把它们带到了参数里。
+   */
+  it.each(["minimax-music-2.6", "lyria3", "lyria3-clip", "seed-audio-1.0"])(
+    "音频：音乐模型 %s 只翻译 lyrics，丢弃音色 / 格式 / 语速",
+    (providerModelId) => {
+      expect(
+        translateParameters(providerModelId, "audio", {
+          voice: "male-qn-qingse",
+          outputFormat: "mp3",
+          speed: 1,
+          lyrics: "两只老虎，两只老虎"
+        })
+      ).toEqual({ lyrics: "两只老虎，两只老虎" });
+    }
+  );
+
+  it("音频：音乐模型的空歌词不进请求", () => {
+    expect(translateParameters("lyria3", "audio", { lyrics: "   " })).toEqual({});
+  });
+
   it("未识别的音频模型原样透传（服务端自己认识它的上游）", () => {
     const parameters = { voice: "alloy", response_format: "mp3", speed: 1 };
     expect(translateParameters("some-vendor-speech", "audio", parameters)).toEqual(parameters);

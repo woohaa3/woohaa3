@@ -183,7 +183,8 @@ describe("音频卡片", () => {
     const { model, dropped } = composePresetCard(cardById("tts-1"));
     const properties = propertiesOf(model);
 
-    expect(dropped).toEqual([]);
+    // 语音没有歌词概念：`lyrics` 是音乐专属键，语音卡片把它剪掉。
+    expect(dropped).toEqual(["lyrics"]);
     expect(Object.keys(properties).sort()).toEqual(["outputFormat", "prompt", "speed", "voice"]);
 
     const voice = properties.voice as { enum: Array<{ value: string }>; default?: string };
@@ -238,6 +239,39 @@ describe("音频卡片", () => {
     const format = properties.outputFormat as { enum: Array<{ value: string }> };
     expect(format.enum.map((entry) => entry.value)).toEqual(["mp3", "wav", "opus"]);
     expect(presetLimitsOf(model)).toBeUndefined();
+  });
+
+  /**
+   * 音乐生成与语音合成是两条上游路由：`/v1/audio/music` 只认 prompt 与 lyrics。
+   *
+   * 现场事故：`lyria3` 继承了上一个 MiniMax 语音任务的 `voice=male-qn-qingse`，而
+   * lyria3 只接受 OpenAI 音色名，请求直接 500。卡片剪掉 voice 之后，切模型时这个键
+   * 因为不在新 schema 里而被丢弃——这是修复的结构性部分，不是靠参数校验兜底。
+   */
+  it.each(["minimax-music-2.6", "lyria3", "lyria3-clip", "seed-audio-1.0"])(
+    "音乐卡片 %s 只保留 prompt 与 lyrics，剪掉音色与语速",
+    (cardId) => {
+      const { model, dropped } = composePresetCard(cardById(cardId));
+      const properties = propertiesOf(model);
+
+      expect(Object.keys(properties).sort()).toEqual(["lyrics", "prompt"]);
+      for (const key of ["voice", "outputFormat", "speed"]) {
+        expect(properties[key]).toBeUndefined();
+        expect(dropped).toContain(key);
+      }
+      // default_input 不该给音乐一个音色默认值。
+      expect(model.defaultInput.voice).toBeUndefined();
+      expect(model.defaultInput.lyrics).toBe("");
+      // 歌词留空表示纯音乐。
+      expect(properties.lyrics).toMatchObject({ default: "", "x-component": "Input.TextArea" });
+    }
+  );
+
+  it("语音卡片仍然保留音色与语速（音乐改动不波及语音）", () => {
+    const { model } = composePresetCard(cardById("minimax-speech-2.8-hd"));
+    expect(propertiesOf(model).voice).toBeDefined();
+    expect(propertiesOf(model).speed).toBeDefined();
+    expect(propertiesOf(model).lyrics).toBeUndefined();
   });
 });
 
