@@ -32,6 +32,8 @@ describe("world target prompt and tools", () => {
     expect(localAgentToolsForMode("world", intent.worldScope)).toEqual([
       "get_model_api",
       ASSISTANT_WORLD_TOOL.readContext,
+      ASSISTANT_WORLD_TOOL.readModelRig,
+      ASSISTANT_WORLD_TOOL.sampleAnimation,
       ASSISTANT_WORLD_TOOL.createModel,
       ASSISTANT_WORLD_TOOL.replaceModel,
       ASSISTANT_WORLD_TOOL.moveModel,
@@ -48,6 +50,28 @@ describe("world target prompt and tools", () => {
     expect(prompt).toContain("sceneArea.animation");
     expect(prompt).toContain("保留未要求修改的轨道");
     expect(prompt).toContain("旧宿主未返回 sceneArea 时不能猜测原动画或直接覆盖");
+  });
+
+  it("states the 4x4 default area and the resize prerequisite before world writes", () => {
+    const intent: AgentEntryIntent = {
+      action: "generate",
+      canvasId: "canvas-1",
+      nodeId: "area-node",
+      mode: "world",
+      worldScope: { kind: "scene-area", areaId: "area-1" },
+      prompt: "搭一个大场景"
+    };
+    const prompt = buildTargetPrompt(intent, "req-2");
+    expect(prompt).toContain("默认 4×4 米");
+    expect(prompt).toContain("resize_scene_area");
+    expect(prompt).toContain("重新 get_world_context");
+    for (const term of ["outside-scope", "version-conflict", "version-unknown", "不要伪造版本"]) expect(prompt).toContain(term);
+  });
+
+  it("tells the selected camera how to read world failures", () => {
+    const worldScope = { kind: "world-camera" as const, cameraId: "camera-a" };
+    const prompt = buildTargetPrompt({ action: "modify", canvasId: "canvas", nodeId: "camera-card", mode: "world", worldScope, prompt: "拉近一点" }, "request");
+    for (const term of ["outside-scope", "version-conflict", "version-unknown", "不要编造"]) expect(prompt).toContain(term);
   });
 
   it("retires camera tools and refuses a world target without a scope", () => {

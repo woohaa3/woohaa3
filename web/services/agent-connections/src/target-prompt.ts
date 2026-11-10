@@ -67,13 +67,14 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "世界坐标为 u/v 地面、h 向上（米）；rotation 是 [x,y,z,w] 四元数，零旋转朝 +v、画面上方为 +h；模型 localBounds 保持资产局部 Y-up 坐标。FoV 使用 projection.kind=perspective、verticalFovRadians 为弧度。",
       "朝向优先用 lookAt（世界 u/v/h 注视点，同时给 position）：宿主会算出精确单位四元数。直接传 rotation 时必须是全精度单位四元数（用代码计算，不要手写 0.7071 这类四舍五入值），四元数归一化误差超过 1e-3 会被拒绝。",
       "按用户要求做最小必要调整，保留 nearMeters、farMeters、boundInstanceId、captureMode 和未要求变更的参数。FoV 调整视野；推拉需要修改机位。",
-      "使用 set_world_camera，cameraId 和 expectedSettingsVersion 必须来自刚读取的 camera.settings；每次成功写入后再次 get_world_context 核对真实参数，再决定是否继续调整。版本冲突或占用时如实报告，不得换镜头绕过。",
+      "使用 set_world_camera，cameraId 和 expectedSettingsVersion 必须来自刚读取的 camera.settings；每次成功写入后再次 get_world_context 核对真实参数，再决定是否继续调整。工具失败时先看回执里的 code 与失败类别：outside-scope（超出本轮范围）、version-conflict（版本已变化）、version-unknown（宿主无法确认版本）都须重新 get_world_context 取真实版本后重试，不得换镜头绕过、不得伪造版本；回执中的 bounds/axis 诊断直接引用，不要编造。",
       "宿主会在本轮成功结束后按真实写入确认镜头版本并更新取景；只有工具返回成功才可以报告已调整。complete_world_camera 仅用于重试宿主已签发的完成确认。"
     );
   } else if (intent.mode === "world") {
     lines.push(
-      "这是导演区/2D 组的共享世界创作目标。宿主已经签发本轮真实范围、版本、可写模型/镜头与只读参考；你不能自行声明或扩大范围。",
+      "这是导演区/2D 组的共享世界创作目标。宿主已经签发本轮真实范围、版本、可写模型/镜头与只读参考；你不能自行声明范围，只能在用户明确要求时用 resize_scene_area 显式扩区。",
       "先调用 get_world_context 读取本轮上下文。只修改 writable 中的对象；read-only、部分包含、unknown 或区外对象只能参考，不能写入。",
+      "新建导演区默认 4×4 米（以地面中心为原点，u/v 各 ±2 米）。大场景放不下时先用 resize_scene_area 显式扩区（expectedScopeVersion 来自 get_world_context.sceneArea.scopeVersion），扩区后重新 get_world_context 取得新 bounds 与版本，再创建/移动模型与镜头；不要靠挪动对象或猜测范围绕过。",
       "导演区 get_world_context.sceneModels 返回各模型的世界变换（含朝向）与 localBounds（本地包围盒），bounds 是导演区地面范围；用这些真实空间数据推导倒下支点、尺寸和镜头取景，不要猜测。",
       "模型局部坐标为 Y-up；实例无旋转、scale=1 时 local(x,y,z) 映射 world(u+x,v-z,h+y)。例：实例在 (u=10,v=20,h=0)，局部 (1,2,3) 位于世界 (11,17,2)；世界 yaw 绕 +h 旋转 +90° 后，局部 (1,0,0) 位于 (10,21,0)。先对局部点应用实例 scale/rotation，再平移；不要把局部坐标直接填为世界机位。",
       "导演区 get_world_context.sceneArea 同时返回 animationOrigin 与当前发布的完整动画脚本（animationScript 为 null 表示尚无动画）。位置轨道是相对 animationOrigin 的偏移，不是世界坐标。返修动画时先读取脚本并保留未要求修改的轨道；set_scene_animation_script 会替换整份脚本。旧宿主未返回 sceneArea 时不能猜测原动画或直接覆盖，应如实说明无法完成局部返修。写入后再次 get_world_context 核对发布结果。",
@@ -82,6 +83,7 @@ export function buildTargetPrompt(intent: AgentEntryIntent, requestId: string): 
       "需要扩大或缩小导演区范围时用 resize_scene_area：bounds 是世界 u/v 矩形，expectedScopeVersion 来自 get_world_context.sceneArea.scopeVersion。只有用户明确要求改范围时才用，不能拿它绕开对象写权限；范围缩小后落在外面的对象会变成只读。",
       "写 modelScript 前必须先调用 get_model_api 获取当前 woohaa-model-js-v2 的 scene.* API；脚本必须使用 scene.box/scene.cylinder 等 scene 接口，不要使用 THREE、export default 或浏览器模块写法。",
       "create_world_model 的 transform.position 使用世界 u/v 坐标，必须落在 get_world_context.bounds 内；新模型节点身份由宿主生成，不要传 nodeId。",
+      "工具失败时先看回执里的 code 与失败类别：outside-scope 表示超出本轮 bounds 或不在可写集合（可核实 bounds 后按用户要求扩区再重读），version-conflict 表示版本已变化、version-unknown 表示宿主无法确认版本——这两类都要重新 get_world_context 取真实版本后重试，不要复用旧版本、不要换对象绕过、不要伪造版本。回执中的 geometry/bounds/axis 诊断是宿主给出的真实证据，直接引用，不要自行编造。",
       "所有写入必须携带从 get_world_context 读取到的真实版本；工具拒绝时如实说明，不要改用别的对象或伪造版本。",
       "镜头修改是否留档由宿主在本轮成功结束后按真实写入与版本确认一次，模型自报或取景刷新都不是完成证据；complete_world_camera 只用于按宿主已签发的完成身份重试确认，宿主尚未确认时会返回未核实。",
       intent.worldScope?.kind === "workflow-group-2d"
