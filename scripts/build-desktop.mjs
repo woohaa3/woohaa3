@@ -218,10 +218,36 @@ function runHostPrepareCommand(resourceRoot) {
   const command = process.env.WOOHAA_DESKTOP_HOST_PREPARE_COMMAND?.trim();
   if (!command) return null;
   console.log(`[desktop] 执行归档前钩子：${command}`);
-  const result = spawnSync(command, [resourceRoot], { cwd: root, env: childEnv(), stdio: "inherit" });
-  if (result.error) throw new Error(`归档前钩子启动失败：${result.error.message}`);
-  if (result.status !== 0) throw new Error(`归档前钩子退出码 ${result.status ?? "null"}`);
+  runHookCommand({ label: "归档前钩子", command, args: [resourceRoot] });
   return command;
+}
+
+/** 产物就绪、尚未哈希时的可选外部钩子。 */
+function runArtifactFinalizeCommand({ bundleRoot, releaseId, artifacts }) {
+  const command = process.env.WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND?.trim();
+  if (!command) return null;
+  const kinds = [...new Set(artifacts.map(artifact => artifact.kind))].join(",");
+  console.log(`[desktop] 执行产物收尾钩子：${command}`);
+  runHookCommand({ label: "产物收尾钩子", command, args: [bundleRoot, releaseId, kinds] });
+  return command;
+}
+
+/**
+ * 执行一条由环境变量给出的命令模板（例如 `node /path/to/sign.mjs`）。
+ *
+ * 不能把整个字符串交给 spawnSync 的可执行文件位：`spawnSync("node x.mjs")` 会把
+ * `node x.mjs` 当成一个文件名，直接 ENOENT。也不能用 `shell: true` 加 args——
+ * 那样参数会被 shell 再拆一次，含空格的路径会被截断。这里显式经 `sh -c` 让 shell
+ * 解析命令模板，参数作为 `$@` 原样传入，不做二次拆分。
+ */
+function runHookCommand({ label, command, args }) {
+  const result = spawnSync("/bin/sh", ["-c", `${command} "$@"`, "woohaa-hook", ...args], {
+    cwd: root,
+    env: childEnv(),
+    stdio: "inherit"
+  });
+  if (result.error) throw new Error(`${label}启动失败：${result.error.message}`);
+  if (result.status !== 0) throw new Error(`${label}退出码 ${result.status ?? "null"}`);
 }
 
 function frontendBuildSteps(standalone) {
@@ -478,26 +504,6 @@ async function runBuild(options) {
 function relative(target) {
   const value = path.relative(root, target);
   return value.startsWith("..") ? target : value;
-}
-
-/**
- * 产物就绪、尚未哈希时的可选外部钩子。
- *
- * 公证和装订会改动产物字节，必须在 sha256 与 `--copy` 之前完成，否则 manifest 里记录的
- * 哈希和上传的包对不上。发行方用 `WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND` 接管，
- * 参数依次是 bundle 根目录、releaseId。
- *
- * 未配置时不做任何事：公开仓的普通构建不需要公证。
- */
-function runArtifactFinalizeCommand({ bundleRoot, releaseId, artifacts }) {
-  const command = process.env.WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND?.trim();
-  if (!command) return null;
-  const kinds = [...new Set(artifacts.map(artifact => artifact.kind))].join(",");
-  console.log(`[desktop] 执行产物收尾钩子：${command}`);
-  const result = spawnSync(command, [bundleRoot, releaseId, kinds], { cwd: root, env: childEnv(), stdio: "inherit" });
-  if (result.error) throw new Error(`产物收尾钩子启动失败：${result.error.message}`);
-  if (result.status !== 0) throw new Error(`产物收尾钩子退出码 ${result.status ?? "null"}`);
-  return command;
 }
 
 async function main() {
