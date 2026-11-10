@@ -90,7 +90,6 @@ mod tests {
             resource_key: "s".into(),
             scene_version: snapshot.scene_version.clone(),
             signature: "s".into(),
-            placement: ModelPlacement::default(),
         });
         let assets = [("s".to_owned(), Arc::new(snapshot))].into_iter().collect();
         let mut scene = Scene {

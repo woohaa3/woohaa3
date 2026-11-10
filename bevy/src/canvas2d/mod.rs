@@ -19,7 +19,6 @@ mod camera;
 mod card_cache;
 mod cards;
 mod chrome;
-mod compact_card;
 mod dash;
 mod decoration_cache;
 pub(crate) mod draw_order;
@@ -79,7 +78,7 @@ pub(crate) use camera::sync_camera;
 pub(crate) use focus_backdrop::sync as sync_focus_backdrop;
 pub(crate) use generation::{GenerationClock, sync_generation};
 pub(crate) use init::{font_ready, setup};
-pub(crate) use labels::{LabelRequests, sync_canvas_labels};
+pub(crate) use labels::{sync_canvas_labels, LabelRequests};
 pub(crate) use node_action::sync_node_action_bars;
 pub(crate) use render::{
     begin_selection_outlines, canvas_render_requested, produce_card_geometry, produce_card_hover,

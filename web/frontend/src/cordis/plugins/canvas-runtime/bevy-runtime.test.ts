@@ -6,7 +6,7 @@
  * descriptor 与 payload 分离的用例见 `bevy-runtime-payload.test.ts`（同一份 harness）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, DEFAULT_MODEL_PREVIEW, prepareModelResource, type CanvasRenderScene } from "@woohaa3/contracts";
+import { CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION, MODEL_FOCUS_VERSION, prepareModelResource, type CanvasRenderScene } from "@woohaa3/contracts";
 import { loadBevyRuntime, frameCountersReadable } from "./bevy-runtime.js";
 import { resetSceneDiagnostics, sceneDiagnostics } from "./scene-diagnostics.js";
 import { mockModule, sceneWith, v2Ops, type Calls } from "./test-support/runtime-harness.js";
@@ -359,13 +359,11 @@ describe("Bevy runtime viewport capability（change: 2026-10-10-optimize-canvas-
         version: MODEL_FOCUS_VERSION, nodeId: "m1", target: [0, 0, 0] as [number, number, number],
         yaw: 0.1, pitch: -0.2, distance: 4, fov: 0.8, radius: 1
       },
-      nodes: sceneWith("k", "s").nodes.map(node => node.id === "m1" ? { ...node, modelPreview: { ...DEFAULT_MODEL_PREVIEW } } : node)
     };
     runtime.setScene(scene);
     const generation = runtime.setObserver!({
       baseSceneGeneration: runtime.baseSceneGeneration!(),
       nodeId: "m1",
-      preview: { ...DEFAULT_MODEL_PREVIEW, azimuth: 1.2 },
       yaw: 0.8, pitch: -0.3, distance: 5, target: [1, 2, 3]
     });
     expect(generation).toBe(2);
@@ -376,7 +374,6 @@ describe("Bevy runtime viewport capability（change: 2026-10-10-optimize-canvas-
     expect(sent.nodeId).toBe("m1");
     const mirrored = (globalThis as unknown as { __bevyRuntime: { lastScene(): CanvasRenderScene } }).__bevyRuntime.lastScene();
     expect(mirrored.modelFocus).toMatchObject({ nodeId: "m1", yaw: 0.8, distance: 5, target: [1, 2, 3] });
-    expect(mirrored.nodes.find(node => node.id === "m1")?.modelPreview?.azimuth).toBe(1.2);
   });
 });
 

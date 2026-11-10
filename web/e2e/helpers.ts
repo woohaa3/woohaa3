@@ -14,8 +14,20 @@
  * 已删除 Godot bridge：不再有 `canvasBridgeCommand`、帧缓冲、`__canvasFrameLog` 或
  * 「已应用帧版本」；Bevy 由 Web 每帧调用 `set_scene`，其 `renderedRevision` 是运行时信号。
  */
-import type { Page } from "@playwright/test";
-import { defaultSelfContained3DNodeData, type CanvasCommand } from "@woohaa3/contracts";
+import { expect, type Page } from "@playwright/test";
+import { createHighEntropyId, defaultSelfContained3DNodeData, type CanvasCommand } from "@woohaa3/contracts";
+
+/**
+ * 模型节点的默认世界实例 nodeData（change: 2026-11-10-remove-legacy-model-card-nodes）。
+ *
+ * 模型没有卡片：位置只由 `sharedWorldInstance` 表达，因此 E2E 创建模型时必须给出实例。
+ */
+export function modelNodeData(world: { x: number; y: number } = { x: 0, y: 0 }): Record<string, unknown> {
+	return defaultSelfContained3DNodeData("model3d", {
+		instanceId: createHighEntropyId("world-instance"),
+		point: world
+	}) as unknown as Record<string, unknown>;
+}
 
 export type StoredCanvas = {
 	id: string;
@@ -28,6 +40,44 @@ export type StoredCanvas = {
 	nodeData: Record<string, Record<string, unknown>>;
 	assets: Array<{ id: string; url?: string; metadata?: Record<string, unknown> }>;
 };
+
+/**
+ * 共享世界模型屏幕上可双击/悬停的中心点（client 坐标）。
+ *
+ * 模型没有卡片：取渲染器发布的模型根包围盒中心（`canvas_work_diagnostics().modelPoses[].center`，
+ * 渲染器世界坐标 Y-up，米制 × 64），按画布 viewport 投影到 client 坐标。
+ * 生产构建不提供 `getWorkDiagnostics`，此时回落到按世界实例变换估算的锚点
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
+ */
+export async function worldModelClientPoint(page: Page, nodeId: string): Promise<{ x: number; y: number }> {
+	const point = () => page.evaluate((id) => {
+		const runtime = (window as unknown as {
+			__bevyRuntime: {
+				getWorkDiagnostics?: () => { modelPoses?: Array<{ nodeId?: string; center?: number[] | null }> };
+				lastScene: () => { viewport: { x: number; y: number; zoom: number }; nodes: Array<Record<string, unknown>> };
+			};
+		}).__bevyRuntime;
+		const scene = runtime.lastScene();
+		const node = scene.nodes.find((entry) => entry.id === id);
+		const instance = node?.sharedWorldInstance as { transform?: { position?: { u?: number; v?: number; h?: number }; scale?: number } } | undefined;
+		const pose = runtime.getWorkDiagnostics?.().modelPoses?.find((entry) => entry.nodeId === id);
+		let world: number[] | null = pose?.center ?? null;
+		if (!world && instance?.transform?.position) {
+			// 无卡片模型：实例变换即唯一位置；原点落在 h=0 地面，取 1 米高的保守中心。
+			const position = instance.transform.position;
+			const scale = (instance.transform.scale ?? 1) * 64;
+			world = [(position.u ?? 0) * 64, scale * 0.5, -(position.v ?? 0) * 64];
+		}
+		if (!world) return null;
+		const rect = document.querySelector("#bevy-canvas")!.getBoundingClientRect();
+		return {
+			x: rect.left + world[0] * scene.viewport.zoom + scene.viewport.x,
+			y: rect.top + -world[2] * scene.viewport.zoom + scene.viewport.y
+		};
+	}, nodeId);
+	await expect.poll(point, { timeout: 30_000 }).not.toBeNull();
+	return (await point())!;
+}
 
 /** 等待 Bevy 运行时就绪（字体/相机 ready）。 */
 export async function waitForBevyReady(page: Page): Promise<void> {
@@ -238,10 +288,19 @@ export async function createNode(
 	}
 ): Promise<{ ok: boolean; revision: number }> {
 	const nodeId = input.nodeId ?? `e2e-${input.nodeType}-${Date.now().toString(36)}`;
+	const position = input.position ?? { x: 0, y: 0 };
+	// 模型没有卡片坐标：默认 nodeData 直接携带投影到该画布点的世界实例。
+	const nodeData =
+		input.nodeData ??
+		(input.nodeType === "model3d" && !input.nodeData ? modelNodeData(position) : undefined) ??
+		defaultSelfContained3DNodeData(input.nodeType, input.nodeType === "model3d" ? { instanceId: createHighEntropyId("world-instance"), point: position } : undefined) ??
+		undefined;
 	const command: CanvasCommand = {
 		type: "node.add",
-		node: { id: nodeId, type: input.nodeType, position: input.position ?? { x: 0, y: 0 } },
-		nodeData: (input.nodeData ?? defaultSelfContained3DNodeData(input.nodeType) ?? undefined) as never,
+		node: input.nodeType === "model3d"
+			? { id: nodeId, type: input.nodeType }
+			: { id: nodeId, type: input.nodeType, position },
+		nodeData: nodeData as never,
 		...(input.connect
 			? {
 					connect: {

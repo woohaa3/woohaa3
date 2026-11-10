@@ -9,8 +9,8 @@ installSharedSession();
 describe("双击选入模型", () => {
   it("只在选入时选中，不进入聚焦；已选中后的下一次双击仍可聚焦", () => {
     const h = focusHarness();
-    // 卡片中心同时是 pointerdown 的卡片命中与 dblclick 的卡片回退聚焦入口。
-    const point = { x: 298, y: 132 };
+    // 共享世界模型没有卡片：指针落在世界模型网格上（pick 与 dblclick 同源）。
+    const point = modelCenter(h.target);
     const press = () => {
       domFire(h.dom, "pointerdown", { button: 0, clientX: point.x, clientY: point.y });
       domFire(h.dom, "pointerup", { button: 0, clientX: point.x, clientY: point.y });

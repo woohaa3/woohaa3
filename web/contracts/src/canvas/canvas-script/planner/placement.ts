@@ -64,16 +64,20 @@ export type PlacementState = {
 
 export function resolvePlacement(
   placement: AgentCreatePlacement | undefined,
-  descriptor: { defaultSize: { width: number; height: number } },
+  descriptor: { defaultSize: { width: number; height: number }; worldOnly?: boolean },
   state: PlacementState
 ): { ok: true; position: { x: number; y: number } } | { ok: false; error: AgentCanvasError } {
   const mode: AgentPlacementMode = placement?.mode ?? "auto";
   const size = descriptor.defaultSize;
+  // 模型没有卡片矩形：只能把画布点投影成世界实例，不参与卡片的自动布局与避让。
+  if (descriptor.worldOnly && mode !== "absolute") {
+    return { ok: false, error: { code: "invalid-placement", message: "模型没有卡片矩形，只支持 absolute placement", retryable: false, operationIndex: state.operationIndex, field: "placement" } };
+  }
   if (mode === "absolute") {
     if (!placement || placement.mode !== "absolute") {
       return { ok: false, error: { code: "malformed-request", message: "缺少 absolute position", retryable: false, operationIndex: state.operationIndex, field: "placement" } };
     }
-    return { ok: true, position: avoidOverlap(placement.position, size, state, 0) };
+    return { ok: true, position: descriptor.worldOnly ? { ...placement.position } : avoidOverlap(placement.position, size, state, 0) };
   }
   if (mode === "auto") {
     const bounds = graphBounds(state.snapshot.nodes, state.plannedRects);

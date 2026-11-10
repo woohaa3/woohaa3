@@ -34,7 +34,6 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         chrome: NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,
-        model_preview: None,
         id: id.into(),
         kind: "image".into(),
         x,

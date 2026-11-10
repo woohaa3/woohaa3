@@ -27,7 +27,6 @@ import { beginStartupSpan } from "../../services/telemetry-primitives.js";
 import { sharedCanvasNodeIndex, indexNodeSize } from "./canvas-node-index.js";
 import { errorDetail } from "../canvas-runtime/runtime-issues.js";
 import { advanceTransientState } from "./interaction-frame-prelude.js";
-import { collectModelPlacements } from "./interaction-placements.js";
 import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
 import { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
@@ -39,7 +38,6 @@ import { createWorldGroundPreviewState } from "./world-ground-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
-import { modelPreviewStore } from "../../services/model-preview-store.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
 import type { AlignmentSnapPolicy } from "./alignment-snap.js";
@@ -134,7 +132,6 @@ export function installInteractionController(options: InteractionControllerOptio
     activeViewport
   });
 
-  const modelPlacements = () => collectModelPlacements();
   /**
    * 镜头视锥拖动中的瞬时位姿：只影响呈现，不写规范 nodeData。
    * 规则与状态在 `world-camera-preview.ts`（保持 controller 文件体积）。
@@ -214,7 +211,7 @@ export function installInteractionController(options: InteractionControllerOptio
    */
   let firstSceneBuildMeasured = false;
   const buildSceneWithResources = () => {
-    const build = () => buildSceneWithResourcesModule(options, surfaceSize, () => modelPlacements(), frameState());
+    const build = () => buildSceneWithResourcesModule(options, surfaceSize, frameState());
     if (firstSceneBuildMeasured) return build();
     // 第一次完整构建包含模型资源装配与全表投影，是启动路径上唯一可分离的"建场"成本。
     const finish = beginStartupSpan("scene-build");
@@ -652,11 +649,10 @@ export function installInteractionController(options: InteractionControllerOptio
 
   // 供 E2E/排障观察（生产无副作用）；change: 2026-09-28-split-frontend-god-plugins 后续拆分。
   const unsubscribeCapabilities = options.nodeCapabilities?.subscribe(() => {
-    if (state.gesture.kind === "resize" || state.gesture.kind === "model-preview") cancelTransientGesture();
+    if (state.gesture.kind === "resize") cancelTransientGesture();
     schedule("node-capabilities");
   });
   const unsubscribeAppearance = canvasAppearanceStore.subscribe(() => schedule("canvas-appearance"));
-  const unsubscribePreview = modelPreviewStore.subscribe(() => schedule("model-preview"));
   const unsubscribeCameraEditor = worldCameraEditorStore.subscribe(() => schedule("world-camera-editor"));
   const disposeDiagnostics = installCanvasDiagnostics({ core, target, state, activeViewport, setSelection, model,
     renderError: () => renderError,
@@ -845,9 +841,7 @@ export function installInteractionController(options: InteractionControllerOptio
       frameLoop.dispose();
       unsubscribeCapabilities?.();
       unsubscribeAppearance();
-      unsubscribePreview();
       unsubscribeCameraEditor();
-      modelPreviewStore.clear();
       viewportTransition.cancel();
       // 取消未提交的拖动粘连 / 聚合拉线手势（change: add-drag-touch-connections /
       // add-multi-select-aggregate-connect，design D6）。

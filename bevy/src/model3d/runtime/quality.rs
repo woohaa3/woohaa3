@@ -20,7 +20,7 @@ pub(crate) fn sync_quality(
     now: f64,
     pins: &HashSet<String>,
 ) -> bool {
-    sync_quality_with_demand(commands, meshes, models, scene, focus, now, pins, pins)
+    sync_quality_with_demand(commands, meshes, models, scene, focus, now, pins)
 }
 
 /// 同步档位，并把「需要 High 的根」与「需要保持驻留的根」分开。
@@ -34,21 +34,19 @@ pub(crate) fn sync_quality_with_demand(
     focus: Option<&str>,
     now: f64,
     pins: &HashSet<String>,
-    high_demand: &HashSet<String>,
 ) -> bool {
     let ModelVisuals {
         roots,
         shared,
         capture_pins,
-        high_demand: stored_high_demand,
-        ..
+        .. 
     } = models;
     if *capture_pins != *pins {
         capture_pins.clone_from(pins);
     }
-    if *stored_high_demand != *high_demand {
-        stored_high_demand.clone_from(high_demand);
-    }
+    // High 消费者集合与驻留 pin 是同一份（生产调用方 `sync_models` 已按截图/导出需求算出
+    // `pins`；旧的 `high_demand` 形参让内部调用与系统参数列表不一致，导致 WASM 校验失败）。
+    let high_demand: HashSet<String> = pins.clone();
 
     let completed = shared.poll_jobs(meshes);
     let mut changed = completed.is_some();
@@ -72,10 +70,16 @@ pub(crate) fn sync_quality_with_demand(
         let purpose =
             super::super::quality::purpose(node, scene, focus, high_demand.contains(&node.id));
         let high_owner = purpose.requires_high();
-        // Demand retains/prewarms nearby roots; ordinary invisible cards must
-        // not compete with visible work when wheel/pinch changes their LOD.
-        let visible = super::super::quality::card_visible(node, scene, focus);
-        if !high_owner && !visible {
+        // 世界模型始终参与绘制；是否驻留只由需求集合决定（离屏宽限、捕获 pin、聚焦）。
+        // 旧卡片节点没有世界实例，因此没有可视几何。
+        if node.shared_world_instance.is_none() {
+            continue;
+        }
+        let demanded = models
+            .demand
+            .as_ref()
+            .is_none_or(|demand| demand.contains(&node.id));
+        if !high_owner && !demanded {
             continue;
         }
         let next = if high_owner {
@@ -84,6 +88,7 @@ pub(crate) fn sync_quality_with_demand(
             super::super::quality::desired(node, scene, focus, root.quality, &root.resource)
         };
         let generated = root.quality_refresh_pending;
+
         if (next == root.quality && !generated)
             || (next != root.quality
                 && !high_owner
@@ -103,6 +108,7 @@ pub(crate) fn sync_quality_with_demand(
             let effective = super::super::mesh::effective_quality(geometry, next);
             let key = super::super::mesh::quality_key(base, geometry, effective);
             let Some((handle, _)) = shared.mesh(meshes, base, geometry, effective) else {
+                root.quality_refresh_pending = true;
                 continue 'roots;
             };
             active.insert(key, handle.clone());
@@ -118,6 +124,7 @@ pub(crate) fn sync_quality_with_demand(
                 .min()
                 .unwrap_or(next);
             let Some(asset) = shared.batches.get(meshes, &batch.source, batch_quality) else {
+                root.quality_refresh_pending = true;
                 continue 'roots;
             };
             active.insert(format!("batch:{:?}", batch.entity), asset.handle.clone());

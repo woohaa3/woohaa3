@@ -62,6 +62,6 @@ export function applyNodeResourceLoading(
   readers: Partial<Record<"image" | "video" | "model", NodeResourceLoadingReader | null>>
 ): void {
   for (const node of scene.nodes) {
-    if (!node.busy && Object.entries(readers).some(([kind, reader]) => reader?.isLoading?.(node.id) && (reader.isResourceNode?.(node) ?? (node.model || ["image", "video", "model"].includes(node.type) || (kind === "model" && !!node.modelPreview))))) node.mediaLoading = true;
+    if (!node.busy && Object.values(readers).some(reader => reader?.isLoading?.(node.id) && (reader.isResourceNode?.(node) ?? (node.model || ["image", "video", "model"].includes(node.type))))) node.mediaLoading = true;
   }
 }

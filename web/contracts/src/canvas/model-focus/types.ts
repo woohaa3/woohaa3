@@ -32,9 +32,7 @@ export const MODEL_FOCUS_FOV = (50 * Math.PI) / 180;
 export const MODEL_FOCUS_PITCH_LIMIT = (89 * Math.PI) / 180;
 /** 自动取景时包围球外扩系数（留出边距）。 */
 export const FRAME_PADDING = 1.12;
-/** 卡片底部与模型顶部之间的固定间距（与 Rust `MODEL_CARD_GAP` 一致）。 */
-export const MODEL_CARD_GAP = 40.0;
-/** 模型单位基准（与 Rust `model_anchor` / `model_unit` 的 `64.0` 一致）。 */
+/** 模型单位基准（与 Rust `model_unit` 的 `64.0` 一致）。 */
 export const MODEL_SIZE_BASE = 64.0;
 /**
  * 场景单位 → 画布世界单位的**绝对**换算：1 场景单位（= 1 米，见 `MODEL_API_AXIS_CONVENTIONS`）

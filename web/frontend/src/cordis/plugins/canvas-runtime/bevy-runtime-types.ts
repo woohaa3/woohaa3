@@ -125,7 +125,6 @@ export type BevyModule = {
  */
 export type PointHit =
   | { kind: "scene-area-playback"; nodeId: string; control: "play" | "loop" | "track" | "body"; track: [number, number, number, number] }
-  | { kind: "model-preview"; nodeId: string }
   | { kind: "node"; nodeId: string }
   | { kind: "history"; nodeId: string }
   | { kind: "port"; nodeId: string; side: "input" | "output" }

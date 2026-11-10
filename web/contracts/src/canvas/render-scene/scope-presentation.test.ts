@@ -80,7 +80,7 @@ it("renders 2D groups as member frames and shared-world models without a card", 
   const model = scene.nodes.find(node => node.id === "model")!;
   expect(model.chrome).toEqual({ kind: "none" });
   expect(model.resizable).toBe(false);
-  expect(model.modelPreview).toBeUndefined();
+  expect(Object.prototype.hasOwnProperty.call(model, "modelPreview")).toBe(false);
   expect(model.id).toBe("model");
   expect(model.sharedWorldInstance?.instanceId).toBe("instance-main");
   expect(scene.nodes.find(node => node.id === "camera")?.chrome).toBeUndefined();
@@ -335,4 +335,39 @@ it("includes the default-on global light in presentation deduplication", () => {
   const missing = renderSceneFingerprint(scene);
   expect(renderSceneFingerprint({ ...scene, globalLightEnabled: true })).toBe(missing);
   expect(renderSceneFingerprint({ ...scene, globalLightEnabled: false })).not.toBe(missing);
+});
+
+it("projects legacy model cards as read-only diagnostic cards and world models without chrome", () => {
+  // 世界模型：只有世界对象与选择身份，不含卡片预览/卡片纹理/尺寸抓手。
+  const canvas = fixture();
+  const worldScene = buildCanvasRenderScene({ canvas });
+  const world = worldScene.nodes.find(node => node.id === "model")!;
+  expect(world.chrome).toEqual({ kind: "none" });
+  expect(world.resizable).toBe(false);
+  expect(Object.prototype.hasOwnProperty.call(world, "modelPreview")).toBe(false);
+
+  // 旧卡片：保留节点与 nodeData 原值，只投影固定诊断正文的通用卡片。
+  const legacy = {
+    ...canvas,
+    document: {
+      ...canvas.document,
+      nodes: [...canvas.document.nodes, { id: "legacy", type: "model3d", position: { x: 900, y: 200 }, width: 248, height: 232 }]
+    },
+    nodeData: {
+      ...canvas.nodeData,
+      legacy: { title: "旧模型", modelScript: "scene.box({ id: 'a' });", modelScriptVersion: "woohaa-model-js-v2" }
+    }
+  };
+  const legacyScene = buildCanvasRenderScene({
+    canvas: legacy,
+    modelResources: new Map([["legacy", prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] })]])
+  });
+  const card = legacyScene.nodes.find(node => node.id === "legacy")!;
+  expect(card.chrome).toBeUndefined();
+  expect(card.body).toBe("旧版 3D 模型卡片已不再支持，删除后重新创建模型");
+  expect(card.model).toBeUndefined();
+  expect(card.resizable).toBe(false);
+  expect(card.busy).toBe(false);
+  expect(card.progress).toBe(0);
+  expect(card.title).toBe("旧模型");
 });

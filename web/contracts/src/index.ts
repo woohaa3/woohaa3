@@ -129,7 +129,6 @@ export * from "./canvas/world-animation-spatial.js";
 export * from "./canvas/world-animation-verification.js";
 export * from "./canvas/humanoid-motion-reference.js";
 export * from "./canvas/scene-footprint.js";
-export * from "./canvas/world-conversion.js";
 export * from "./canvas/creation-scopes-ui.js";
 export {
   SharedWorldCodecError,

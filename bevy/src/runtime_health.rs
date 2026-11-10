@@ -37,7 +37,7 @@ impl Plugin for RuntimeHealthPlugin {
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.add_systems(
                 Render,
-                (|work: Option<Res<crate::model_preview::render_work::RenderWork>>| {
+                (|work: Option<Res<crate::render_work::RenderWork>>| {
                     DRAW_CALLS_3D
                         .with(|v| v.set(work.and_then(|work| work.draw_recording_calls())));
                     RENDERS.with(|v| v.set(v.get().wrapping_add(1)));

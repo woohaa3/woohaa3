@@ -12,31 +12,15 @@ export type BevyModelPlacement = {
   yaw: number;
 };
 
-export type BevyModelPreview = {
-  azimuth: number;
-  elevation: number;
-  distanceScale: number;
-  targetOffset?: [number, number, number];
-};
-
-export const MODEL_PREVIEW_MIN_HEIGHT = 160;
-
-/**
- * 卡片默认视角：正对模型正面（局部 +Z），保留 30° 俯视。
- *
- * 早先是方位 45° 的斜视角，模型在卡片里总是斜对观察者；改为正面后主体朝向与顶面
- * 体积感兼顾。`azimuth` 用的是与聚焦观察相机同一套绕 Y 轴方位角，0 即沿 +Z 看向原点。
- */
-export const DEFAULT_MODEL_PREVIEW: BevyModelPreview = {
-  azimuth: 0, elevation: Math.PI / 6, distanceScale: 1, targetOffset: [0, 0, 0]
-};
-
 /**
  * 轻量模型引用（change: optimize-model-scene-snapshot-hot-path）。
  *
- * 节点只携带稳定 `resourceKey` 与动态 placement；模型内容由独立的不可变资源通道
+ * 节点只携带稳定 `resourceKey`；模型内容由独立的不可变资源通道
  * （`prepare_and_register_model_resource`）注册，`CanvasRenderScene` 不再内联 `ops`。`signature`
  * 用于 Bevy 判断是否需要替换 ECS entity 树，`sceneVersion` 决定渲染语义。
+ *
+ * 世界根只使用 `sharedWorldInstance.transform`；`modelPlacement` 仍是 nodeData 上的内容/历史
+ * 快照字段，但不进入场景 wire（change: 2026-11-10-remove-legacy-model-card-nodes）。
  */
 export type BevyModelReference = {
   /** Stable bind-pose anchor in asset XYZ; editor projects it onto world ground. */
@@ -49,5 +33,4 @@ export type BevyModelReference = {
   resourceKey: string;
   /** 模型内容签名；placement/viewport 变化时不变。 */
   signature: string;
-  placement?: BevyModelPlacement;
 };

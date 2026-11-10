@@ -359,7 +359,6 @@ mod tests {
             chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             world_camera: None,
-            model_preview: None,
             ghost: false,
             card_label: None,
             id: id.into(),

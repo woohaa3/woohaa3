@@ -457,12 +457,12 @@ function buildMergeCommands(
     return { ok: false, code: "merge-failed", message: "恢复命令缺少目标内容写入" };
   }
   const patch = commands[index] as Extract<CanvasCommand, { type: "nodeData.patch" }>;
-  // 模型当前身份包含摆放：来源条目未携带摆放时必须显式写 null（批次里始终有摆放语义），
-  // 由 reducer 归一化为默认摆放，使目标内容与来源当前版本等价；来源带摆放时写回后身份完全一致。
+  // 模型当前身份包含摆放：来源带摆放时写回该摆放；来源没有摆放时不写 `modelPlacement`
+  // （显式 null 不是合法摆放置，会被领域校验整批拒绝），目标保留自己的摆放。
   const value = input.kind === "model"
     ? {
         ...((patch.value ?? {}) as Record<string, unknown>),
-        modelPlacement: input.modelPlacement,
+        ...(input.modelPlacement ? { modelPlacement: input.modelPlacement } : {}),
         modelScriptStatus: "ok",
         modelScriptError: null
       }

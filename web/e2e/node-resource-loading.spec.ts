@@ -1,7 +1,7 @@
 import { expect, test } from "./review-browser.js";
 import { readFileSync } from "node:fs";
-import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
-import { installPageHelpers, resetCanvasStorage, seedYjsCanvas, uploadMedia, waitForBevyReady, waitForCanvasSession } from "./helpers.js";
+
+import { installPageHelpers, modelNodeData, resetCanvasStorage, seedYjsCanvas, uploadMedia, waitForBevyReady, waitForCanvasSession } from "./helpers.js";
 
 test("图片、视频与 3D 模型共用加载状态，资源就绪后清除", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -37,14 +37,14 @@ test("图片、视频与 3D 模型共用加载状态，资源就绪后清除", a
   await seedYjsCanvas(page, "woohaa3-default-canvas", [], { canvas: {
     id: "woohaa3-default-canvas", title: "共享加载状态", revision: 1,
     document: { schemaVersion: "asset-canvas-v1", edges: [], updatedAt: now, nodes: [
-      { id: "model-0-ready", type: "model3d", position: { x: 1060, y: 240 }, width: 260, height: 195 },
+      { id: "model-0-ready", type: "model3d" },
       { id: "image-loading", type: "image", position: { x: 100, y: 240 }, width: 260, height: 195 },
       { id: "video-loading", type: "video", position: { x: 420, y: 240 }, width: 260, height: 195 },
-      { id: "model-loading", type: "model3d", position: { x: 740, y: 240 }, width: 260, height: 195 }
+      { id: "model-loading", type: "model3d" }
     ] },
     nodeData: {
-      "model-0-ready": defaultSelfContained3DNodeData("model3d"),
-      "model-loading": defaultSelfContained3DNodeData("model3d"),
+      "model-0-ready": modelNodeData({ x: 1060, y: 240 }),
+      "model-loading": modelNodeData({ x: 740, y: 240 }),
       "image-loading": { outputAssetId: "image-asset" },
       "video-loading": { outputAssetId: "video-asset" }
     },

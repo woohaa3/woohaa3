@@ -333,13 +333,12 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         nodeId: z.string().min(1).optional(),
         // 兼容旧客户端传入；实际版本由宿主固定为当前支持的脚本版本。
         modelScriptVersion: z.string().min(1).optional(),
-        cardPosition: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).optional(),
         transform
       }),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
-    async ({ instanceId, modelScript, cardPosition, transform: pose }) =>
+    async ({ instanceId, modelScript, transform: pose }) =>
       auditWrap(deps, "create_world_model", { requestId: deps.grant?.workId }, async () => {
         const bound = worldGrant(deps);
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
@@ -349,7 +348,6 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           instanceId: instanceId ?? null,
           modelScript,
           modelScriptVersion: scriptVersion,
-          cardPosition: cardPosition ?? null,
           transform: pose
         }));
         // 始终由宿主派生稳定 id：不信任模型传入的节点身份（常被误填为导演区节点），
@@ -360,7 +358,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           operationId: `${deps.grant!.workId}:create:${resolvedNodeId}:${contentHash}`,
           nodeId: resolvedNodeId,
           ...(instanceId ? { instanceId } : {}),
-          content: { modelScript, modelScriptVersion: scriptVersion, ...(cardPosition ? { cardPosition } : {}) },
+          content: { modelScript, modelScriptVersion: scriptVersion },
           transform: pose as WorldTransform
         };
         const outcome = await bound.client.write({
@@ -383,13 +381,12 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         expectedVersion: z.string().min(1),
         modelScript: z.string().min(1),
         modelScriptVersion: z.string().min(1).optional(),
-        cardPosition: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).optional(),
         transform: transform.optional()
       }),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
-    async ({ instanceId, expectedVersion, modelScript, cardPosition, transform: pose }) =>
+    async ({ instanceId, expectedVersion, modelScript, transform: pose }) =>
       auditWrap(deps, "replace_world_model_content", { requestId: deps.grant?.workId }, async () => {
         const bound = worldGrant(deps);
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
@@ -398,10 +395,10 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           contextId: bound.world.contextId,
           operation: {
             kind: "replace-model-content",
-            operationId: `${deps.grant!.workId}:replace:${instanceId}:${hashText(JSON.stringify({ expectedVersion, modelScript, modelScriptVersion: scriptVersion, cardPosition: cardPosition ?? null, transform: pose ?? null }))}`,
+            operationId: `${deps.grant!.workId}:replace:${instanceId}:${hashText(JSON.stringify({ expectedVersion, modelScript, modelScriptVersion: scriptVersion, transform: pose ?? null }))}`,
             instanceId,
             expectedVersion,
-            content: { modelScript, modelScriptVersion: scriptVersion, ...(cardPosition ? { cardPosition } : {}) },
+            content: { modelScript, modelScriptVersion: scriptVersion },
             ...(pose ? { transform: pose as WorldTransform } : {})
           }
         });

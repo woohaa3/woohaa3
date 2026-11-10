@@ -14,9 +14,11 @@ pub(crate) fn preview_fit_distance(radius: f32, aspect: f32) -> f32 {
 }
 
 /// Highest consumer requirement owns a shared root representation.
+///
+/// 模型卡片预览已删除：`World` 是普通画布上唯一的默认用途，按世界相机下的实际投影占比
+/// 分档（change: 2026-11-10-remove-legacy-model-card-nodes）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ViewPurpose {
-    Card,
     Focus,
     Edit,
     Selected,
@@ -28,14 +30,14 @@ impl ViewPurpose {
     pub(crate) fn requires_high(self) -> bool {
         matches!(
             self,
-            Self::Focus | Self::Edit | Self::Selected | Self::Capture | Self::Export | Self::World
+            Self::Focus | Self::Edit | Self::Selected | Self::Capture | Self::Export
         )
     }
     pub(crate) fn select(self, metric: f32, current: Quality) -> Quality {
         if self.requires_high() {
             Quality::High
         } else {
-            Quality::for_pixels(metric, current)
+            Quality::for_fraction(metric, current)
         }
     }
 }
@@ -60,16 +62,19 @@ pub(super) fn purpose(
             .is_some_and(|f| f.node_id == node.id)
     {
         ViewPurpose::Focus
-    } else if node.model_preview.is_none() {
-        ViewPurpose::World
     } else {
-        ViewPurpose::Card
+        ViewPurpose::World
     }
 }
 
 /// Exact card visibility, without the demand/prewarm margin. Unknown surfaces
 /// stay conservative for native callers. Focus/edit/capture bypass this gate.
+///
+/// 共享世界模型没有卡片：它始终参与世界绘制，因此不做卡片矩形裁剪。
 pub(super) fn card_visible(node: &GraphNode, scene: &Scene, focus: Option<&str>) -> bool {
+    if !matches!(node.chrome, crate::protocol::NodeChrome::Card) {
+        return true;
+    }
     if (focus.is_some() || scene.model_focus.is_some())
         && !crate::canvas_query::focus_context::contains(scene, &node.id)
     {
@@ -132,19 +137,24 @@ impl Quality {
             ),
         }
     }
-    /// A dead band around both thresholds prevents wheel/pinch oscillation.
-    pub(super) fn for_pixels(pixels: f32, current: Self) -> Self {
-        if !pixels.is_finite() || pixels <= 0.0 {
+    /// 世界投影占比的档位阈值（带死区）。占比 = 投影直径 ÷ 可视窗口高度。
+    pub(super) fn for_fraction(fraction: f32, current: Self) -> Self {
+        if !fraction.is_finite() || fraction <= 0.0 {
             return Self::High;
         }
+        const HIGH_ON: f32 = 0.45;
+        const HIGH_OFF: f32 = 0.36;
+        const LOW_ON: f32 = 0.12;
+        const LOW_OFF: f32 = 0.09;
         match current {
-            Self::Low if pixels < 224.0 => Self::Low,
-            Self::High if pixels > 448.0 => Self::High,
-            _ if pixels < 176.0 => Self::Low,
-            _ if pixels > 576.0 => Self::High,
+            Self::Low if fraction < LOW_OFF => Self::Low,
+            Self::High if fraction > HIGH_OFF => Self::High,
+            _ if fraction < LOW_ON => Self::Low,
+            _ if fraction > HIGH_ON => Self::High,
             _ => Self::Medium,
         }
     }
+
 
 }
 
@@ -161,15 +171,15 @@ pub(super) fn desired(
     if purpose.requires_high() {
         return Quality::High;
     }
-    let dpr = scene.surface.as_ref().map_or(1.0, |s| s.pixel_ratio);
-    let display = crate::canvas_query::focus_context::node(scene, node);
-    let (_, _, width, height) = crate::canvas_query::layout::content_rect(&display);
+    let Some(surface) = scene.surface.as_ref().filter(|surface| {
+        surface.height.is_finite() && surface.height > 0.0
+    }) else {
+        return Quality::High;
+    };
     let radius = node
         .model
         .as_ref()
-        .and_then(|reference| {
-            super::layout::model_bounds_for_node(resource, &reference.placement, node)
-        })
+        .and_then(|_| super::layout::model_bounds_for_node(resource, node))
         .map(|(bounds, _)| {
             (bevy::prelude::Vec3::from_array(bounds.max)
                 - bevy::prelude::Vec3::from_array(bounds.min))
@@ -179,107 +189,98 @@ pub(super) fn desired(
     let Some(radius) = radius.filter(|radius| radius.is_finite()) else {
         return Quality::High;
     };
-    let distance_scale = node
-        .model_preview
-        .as_ref()
-        .map_or(1.0, |view| view.distance_scale);
-    let metric = projected_card_pixels(
-        width,
-        height,
-        crate::canvas_query::focus_context::viewport(scene)[2],
-        dpr,
-        distance_scale,
-        radius,
-    );
-    purpose.select(metric, current)
+    let zoom = crate::canvas_query::focus_context::viewport(scene)[2];
+    let metric = projected_world_fraction(radius, zoom, surface.height);
+    Quality::for_fraction(metric, current)
 }
 
-/// Conservative projected bounding-sphere diameter for the card's perspective lens.
-/// Applies exactly the same distance floors/caps as preview framing, using prepared
-/// bounds rather than vertex traversal. 中心平面高度换算对透视/正交等价
-/// （`2·d·tan(fov/2)`），因此改投影不改变分档数值。
-fn projected_card_pixels(
-    width: f32,
-    height: f32,
-    zoom: f32,
-    dpr: f32,
-    distance_scale: f32,
-    radius: f32,
-) -> f32 {
+/// 世界相机下的保守投影占比：投影直径 ÷ 可视窗口高度。
+///
+/// 普通画布的世界几何按 `screen = canvas * zoom + pan` 投影，因此直径的 CSS 像素是
+/// `2 · radius · zoom`；除以视口高度得到与 DPR、相机距离无关的占比。
+fn projected_world_fraction(radius: f32, zoom: f32, viewport_height: f32) -> f32 {
     if !radius.is_finite() || radius < 0.0 {
         return f32::INFINITY;
     }
-    if [width, height, zoom, dpr, distance_scale]
-        .iter()
-        .any(|v| !v.is_finite() || *v <= 0.0)
-    {
+    if [zoom, viewport_height].iter().any(|v| !v.is_finite() || *v <= 0.0) {
         return f32::INFINITY;
     }
-    let radius = radius.max(0.01);
-    let distance = preview_fit_distance(radius, width.max(1.0) / height.max(1.0)) * distance_scale;
-    let viewport_height = crate::orbit_camera::orthographic_viewport_height(
-        distance,
-        crate::orbit_camera::ORBIT_DEFAULT_FOV,
-    );
-    height.max(1.0) * zoom * dpr * 2.0 * radius / viewport_height
+    2.0 * radius.max(0.01) * zoom / viewport_height
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn explicit_consumers_pin_high_independent_of_pixel_budget() {
+    fn high_consumers_stay_high_regardless_of_projection_size() {
         for purpose in [
             ViewPurpose::Focus,
             ViewPurpose::Edit,
-            ViewPurpose::Selected,
             ViewPurpose::Capture,
             ViewPurpose::Export,
-            ViewPurpose::World,
         ] {
             assert!(purpose.requires_high());
-            assert_eq!(purpose.select(1., Quality::Low), Quality::High);
+            assert_eq!(purpose.select(0.01, Quality::Low), Quality::High);
+            assert_eq!(purpose.select(10.0, Quality::Low), Quality::High);
         }
-        assert!(!ViewPurpose::Card.requires_high());
-        assert_eq!(ViewPurpose::Card.select(1., Quality::Medium), Quality::Low);
+        // 选中缩放与世界画布都按实际投影占比分档，不再恒为 High。
+        assert!(!ViewPurpose::World.requires_high());
+        assert_eq!(ViewPurpose::World.select(0.01, Quality::Medium), Quality::Low);
+        assert_eq!(ViewPurpose::World.select(10.0, Quality::Medium), Quality::High);
     }
+
     #[test]
-    fn card_projection_accounts_for_lens_scale_and_physical_pixels() {
-        let base = projected_card_pixels(800., 400., 1., 1., 1., 1.);
-        assert!((projected_card_pixels(800., 400., 2., 2., 1., 1.) - base * 4.).abs() < 0.001);
-        assert!((projected_card_pixels(800., 400., 1., 1., 4., 1.) - base / 4.).abs() < 0.001);
-        assert_eq!(
-            Quality::for_pixels(base / 4., Quality::Medium),
-            Quality::Low
-        );
-        assert_eq!(
-            Quality::for_pixels(base * 4., Quality::Medium),
-            Quality::High
-        );
-        assert!(projected_card_pixels(800., 400., 1., 1., 1., 1e8) > base);
-        assert!(projected_card_pixels(800., 400., 1., 1., 1., 0.001) < base);
-        let portrait = projected_card_pixels(200., 800., 1., 1., 1., 1.);
-        assert!(portrait < base && portrait > 0.);
-        for scale in [0., -1., f32::NAN, f32::INFINITY] {
-            assert_eq!(
-                Quality::for_pixels(
-                    projected_card_pixels(800., 400., 1., 1., scale, 1.),
-                    Quality::Low
-                ),
-                Quality::High
-            );
+    fn world_projection_fraction_uses_zoom_and_viewport_height() {
+        let base = projected_world_fraction(1.0, 1.0, 800.0);
+        assert!((base - 2.0 / 800.0).abs() < 1e-6);
+        // 放大 2 倍 ⇒ 投影占比翻倍；视口更高 ⇒ 占比变小。
+        assert!((projected_world_fraction(1.0, 2.0, 800.0) - base * 2.0).abs() < 1e-6);
+        assert!((projected_world_fraction(1.0, 1.0, 1600.0) - base / 2.0).abs() < 1e-6);
+        assert!(projected_world_fraction(10.0, 1.0, 800.0) > base);
+        assert!(projected_world_fraction(0.1, 1.0, 800.0) < base);
+        for radius in [f32::NAN, f32::INFINITY, -1.0] {
+            assert_eq!(Quality::for_fraction(projected_world_fraction(radius, 1.0, 800.0), Quality::Low), Quality::High);
+        }
+        for zoom in [0.0, -1.0, f32::NAN] {
+            assert_eq!(Quality::for_fraction(projected_world_fraction(1.0, zoom, 800.0), Quality::Low), Quality::High);
         }
     }
+
     #[test]
-    fn thresholds_have_dead_bands_and_invalid_values_are_conservative() {
-        assert_eq!(Quality::for_pixels(200., Quality::Low), Quality::Low);
-        assert_eq!(Quality::for_pixels(200., Quality::Medium), Quality::Medium);
-        assert_eq!(Quality::for_pixels(500., Quality::High), Quality::High);
-        assert_eq!(Quality::for_pixels(500., Quality::Medium), Quality::Medium);
-        assert_eq!(Quality::for_pixels(160., Quality::High), Quality::Low);
-        assert_eq!(Quality::for_pixels(600., Quality::Low), Quality::High);
-        for p in [0., -1., f32::NAN, f32::INFINITY] {
-            assert_eq!(Quality::for_pixels(p, Quality::Low), Quality::High);
+    fn world_thresholds_have_dead_bands_and_invalid_values_are_conservative() {
+        // 0.10（低档附近）：Low 保持，Medium 落到 Low。
+        assert_eq!(Quality::for_fraction(0.10, Quality::Low), Quality::Low);
+        assert_eq!(Quality::for_fraction(0.10, Quality::Medium), Quality::Low);
+        // 0.30（中档）：Medium 保持；High 降到 Medium。
+        assert_eq!(Quality::for_fraction(0.30, Quality::Medium), Quality::Medium);
+        assert_eq!(Quality::for_fraction(0.30, Quality::High), Quality::Medium);
+        // 0.50（高档）：High 保持，Medium 提到 High。
+        assert_eq!(Quality::for_fraction(0.50, Quality::High), Quality::High);
+        assert_eq!(Quality::for_fraction(0.50, Quality::Medium), Quality::High);
+        for fraction in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(Quality::for_fraction(fraction, Quality::Low), Quality::High);
         }
+    }
+
+    #[test]
+    fn models_without_world_instance_have_no_world_quality() {
+        let path = format!("{}/tests/fixtures/shared-world/render-scene.json", env!("CARGO_MANIFEST_DIR"));
+        let scene: Scene = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let node = &scene.nodes[0];
+        let resource = ModelSnapshot::new(
+            Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
+            vec![],
+            "sig".to_owned(),
+            1.0,
+            Default::default(),
+        );
+        // 世界模型（无聚焦/编辑）使用世界投影占比分档。
+        assert_eq!(purpose(node, &scene, None, false), ViewPurpose::World);
+        assert_eq!(desired(node, &scene, None, Quality::Medium, &resource), Quality::High);
+        // 旧卡片节点没有世界实例，因此没有世界 AABB：保守保持 High，不伪造尺寸。
+        let mut legacy = node.clone();
+        legacy.shared_world_instance = None;
+        assert_eq!(crate::model3d::layout::model_bounds_for_node(&resource, &legacy), None);
+        assert_eq!(desired(&legacy, &scene, None, Quality::Low, &resource), Quality::High);
     }
 }

@@ -17,8 +17,8 @@ import { QUALITY_VERTEX_COUNTS } from "./scene-ir-v2/types.js";
 /**
  * 坐标 / 旋转单位、朝向与**长度基准**约定。
  *
- * `lengthUnit` / `unitMeters` 让模型脚本的绝对尺寸有统一口径：模型卡片按自身 extent 归一化显示，
- * 只看卡片无法发现「人物 1.7、椅子 100」，因此必须把现实尺度写进指南与生成提示词，而不是留空。
+ * `lengthUnit` / `unitMeters` 让模型脚本的绝对尺寸有统一口径：共享世界模型按真实尺度渲染，
+ * 因此必须把现实尺度写进指南与生成提示词，而不是留空。
  */
 export const MODEL_API_AXIS_CONVENTIONS = {
   up: "+Y",

@@ -44,7 +44,7 @@ use serde::Deserialize;
 /// scene collections and no per-object playback; composite-asset nodes render as plain cards.
 /// v41 adds transient assistant execution IDs for scope-border feedback.
 /// v42 adds derived `cameraShot` semantics to world-camera cards (video duration/status).
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v42";
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v43";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。
@@ -156,11 +156,9 @@ pub(crate) struct ModelReference {
     pub(crate) scene_version: Option<String>,
     /// 按内容签名注册的资源 key；不含节点 id。
     pub(crate) resource_key: String,
-    /// 模型内容签名；placement/viewport 变化时不变。
+    /// 模型内容签名；world transform/viewport 变化时不变。
     #[serde(default)]
     pub(crate) signature: String,
-    #[serde(default)]
-    pub(crate) placement: ModelPlacement,
     /// Per-instance additive local joint rotations; presence preserves the hierarchy.
     #[serde(default, deserialize_with = "deserialize_part_rotations")]
     pub(crate) part_rotations: Option<std::collections::HashMap<String, [f32; 4]>>,

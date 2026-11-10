@@ -13,12 +13,6 @@ export { effectiveCanvasNodeSize, minimumNodeSizeFor } from "../node-dimensions.
 /** 参考实现的 palette kind（决定 Bevy 中的配色与图标）。 */
 export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "shot" | "node";
 
-/** 静态 model3d 卡片自带本地轨道预览。
- * 已下线的 generate/edit/shot 不在此列，保持未知节点行为（change: 2026-10-08-integrate-render-performance-and-model-preview）。 */
-export function isModelPreviewNodeType(type: string): boolean {
-  return type === "model3d";
-}
-
 /**
  * woohaa3 六类应用节点 → 参考 palette kind。
  * `model3d`/`composite-asset` 承载 3D 内容，映射为 `model`；start 已下线；未知回落 `node`。

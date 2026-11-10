@@ -18,14 +18,12 @@ import {
 } from "../model-transform.js";
 import type { BevyModelPlacement } from "../render-scene/wire-model.js";
 import { axisQ, quatMulLocal } from "./math.js";
-import { canvasPointToWorld, viewRotation } from "./canvas-projection.js";
+import { viewRotation } from "./canvas-projection.js";
 import { clampDistance } from "./clamp.js";
 import {
   CANVAS_UNITS_PER_METER,
   FRAME_PADDING,
-  MODEL_CARD_GAP,
   MODEL_FOCUS_FOV,
-  MODEL_SIZE_BASE,
   type ModelSceneInput
 } from "./types.js";
 
@@ -56,13 +54,6 @@ export function unionAabb(a: Aabb, b: Aabb): Aabb {
 export function modelLocalAabb(input: ModelSceneInput): Aabb | null {
   if (input.aabb !== undefined) return input.aabb;
   return v2SceneAabb(input.ops);
-}
-
-/**
- * 屏幕投影用的相对 AABB（等距旋转 × yaw × unit）。
- */
-export function modelLayoutAabbRelative(input: ModelSceneInput): Aabb | null {
-  return modelScaledAabb(input, true);
 }
 
 /**
@@ -106,25 +97,6 @@ export function aabbCenterRadius(box: Aabb): { center: Vec3; radius: number } {
   const center = scaleVec3(addVec3(box.min, box.max), 0.5);
   const radius = lengthVec3(subVec3(box.max, box.min)) / 2;
   return { center, radius };
-}
-
-/**
- * 模型根锚点（Bevy 世界坐标，y 向上）——与 Rust `model_anchor` **逐位一致**。
- */
-export function modelAnchor(input: {
-  nodeX: number;
-  nodeY: number;
-  nodeWidth: number;
-  nodeHeight: number;
-  relativeAabb: Aabb | null;
-  offset: { x: number; y: number; z: number };
-}): Vec3 {
-  const size = MODEL_SIZE_BASE;
-  const cx = input.nodeX + input.nodeWidth / 2 + input.offset.x * size;
-  const cardBottom = input.nodeY + input.nodeHeight;
-  const top = input.relativeAabb ? Math.max(0, input.relativeAabb.max[1]) : 74.0 - MODEL_CARD_GAP;
-  const cy = cardBottom + MODEL_CARD_GAP + top - input.offset.y * size;
-  return canvasPointToWorld(cx, cy, input.offset.z * size);
 }
 
 /**

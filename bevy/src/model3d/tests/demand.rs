@@ -22,6 +22,7 @@ fn fixture(count: usize) -> (Scene, ModelAssets) {
             serde_json::json!({"id":id,"type":"model","x":0,"y":0,"width":240,"height":195}),
         )
         .unwrap();
+        super::with_world_instance(&mut node);
         node.model = Some(reference.clone());
         scene.nodes.push(node);
     }
@@ -40,8 +41,10 @@ fn update(world: &mut World, scene: &Scene, resources: &ModelAssets, now: f64) {
     run_sync(world, scene, resources);
 }
 
+/// 共享世界模型没有卡片矩形，始终参与世界绘制：删除节点后根与资源立即释放，
+/// 不会再出现「离屏一秒后按卡片矩形回收」（change: 2026-11-10-remove-legacy-model-card-nodes）。
 #[test]
-fn leaving_and_returning_reuses_root_then_expires() {
+fn world_models_stay_resident_and_release_on_deletion() {
     let (mut scene, resources) = fixture(1);
     let mut world = world_with_resources();
     update(&mut world, &scene, &resources, 0.);
@@ -51,29 +54,34 @@ fn leaving_and_returning_reuses_root_then_expires() {
     scene.viewport.x = -10_000.;
     update(&mut world, &scene, &resources, 1.);
     update(&mut world, &scene, &resources, 5.);
+    assert_eq!(
+        world.resource::<ModelVisuals>().roots["film-0"].entities,
+        entities,
+        "世界模型不因卡片视口移出而回收"
+    );
     scene.viewport.x = 0.;
     update(&mut world, &scene, &resources, 6.);
     assert_eq!(
         world.resource::<ModelVisuals>().roots["film-0"].entities,
         entities
     );
-    scene.viewport.x = -10_000.;
+    scene.nodes.clear();
     update(&mut world, &scene, &resources, 7.);
-    update(&mut world, &scene, &resources, 18.);
     assert!(world.resource::<ModelVisuals>().roots.is_empty());
     assert!(world.resource::<Assets<Mesh>>().is_empty());
     assert!(world.resource::<Assets<StandardMaterial>>().is_empty());
 }
 
+/// 十个世界模型全部常驻；删除节点立即释放对应根。
 #[test]
-fn offscreen_warm_roots_are_bounded_and_deletion_releases_immediately() {
+fn world_roots_are_not_bounded_by_card_viewport() {
     let (mut scene, resources) = fixture(10);
     let mut world = world_with_resources();
     update(&mut world, &scene, &resources, 0.);
     scene.viewport.x = -10_000.;
     update(&mut world, &scene, &resources, 1.);
     update(&mut world, &scene, &resources, 3.);
-    assert_eq!(world.resource::<ModelVisuals>().roots.len(), 8);
+    assert_eq!(world.resource::<ModelVisuals>().roots.len(), 10);
     scene.nodes.clear();
     update(&mut world, &scene, &resources, 4.);
     assert!(world.resource::<ModelVisuals>().roots.is_empty());

@@ -65,11 +65,14 @@ function connectDataReader(
 
 export function addNode(
   work: WorkingState,
-  command: Extract<CanvasCommand, { type: "node.add" }>
+  command: Extract<CanvasCommand, { type: "node.add" }>,
+  options: { restore?: boolean } = {}
 ): CommandApplyResult {
   const { node } = command;
   const worldRejection = validateWorldInstance(node.type, command.nodeData);
   if (worldRejection) return worldRejection;
+  const legacyModelRejection = requireWorldInstanceForModel(node.type, command.nodeData as Record<string, unknown> | undefined, options.restore === true);
+  if (legacyModelRejection) return legacyModelRejection;
   const managed = command.nodeData?.managedBy;
   if (managed !== undefined) {
     const decoded = decodeManagedNodeRelation(managed);
@@ -187,6 +190,10 @@ export function updateNode(
 ): CommandApplyResult {
   const node = work.nodes.find((entry) => entry.id === command.nodeId);
   if (!node) return reject("unknown-node", `节点 ${command.nodeId} 不存在`);
+  if (isLegacyModelCard(node, work.nodeData[node.id] as Record<string, unknown> | undefined)
+    && (command.width !== undefined || command.height !== undefined)) {
+    return reject("invalid-command", LEGACY_MODEL_CARD_REJECTION);
+  }
   // 3D 节点没有卡片布局，但转换/撤销可能在同一批次里先恢复卡片字段再移除 3D 数据；
   // 最终由 normalizeCanvas 按节点最终形态剔除卡片布局，命令层不提前拒绝。
   if (command.position) node.position = { x: command.position.x, y: command.position.y };
@@ -254,6 +261,11 @@ export function patchNodeData(
   const node = work.nodes.find((entry) => entry.id === nodeId);
   const worldRejection = validateWorldInstance(node?.type, value);
   if (worldRejection) return worldRejection;
+  if (node && isLegacyModelCard(node, work.nodeData[nodeId] as Record<string, unknown> | undefined)
+    && (value !== null && Object.keys(value).some(key => key !== "title"))
+    && !Object.prototype.hasOwnProperty.call(value, "sharedWorldInstance")) {
+    return reject("invalid-command", LEGACY_MODEL_CARD_REJECTION);
+  }
   const currentManaged = managedNodeRelationOf(work.nodeData[nodeId]);
   const hasManagedField = !!work.nodeData[nodeId] && Object.prototype.hasOwnProperty.call(work.nodeData[nodeId], "managedBy");
   if (value && Object.prototype.hasOwnProperty.call(value, "managedBy")) {
@@ -304,6 +316,30 @@ export function patchNodeData(
   }
   work.nodeData[nodeId] = { ...(work.nodeData[nodeId] ?? {}), ...value };
   return OK;
+}
+
+/** 旧卡片模型只保留原值：只允许重命名，其它写入一律拒绝。 */
+export const LEGACY_MODEL_CARD_REJECTION = "旧版 3D 模型卡片已不再支持，请删除后重新创建模型";
+
+function isLegacyModelCard(
+  node: { type: string },
+  data: Record<string, unknown> | undefined
+): boolean {
+  return node.type === "model3d" && (data?.sharedWorldInstance === undefined);
+}
+
+/**
+ * 受支持的 `model3d` 必须携带 `sharedWorldInstance`；新建、复制、粘贴都不得再产生旧卡片节点
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。`restore` 只用于撤销/重做恢复既有节点。
+ */
+function requireWorldInstanceForModel(
+  type: string,
+  data: Record<string, unknown> | undefined,
+  restore: boolean
+): CommandApplyResult | null {
+  if (type !== "model3d" || restore) return null;
+  if (data?.sharedWorldInstance !== undefined) return null;
+  return reject("invalid-command", LEGACY_MODEL_CARD_REJECTION);
 }
 
 function validateWorldInstance(type: string | undefined, data: CanvasNodeData | null | undefined): CommandApplyResult | null {

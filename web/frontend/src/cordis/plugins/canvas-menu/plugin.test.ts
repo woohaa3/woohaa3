@@ -5,7 +5,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  conversionFeedbackCurrent,
   createdNodeIdOf,
   nodeContextMenuItems,
   type CanvasMenuNode
@@ -31,18 +30,11 @@ describe("createdNodeIdOf", () => {
 });
 
 describe("nodeContextMenuItems", () => {
-  it("rejects conversion feedback after disposal, cancellation or canvas change", () => {
-    expect(conversionFeedbackCurrent(true, false, "a", "a")).toBe(true);
-    expect(conversionFeedbackCurrent(false, false, "a", "a")).toBe(false);
-    expect(conversionFeedbackCurrent(true, true, "a", "a")).toBe(false);
-    expect(conversionFeedbackCurrent(true, false, "a", "b")).toBe(false);
-  });
-  it("offers explicit conversion only for legacy models", () => {
+  it("offers no conversion entry for any model", () => {
     const models = [{ id: "legacy", type: "model3d" }, { id: "world", type: "model3d" }];
     const nodeData = { world: { sharedWorldInstance: { instanceId: "i" } } };
-    expect(ids(nodeContextMenuItems(models, ["legacy"], true, { activeNodeId: "legacy", nodeData }))).toContain("convert-world");
+    expect(ids(nodeContextMenuItems(models, ["legacy"], true, { activeNodeId: "legacy", nodeData }))).not.toContain("convert-world");
     expect(ids(nodeContextMenuItems(models, ["world"], true, { activeNodeId: "world", nodeData }))).not.toContain("convert-world");
-    expect(nodeContextMenuItems(models, ["legacy"], false, { activeNodeId: "legacy", nodeData }).find(item => item.id === "convert-world")?.disabled).toBe(true);
   });
   it("hides independent deletion for a managed node from an unrelated extension", () => {
     const nodeData = { b: { managedBy: { schemaVersion: 1, extensionId: "test.extension", ownerNodeId: "c", entityId: "entry", lifecycle: "owner-managed" } } };

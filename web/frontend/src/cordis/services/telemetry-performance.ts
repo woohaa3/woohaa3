@@ -60,7 +60,6 @@ export type PerfFrameCounters = {
   readonly stageModelMs?: number;
   readonly stageModelFrames?: number;
   /** 预览卡片规模快照（`d`=延迟队列、`v`=可见、`l`=在途、`r`=就绪、`b`=纹理 MB）；不是累计量。 */
-  readonly previews?: string;
 };
 
 export type PerfFrameWindowOptions = {
@@ -159,8 +158,6 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
       delta.renderFps === undefined ? undefined : Math.round(delta.renderFps * 10) / 10;
     const pacing =
       typeof current.pacing === "string" && current.pacing.length > 0 ? current.pacing : undefined;
-    const previews =
-      typeof current.previews === "string" && current.previews.length > 0 ? current.previews : undefined;
     reset();
     // 半窗（页面切后台）、缺构建模式、无客户端：一律不写。窗口里的 0 会污染分位数。
     const mode = telemetryBuildMode();
@@ -195,8 +192,7 @@ export function createPerfFrameWindow(options: PerfFrameWindowOptions): PerfFram
           ...(delta.mainMs === undefined ? {} : { mainMs: delta.mainMs }),
           ...(delta.modelMs === undefined ? {} : { modelMs: delta.modelMs }),
           ...(delta.steps === undefined ? {} : { steps: delta.steps }),
-          ...(pacing === undefined ? {} : { pacing }),
-          ...(previews === undefined ? {} : { previews })
+          ...(pacing === undefined ? {} : { pacing })
         }
       });
     } catch {
@@ -284,7 +280,7 @@ type FrameDelta = PerfFrameCounters & {
 };
 
 function diffCounters(current: PerfFrameCounters, baseline: PerfFrameCounters, elapsedMs: number): FrameDelta {
-  type NumericCounterKey = Exclude<keyof PerfFrameCounters, "pacing" | "stepMs" | "previews">;
+  type NumericCounterKey = Exclude<keyof PerfFrameCounters, "pacing" | "stepMs">;
   const delta = (key: NumericCounterKey): number =>
     Math.max(0, (current[key] ?? 0) - (baseline[key] ?? 0));
   /** 累计量 / 累计帧数；窗口任一端的计数缺失就不写（不用 0 冒充"没花时间"）。 */

@@ -34,7 +34,7 @@ export function createCancellationHandlers(
     // 窗口失焦时 Space 的 keyup 可能永远收不到：不清理会让左键点击永久退化为平移
     // （change: fix-space-pan-latch-after-focus-exit）。
     state.spacePressed = false;
-    if (state.gesture.kind === "model-preview" || state.gesture.kind === "history-press"
+    if (state.gesture.kind === "history-press"
       || state.gesture.kind === "world-ground" || state.gesture.kind === "world-camera") cancelDrag();
     else if (state.gesture.kind === "drag") {
       cancelDrag();

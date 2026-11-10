@@ -20,7 +20,6 @@ import { applyRunStateProjection, executingScopeIds } from "./run-state-projecti
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
-import { modelPreviewStore } from "../../services/model-preview-store.js";
 import type { InteractionControllerOptions } from "./interaction-types.js";
 import type { Viewport } from "./interaction-core.js";
 import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
@@ -69,7 +68,6 @@ export type SceneBuildInput = {
 export function buildSceneWithResources(
   options: InteractionControllerOptions,
   surfaceSize: () => { width: number; height: number; pixelRatio: number; originX?: number; originY?: number },
-  modelPlacements: () => ReadonlyMap<string, import("@woohaa3/contracts").BevyModelPlacement>,
   input: SceneBuildInput
 ): { scene: CanvasRenderScene; resources: Map<string, PreparedModelResource> } | null {
   // Bevy/hit test 使用 working projection：立即反映本页 pending 命令（design D11）。
@@ -116,7 +114,6 @@ export function buildSceneWithResources(
   const scene = buildCanvasRenderScene({
     canvas: canvasState,
     nodeCapabilities: options.nodeCapabilities,
-    modelPreviews: modelPreviewStore.snapshot(),
     selection: { nodes: [...input.selected], edge: input.selectedEdgeId ?? null },
     draft: input.draft,
     marquee: input.marquee,
@@ -125,7 +122,6 @@ export function buildSceneWithResources(
     sizeOverrides: input.localSizes,
     viewportOverride: viewport,
     modelResources: byNode,
-    modelPlacements: modelPlacements(),
     worldGroundPreviews: input.worldGroundPreviews,
     worldCameraPreviews: input.worldCameraPreviews,
     worldCameraShotPhases: shotPhasesByNode(canvasState),

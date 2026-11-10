@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
+  newWorldInstance,
   normalizeGlbModelReference,
   type CanvasNodeData,
   type ServerCanvas
@@ -26,6 +27,7 @@ function glbNodeData(): CanvasNodeData {
   if (!reference.ok) throw new Error("fixture");
   return {
     title: "模型.glb",
+    sharedWorldInstance: newWorldInstance("instance-glb", { x: 0, y: 0 }),
     modelSourceKind: "glb",
     modelAssetId: ASSET_ID,
     modelContentVersion: reference.value.contentVersion,
@@ -39,19 +41,20 @@ async function fixture() {
   const canvas: ServerCanvas = {
     ...base,
     document: { ...base.document, nodes: [
-      { id: "glb", type: "model3d", position: { x: 0, y: 0 } },
-      { id: "script", type: "model3d", position: { x: 200, y: 0 } }
+      { id: "glb", type: "model3d" },
+      { id: "script", type: "model3d" }
     ] },
     nodeData: {
       glb: glbNodeData(),
       script: {
+        sharedWorldInstance: newWorldInstance("instance-script", { x: 200, y: 0 }),
         title: "脚本模型",
         modelScript: "scene.box({ id: 'a' });",
         modelScriptLanguage: "javascript",
         modelScriptVersion: "woohaa-model-js-v2",
         modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" },
         modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
-      }
+      } as unknown as CanvasNodeData
     },
     assets: [{
       id: ASSET_ID,

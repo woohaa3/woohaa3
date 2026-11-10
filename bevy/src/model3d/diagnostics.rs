@@ -17,7 +17,13 @@ impl ModelVisuals {
             let super::runtime::ModelRootLayout::V2 { root: entity } = root.layout;
             let mut parts: Vec<_> = root.part_entities.iter().collect();
             parts.sort_by_key(|(id, _)| *id);
-            Some(serde_json::json!({ "nodeId": id, "root": pose(entity, transforms)?,
+            let root_pose = pose(entity, transforms)?;
+            // `center` 是渲染器世界坐标里的模型根包围盒中心，供 E2E 在无卡片模型上定位
+            // （change: 2026-11-10-remove-legacy-model-card-nodes）。
+            let center = root
+                .aabb
+                .map(|(min, max)| [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5, (min[2] + max[2]) * 0.5]);
+            Some(serde_json::json!({ "nodeId": id, "root": root_pose, "center": center,
                 "parts": parts.into_iter().take(128).filter_map(|(id, entity)| pose(*entity, transforms).map(|p| (id.clone(), p))).collect::<std::collections::BTreeMap<_, _>>() }))
         }).collect())
     }
@@ -158,14 +164,8 @@ impl ModelVisuals {
             "scope": "cumulative-since-renderer-start; not GPU time",
             "focusVisibilityInserts": self.hot_path.focus_visibility_inserts,
             "focusVisibilitySkips": self.hot_path.focus_visibility_skips,
-            "previewLayerInserts": self.hot_path.preview_layer_inserts,
-            "previewLayerSkips": self.hot_path.preview_layer_skips,
             "resourceReferenceRebuilds": self.hot_path.resource_reference_rebuilds,
-            "resourceReferenceSkips": self.hot_path.resource_reference_skips,
-            "previewSpriteInserts": self.hot_path.preview_sprite_inserts,
-            "previewSpriteSkips": self.hot_path.preview_sprite_skips,
-            "previewPoseInserts": self.hot_path.preview_pose_inserts,
-            "previewPoseSkips": self.hot_path.preview_pose_skips
+            "resourceReferenceSkips": self.hot_path.resource_reference_skips
         });
         #[cfg(feature = "explicit-instancing")]
         let value = {

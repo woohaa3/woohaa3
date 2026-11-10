@@ -21,7 +21,7 @@ use bevy::{
     winit::{EventLoopProxy, EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent},
 };
 
-use crate::{history_preview, model_preview, model3d, world_capture};
+use crate::{history_preview, model3d, world_capture};
 
 use super::state::FrameFlags;
 
@@ -40,16 +40,15 @@ const STARTUP_HOLD_SECS: f64 = 3.0;
 
 /// 是否仍有需要连续帧的活动。
 ///
-/// 输入（含纯视口增量）、动画播放/运动求值/截图，以及排队中的模型准备、卡片预览与
-/// 离屏预览分配都要求逐帧推进；其余情况画布内容不会自行变化，可以停帧。
+/// 输入（含纯视口增量）、动画播放/运动求值/截图，以及排队中的模型准备与离屏预览分配
+/// 都要求逐帧推进；其余情况画布内容不会自行变化，可以停帧。
 pub(super) fn busy(
     flags: &FrameFlags,
     visuals: &model3d::ModelVisuals,
-    previews: &model_preview::Previews,
     history: &history_preview::ActiveThumbnail,
     capture: &world_capture::ActiveWorldCapture,
 ) -> bool {
-    busy_reasons(flags, visuals, previews, history, capture) != 0
+    busy_reasons(flags, visuals, history, capture) != 0
 }
 
 /// 逐项忙碌位图；`0` 表示可以停帧。
@@ -59,7 +58,6 @@ pub(super) fn busy(
 fn busy_reasons(
     flags: &FrameFlags,
     visuals: &model3d::ModelVisuals,
-    previews: &model_preview::Previews,
     history: &history_preview::ActiveThumbnail,
     capture: &world_capture::ActiveWorldCapture,
 ) -> u16 {
@@ -73,7 +71,6 @@ fn busy_reasons(
         (1 << 5, flags.surface_changed),
         (1 << 6, flags.changed),
         (1 << 7, visuals.has_hot_activity()),
-        (1 << 8, previews.has_pending()),
         (1 << 9, history.has_pending()),
         (1 << 11, capture.has_pending()),
     ] {
@@ -85,26 +82,25 @@ fn busy_reasons(
 }
 
 /// 忙碌位图的固定词表（诊断口径，长度有界）。
-const BUSY_LABELS: [&str; 12] = [
-    "scene",
-    "positions",
-    "viewport",
-    "observer",
-    "model-textures",
-    "surface",
-    "changed",
-    "hot",
-    "previews",
-    "history",
-    "scope-execution",
-    "capture",
+const BUSY_LABELS: [(u16, &str); 11] = [
+    (1 << 0, "scene"),
+    (1 << 1, "positions"),
+    (1 << 2, "viewport"),
+    (1 << 3, "observer"),
+    (1 << 4, "model-textures"),
+    (1 << 5, "surface"),
+    (1 << 6, "changed"),
+    (1 << 7, "hot"),
+    (1 << 9, "history"),
+    (1 << 10, "scope-execution"),
+    (1 << 11, "capture"),
 ];
 
 fn busy_label(bits: u16) -> String {
     let mut label = String::from("active:");
     let mut first = true;
-    for (index, name) in BUSY_LABELS.iter().enumerate() {
-        if bits & (1 << index) == 0 {
+    for (mask, name) in BUSY_LABELS.iter() {
+        if bits & mask == 0 {
             continue;
         }
         if !first {
@@ -156,7 +152,6 @@ pub(super) fn sync_pacing(
     flags: Res<FrameFlags>,
     scene: Res<super::CurrentScene>,
     visuals: Res<model3d::ModelVisuals>,
-    previews: Res<model_preview::Previews>,
     history: Res<history_preview::ActiveThumbnail>,
     capture: Res<world_capture::ActiveWorldCapture>,
     mut state: ResMut<PacingState>,
@@ -171,7 +166,7 @@ pub(super) fn sync_pacing(
         && scene.0.image_focus.is_none()
         && scene.0.video_focus.is_none()
         && !scene.0.executing_scopes.is_empty();
-    let bits = busy_reasons(&flags, &visuals, &previews, &history, &capture)
+    let bits = busy_reasons(&flags, &visuals, &history, &capture)
         | if scope_animation { 1 << 10 } else { 0 };
     if bits != 0 {
         state.active_until = now + DWELL_SECS;
@@ -251,16 +246,14 @@ mod tests {
     fn plain_canvas_frames_stay_still() {
         let flags = FrameFlags::default();
         let visuals = model3d::ModelVisuals::default();
-        let previews = model_preview::Previews::default();
         let history = history_preview::ActiveThumbnail::default();
         let capture = world_capture::ActiveWorldCapture::default();
-        assert!(!busy(&flags, &visuals, &previews, &history, &capture));
+        assert!(!busy(&flags, &visuals, &history, &capture));
     }
 
     #[test]
     fn input_frames_are_busy() {
         let visuals = model3d::ModelVisuals::default();
-        let previews = model_preview::Previews::default();
         let history = history_preview::ActiveThumbnail::default();
         let capture = world_capture::ActiveWorldCapture::default();
         for mutate in [
@@ -272,7 +265,7 @@ mod tests {
         ] {
             let mut flags = FrameFlags::default();
             mutate(&mut flags);
-            assert!(busy(&flags, &visuals, &previews, &history, &capture));
+            assert!(busy(&flags, &visuals, &history, &capture));
         }
     }
 }

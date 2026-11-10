@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyCanvasCommands,
   createEmptyWoohaa3ServerCanvas,
-  DEFAULT_MODEL_PLACEMENT,
   hashModelScript,
+  newWorldInstance,
   nodeHistoryContentIdentity,
   nodeHistoryEntryId,
   NODE_GENERATION_HISTORY_VERSION,
@@ -138,9 +138,10 @@ function canvasWith(nodes: Array<{ node: unknown; data: Record<string, unknown> 
 
 function modelNode(id: string, script: string, placement: Record<string, number | Record<string, number>> | null) {
   return {
-    node: { id, type: "model3d", position: { x: 0, y: 0 }, width: 248, height: 232 },
+    node: { id, type: "model3d" },
     data: {
       title: id,
+      sharedWorldInstance: newWorldInstance(`instance-${id}`, { x: 0, y: 0 }),
       modelScript: script,
       modelScriptLanguage: "javascript",
       modelScriptVersion: "woohaa-model-js-v2",
@@ -353,7 +354,7 @@ describe("同类型节点合并", () => {
     expect(currentIdentityOf(room.canvas, "target", "model")).toBe(expectedSourceIdentity);
   });
 
-  it("来源没有摆放时同批显式写 null，由 reducers 归一化为等价默认摆放", async () => {
+  it("来源没有摆放时仍写入合法默认摆放，不写显式 null", async () => {
     const canvas = canvasWith([
       modelNode("source", "build(source)", null),
       modelNode("target", "build(target)", { offset: { x: 4, y: 5, z: 6 }, scale: 3, yaw: 1 })
@@ -373,10 +374,12 @@ describe("同类型节点合并", () => {
     const patch = room.submitted[0]!.commands.find((command) =>
       (command as { type?: string }).type === "nodeData.patch"
     ) as { value: Record<string, unknown> };
-    expect(Object.prototype.hasOwnProperty.call(patch.value, "modelPlacement")).toBe(true);
+    // 显式摆放始终是合法值（显式 null 会被领域校验整批拒绝）：来源没有摆放时沿用来源
+    // 当前的合法摆放，来源带摆放时写回同一身份。
+    expect(patch.value.modelPlacement).toEqual({ offset: { x: 4, y: 5, z: 6 }, scale: 3, yaw: 1 });
     const targetData = room.canvas.nodeData.target as { modelScript: string; modelPlacement: unknown };
     expect(targetData.modelScript).toBe("build(source)");
-    expect(targetData.modelPlacement).toEqual(DEFAULT_MODEL_PLACEMENT);
+    expect(targetData.modelPlacement).toEqual({ offset: { x: 4, y: 5, z: 6 }, scale: 3, yaw: 1 });
     // 来源的缺摆放版本被原样复制到目标历史。
     const copied = (await repository.listForNode(CANVAS, "target"))
       .find((entry) => entry.payload.kind === "model" && entry.payload.modelScript === "build(source)");

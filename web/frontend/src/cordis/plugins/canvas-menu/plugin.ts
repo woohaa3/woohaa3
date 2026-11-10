@@ -21,7 +21,7 @@ import {
 import { planInsertNode } from "../../../extension-api/command-planner.js";
 import { initialCameraCardPosition, revealWorldCamera } from "../../services/world-camera-frame.js";
 import { findNonOverlappingNodePosition } from "@woohaa3/contracts";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, newWorldInstance, partitionManagedNodeDeletion, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, partitionManagedNodeDeletion, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";
@@ -52,9 +52,6 @@ export type NodeContextMenuFacts = {
   activeNodeId?: string | null;
 };
 
-export function conversionFeedbackCurrent(active: boolean, disposed: boolean, expectedCanvasId: string, currentCanvasId?: string): boolean {
-  return active && !disposed && currentCanvasId === expectedCanvasId;
-}
 
 /** 一次创建提交里新产生的节点 ID；手动创建时据此选中刚产生的节点。 */
 export function createdNodeIdOf(commands: readonly CanvasCommand[]): string | null {
@@ -80,10 +77,7 @@ export function nodeContextMenuItems(
   const selected = [...selectedNodeIds];
   const deletion = partitionManagedNodeDeletion(nodes, facts.nodeData ?? {}, activeNodeId ? [activeNodeId] : selected);
   const canDelete = deletion.allowed.length > 0;
-  const active = nodes.find(node => node.id === activeNodeId);
-  const data = activeNodeId ? facts.nodeData?.[activeNodeId] as { sharedWorldInstance?: unknown } | undefined : undefined;
   return [
-    ...(active?.type === "model3d" && !data?.sharedWorldInstance ? [{ id: "convert-world", label: "转换到共享世界", disabled: !writable }] : []),
     ...(selected.length === 1 ? [{ id: "rename-node", label: "重命名作品", disabled: !writable }] : []),
     ...(canDelete ? [{ id: "delete-node", label: "删除作品", danger: true, disabled: !writable }] : [])
   ];
@@ -92,11 +86,9 @@ export function nodeContextMenuItems(
 export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
   (ctx: Context) => {
     let disposed = false;
-    const conversionCleanups = new Set<() => void>();
     ctx.effect(() => () => {
       disposed = true;
-      for (const cleanup of conversionCleanups) cleanup();
-    }, "canvas-menu-conversion-cleanup");
+    }, "canvas-menu-dispose");
     const removeEmpty = ctx.slots.register("canvas.overlay", {
       id: "empty-canvas", owner: CANVAS_MENU_PLUGIN_ID, priority: 0,
       render: (props) => createElement(EmptyCanvas, { ctx, writable: props.writable, modalActive: props.modalActive })
@@ -158,46 +150,6 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
           if (!plan.ok) { report(plan.reason); return; }
           if (plan.commands.length) void ctx.canvasEdit.record(plan.commands, "整理所选作品")
             .then(result => { if (!result.ok) report(result.reason); }).catch(() => report("无法保存整理，请检查画布连接"));
-          return;
-        }
-        if (itemId === "convert-world") {
-          const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
-          const nodeId = context.nodeId;
-          if (!canvas || !nodeId || !ctx.canvasSession.isWritable() ||
-              !canvas.document.nodes.some(node => node.id === nodeId && node.type === "model3d") ||
-              canvas.nodeData[nodeId]?.sharedWorldInstance) return;
-          const canvasId = canvas.id;
-          const operationId = createHighEntropyId("world-conversion");
-          const instanceId = createHighEntropyId("world-instance");
-          const actionKey = `world-conversion:${operationId}`;
-          let dialogId: string | null = null;
-          let unsubscribe: (() => void) | undefined;
-          let active = true;
-          let pending: Promise<{ ok: true } | { ok: false; error: string }> | null = null;
-          const cleanup = () => { active = false; unregister(); unsubscribe?.(); conversionCleanups.delete(cleanup); };
-          const unregister = ctx.dialogs.registerAlertAction(actionKey, () => {
-            if (pending) return pending;
-            pending = (async () => {
-              let result: Awaited<ReturnType<typeof ctx.canvasEdit.convertWorld>>;
-              try {
-                result = await ctx.canvasEdit.convertWorld({ remote: ctx.canvasRemote, canvasId, operationId, targets: [{ nodeId, instanceId }] });
-              } catch (error) {
-                if (!conversionFeedbackCurrent(active, disposed, canvasId, workingCanvasOf(woohaa3CanvasStore.getState())?.id)) return { ok: false as const, error: "页面已切换" };
-                return { ok: false as const, error: error instanceof Error ? error.message : "转换失败" };
-              }
-              if (!conversionFeedbackCurrent(active, disposed, canvasId, workingCanvasOf(woohaa3CanvasStore.getState())?.id)) return { ok: false as const, error: "页面已切换" };
-              if (!result.ok) return { ok: false as const, error: result.reason };
-              cleanup();
-              if (dialogId) ctx.dialogs.close(dialogId);
-              return { ok: true as const };
-            })().finally(() => { pending = null; });
-            return pending;
-          });
-          conversionCleanups.add(cleanup);
-          const opened = ctx.dialogs.open({ dialogId: ALERT_DIALOG_ID, payload: { title: "转换到共享世界", description: "将此旧模型转换为共享世界实例。转换可撤销。", confirmLabel: "转换", cancelLabel: "取消", actionKey } });
-          if (!opened.ok) { cleanup(); return; }
-          dialogId = opened.instance.instanceId;
-          unsubscribe = ctx.dialogs.subscribe(() => { if (dialogId && !ctx.dialogs.find(dialogId)) cleanup(); });
           return;
         }
         if (itemId === "delete-node") {
@@ -328,12 +280,10 @@ function insertNode(ctx: Context, templateId: string, context: ContextMenuContex
   const canvasId = workingCanvasOf(woohaa3CanvasStore.getState())?.id;
   if (!canvasId) return;
   const world = context.world;
-  // 自包含 3D 节点直接创建时携带完整本地模型定义，不从来源节点读取。
-  const defaults = defaultNodeDataForType(template.id);
-  const nodeData = defaults;
-  if (nodeData && template.nodeType === "model3d") {
-    nodeData.sharedWorldInstance = newWorldInstance(createHighEntropyId("world-instance"), world);
-  }
+  // 自包含 3D 节点直接创建时携带完整本地模型定义与共享世界实例（模型没有卡片位置）。
+  const nodeData = defaultNodeDataForType(template.id, template.nodeType === "model3d"
+    ? { instanceId: createHighEntropyId("world-instance"), point: world }
+    : undefined);
   if (nodeData === undefined) return;
   const label = context.connectFrom ? connectLabelFor(context.connectFrom.nodeType, template.nodeType) : "";
   void Promise.resolve().then(() => {

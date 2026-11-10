@@ -166,10 +166,7 @@ pub(crate) fn sync(
                 if !selected && !hovered {
                     continue;
                 }
-                let Some(placement) = node.model.as_ref().map(|reference| &reference.placement) else {
-                    continue;
-                };
-                let Some((aabb, anchor)) = layout::model_bounds_for_node(model, placement, node) else {
+                let Some((aabb, anchor)) = layout::model_bounds_for_node(model, node) else {
                     continue;
                 };
                 let min = Vec3::new(

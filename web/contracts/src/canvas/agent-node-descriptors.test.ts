@@ -15,6 +15,9 @@ import {
   findAgentNodeDescriptor
 } from "./agent-node-descriptors.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
+import { newWorldInstance } from "./creation-scopes-ui.js";
+
+const modelWorld = { instanceId: "instance-test", point: { x: 120, y: 80 } };
 
 describe("Agent 节点描述符（任务 1.2）", () => {
   it("暴露全部可创建语义种类与标签", () => {
@@ -25,9 +28,13 @@ describe("Agent 节点描述符（任务 1.2）", () => {
   it("模型语义种类映射为 canonical model3d 且不带任务字段", () => {
     expect(findAgentNodeDescriptor("model")?.canonicalType).toBe("model3d");
     expect(findAgentNodeDescriptor("model")?.taskKind).toBeUndefined();
-    expect(defaultAgentNodeData("model")).toMatchObject({ modelScript: "", modelScriptVersion: "woohaa-model-js-v2" });
-    expect(defaultAgentNodeData("model")?.modelContentVersion).toBeDefined();
-    expect(defaultAgentNodeData("model")?.taskKind).toBeUndefined();
+    const data = defaultAgentNodeData("model", modelWorld);
+    expect(data).toMatchObject({ modelScript: "", modelScriptVersion: "woohaa-model-js-v2" });
+    expect(data?.modelContentVersion).toBeDefined();
+    expect(data?.taskKind).toBeUndefined();
+    // 模型没有卡片：默认定义必须带共享世界实例，位置由画布点投影得到。
+    expect(data?.sharedWorldInstance).toEqual(newWorldInstance("instance-test", { x: 120, y: 80 }));
+    expect(() => defaultAgentNodeData("model")).toThrow(/sharedWorldInstance/);
     expect(agentDescriptorForCanonicalType("model3d")?.kind).toBe("model");
     expect(agentDescriptorForCanonicalType(COMPOSITE_ASSET_NODE_TYPE)?.kind).toBe("model");
     expect(agentDescriptorForCanonicalType("generate")).toBeNull();

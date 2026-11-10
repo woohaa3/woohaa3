@@ -2,6 +2,8 @@
 //! Render includes pipeline-queue processing and render graph/driver CPU calls,
 //! including waits incurred inside that stage; it does not isolate GPU execution.
 //! This is not GPU time, per-preview cost, or a sum of individual system CPU times.
+mod draw_work;
+
 use bevy::{
     ecs::schedule::ScheduleLabel,
     platform::time::Instant,
@@ -39,7 +41,7 @@ struct Stats {
 #[derive(Resource, Clone, Default)]
 pub(crate) struct RenderWork(
     Arc<Mutex<Stats>>,
-    super::render_draw_work::DrawWork,
+    draw_work::DrawWork,
     #[cfg(feature = "explicit-instancing")] crate::model3d::instancing::InstanceWork,
 );
 #[derive(Clone, Default)]
@@ -166,7 +168,7 @@ impl RenderWork {
     }
 }
 pub(super) fn install(render: &mut SubApp, work: RenderWork) {
-    super::render_draw_work::install(render, work.1.clone());
+    draw_work::install(render, work.1.clone());
     if let Some(mut extract) = render.take_extract() {
         let shared = work.clone();
         render.set_extract(move |main, world| {

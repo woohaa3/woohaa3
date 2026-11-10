@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createEmptyWoohaa3ServerCanvas, hashModelScript, nodeHistoryContentIdentity, NODE_GENERATION_HISTORY_VERSION, type MediaStorageScope, type NodeGenerationHistoryEntry, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, hashModelScript, newWorldInstance, nodeHistoryContentIdentity, NODE_GENERATION_HISTORY_VERSION, type MediaStorageScope, type NodeGenerationHistoryEntry, type ServerCanvas, type StoredAsset } from "@woohaa3/contracts";
 import { InMemoryNodeHistoryRepository } from "./in-memory-node-history-repository.js";
 import { NodeHistoryApplicationService, snapshotCurrentImageEdit } from "./node-history-service.js";
 import { SqliteNodeHistoryRepository } from "../sqlite/node-history.js";
@@ -42,6 +42,7 @@ function canvasWithNode(type: string, data: Record<string, unknown> = {}): Serve
   // 自包含 3D 节点必须携带完整本地模型定义（命令边界校验要求）；测试用最小合法默认值。
   const selfContained: Record<string, unknown> = type === "model3d"
     ? {
+        sharedWorldInstance: newWorldInstance("instance-node-1", { x: 0, y: 0 }),
         modelScript: "build(default)",
         modelScriptLanguage: "javascript",
         modelScriptVersion: "woohaa-model-js-v2",
@@ -54,7 +55,7 @@ function canvasWithNode(type: string, data: Record<string, unknown> = {}): Serve
     revision: 1,
     document: {
       ...base.document,
-      nodes: [{ id: "node-1", type, position: { x: 0, y: 0 }, width: 248, height: 232 }]
+      nodes: [{ id: "node-1", type, ...(type === "model3d" ? {} : { position: { x: 0, y: 0 }, width: 248, height: 232 }) }]
     },
     nodeData: { "node-1": { title: "T", ...selfContained, ...data } }
   } as ServerCanvas;

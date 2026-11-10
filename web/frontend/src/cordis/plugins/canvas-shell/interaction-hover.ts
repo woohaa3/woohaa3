@@ -59,7 +59,7 @@ function canvasHasModelNode(resolver: NodeCapabilityResolver = builtinNodeCapabi
  */
 function playbackHoverNodeId(hit: HitTarget | null): string | null {
   if (!hit) return null;
-  return hit.kind === "node" || hit.kind === "model-preview" ? hit.nodeId : null;
+  return hit.kind === "node" ? hit.nodeId : null;
 }
 
 /**

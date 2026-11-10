@@ -115,7 +115,7 @@ it("动态镜头通过页面资源预算播放录制视频，移出暂停，录�
   const tracker = createHoverTracker({ state, videoSessions: media.videoSessions, modalActive: () => false, schedule: vi.fn() });
   const cameraTexture = () => buildSceneWithResources(
     { videoSessions: media.videoSessions } as never,
-    () => ({ width: 1024, height: 768, pixelRatio: 1 }), () => new Map(),
+    () => ({ width: 1024, height: 768, pixelRatio: 1 }),
     { selected: [], draft: null, marquee: null, localPositions: new Map(), localSizes: new Map(),
       viewportPreview: null, fallbackViewport: { x: 0, y: 0, zoom: 1 },
       hoveredNodeId: null, hoveredPort: null, hoveredEdgeId: null }

@@ -228,14 +228,12 @@ mod tests {
             scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
             resource_key: "v2:missing".to_owned(),
             signature: "missing".to_owned(),
-            placement: Default::default(),
         };
         let scene = Scene {
             nodes: vec![crate::protocol::GraphNode {
                 chrome: crate::protocol::NodeChrome::Card,
                 shared_world_instance: None,
                 world_camera: None,
-                model_preview: None,
                 history_strip: None,
                 id: "n".into(),
                 kind: "model".into(),
@@ -281,7 +279,6 @@ mod tests {
                 chrome: crate::protocol::NodeChrome::Card,
                 shared_world_instance: None,
                 world_camera: None,
-                model_preview: None,
                 history_strip: None,
                 id: "n".into(),
                 kind: "model".into(),
@@ -304,7 +301,6 @@ mod tests {
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
                     resource_key: protected.to_owned(),
                     signature: "scene-only".to_owned(),
-                    placement: Default::default(),
                 }),
             }],
             ..Scene::default()
@@ -386,7 +382,6 @@ mod tests {
                 chrome: crate::protocol::NodeChrome::Card,
                 shared_world_instance: None,
                 world_camera: None,
-                model_preview: None,
                 history_strip: None,
                 id: "n".into(),
                 kind: "model".into(),
@@ -409,7 +404,6 @@ mod tests {
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
                     resource_key: protected.to_owned(),
                     signature: "keep".to_owned(),
-                    placement: Default::default(),
                 }),
             }],
             ..Scene::default()

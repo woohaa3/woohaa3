@@ -5,10 +5,12 @@
 
 use serde::Deserialize;
 
-use super::scene::{ModelPreview, Scene};
+use super::scene::Scene;
 
 /// 与 contracts `CANVAS_OBSERVER_UPDATE_VERSION` 一致，结构变化必须升版本。
-pub(crate) const CANVAS_OBSERVER_UPDATE_VERSION: &str = "woohaa-canvas-observer-v1";
+///
+/// v2 删除了卡片预览姿态（`preview`）：模型聚焦只使用世界包围盒取景。
+pub(crate) const CANVAS_OBSERVER_UPDATE_VERSION: &str = "woohaa-canvas-observer-v2";
 
 /// 固定大小观察镜头增量请求（`set_observer` JSON 输入）。
 #[derive(Clone, Deserialize)]
@@ -17,7 +19,6 @@ pub(crate) struct ObserverUpdateRequest {
     pub(crate) version: String,
     pub(crate) base_scene_generation: u32,
     pub(crate) node_id: String,
-    pub(crate) preview: ModelPreview,
     pub(crate) yaw: f32,
     pub(crate) pitch: f32,
     pub(crate) distance: f32,
@@ -31,20 +32,6 @@ impl ObserverUpdateRequest {
         }
         if self.node_id.is_empty() || self.node_id.len() > 128 {
             return Err("Invalid observer node id");
-        }
-        let preview = [
-            self.preview.azimuth,
-            self.preview.elevation,
-            self.preview.distance_scale,
-            self.preview.target_offset[0],
-            self.preview.target_offset[1],
-            self.preview.target_offset[2],
-        ];
-        if !preview.iter().all(|value| value.is_finite()) {
-            return Err("Invalid observer preview");
-        }
-        if !(0.001..=1e9).contains(&self.preview.distance_scale) {
-            return Err("Invalid observer distance scale");
         }
         if ![
             self.yaw,
@@ -75,13 +62,6 @@ pub(crate) fn apply_observer(scene: &mut Scene, request: &ObserverUpdateRequest)
             focus.target = request.target;
         }
     }
-    if let Some(node) = scene
-        .nodes
-        .iter_mut()
-        .find(|node| node.id == request.node_id)
-    {
-        node.model_preview = Some(request.preview.clone());
-    }
 }
 
 #[cfg(test)]
@@ -93,12 +73,6 @@ mod tests {
             version: CANVAS_OBSERVER_UPDATE_VERSION.to_owned(),
             base_scene_generation: 1,
             node_id: "n".into(),
-            preview: ModelPreview {
-                azimuth: 0.0,
-                elevation: 0.5,
-                distance_scale: 1.0,
-                target_offset: [0.0, 0.0, 0.0],
-            },
             yaw: 0.2,
             pitch: -0.1,
             distance: 4.0,

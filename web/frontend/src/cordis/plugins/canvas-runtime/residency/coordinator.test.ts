@@ -20,14 +20,14 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("residency policy", () => {
   it("injected budgets are clamped to finite positive limits and never loosen silently", () => {
-    const policy = resolveResidencyPolicy({ imageDecodeConcurrency: Number.POSITIVE_INFINITY, videoSessionLimit: -3, previewSlots: 4, modelPrepareBudgetMs: 10_000 });
+    const policy = resolveResidencyPolicy({ imageDecodeConcurrency: Number.POSITIVE_INFINITY, videoSessionLimit: -3, uploadCountPerFrame: 4, modelPrepareBudgetMs: 10_000 });
     // 非法注入被忽略（保留集中默认），不能把并发写成 Infinity/负数绕开预算。
     expect(policy.imageDecodeConcurrency).toBe(DEFAULT_RESIDENCY_POLICY.imageDecodeConcurrency);
     expect(policy.videoSessionLimit).toBe(DEFAULT_RESIDENCY_POLICY.videoSessionLimit);
-    expect(policy.previewSlots).toBe(4);
+    expect(policy.uploadCountPerFrame).toBe(4);
     // 片段预算同样只接受有限的合理值，不能注入 10 秒的主线程占用。
     expect(policy.modelPrepareBudgetMs).toBe(100);
-    expect(resolveResidencyPolicy({ previewSlots: 10_000 }).previewSlots).toBe(256);
+    expect(resolveResidencyPolicy({ uploadCountPerFrame: 10_000 }).uploadCountPerFrame).toBe(1024);
     expect(concurrencyLimit(policy, "video-frame")).toBe(DEFAULT_RESIDENCY_POLICY.videoFirstFrameConcurrency);
     expect(concurrencyLimit(policy, "upload")).toBe(Number.POSITIVE_INFINITY);
   });
@@ -252,49 +252,6 @@ describe("CanvasResourceCoordinator", () => {
     coordinator.dispose();
   });
 
-  it("caps preview-slot admissions and never starves pinned targets", () => {
-    // 预览槽只约束需要离屏预览相机的需求（模型/复合资产）；这里全部声明为预览需求。
-    const coordinator = new CanvasResourceCoordinator({ policy: { previewSlots: 2 } });
-    const many = Array.from({ length: 10 }, (_, index) => ({
-      nodeId: `n${index}`, contentKey: `k${index}`, x: index * 10, y: 0, width: 200, height: 200,
-      eligible: true, previewSlot: true
-    }));
-    coordinator.project({
-      viewport: { x: 0, y: 0, zoom: 1 },
-      surface: { width: 2000, height: 600, pixelRatio: 1 },
-      pageVisible: true,
-      interactive: [],
-      pins: ["n9"],
-      candidates: many
-    });
-    const admitted = new Set(coordinator.admittedNodeIds());
-    expect(admitted.size).toBeLessThanOrEqual(3);
-    expect(admitted.has("n9")).toBe(true);
-    // 裁剪只影响重资源准入，不改变文档节点：候选仍在下一帧参与投影。
-    expect(coordinator.diagnostics().deferred).toBeGreaterThan(0);
-    coordinator.dispose();
-  });
-
-  it("does not spend preview slots on plain media cards", () => {
-    // 图片/视频的纹理是卡片贴图，不占离屏预览槽：槽只剩 1 个时仍应准入全部卡片。
-    const coordinator = new CanvasResourceCoordinator({ policy: { previewSlots: 1 } });
-    const many = Array.from({ length: 10 }, (_, index) => ({
-      nodeId: `n${index}`, contentKey: `k${index}`, x: index * 10, y: 0, width: 200, height: 200,
-      eligible: true, previewSlot: false
-    }));
-    coordinator.project({
-      viewport: { x: 0, y: 0, zoom: 1 },
-      surface: { width: 2000, height: 600, pixelRatio: 1 },
-      pageVisible: true,
-      interactive: [],
-      pins: [],
-      candidates: many
-    });
-    expect(coordinator.admittedNodeIds()).toHaveLength(10);
-    expect(coordinator.diagnostics().deferred).toBe(0);
-    coordinator.dispose();
-  });
-
   it("chooses a thumbnail tier from the projected physical size", () => {
     const coordinator = new CanvasResourceCoordinator();
     coordinator.project({
@@ -442,9 +399,10 @@ describe("CanvasResourceCoordinator", () => {
   });
 
   it("ranks the prefetch margin below visible cards instead of one flat tier", () => {
-    const coordinator = new CanvasResourceCoordinator({ policy: { previewSlots: 2, prefetchMarginFactor: 1 } });
+    // 只够两张 200×200 卡片的 GPU 估算预算：预热余量里的节点必须让位。
+    const coordinator = new CanvasResourceCoordinator({ policy: { prefetchMarginFactor: 1, gpuDerivedBytes: 600_000 } });
     const at = (nodeId: string, x: number) => ({
-      nodeId, contentKey: `k-${nodeId}`, x, y: 0, width: 200, height: 200, eligible: true, previewSlot: true
+      nodeId, contentKey: `k-${nodeId}`, x, y: 0, width: 200, height: 200, eligible: true
     });
     // surface 800×600、zoom 1：视口覆盖 x∈[0,800]，余量 1 屏 ⇒ 预热覆盖 x∈[-800,1600]。
     coordinator.project({
@@ -455,7 +413,7 @@ describe("CanvasResourceCoordinator", () => {
       pins: [],
       candidates: [at("visible-a", 0), at("visible-b", 400), at("prefetch-a", 1000)]
     });
-    // 预览槽只有 2 个：两张视口内的卡片优先，预热余量里的节点让位（design D1「预热首先让位」）。
+    // 预算只够两张视口内卡片：预热余量里的节点让位（design D1「预热首先让位」）。
     expect(coordinator.isAdmitted("visible-a")).toBe(true);
     expect(coordinator.isAdmitted("visible-b")).toBe(true);
     expect(coordinator.isAdmitted("prefetch-a")).toBe(false);
@@ -505,7 +463,6 @@ describe("CanvasResourceCoordinator", () => {
     expect(snapshot.demands).toBe(1);
     expect(snapshot.byPurpose.visible).toBe(1);
     expect(snapshot.estimatedGpuBytes).toBeGreaterThan(0);
-    expect(snapshot.policy.previewSlots).toBe(DEFAULT_RESIDENCY_POLICY.previewSlots);
     coordinator.dispose();
   });
 });

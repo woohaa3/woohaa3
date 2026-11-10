@@ -8,7 +8,6 @@
  * 依据失效账本决定。
  */
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
-import { modelPreviewStore } from "../../services/model-preview-store.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import type { InteractionState } from "./interaction-core.js";
 
@@ -58,10 +57,6 @@ export function advanceTransientState(deps: TransientFrameDeps): void {
     const liveIds = index.liveIds;
     const focused = deps.isFocused();
     const visible = (id: string) => liveIds.has(id) && (focused || !index.hiddenNodeIds.has(id));
-    modelPreviewStore.prune(liveIds);
-    if (state.gesture.kind === "model-preview" && !liveIds.has(state.gesture.nodeId)) {
-      deps.cancelTransientGesture();
-    }
     const edgeVisible = (id: string) => working.document.edges.some(edge =>
       edge.id === id && visible(edge.source) && visible(edge.target));
     if (state.selectedEdgeId && !edgeVisible(state.selectedEdgeId)) {

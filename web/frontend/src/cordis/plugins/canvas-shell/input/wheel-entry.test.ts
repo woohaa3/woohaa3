@@ -4,8 +4,6 @@ import type { InteractionCore } from "../interaction-core.js";
 import type { TelemetryEventInput } from "@woohaa3/contracts";
 import { setTelemetryBuildModeForTesting, setTelemetryClientForTesting } from "../../../services/telemetry-primitives.js";
 
-const { preview } = vi.hoisted(() => ({ preview: vi.fn() }));
-vi.mock("./model-preview.js", () => ({ modelPreviewWheel: preview }));
 afterEach(() => {
   vi.resetAllMocks();
   setTelemetryClientForTesting(undefined);
@@ -37,17 +35,7 @@ function coreOf(overrides: Record<string, unknown> = {}) {
   } as unknown as InteractionCore;
 }
 
-it("preview consumption short-circuits viewport handling", () => {
-  preview.mockReturnValue(true);
-  const onWheel = vi.fn();
-  const handler = createWheelEntryHandler(coreOf(), { onWheel } as never);
-  const event = { preventDefault: vi.fn() } as unknown as WheelEvent;
-  handler(event);
-  expect(onWheel).not.toHaveBeenCalled();
-});
-
 it("passes the measured canvas rect into viewport consumption", () => {
-  preview.mockReturnValue(false);
   const onWheel = vi.fn(() => ({ kind: "pan", source: "trackpad" }));
   const core = coreOf({ canvas: { getBoundingClientRect: () => ({ left: 12, top: 34 }) } });
   createWheelEntryHandler(core, { onWheel } as never)({ preventDefault: vi.fn() } as unknown as WheelEvent);
@@ -55,7 +43,6 @@ it("passes the measured canvas rect into viewport consumption", () => {
 });
 
 it("blocks viewport zoom on modal, focused model and video focus", () => {
-  preview.mockReturnValue(false);
   const onWheel = vi.fn();
   const base = { canvas: { getBoundingClientRect: () => ({ left: 0, top: 0 }) }, options: {} };
   for (const core of [
@@ -68,16 +55,7 @@ it("blocks viewport zoom on modal, focused model and video focus", () => {
   expect(onWheel).not.toHaveBeenCalled();
 });
 
-it("a throwing preview query propagates without consuming viewport", () => {
-  preview.mockImplementationOnce(() => { throw new Error("query failed"); });
-  const onWheel = vi.fn();
-  const handler = createWheelEntryHandler(coreOf(), { onWheel } as never);
-  expect(() => handler({ preventDefault: vi.fn() } as unknown as WheelEvent)).toThrow("query failed");
-  expect(onWheel).not.toHaveBeenCalled();
-});
-
 it("被门禁拒绝的滚轮不产生 perf.interaction", () => {
-  preview.mockReturnValue(false);
   setTelemetryBuildModeForTesting("dev");
   const sink = telemetrySink();
   setTelemetryClientForTesting(sink);
@@ -89,7 +67,6 @@ it("被门禁拒绝的滚轮不产生 perf.interaction", () => {
 });
 
 it("被视口消费的滚轮产生一条 perf.interaction 与 viewport-apply 分段", () => {
-  preview.mockReturnValue(false);
   setTelemetryBuildModeForTesting("dev");
   const sink = telemetrySink();
   setTelemetryClientForTesting(sink);
@@ -106,7 +83,6 @@ it("被视口消费的滚轮产生一条 perf.interaction 与 viewport-apply 分
 });
 
 it("分类判定不是视口手势时不产生事件", () => {
-  preview.mockReturnValue(false);
   setTelemetryBuildModeForTesting("dev");
   const sink = telemetrySink();
   setTelemetryClientForTesting(sink);

@@ -11,18 +11,15 @@ import { isWorldInstanceNode } from "../../model-world-presentation.js";
 import { enclosingAuthoringScope } from "./scope.js";
 import type { NodePointerTarget } from "./types.js";
 
-/** 卡片/模型预览命中 → 统一节点目标；控件或空白返回 `null`。 */
+/** 卡片命中 → 统一节点目标；控件或空白返回 `null`。 */
 export function cardPointerTarget(
   canvas: ServerCanvas | null,
   hit: HitTarget | null
 ): NodePointerTarget | null {
-  if (!hit || (hit.kind !== "node" && hit.kind !== "model-preview")) return null;
+  if (!hit || hit.kind !== "node") return null;
   const nodeId = cardHitNodeId(hit);
   if (!nodeId) return null;
   const scopeId = enclosingAuthoringScope(canvas, nodeId);
-  if (hit.kind === "model-preview") {
-    return { kind: "model-preview", nodeId, via: "card", scopeId };
-  }
   return isWorldInstanceNode(canvas, nodeId)
     ? { kind: "world-object", nodeId, via: "card", scopeId }
     : { kind: "card", nodeId, via: "card", scopeId };

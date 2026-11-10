@@ -34,8 +34,7 @@ export type ResidencyChannel =
   | "video-session"
   | "video-frame"
   | "model-prepare"
-  | "upload"
-  | "preview";
+  | "upload";
 
 export type ResidencyPolicy = {
   /**
@@ -78,8 +77,6 @@ export type ResidencyPolicy = {
   modelPayloadBytes: number;
   /** 每页 GPU 派生资源估算预算（字节；保守估算，不是驱动实测显存）。 */
   gpuDerivedBytes: number;
-  /** 每页预览渲染槽上限。 */
-  previewSlots: number;
   /** 单帧普通预览刷新上限。 */
   previewRefreshesPerFrame: number;
   /** 离屏保留宽限（ms）；宽限结束后按预算淘汰。 */
@@ -109,7 +106,6 @@ export const DEFAULT_RESIDENCY_POLICY: ResidencyPolicy = {
   cpuDerivedBytes: 96 * 1024 * 1024,
   modelPayloadBytes: 64 * 1024 * 1024,
   gpuDerivedBytes: 256 * 1024 * 1024,
-  previewSlots: 16,
   previewRefreshesPerFrame: 2,
   offscreenGraceMs: 1500,
   prefetchMarginFactor: 0.5,
@@ -130,7 +126,6 @@ const LIMITS: Readonly<Record<keyof ResidencyPolicy, number>> = {
   cpuDerivedBytes: 4096 * 1024 * 1024,
   modelPayloadBytes: 4096 * 1024 * 1024,
   gpuDerivedBytes: 8192 * 1024 * 1024,
-  previewSlots: 256,
   previewRefreshesPerFrame: 32,
   offscreenGraceMs: 60_000,
   prefetchMarginFactor: 4,
@@ -163,7 +158,6 @@ export function concurrencyLimit(policy: ResidencyPolicy, channel: ResidencyChan
     case "video-session": return Math.floor(policy.videoSessionLimit);
     case "video-frame": return Math.floor(policy.videoFirstFrameConcurrency);
     case "model-prepare": return Math.floor(policy.modelPrepareConcurrency);
-    case "preview": return Math.floor(policy.previewSlots);
     case "upload": return Number.POSITIVE_INFINITY;
   }
 }
@@ -179,7 +173,6 @@ export function byteBudget(policy: ResidencyPolicy, channel: ResidencyChannel): 
     case "video-session": return policy.gpuDerivedBytes;
     case "model-prepare": return policy.modelPayloadBytes;
     case "upload": return policy.uploadBytesPerFrame;
-    case "preview": return policy.gpuDerivedBytes;
   }
 }
 

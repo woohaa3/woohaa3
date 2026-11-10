@@ -2,10 +2,9 @@ import { executeModelScriptVersioned } from "./model-executor-v2.js";
 /** The only builtin rendering implementation bindings. Domain type validation stays separate. */
 import { isSupportedModelScriptVersion, sceneIrVersionFor } from './model-script.js';
 import { prepareModelResource } from './prepared-model.js';
-import { DEFAULT_MODEL_PREVIEW, type BevyModelPreview } from './render-scene/wire-model.js';
-import { CANVAS_CAMERA_PITCH } from './model-focus/canvas-projection.js';
-import type { NodeCapabilities, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
+import type { NodeCapabilities, NodeCapabilityContext, NodeCapabilityResolver, NodeModelPreparation } from './node-capabilities.js';
 import { WORLD_CAMERA_CARD_SIZE } from './world-camera-ui.js';
+import { LEGACY_MODEL_CARD_BODY } from './render-scene/scene-builder.js';
 
 export const scriptModelPreparation: NodeModelPreparation = {
   executionKey: ({ data }) => data?.modelScript ? `${String(data.modelScriptVersion)}:${data.modelScript}` : undefined,
@@ -16,36 +15,63 @@ export const scriptModelPreparation: NodeModelPreparation = {
     return { status: 'ok', resource: prepareModelResource({ sceneVersion: sceneIrVersionFor(data.modelScriptVersion), ops: execution.scene.ops }) };
   }
 };
-/**
- * 模型卡片预览的默认姿态：正对模型正面（方位 0），俯仰跟随画布镜头
- * `CANVAS_CAMERA_PITCH`，让片场/模型卡片与画布中的真实模型保持同一视角。
- */
-export function defaultModelPreview(): BevyModelPreview {
-  return { ...DEFAULT_MODEL_PREVIEW, elevation: CANVAS_CAMERA_PITCH };
-}
-
-export const orbitModelPreview: NonNullable<NodeCapabilities['modelPreview']> = {
-  project: (_context, view) => ({ ...defaultModelPreview(), ...view })
-};
 export const modelWorkspaceFocus: NonNullable<NodeCapabilities['focus']> = { kind: () => 'model' };
 export const nodeActionContributions: NonNullable<NodeCapabilities['actions']> = { accepts: () => true };
 export const rectangularNodeResize: NonNullable<NodeCapabilities['resize']> = { mode: 'rect', minimum: () => ({ width: 180, height: 64 }) };
-export const modelResourceDemand: NonNullable<NodeCapabilities['resources']> = { channel: 'model', previewSlot: true, contentKey: context => context.modelResourceKey };
+export const modelResourceDemand: NonNullable<NodeCapabilities['resources']> = { channel: 'model', contentKey: context => context.modelResourceKey };
 const rich = { width: 248, height: 232 };
+
+/** `model3d` 只有携带共享世界实例才是受支持的模型节点。 */
+export function hasSharedWorldInstance(context: Pick<NodeCapabilityContext, 'data'>): boolean {
+  const value = context.data?.sharedWorldInstance;
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** 旧卡片模型不提供任何模型能力，只保留结构诊断与删除身份。 */
+const legacyModelCardCapabilities: NodeCapabilities = {
+  appearance: { palette: 'model', defaultSize: rich },
+  connections: { endpoints: () => 'ordinary' }
+};
+
+/**
+ * 受支持的模型节点能力：世界驻留、准备、聚焦与动作。
+ *
+ * 缺少 `sharedWorldInstance` 的旧卡片模型没有模型准备、预览、聚焦、动作或缩放能力
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
+ */
+export const worldModelCapabilities: NodeCapabilities = {
+  appearance: { palette: 'model', defaultSize: rich },
+  modelPreparation: scriptModelPreparation,
+  resources: modelResourceDemand,
+  focus: modelWorkspaceFocus,
+  actions: nodeActionContributions,
+  connections: { endpoints: () => 'ordinary' }
+};
+
+export function modelNodeCapabilities(context: Pick<NodeCapabilityContext, 'data'>): NodeCapabilities {
+  return hasSharedWorldInstance(context) ? worldModelCapabilities : legacyModelCardCapabilities;
+}
+
+/**
+ * 旧卡片模型的诊断正文；受支持的世界模型或非模型节点返回 `null`。
+ *
+ * Render Scene 用同一判定把缺少 `sharedWorldInstance` 的 `model3d` 投影为只读诊断卡片。
+ */
+export function legacyDiagnosticCardBodyFor(
+  node: { type: string },
+  context: Pick<NodeCapabilityContext, 'data'>
+): string | null {
+  return node.type === "model3d" && !hasSharedWorldInstance(context) ? LEGACY_MODEL_CARD_BODY : null;
+}
+
 export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabilities> {
   const entries = new Map<string, NodeCapabilities>();
   for (const type of ['text', 'image', 'audio', 'video'] as const) entries.set(type, {
     appearance: { palette: type, defaultSize: rich }, resize: rectangularNodeResize,
     ...(type !== "text" ? { actions: nodeActionContributions } : {}), connections: { endpoints: () => 'ordinary' },
-    ...((type === 'image' || type === 'video') ? { resources: { channel: type, previewSlot: false, contentKey: context => context.assetContentKey } } satisfies Pick<NodeCapabilities, 'resources'> : {})
+    ...((type === 'image' || type === 'video') ? { resources: { channel: type, contentKey: context => context.assetContentKey } } satisfies Pick<NodeCapabilities, 'resources'> : {})
   });
-  entries.set('model3d', {
-    appearance: { palette: 'model', defaultSize: rich, cardLabel: '3D 模型' },
-    modelPreparation: scriptModelPreparation, modelPreview: orbitModelPreview,
-    resources: modelResourceDemand, focus: modelWorkspaceFocus, actions: nodeActionContributions,
-    connections: { endpoints: () => 'ordinary' },
-    resize: { mode: 'rect', legacyPreviewHeight: 116, minimum: () => ({ width: 180, height: 160 }) }
-  });
+  entries.set('model3d', worldModelCapabilities);
   entries.set('composite-asset', {
     appearance: { palette: 'model', defaultSize: { width: 260, height: 195 } },
     actions: nodeActionContributions,
@@ -62,7 +88,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
   });
   entries.set('world-camera', {
     appearance: { palette: 'shot', defaultSize: WORLD_CAMERA_CARD_SIZE, cardLabel: '镜头' },
-    resources: { channel: 'video', previewSlot: false, contentKey: context => context.assetContentKey },
+    resources: { channel: 'video', contentKey: context => context.assetContentKey },
     actions: nodeActionContributions,
     connections: { endpoints: () => 'ordinary' },
     resize: rectangularNodeResize
@@ -74,5 +100,8 @@ export function builtinNodeCapabilitiesForType(type: string): NodeCapabilities {
 /** Pure fixtures/domain defaults. Production supplies the page resolver explicitly. */
 export const builtinNodeCapabilityResolver: NodeCapabilityResolver = {
   getRevision: () => 0,
-  resolve: ({ node }) => ({ ...builtins.get(node.type), generation: 0 })
+  resolve: (context) => ({
+    ...(context.node.type === 'model3d' ? modelNodeCapabilities(context) : builtins.get(context.node.type)),
+    generation: 0
+  })
 };

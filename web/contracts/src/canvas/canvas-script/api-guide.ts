@@ -114,9 +114,10 @@ ${CANVAS_SCRIPT_API_SIGNATURES.map((entry) => `- \`${entry.signature}\` — ${en
 
 ## 布局
 
-画布只支持节点与连线，不支持分组容器。用 canvas.layout 网格排布相关节点，标题用 setTitle 表达用途。
+画布只支持节点与连线，不支持分组容器。用 canvas.layout 网格排布普通卡片，标题用 setTitle 表达用途。
 connect 只表达真实生成输入。
-模型新建尺寸为 248×232。图查询 size/worldBounds、相对定位与 grid 都使用和界面一致的有效尺寸；已有 196×64 模型卡片也按实际预览尺寸参与布局，无需手工补偿尺寸。
+模型没有卡片：\`model\` 只接受 absolute placement，画布点投影到 h=0 地面生成共享世界实例，按真实尺度渲染；
+模型不参与 grid、after/before/below 或卡片避让，图查询的 size/worldBounds 使用世界包围盒。
 
 ## handle 与 key 规则
 
@@ -148,7 +149,7 @@ ${CANVAS_SCRIPT_GUIDE_EXAMPLE}
 
 - \`prompt\` 是生成输入，不冒充已有文本作品输出；节点执行必须在画布提交成功后经 \`run_canvas_node\` 触发。
 - 提交成功后脚本源码不写入画布、数据库、历史或日志；重试相同身份与内容返回首次回执。
-- model 种类映射为合法自包含 \`model3d\` 占位模型；实际模型源码通过独立 model authoring 工具提交。
+- model 种类映射为带共享世界实例的 \`model3d\` 空模型；实际模型源码通过独立 model authoring 工具提交。
 - 2D 组作用域内新建的节点会自动进入根组成员表；\`canvas.resize\` 只改卡片尺寸，不改成员关系。`;
 
 /** 机器可读的能力声明（供 `get_canvas_script_api`）。 */

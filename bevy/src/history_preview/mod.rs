@@ -4,9 +4,9 @@
 //! 历史卡片不再下载服务端 PNG：调用方把服务端权威脚本派生出的 Scene IR（V2）连同稳定
 //! `requestId` / `generation` 交给本模块。模块在**既有 App** 里：
 //!
-//! 1. 从共享预览层池租一个层（不与模型卡片/镜头卡片撞层）；
+//! 1. 从共享预览层池租一个层（不与镜头卡片/捕获撞层）；
 //! 2. 在该层上建一次性模型根 + 一次性离屏相机（`RenderTarget::Image`）；
-//! 3. 复用模型预览卡片的就绪门禁（`model_preview::PreviewView`）等到真实绘制完成；
+//! 3. 复用一次性离屏预览的就绪门禁（`preview_readiness::PreviewView`）等到真实绘制完成；
 //! 4. 用 `Screenshot::image` 回读 RGBA，立即拆实体、释放图像与层租约。
 //!
 //! 不新建 Bevy App、WebGL/WebGPU context、第二个 canvas 或模型副本，也不写规范状态。
@@ -29,7 +29,7 @@ use bevy::{
 use crate::{
     app::PreviewLayerPool,
     bridge::{self, HistoryThumbnailOutcome, HistoryThumbnailRequest, HistoryThumbnailResult},
-    model_preview::{PreviewView, Ready},
+    preview_readiness::{PreviewView, Ready},
     model3d::{self, PreviewRoot},
     protocol::ModelSnapshot,
     theme::ThemeResource,
@@ -41,7 +41,7 @@ const OWNER: &str = "model-history-thumbnail";
 const READINESS_TIMEOUT_FRAMES: u32 = 240;
 /// 提交回读后的等待上限。
 const READBACK_TIMEOUT_FRAMES: u32 = 120;
-/// 稳定的三分之四视角，与模型卡片/原生预览的观察方向一致。
+/// 稳定的三分之四视角，与原生预览的观察方向一致。
 const VIEW_DIRECTION: [f32; 3] = [0.55, 0.5, 0.67];
 
 pub(crate) struct HistoryThumbnailPlugin;
@@ -199,7 +199,7 @@ fn start(
     state: &mut ActiveThumbnail,
 ) {
     let Some(slot) = pool.0.acquire(OWNER) else {
-        // 预览层池被模型卡片/镜头卡片占满：明确失败，让卡片可重试，而不是无界加层。
+        // 预览层池被镜头卡片/捕获占满：明确失败，让调用方可重试，而不是无界加层。
         bridge::set_history_thumbnail_result(HistoryThumbnailResult {
             request_id: request.request_id,
             generation: request.generation,

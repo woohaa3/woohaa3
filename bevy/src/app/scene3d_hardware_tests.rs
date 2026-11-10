@@ -101,7 +101,7 @@ fn shared_world_production_frame_hardware() {
         .init_resource::<FocusRig>()
         .init_resource::<AnimationCameraState>()
         .init_resource::<model3d::capture::ShotCaptureRouting>()
-        .init_resource::<crate::model_preview::render_work::RenderWork>()
+        .init_resource::<crate::render_work::RenderWork>()
         .init_resource::<super::super::NodeIndex>()
         .init_resource::<super::super::positions::PositionIndex>()
         .init_resource::<SurfaceState>()

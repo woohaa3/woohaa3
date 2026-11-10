@@ -77,6 +77,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
   const place = (
     placement: import("../../agent-canvas-protocol.js").AgentCreatePlacement | undefined,
     size: { width: number; height: number },
+    worldOnly = false,
   ) => {
     if (placement && "anchor" in placement) resolve(placement.anchor);
     const nodes = [...geometry.nodes.values()];
@@ -97,7 +98,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
       plannedRects: [],
       operationIndex,
     };
-    const result = resolvePlacement(placement, { defaultSize: size }, state);
+    const result = resolvePlacement(placement, { defaultSize: size, worldOnly }, state);
     if (!result.ok) throw new PlanGeometryError(result.error.code, result.error.message, result.error.field);
     return result.position;
   };
@@ -120,7 +121,11 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
             );
           const id = deriveEntityId(descriptor.canonicalType, [...identity, operation.ref, "node"]);
           declare(operation.ref, id, descriptor.canonicalType, false, operation.kind);
-          const position = place(operation.placement, descriptor.defaultSize);
+          const worldModel = descriptor.canonicalType === "model3d";
+          const position = place(operation.placement, descriptor.defaultSize, worldModel);
+          const world = worldModel
+            ? { instanceId: deriveEntityId("world-instance", [...identity, operation.ref, "instance"]), point: position }
+            : undefined;
           geometry.nodes.set(id, {
             id,
             type: descriptor.canonicalType,
@@ -135,7 +140,7 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
             type: "node.add",
             node: { id, type: descriptor.canonicalType, position, ...descriptor.defaultSize },
             nodeData: {
-              ...defaultAgentNodeData(operation.kind),
+              ...defaultAgentNodeData(operation.kind, world),
               ...(operation.title !== undefined ? { title: operation.title } : {}),
               ...(operation.prompt !== undefined ? { prompt: operation.prompt } : {}),
             } as CanvasNodeData,

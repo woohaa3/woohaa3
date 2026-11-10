@@ -91,16 +91,20 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
           return fail(operationIndex, "kind", "unsupported-node-kind", `不支持的节点种类 ${operation.kind}`);
         }
         const nodeId = deriveEntityId(`${descriptor.canonicalType}`, [...entityIdentity, operation.ref, "node"]);
+        const worldModel = descriptor.canonicalType === "model3d";
         const placement = resolvePlacement(operation.placement, {
-          descriptor,
+          descriptor: worldModel ? { ...descriptor, worldOnly: true } : descriptor,
           snapshot,
           declaredRefs,
           plannedRects,
           operationIndex
         });
         if (!placement.ok) return placement;
+        const world = worldModel
+          ? { instanceId: deriveEntityId("world-instance", [...entityIdentity, operation.ref, "instance"]), point: placement.position }
+          : undefined;
         const nodeData = {
-          ...(defaultAgentNodeData(operation.kind) ?? {}),
+          ...(defaultAgentNodeData(operation.kind, world) ?? {}),
           ...(operation.title !== undefined ? { title: operation.title } : {}),
           ...(operation.prompt !== undefined ? { prompt: operation.prompt } : {})
         } as CanvasNodeData;
@@ -115,7 +119,8 @@ export function compileAgentPlan(input: PlanCompileInput): PlanCompileResult {
           },
           nodeData
         });
-        plannedRects.push(rectOf(placement.position, descriptor.defaultSize));
+        // 模型没有卡片矩形，不参与后续卡片的避让与布局。
+        if (!worldModel) plannedRects.push(rectOf(placement.position, descriptor.defaultSize));
         declaredRefs.set(operation.ref, { kind: "node", canonicalType: descriptor.canonicalType, nodeId });
         refToId[operation.ref] = nodeId;
         entities.push({ ref: operation.ref, kind: descriptor.kind, canonicalType: descriptor.canonicalType, nodeId });

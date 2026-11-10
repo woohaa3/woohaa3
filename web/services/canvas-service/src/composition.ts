@@ -66,7 +66,6 @@ import { composeImportedFirstCanvasAccess, importedPermissionFor, type ImportedC
 import type { CanvasAccessPort, CanvasLifecyclePort } from "./access/resolve-access.js";
 import type { PrincipalContext } from "@woohaa3/contracts";
 import type { CanvasMediaAssetSyncState, CanvasService, CanvasServiceOptions } from "./composition/service-types.js";
-import { createWorldConversionService } from "./world-authoring/conversion-service.js";
 import { createWorldAuthoringAuthority } from "./world-authoring/authority.js";
 import { createWorldAuthoringService } from "./world-authoring/scene-area-service.js";
 import { createWorldCameraSettingsService, type WorldCameraCompletionVerification } from "./world-authoring/camera-service.js";
@@ -772,8 +771,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     return merged;
   };
 
-  const worldConversion = sync ? createWorldConversionService(async (id) =>
-    await canvasContentExists(id) ? sync.registry.resolve(id) : null) : null;
   const spatialWrites: CanvasService["spatialWrites"] = sync ? {
     acquire: async (intent) => {
       // Refresh the authority's exact-revision footprint cache before the lease is
@@ -879,7 +876,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
     return repository;
   }
   const composedHandler = composeRequestHandler({
-    worldConversion,
     worldAuthoring,
     worldCamera: cameraSettings,
     worldCapture,
@@ -923,7 +919,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
 
   return {
     spatialWrites,
-    worldConversion,
     worldAuthoring,
     cameraSettings,
     assistantWorld,

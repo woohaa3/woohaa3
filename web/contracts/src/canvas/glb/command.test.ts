@@ -9,6 +9,12 @@ import { describe, expect, it } from "vitest";
 import { applyCanvasCommands } from "../../../../test-support/managed-shot-commands.js";
 import { createEmptyWoohaa3ServerCanvas, type CanvasNodeData, type ServerCanvas, type StoredAsset } from "../domain/index.js";
 import { glbModelSourceHash, normalizeGlbModelReference } from "../model-definition.js";
+import { newWorldInstance } from "../creation-scopes-ui.js";
+
+/** 模型没有卡片：每个节点都需要合法的共享世界实例。 */
+function worldInstance(id = "instance-glb") {
+  return newWorldInstance(id, { x: 0, y: 0 });
+}
 
 const NOW = "2026-10-28T00:00:00.000Z";
 const ASSET_ID = `asset-upload-${"c".repeat(64)}`;
@@ -41,7 +47,8 @@ function glbNodeData(): CanvasNodeData {
     modelSourceKind: "glb",
     modelAssetId: ASSET_ID,
     modelContentVersion: reference.value.contentVersion,
-    modelPlacement: reference.value.placement
+    modelPlacement: reference.value.placement,
+    sharedWorldInstance: worldInstance()
   };
 }
 
@@ -53,7 +60,7 @@ describe("文件模型节点写入", () => {
   it("资产与节点同批创建时规范化为文件模型且不写脚本字段", () => {
     const result = applyCanvasCommands(base(), [
       { type: "asset.upsert", asset: fileAsset() },
-      { type: "node.add", node: { id: "glb", type: "model3d", position: { x: 12, y: 8 } }, nodeData: glbNodeData() }
+      { type: "node.add", node: { id: "glb", type: "model3d" }, nodeData: glbNodeData() }
     ], { now: NOW });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -68,7 +75,7 @@ describe("文件模型节点写入", () => {
 
   it("缺失资产或资产类型不匹配时整批拒绝（不产生半成品节点）", () => {
     const missing = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "glb", type: "model3d", position: { x: 0, y: 0 } }, nodeData: glbNodeData() }
+      { type: "node.add", node: { id: "glb", type: "model3d" }, nodeData: glbNodeData() }
     ], { now: NOW });
     expect(missing.ok).toBe(false);
     if (missing.ok) return;
@@ -76,7 +83,7 @@ describe("文件模型节点写入", () => {
 
     const wrongKind = applyCanvasCommands(base(), [
       { type: "asset.upsert", asset: fileAsset({ mediaKind: "image" }) },
-      { type: "node.add", node: { id: "glb", type: "model3d", position: { x: 0, y: 0 } }, nodeData: glbNodeData() }
+      { type: "node.add", node: { id: "glb", type: "model3d" }, nodeData: glbNodeData() }
     ], { now: NOW });
     expect(wrongKind.ok).toBe(false);
     if (wrongKind.ok) return;
@@ -88,7 +95,7 @@ describe("文件模型节点写入", () => {
       { type: "asset.upsert", asset: fileAsset() },
       {
         type: "node.add",
-        node: { id: "glb", type: "model3d", position: { x: 0, y: 0 } },
+        node: { id: "glb", type: "model3d" },
         nodeData: { ...glbNodeData(), modelScript: "" } as unknown as CanvasNodeData
       }
     ], { now: NOW });
@@ -98,8 +105,8 @@ describe("文件模型节点写入", () => {
       { type: "asset.upsert", asset: fileAsset() },
       {
         type: "node.add",
-        node: { id: "glb", type: "model3d", position: { x: 0, y: 0 } },
-        nodeData: { title: "x", modelSourceKind: "gltf", modelAssetId: ASSET_ID } as unknown as CanvasNodeData
+        node: { id: "glb", type: "model3d" },
+        nodeData: { title: "x", modelSourceKind: "gltf", modelAssetId: ASSET_ID, sharedWorldInstance: worldInstance() } as unknown as CanvasNodeData
       }
     ], { now: NOW });
     expect(unknown.ok).toBe(false);
@@ -108,7 +115,7 @@ describe("文件模型节点写入", () => {
   it("placement 编辑推进 revision，重复同样内容不推进；来源哈希保持稳定", () => {
     const created = applyCanvasCommands(base(), [
       { type: "asset.upsert", asset: fileAsset() },
-      { type: "node.add", node: { id: "glb", type: "model3d", position: { x: 0, y: 0 } }, nodeData: glbNodeData() }
+      { type: "node.add", node: { id: "glb", type: "model3d" }, nodeData: glbNodeData() }
     ], { now: NOW });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
@@ -135,13 +142,14 @@ describe("文件模型节点写入", () => {
     const scripted = applyCanvasCommands(base(), [
       {
         type: "node.add",
-        node: { id: "script", type: "model3d", position: { x: 0, y: 0 } },
+        node: { id: "script", type: "model3d" },
         nodeData: {
           modelScript: "scene.box({ id: 'a' });",
           modelScriptLanguage: "javascript",
           modelScriptVersion: "woohaa-model-js-v2",
           modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" },
-          modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
+          modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+          sharedWorldInstance: worldInstance("instance-script")
         }
       }
     ], { now: NOW });

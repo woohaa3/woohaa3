@@ -40,9 +40,6 @@ import {
   effectiveCanvasNodeSize,
 } from "./node-geometry.js";
 import {
-  type BevyModelPlacement
-} from "./wire-model.js";
-import {
   CANVAS_RENDER_SCENE_VERSION,
   type BevyAggregateConnect,
   type BevyAnimationPlayback,
@@ -64,7 +61,6 @@ import {
   clampProgress,
   isBusy,
   readBody,
-  readPlacement,
   resolveTextureKey
 } from "./node-projection.js";
 
@@ -73,7 +69,6 @@ export type CanvasRenderSceneInput = {
   content?: ContentContributionResolver;
   canvas: ServerCanvas;
   nodeCapabilities?: NodeCapabilityResolver;
-  modelPreviews?: ReadonlyMap<string, import("./wire-model.js").BevyModelPreview>;
   selection?: { nodes?: readonly string[]; edge?: string | null };
   draft?: BevyRenderDraft | null;
   /** 框选选区矩形（世界坐标）。 */
@@ -94,8 +89,6 @@ export type CanvasRenderSceneInput = {
    * 原始 ops 并在映射内一次性派生，保持旧调用可用。
    */
   modelResources?: ReadonlyMap<string, PreparedModelResource>;
-  /** 模型 placement（来自 DOM 参数面板的瞬时/规范 nodeData）。 */
-  modelPlacements?: ReadonlyMap<string, BevyModelPlacement>;
   /** Transient ground displacement in meters; never applied to the canvas document. */
   worldGroundPreviews?: ReadonlyMap<string, { u: number; v: number }>;
   /**
@@ -149,6 +142,13 @@ export type CanvasRenderSceneInput = {
    */
   nodeActionToolbars?: ReadonlyMap<string, BevyNodeActionsPresentation>;
 };
+
+/**
+ * 旧版模型卡片（缺少 `sharedWorldInstance` 的 `model3d`）只显示这段固定的诊断正文，
+ * 不再执行模型脚本、生成资源、预览、统计或动作
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
+ */
+export const LEGACY_MODEL_CARD_BODY = "旧版 3D 模型卡片已不再支持，删除后重新创建模型";
 
 /** 校验并返回本帧使用的主题；非法输入直接抛错（不得部分降级）。 */
 export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
@@ -224,10 +224,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     }
   }
   const nodes: BevyRenderNode[] = canvas.document.nodes.flatMap((node) => {
-    const context = { canvas, node, data: nodeData[node.id] };
     const capabilities = capabilitiesOf(node);
     const kind = capabilities.appearance?.palette ?? "node";
-    const previewCard = capabilities.modelPreview;
     const size = effectiveCanvasNodeSize(node, input.sizeOverrides?.get(node.id), capabilities);
     const override = input.positionOverrides?.get(node.id);
     const data = nodeData[node.id];
@@ -287,6 +285,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const x = override ? override.x : node.position?.x ?? 0;
     const y = override ? override.y : node.position?.y ?? 0;
     const { width, height } = size;
+    // 旧卡片模型（缺少 sharedWorldInstance）只投影为只读诊断卡片：不执行脚本、不生成资源。
+    const legacyModelCard = node.type === "model3d" && !projectedWorld;
     const displayName = resolveNodeDisplayName({
       type: node.type,
       explicitName: data?.title,
@@ -295,7 +295,6 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const texture = resolveTextureKey(node.type, data, assets) !== null;
     const modelOpsV2 = input.modelScenesV2?.get(node.id);
     const preparedResource = input.modelResources?.get(node.id);
-    const placement = input.modelPlacements?.get(node.id) ?? readPlacement(data);
     const resource = capabilities.modelPreparation
       ? (preparedResource
         ?? (modelOpsV2
@@ -315,7 +314,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       y,
       width,
       height,
-      body: readBody(node.type, data, assets),
+      // 旧卡片模型不再执行脚本或生成预览：只显示固定诊断正文。
+      body: legacyModelCard ? LEGACY_MODEL_CARD_BODY : readBody(node.type, data, assets),
       ...(camera?.ok ? { worldCamera: camera.value } : {}),
       ...(shotPresentation ? { cameraShot: shotPresentation } : {}),
       title: displayName.displayName,
@@ -323,8 +323,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       typeLabel: shotPresentation && shotPresentation.kind === "dynamic" && shotPresentation.label !== ""
         ? shotPresentation.label
         : displayName.contentTypeLabel,
-      progress: clampProgress(data?.progress),
-      busy: isBusy(data),
+      progress: legacyModelCard ? 0 : clampProgress(data?.progress),
+      busy: legacyModelCard ? false : isBusy(data),
       texture,
       // 仅当该节点是唯一选中项时才绘制抓手，避免多选时语义歧义（design D1）。
       // 共享世界实例没有卡片尺寸抓手：模型缩放走世界变换/助手，不是卡片 resize。
@@ -340,8 +340,6 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
           memberNodeIds: [...workflowGroup.value.memberNodeIds]
         }
       } : {}),
-      // 共享世界实例没有卡片，也不再申请卡内轨道预览；模型由世界姿态直接绘制。
-      ...(previewCard && !projectedWorld ? { modelPreview: previewCard.project(context, input.modelPreviews?.get(node.id)) } : {}),
       ...(capabilities.appearance?.cardLabel ? { cardLabel: capabilities.appearance.cardLabel } : {})
     };
     if (capabilities.modelPreparation && resource) {
@@ -352,8 +350,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         sceneVersion: resource.sceneVersion,
         resourceKey: resource.resourceKey,
         signature: resource.signature,
-        ...(animated?.partRotations ? { partRotations: animated.partRotations } : {}),
-        ...(placement ? { placement } : {})
+        ...(animated?.partRotations ? { partRotations: animated.partRotations } : {})
       };
     }
     return [rendered];

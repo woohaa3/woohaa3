@@ -1231,7 +1231,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     const fields = instanceFields(definition, instanceId, operation.transform);
     const prepared = await deps.authority.prepareContent(fields);
     if (!prepared) return failure("invalid-data", "模型脚本无法执行或无法确定占地；请先调用 get_model_api，并使用 woohaa-model-js-v2 的 scene.* API");
-    const cardPosition = operation.content.cardPosition ?? { x: 0, y: 0 };
     const commandId = intentCommandId("assistant-world-create", operation);
     const result = await inspected.room.submitDerived({
       commandId,
@@ -1249,7 +1248,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             baseRevision: canvas.revision,
             commands: [{
               type: "node.add" as const,
-              node: { id: operation.nodeId, type: "model3d", position: cardPosition },
+              node: { id: operation.nodeId, type: "model3d" },
               nodeData: fields as unknown as CanvasNodeData
             }]
           }

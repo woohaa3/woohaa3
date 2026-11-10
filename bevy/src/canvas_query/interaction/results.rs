@@ -28,9 +28,6 @@ pub(crate) enum PointHit {
     History {
         node_id: String,
     },
-    ModelPreview {
-        node_id: String,
-    },
     Port {
         node_id: String,
         side: String,

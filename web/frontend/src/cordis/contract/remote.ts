@@ -109,8 +109,6 @@ export interface CanvasRemoteService {
   prepareSceneArea(input: { canvasId: string; areaId: string }, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>>;
   executeSceneArea(input: import("@woohaa3/contracts").WorldAuthoringExecuteInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>>;
   historySceneArea(direction: "undo" | "redo", input: import("@woohaa3/contracts").WorldAuthoringHistoryInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>>;
-  prepareWorldConversion(input: import("@woohaa3/contracts").WorldConversionPrepareInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
-  commitWorldConversion(input: import("@woohaa3/contracts").WorldConversionCommitInput, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
   /**
    * 打开当前 Canvas page 的 `canvas-yjs` 逻辑通道
    * （change: unify-canvas-session-websocket，design D2）。

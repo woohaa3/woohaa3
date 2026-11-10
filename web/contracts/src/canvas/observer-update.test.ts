@@ -16,48 +16,45 @@ import {
 import { CANVAS_RENDER_SCENE_VERSION, type CanvasRenderScene } from "./render-scene.js";
 import { defaultAppTheme } from "../theme/index.js";
 
-const preview = { azimuth: 0.4, elevation: 0.2, distanceScale: 1.1, targetOffset: [0, 0.5, 0] as [number, number, number] };
-
 describe("observer update wire", () => {
   it("编码固定结构：不含节点/边/完整场景", () => {
     const json = canvasObserverUpdateRequest({
-      baseSceneGeneration: 7, nodeId: "n1", preview, yaw: 0.2, pitch: -0.1, distance: 4, target: [1, 2, 3]
+      baseSceneGeneration: 7, nodeId: "n1", yaw: 0.2, pitch: -0.1, distance: 4, target: [1, 2, 3]
     });
     const parsed = JSON.parse(json);
     expect(Object.keys(parsed).sort()).toEqual([
-      "baseSceneGeneration", "distance", "nodeId", "pitch", "preview", "target", "version", "yaw"
+      "baseSceneGeneration", "distance", "nodeId", "pitch", "target", "version", "yaw"
     ]);
     expect(parsed.version).toBe(CANVAS_OBSERVER_UPDATE_VERSION);
     expect(json).not.toContain("nodes");
     expect(json).not.toContain("edges");
   });
 
-  it("规范化非有限值，并把距离下限钳到 0.001", () => {
+  it("规范化非有限值", () => {
     const parsed = JSON.parse(canvasObserverUpdateRequest({
       baseSceneGeneration: 3.9, nodeId: "n",
-      preview: { azimuth: Number.NaN, elevation: Number.POSITIVE_INFINITY, distanceScale: 0, targetOffset: [Number.NaN, 1, 2] },
-      yaw: Number.NaN, pitch: 0, distance: 4, target: [0, 0, 0]
+      yaw: Number.NaN, pitch: 0, distance: Number.POSITIVE_INFINITY, target: [Number.NaN, 1, 2]
     }));
     expect(parsed.baseSceneGeneration).toBe(3);
-    expect(parsed.preview).toEqual({ azimuth: 0, elevation: 0, distanceScale: 0.001, targetOffset: [0, 1, 2] });
     expect(parsed.yaw).toBe(0);
+    expect(parsed.distance).toBe(0);
+    expect(parsed.target).toEqual([0, 1, 2]);
   });
 
-  it("只改匹配节点的 modelFocus 与 modelPreview", () => {
+  it("只改匹配节点的 modelFocus，不再回写卡片观察态", () => {
     const scene = {
       version: CANVAS_RENDER_SCENE_VERSION, canvasId: "canvas-test", revision: 1, nodes: [
-        { id: "a", type: "model", x: 0, y: 0, width: 1, height: 1, body: "", title: "", typeLabel: "", progress: 0, busy: false, texture: false, resizable: false, modelPreview: { azimuth: 0, elevation: 0, distanceScale: 1, targetOffset: [0, 0, 0] } },
+        { id: "a", type: "model", x: 0, y: 0, width: 1, height: 1, body: "", title: "", typeLabel: "", progress: 0, busy: false, texture: false, resizable: false },
         { id: "b", type: "image", x: 0, y: 0, width: 1, height: 1, body: "", title: "", typeLabel: "", progress: 0, busy: false, texture: false, resizable: false }
       ],
       edges: [], selection: { nodes: [], edge: null }, viewport: { x: 0, y: 0, zoom: 1 }, draft: null, surface: null, theme: defaultAppTheme(),
       modelFocus: { version: "woohaa-model-focus-v1" as const, nodeId: "a", target: [0, 0, 0] as [number, number, number], yaw: 0, pitch: 0, distance: 4, fov: 1, radius: 1 }
     } as CanvasRenderScene;
     const next = applyObserverToScene(scene, {
-      baseSceneGeneration: 1, nodeId: "a", preview, yaw: 1, pitch: -0.5, distance: 6, target: [9, 8, 7]
+      baseSceneGeneration: 1, nodeId: "a", yaw: 1, pitch: -0.5, distance: 6, target: [9, 8, 7]
     });
     expect(next.modelFocus).toMatchObject({ nodeId: "a", yaw: 1, pitch: -0.5, distance: 6, target: [9, 8, 7] });
-    expect(next.nodes[0]?.modelPreview).toEqual(preview);
-    expect(next.nodes[1]).toEqual(scene.nodes[1]);
+    expect(next.nodes).toEqual(scene.nodes);
   });
 
   it("版本字符串与 Rust protocol/observer.rs 一致", () => {

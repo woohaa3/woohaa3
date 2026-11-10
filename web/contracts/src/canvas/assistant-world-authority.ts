@@ -173,12 +173,15 @@ export interface AssistantWorldFailure {
 
 export type AssistantWorldIssueOutcome = ({ ok: true } & AssistantWorldIssued) | AssistantWorldFailure;
 
-/** Model content accepted by assistant tools. Content identity is derived by the authority. */
+/**
+ * Model content accepted by assistant tools. Content identity is derived by the authority.
+ *
+ * 模型没有卡片，位置只由创建操作的 `transform` 表达
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
+ */
 export interface AssistantWorldModelContent {
   modelScript: string;
   modelScriptVersion?: string;
-  /** Optional card position only; world pose is authoritative and independent. */
-  cardPosition?: { x: number; y: number };
 }
 
 export type AssistantWorldWriteOperation =
@@ -376,7 +379,7 @@ export function decodeAssistantWorldScope(value: unknown): { ok: true; value: As
 }
 
 export function decodeAssistantWorldModelContent(value: unknown): { ok: true; value: AssistantWorldModelContent } | { ok: false; code: "invalid-data"; message: string } {
-  if (!isJsonObject(value) || Object.keys(value).some(key => !["modelScript", "modelScriptVersion", "cardPosition"].includes(key))) {
+  if (!isJsonObject(value) || Object.keys(value).some(key => !["modelScript", "modelScriptVersion"].includes(key))) {
     return { ok: false, code: "invalid-data", message: "模型内容包含未知字段" };
   }
   if (typeof value.modelScript !== "string" || value.modelScript.trim() === "") {
@@ -385,15 +388,11 @@ export function decodeAssistantWorldModelContent(value: unknown): { ok: true; va
   if (value.modelScriptVersion !== undefined && !isBoundedId(value.modelScriptVersion)) {
     return { ok: false, code: "invalid-data", message: "模型脚本版本无效" };
   }
-  if (value.cardPosition !== undefined && (!isJsonObject(value.cardPosition) || !finite(value.cardPosition.x) || !finite(value.cardPosition.y))) {
-    return { ok: false, code: "invalid-data", message: "卡片位置无效" };
-  }
   return {
     ok: true,
     value: {
       modelScript: value.modelScript,
-      ...(value.modelScriptVersion === undefined ? {} : { modelScriptVersion: value.modelScriptVersion as string }),
-      ...(value.cardPosition === undefined ? {} : { cardPosition: { x: (value.cardPosition as { x: number }).x, y: (value.cardPosition as { y: number }).y } })
+      ...(value.modelScriptVersion === undefined ? {} : { modelScriptVersion: value.modelScriptVersion as string })
     }
   };
 }

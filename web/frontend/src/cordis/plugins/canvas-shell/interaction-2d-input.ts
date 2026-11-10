@@ -8,7 +8,6 @@ import { createHistoryClick } from "./input/history-click.js";
  * 从 `interaction-controller` 拆出的基础 2D 手势：拖拽、尺寸、连线、框选、平移、视口滚轮、
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
-import { modelPreviewPointerDown, modelPreviewPointerMove } from "./input/model-preview.js";
 import { bevyKindForNodeType, effectiveCanvasNodeSize, builtinNodeCapabilityResolver, decodeWorkflowGroupData, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
 import { nodeSize, cardHitNodeId, type Point } from "./hit-test.js";
 import { planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
@@ -21,7 +20,7 @@ import { applyDragAlignment, setAlignmentGuides } from "./alignment-snap.js";
 import { sharedCanvasNodeIndex } from "./canvas-node-index.js";
 import { createAggregateConnectFamily } from "./aggregate-connect.js";
 import { mergeMarqueeSelection, shouldUseWorldModelPick } from "../canvas-runtime/model-world-presentation.js";
-import { commitPressSelection, noteSelectionPress } from "./input/selection/apply.js";
+import { commitPressSelection } from "./input/selection/apply.js";
 import { resolveContextSelection, resolvePressSelection } from "./input/selection/press.js";
 import { cardPointerTarget, groundAreaCandidates, hasWorldObject, pickedWorldTarget } from "./input/selection/target.js";
 import { createWorldCameraGestureFamilyFromOptions } from "./world-camera-gesture.js";
@@ -387,17 +386,6 @@ export function create2dInputFamily(core: InteractionCore) {
 
     if (trySceneAreaGesture()) return;
 
-    if (modelPreviewPointerDown(core, event, hit)) {
-      // 已选模型预览旋转也是双击序列的一部分：记录按下前选区，保持双击语义一致。
-      noteSelectionPress({
-        state,
-        nodeId: cardTarget?.nodeId ?? null,
-        reason: "already-selected",
-        x: event.clientX,
-        y: event.clientY
-      });
-      return;
-    }
 
     if (!hit && !isRight && !event.shiftKey) {
       const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
@@ -528,8 +516,8 @@ export function create2dInputFamily(core: InteractionCore) {
       }
     }
 
-    // 未选中的模型预览与普通卡片一样，先选择并拖动节点；Shift 保留选择操作。
-    if (cardTarget && (cardTarget.kind === "card" || cardTarget.kind === "model-preview")) {
+    // 普通卡片：先选择并拖动节点；Shift 保留选择操作。
+    if (cardTarget && cardTarget.kind === "card") {
       const hitNodeId = cardTarget.nodeId;
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
       commitPressSelection({
@@ -652,7 +640,6 @@ export function create2dInputFamily(core: InteractionCore) {
 
   const onPointerMove = (event: PointerEvent) => {
     if (history.move(event)) return;
-    if (modelPreviewPointerMove(core, event)) return;
     if (model.active) {
       setCursor("");
       model.moveFocusPointer(event);
@@ -785,7 +772,6 @@ export function create2dInputFamily(core: InteractionCore) {
     if ("pointerId" in state.gesture && state.gesture.pointerId !== event.pointerId) return;
     const world = core.pointerWorld(event);
     state.lastPointerWorld = world;
-    if (state.gesture.kind === "model-preview") { event.preventDefault(); event.stopPropagation(); }
     // 释放后仍请求一帧（沿用既有语义）；纯 pan 释放用 `"viewport"` 以保持纯视口帧，
     // 其它手势（拖拽/resize/连线/框选）可能改变结构或呈现，用缺省 `"input"` 走 full。
     const releasedKind = state.gesture.kind;

@@ -7,7 +7,6 @@ export { minimumNodeSizeFor } from "./node-minimum-size.js";
 
 export const RICH_CONTENT_NODE_SIZE = { width: 248, height: 232 } as const;
 export const COMPACT_NODE_SIZE = { width: 196, height: 64 } as const;
-export const MODEL_PREVIEW_MIN_HEIGHT = 160;
 /** Composite assets use this base rectangle to fit their content and scope. */
 export const COMPOSITE_ASSET_DEFAULT_SIZE = { width: 260, height: 195 };
 
@@ -45,8 +44,9 @@ export function compositeAssetNodeBoxSize(node: NodeDimensions): {
 }
 
 /**
- * Visible card/base rectangle in canvas world units. Reading never rewrites stored geometry.
- * Old model3d cards expand to the preview default; explicit resize previews bypass that expansion.
+ * Visible card/base rectangle in canvas world units for 2D cards. Reading never rewrites stored
+ * geometry. Models have no card: their world position comes from `sharedWorldInstance`, so this
+ * only returns the nominal minimum box and never the retired 248×232 / 196×64 card expansion.
  * Transient controls outside the card are excluded.
  */
 export function effectiveCanvasNodeSize(
@@ -54,17 +54,10 @@ export function effectiveCanvasNodeSize(
   override?: { width: number; height: number },
   capabilities: NodeCapabilities = builtinNodeCapabilitiesForType(node.type),
 ): { width: number; height: number } {
-  const preview = !!capabilities.modelPreview;
   const fallback = capabilities.appearance?.defaultSize ?? COMPACT_NODE_SIZE;
-  const legacyPreview = capabilities.resize?.legacyPreviewHeight !== undefined
-    && (node.height ?? COMPACT_NODE_SIZE.height) <= capabilities.resize.legacyPreviewHeight;
-  const base = override ?? (legacyPreview ? fallback : node);
+  const base = override ?? node;
   return {
     width: dimension(base.width, fallback.width, minimumNodeSizeFor(node.type).width),
-    height: dimension(
-      base.height,
-      fallback.height,
-      preview ? MODEL_PREVIEW_MIN_HEIGHT : minimumNodeSizeFor(node.type).height,
-    ),
+    height: dimension(base.height, fallback.height, minimumNodeSizeFor(node.type).height),
   };
 }

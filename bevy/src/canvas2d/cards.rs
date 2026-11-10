@@ -24,9 +24,6 @@ pub(super) fn draw_static(
         }
         NodeChrome::None => return Vec::new(),
     }
-    if super::layout::compact_card(node) {
-        return super::compact_card::draw(geometry, theme, node, index);
-    }
     let (accent, tint, category) = theme.node_palette(&node.kind);
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
@@ -111,11 +108,7 @@ pub(super) fn draw_static(
     }
     // 正文优先用满预览区宽度换行，行数由卡片实际高度派生；只有超出预算才在末行省略。
     // 历史失败/取消原因尤其依赖这条路径，否则 240 字的报错只剩第一行。
-    let body_lines = if show_content
-        && !node.texture
-        && !node.busy
-        && !(node.model_preview.is_some() && node.model.is_some())
-    {
+    let body_lines = if show_content && !node.texture && !node.busy {
         super::layout::wrapped_lines(
             &node.body,
             width - 48.,

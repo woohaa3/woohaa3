@@ -17,7 +17,6 @@ import {
   type FocusTargetInput
 } from "./model-focus-session.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
-import { restorePreviewObserver } from "./model-preview-focus.js";
 
 export type Surface = { width: number; height: number; pixelRatio: number };
 
@@ -65,7 +64,6 @@ export function createFocusLifecycle(deps: FocusLifecycleDeps) {
       saved: { viewport: deps.activeViewport() }
     });
     if (entered) {
-      restorePreviewObserver(focus, deps.getTargets());
       deps.emit();
     }
     return entered;
@@ -83,7 +81,6 @@ export function createFocusLifecycle(deps: FocusLifecycleDeps) {
       saved: { viewport: deps.activeViewport() }
     });
     if (entered) {
-      restorePreviewObserver(focus, deps.getTargets());
       deps.emit();
     }
     return entered;

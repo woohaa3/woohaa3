@@ -19,7 +19,6 @@ import {
   focusCameraRotation,
   focusRay,
   focusTargetFor,
-  modelAnchor,
   modelLocalAabb,
   modelUnit,
   modelWorldAabbRelative,
@@ -248,41 +247,6 @@ describe("ray 命中", () => {
     });
     expect(result).toBeNull();
   });
-});
-
-describe("modelAnchor", () => {
-  it("固定画布坐标：卡片底部 + gap + 模型顶部高度决定锚点（与 Rust 同式）", () => {
-    const relative = { min: [-1, 0, -1] as Vec3, max: [1, 4, 1] as Vec3 };
-    const anchor = modelAnchor({
-      nodeX: 100,
-      nodeY: 200,
-      nodeWidth: 260,
-      nodeHeight: 195,
-      relativeAabb: relative,
-      offset: { x: 0, y: 0, z: 0 }
-    });
-    // 固定画布点：cx = 230，cy = 395 + 40 + 4 = 439；世界 = R × (230, -439, 0)。
-    const expected = canvasPointToWorld(230, 439, 0);
-    expect(anchor[0]).toBeCloseTo(expected[0], 6);
-    expect(anchor[1]).toBeCloseTo(expected[1], 6);
-    expect(anchor[2]).toBeCloseTo(expected[2], 6);
-  });
-
-  it("placement offset 使用固定 64 单位", () => {
-    const relative = { min: [-1, 0, -1] as Vec3, max: [1, 4, 1] as Vec3 };
-    const anchor = modelAnchor({
-      nodeX: 100,
-      nodeY: 200,
-      nodeWidth: 260,
-      nodeHeight: 195,
-      relativeAabb: relative,
-      offset: { x: 1, y: 0, z: 0 }
-    });
-    const expected = canvasPointToWorld(230 + 64, 439, 0);
-    expect(anchor[0]).toBeCloseTo(expected[0], 6);
-    expect(anchor[1]).toBeCloseTo(expected[1], 6);
-  });
-
 });
 
 describe("modelUnit", () => {

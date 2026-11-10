@@ -1,7 +1,6 @@
 /** Runtime implementation contracts. Never persisted and never sent as executable wire data. */
 import type { CanvasNodeData, ServerCanvas } from './domain/index.js';
 import type { PreparedModelResource } from './prepared-model.js';
-import type { BevyModelPreview } from './render-scene/wire-model.js';
 import type { BevyNodeKind } from './render-scene/node-geometry.js';
 
 export type NodeCapabilityContext = {
@@ -33,11 +32,10 @@ export type NodeResourceContext = NodeCapabilityContext & {
 export type NodeCapabilities = {
   appearance?: Readonly<{ palette: BevyNodeKind; defaultSize: Readonly<{ width: number; height: number }>; cardLabel?: string }>;
   modelPreparation?: NodeModelPreparation;
-  modelPreview?: { project(context: NodeCapabilityContext, view?: BevyModelPreview): BevyModelPreview };
   connections?: { endpoints(context: NodeCapabilityContext): 'ordinary' | 'none' | 'aggregate' };
-  resources?: { channel: 'image' | 'video' | 'model'; previewSlot: boolean; contentKey(context: NodeResourceContext): string | null };
+  resources?: { channel: 'image' | 'video' | 'model'; contentKey(context: NodeResourceContext): string | null };
   focus?: { kind(context: NodeCapabilityContext): 'model' | 'extension' | null };
-  resize?: { mode: 'rect' | 'scope'; minimum(context: NodeCapabilityContext): { width: number; height: number }; legacyPreviewHeight?: number };
+  resize?: { mode: 'rect' | 'scope'; minimum(context: NodeCapabilityContext): { width: number; height: number } };
   actions?: { accepts(context: NodeCapabilityContext): boolean };
 };
 export type ResolvedNodeCapabilities = Readonly<NodeCapabilities> & { readonly generation: number };

@@ -7,6 +7,8 @@ import { applyCanvasCommands } from "../../../test-support/managed-shot-commands
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas, type StoredAsset } from "./domain/index.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
+import { newWorldInstance } from "./creation-scopes-ui.js";
+import { createModel3DNodeData, model3DNodeDataFields } from "./animation-snapshot.js";
 
 import { isCanvasCommandBatchSatisfied, isCanvasCommandSatisfied } from "./command-satisfaction.js";
 import { createWoohaa3CanvasNodeId, createHighEntropyId } from "./domain/index.js";
@@ -335,15 +337,82 @@ describe("输入 mapping finalizer（change: add-reference-inputs-and-mentions�
 describe("类别最小尺寸", () => {
   it("显式尺寸写入低于类别下限时整批拒绝，拒绝时不改变规范画布", () => {
     const added = applyCanvasCommands(base(), [
-      { type: "node.add", node: { id: "model", type: "model3d", position: { x: 0, y: 0 } } }
+      { type: "node.add", node: { id: "asset", type: COMPOSITE_ASSET_NODE_TYPE, position: { x: 0, y: 0 } } }
     ], { now: NOW });
     expect(added.ok).toBe(true);
     if (!added.ok) return;
     const before = JSON.stringify(added.canvas);
-    const result = applyCanvasCommands(added.canvas, [{ type: "node.update", nodeId: "model", width: 120 }], { now: NOW });
+    const result = applyCanvasCommands(added.canvas, [{ type: "node.update", nodeId: "asset", width: 120 }], { now: NOW });
     expect(result).toMatchObject({ ok: false, rejection: { code: "invalid-node-size" } });
     expect(JSON.stringify(added.canvas)).toBe(before);
-    const resized = applyCanvasCommands(added.canvas, [{ type: "node.update", nodeId: "model", width: 200, height: 200 }], { now: NOW });
+    const resized = applyCanvasCommands(added.canvas, [{ type: "node.update", nodeId: "asset", width: 260, height: 200 }], { now: NOW });
     expect(resized.ok).toBe(true);
+  });
+});
+
+describe("旧卡片模型只读诊断（change: 2026-11-10-remove-legacy-model-card-nodes）", () => {
+  const world = () => newWorldInstance("instance-world", { x: 0, y: 0 });
+  /** 升级前画布：旧卡片 model3d（原值保留，含合法内容版本）。 */
+  const legacyCanvas = (data: Record<string, unknown>) => ({
+    ...base(),
+    document: { ...base().document, nodes: [{ id: "old", type: "model3d", position: { x: 0, y: 0 }, width: 248, height: 232 }] },
+    nodeData: { old: { ...data, ...model3DNodeDataFields(createModel3DNodeData({ title: "旧模型", model: { modelScript: data.modelScript as string, modelScriptVersion: "woohaa-model-js-v2" } })) } } as never
+  });
+  const modelData = {
+    modelScript: "scene.box({ id: 'a' });",
+    modelScriptLanguage: "javascript",
+    modelScriptVersion: "woohaa-model-js-v2"
+  };
+
+  it("创建缺少 sharedWorldInstance 的 model3d 整批拒绝", () => {
+    const result = applyCanvasCommands(base(), [
+      { type: "node.add", node: { id: "model", type: "model3d" }, nodeData: modelData as never }
+    ], { now: NOW });
+    expect(result).toMatchObject({ ok: false, rejection: { code: "invalid-command" } });
+  });
+
+  it("带世界实例的模型按世界身份持久化，不写卡片位置/尺寸", () => {
+    const result = applyCanvasCommands(base(), [
+      { type: "node.add", node: { id: "model", type: "model3d" }, nodeData: { ...modelData, sharedWorldInstance: world() } as never }
+    ], { now: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const node = result.canvas.document.nodes.find((entry) => entry.id === "model")!;
+    expect(node.position).toBeUndefined();
+    expect(node.width).toBeUndefined();
+    expect(node.height).toBeUndefined();
+    expect(result.canvas.nodeData.model.sharedWorldInstance).toMatchObject({ instanceId: "instance-world" });
+  });
+
+  it("复制旧卡片：粘贴产生的新节点缺少世界实例时被拒绝", () => {
+    const legacy = applyCanvasCommands(base(), [
+      { type: "node.add", node: { id: "old", type: "model3d", position: { x: 0, y: 0 } }, nodeData: modelData as never }
+    ], { now: NOW });
+    // 旧卡片不能经命令创建；这里用直接文档模拟升级前画布，验证粘贴路径。
+    const history = legacyCanvas(modelData);
+    const pasted = applyCanvasCommands(history, [
+      { type: "node.add", node: { id: "old-copy", type: "model3d", position: { x: 40, y: 40 } }, nodeData: { ...modelData } as never }
+    ], { now: NOW });
+    expect(legacy.ok).toBe(false);
+    expect(pasted).toMatchObject({ ok: false, rejection: { code: "invalid-command" } });
+  });
+
+  it("旧卡片只允许重命名，其它写入被拒绝", () => {
+    const history = legacyCanvas(modelData);
+    const renamed = applyCanvasCommands(history, [
+      { type: "nodeData.patch", nodeId: "old", value: { title: "旧模型" } }
+    ], { now: NOW });
+    if (!renamed.ok) throw renamed.rejection;
+    expect(renamed.ok).toBe(true);
+    if (!renamed.ok) return;
+    const scripted = applyCanvasCommands(renamed.canvas, [
+      { type: "nodeData.patch", nodeId: "old", value: { modelScript: "scene.box({ id: 'b' });" } as never }
+    ], { now: NOW });
+    expect(scripted).toMatchObject({ ok: false, rejection: { code: "invalid-command" } });
+    // 通过补写世界实例升级为受支持模型是允许的唯一写入例外。
+    const upgraded = applyCanvasCommands(renamed.canvas, [
+      { type: "nodeData.patch", nodeId: "old", value: { sharedWorldInstance: world() } as never }
+    ], { now: NOW });
+    expect(upgraded.ok).toBe(true);
   });
 });

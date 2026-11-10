@@ -10,7 +10,7 @@
  * 内容身份，不依赖 GPU：准入是纯逻辑，渲染结果仍需真实 GPU 验证（见 verification.md）。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, newWorldInstance } from "@woohaa3/contracts";
 import {
   CanvasResourceCoordinator,
   createContentIdentity,
@@ -37,7 +37,8 @@ function realisticCanvas() {
       });
       data[id] = { outputAssetId: `asset-${id}` };
     }
-    if (type === "model3d" || type === "composite-asset") data[id] = { modelScript: "scene.group({id:'a'});" };
+    if (type === "model3d") data[id] = { modelScript: "scene.group({id:'a'});", sharedWorldInstance: newWorldInstance(`instance-${id}`, { x, y }) };
+    if (type === "composite-asset") data[id] = { modelScript: "scene.group({id:'a'});" };
     return id;
   };
   // 视口 1（zoom 0.15 的密集总览）：40 媒体 + 18 模型，与实测 58 一致量级。
@@ -75,8 +76,8 @@ describe("真实画布形状下的准入", () => {
     console.log("admitted", admitted.length, "byPurpose", JSON.stringify(snap.byPurpose),
       "gpu MiB", (snap.estimatedGpuBytes / 1048576).toFixed(2), "deferred", snap.deferred);
 
-    // 视口内媒体卡数量远超预览槽（16），修复后必须全部准入。
-    expect(admitted.length).toBeGreaterThan(snap.policy.previewSlots);
+    // 视口内的媒体卡由全页 GPU 估算预算准入，不按单一类别槽位截断。
+    expect(admitted.length).toBeGreaterThan(16);
     expect(snap.estimatedGpuBytes).toBeLessThanOrEqual(snap.policy.gpuDerivedBytes);
     // 内容身份都非空（模型/复合资产取 resourceKey，图片取 storageKey）。
     expect(coordinator.admittedContentKeys().filter(Boolean).length).toBe(admitted.length);

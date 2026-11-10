@@ -40,7 +40,7 @@ export function sizeOf(
 export function resolvePlacement(
   placement: AgentCreatePlacement | undefined,
   context: {
-    descriptor: { defaultSize: { width: number; height: number } };
+    descriptor: { defaultSize: { width: number; height: number }; worldOnly?: boolean };
     snapshot: IndexedSnapshot;
     declaredRefs: Map<string, DeclaredEntity>;
     plannedRects: Rect[];
@@ -49,11 +49,15 @@ export function resolvePlacement(
 ): { ok: true; position: { x: number; y: number } } | { ok: false; error: AgentCanvasError } {
   const mode: AgentPlacementMode = placement?.mode ?? "auto";
   const size = context.descriptor.defaultSize;
+  // 模型没有卡片矩形：只接受 absolute，并把画布点投影成世界实例。
+  if (context.descriptor.worldOnly && mode !== "absolute") {
+    return { ok: false, error: { code: "invalid-placement", message: "模型没有卡片矩形，只支持 absolute placement", retryable: false, operationIndex: context.operationIndex, field: "placement" } };
+  }
   if (mode === "absolute") {
     if (!placement || placement.mode !== "absolute") {
       return { ok: false, error: { code: "malformed-request", message: "缺少 absolute position", retryable: false, operationIndex: context.operationIndex, field: "placement" } };
     }
-    return { ok: true, position: avoidOverlap(placement.position, size, context.snapshot, context.plannedRects, 0) };
+    return { ok: true, position: context.descriptor.worldOnly ? { ...placement.position } : avoidOverlap(placement.position, size, context.snapshot, context.plannedRects, 0) };
   }
   if (mode === "auto") {
     const bounds = graphBounds(context.snapshot.nodes, context.plannedRects);

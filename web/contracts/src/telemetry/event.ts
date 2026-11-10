@@ -117,9 +117,6 @@ export const TELEMETRY_ATTRIBUTE_KEYS = [
   "queueMs",
   "prepareMs",
   "renderMs",
-  // 模型卡片预览的规模快照（`perf.frame`，仅 dev）：`d`=延迟队列、`v`=可见、`l`=在途、
-  // `r`=就绪、`b`=纹理 MB。`pacing` 只说"还有子系统要连续帧"，这条说"是哪一种、多大"。
-  "previews",
   // 帧内最贵的几步（`perf.frame`，仅 dev）：`<步骤>:<每帧 ms>`，按每帧耗时取前三。
   // `frameExecMs` 只说"这一帧花了多少"，这条回答"花在 viewport-notify、image-sync、
   // video-sync 还是 composite-media-sync"——片场相关的逐帧会话同步就在这里露头。
@@ -262,7 +259,6 @@ export const TELEMETRY_PERF_ATTRIBUTE_KEYS: Readonly<
     "prepareMs",
     "renderMs",
     "steps",
-    "previews",
     "mainMs",
     "modelMs",
     // 帧节奏标签（仅 dev）：`idle` / `dwell` / `active:<忙碌项>`。帧率掉下来时，
@@ -335,8 +331,9 @@ export const TELEMETRY_LIMITS = {
    * 把「画得少」与「draw call 少但实例多」分开，`queueMs`/`prepareMs`/`renderMs`
    * 把渲染三阶段拆开，`pacing` 指出还有没有子系统在要求连续帧。
    * 再提到 19：`steps` 直接把帧内最贵的三步写进同一条事实。
-   * 再提到 20：`previews` 把预览延迟队列与纹理占用写进同一条事实。
    * 再提到 22：`mainMs`/`modelMs` 补上主世界那一层（JS 与渲染三阶段都没覆盖）。
+   * 模型卡片预览下线后 `previews` 整项删除（change: 2026-11-10-remove-legacy-model-card-nodes），
+   * 属性枚举仍是封闭集合，旧记录按未知属性忽略。
    * 上限仍在，属性键集合也仍是封闭枚举，所以基数与长度都有界。
    */
   maxAttributes: 22,

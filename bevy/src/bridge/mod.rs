@@ -86,21 +86,17 @@ thread_local! {
 /// 最近 full scene 的 surface（CSS 尺寸）；视口增量沿用该值
     /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
     static LAST_SURFACE: RefCell<Option<[f32; 2]>> = const { RefCell::new(None) };
-    /// Render stage wall + draw recording snapshot（JSON；model_preview 每个 sync 写入）。
+    /// Render stage wall + draw recording snapshot（JSON；render_work 每帧写入）。
     static RENDER_STAGE_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 模型实例/唯一资源预算快照（JSON；scene3d 在表示变化后写入）。
     static MODEL_RENDER_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     static MODEL_POSE_REQUESTED: Cell<bool> = const { Cell::new(false) };
     static MODEL_POSES: RefCell<String> = RefCell::new("{\"sequence\":0,\"focusNode\":null,\"models\":[]}".to_owned());
     static MODEL_POSE_SEQUENCE: Cell<u64> = const { Cell::new(0) };
-    /// 预览同步阶段延迟快照（JSON；变化时写入）。
-    static PREVIEW_LATENCY_DIAGNOSTICS: RefCell<String> = RefCell::new("{}".to_owned());
     /// 帧节奏状态标签（`idle` / `dwell` / `active:<reasons>`；变化时写入）。
     ///
     /// 静止降频是否真的生效只能从运行侧读：前端看不到 winit 的更新间隔。
     static FRAME_PACING_DIAGNOSTICS: RefCell<String> = RefCell::new(String::new());
-    /// 预览队列/纹理预算 gauge（active/pending/bytes/visible/retained/live/deferred/ready）。
-    static PREVIEW_DIAGNOSTICS: Cell<[u64; 8]> = const { Cell::new([0; 8]) };
 }
 
 /// 记录一次 prepared/register 派生。
@@ -158,12 +154,6 @@ pub(crate) fn set_model_poses(models: serde_json::Value, focus_node: Option<&str
 pub(crate) fn set_render_stage_diagnostics(json: String) {
     RENDER_STAGE_DIAGNOSTICS.with(|v| *v.borrow_mut() = json);
 }
-pub(crate) fn set_preview_diagnostics(gauges: [u64; 8]) {
-    PREVIEW_DIAGNOSTICS.with(|v| v.set(gauges));
-}
-pub(crate) fn set_preview_latency_diagnostics(json: String) {
-    PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| *slot.borrow_mut() = json);
-}
 /// 记录帧节奏标签（只在翻转时调用，避免每帧格式化）。
 pub(crate) fn set_frame_pacing_diagnostics(label: String) {
     FRAME_PACING_DIAGNOSTICS.with(|slot| *slot.borrow_mut() = label);
@@ -172,16 +162,14 @@ pub(crate) fn set_frame_pacing_diagnostics(label: String) {
 pub(crate) fn work_diagnostics() -> String {
     MODEL_POSE_REQUESTED.with(|v| v.set(true));
     let poses = MODEL_POSES.with(|v| v.borrow().clone());
-    let latency = PREVIEW_LATENCY_DIAGNOSTICS.with(|slot| slot.borrow().clone());
     let render = RENDER_STAGE_DIAGNOSTICS.with(|v| v.borrow().clone());
     let model = MODEL_RENDER_DIAGNOSTICS.with(|v| v.borrow().clone());
-    let preview = PREVIEW_DIAGNOSTICS.with(Cell::get);
     // 3D 根按可见地面顺序做整对象分离；这里只报告接受点结算到的根/重叠簇规模，
     // 同一根内部的遮挡仍交给深度缓冲（change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D3/D4）。
     let depth = crate::depth_order::diagnostics();
     let pacing = FRAME_PACING_DIAGNOSTICS.with(|v| v.borrow().clone());
     format!(
-        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"models\":{},\"modelPoses\":{},\"renderStages\":{},\"previewLatency\":{},\"previews\":{{\"active\":{},\"pending\":{},\"textureBytes\":{},\"visible\":{},\"retained\":{},\"live\":{},\"deferred\":{},\"ready\":{}}},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
+        "{{\"snapshotBuilds\":{},\"pickCandidateBuilds\":{},\"meshBuilds\":{},\"cardBlockBuilds\":{},\"cardDecorationBuilds\":{},\"edgeBlockBuilds\":{},\"models\":{},\"modelPoses\":{},\"renderStages\":{},\"depthOrder\":{{\"roots\":{},\"clusters\":{},\"compressedClusters\":{}}},\"pacing\":\"{}\"}}",
         WORK_SNAPSHOT_BUILDS.with(Cell::get),
         WORK_PICK_CANDIDATE_BUILDS.with(Cell::get),
         WORK_MESH_BUILDS.with(Cell::get),
@@ -191,15 +179,6 @@ pub(crate) fn work_diagnostics() -> String {
         model,
         poses,
         render,
-        latency,
-        preview[0],
-        preview[1],
-        preview[2],
-        preview[3],
-        preview[4],
-        preview[5],
-        preview[6],
-        preview[7],
         depth.roots,
         depth.clusters,
         depth.compressed_clusters,

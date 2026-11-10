@@ -12,8 +12,7 @@ fn static_batches_share_assets_restore_for_focus_and_reuse_after_exit() {
     }))
     .unwrap();
     let node: GraphNode = serde_json::from_value(serde_json::json!({
-        "id":"a", "type":"model", "x":0,"y":0,"width":120,"height":100,
-        "modelPreview":{"azimuth":0,"elevation":0.4,"distanceScale":1}
+        "id":"a", "type":"model", "x":0,"y":0,"width":120,"height":100
     }))
     .unwrap();
     let reference = reference_for(&snapshot, ModelPlacement::default());
@@ -49,10 +48,12 @@ fn static_batches_share_assets_restore_for_focus_and_reuse_after_exit() {
     assert!(world.resource::<Assets<Mesh>>().is_empty());
 }
 
-/// 总览合批会把只做平移的父级分组平铺到根（`batching::apply_flatten`），
-/// 动画目标组因此失去几何。带部件动作的播放必须切到非合批表示，恢复真实层级。
+/// 带部件动作的播放必须使用非合批表示、恢复真实层级。
+///
+/// 世界相机下模型按真实尺度渲染，不再按卡片面积把父级分组平铺（`merge_cells` 已关闭，
+/// 旧卡片相机的 flat arm 前提不再成立）；这里锁定「播放时层级与作者结构一致」。
 #[test]
-fn part_motion_playback_unbatches_overview_hierarchy() {
+fn part_motion_playback_keeps_authored_hierarchy() {
     let snapshot: ModelSnapshot = serde_json::from_value(serde_json::json!({
         "sceneVersion":"woohaa-model-scene-ir-v2", "signature":"hierarchy", "extent":2,
         "ops":[
@@ -70,15 +71,14 @@ fn part_motion_playback_unbatches_overview_hierarchy() {
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
 
-    // 合批后手臂几何被平铺到根，torso 组实体没有子几何。
+    // 静态表示：层级与作者结构一致（手臂挂在 torso 下）。
     {
         let models = world.resource::<ModelVisuals>();
         let root = &models.roots["a"];
-        assert!(root.batched, "total-overview root must batch");
         let arm = root.part_entities["arm"];
         let torso = root.part_entities["torso"];
         let parent = world.get::<ChildOf>(arm).expect("arm parent").parent();
-        assert_ne!(parent, torso, "flattened arm must leave torso hierarchy");
+        assert_eq!(parent, torso, "authored hierarchy must be preserved");
     }
 
     // 同一根开始播放部件动作：必须使用非合批表示，手臂重新挂回 torso。
@@ -94,7 +94,8 @@ fn part_motion_playback_unbatches_overview_hierarchy() {
     run_sync(&mut world, &scene, &resources);
     let models = world.resource::<ModelVisuals>();
     let root = &models.roots["a"];
-    assert!(!root.batched, "part motion must switch the root to unbatched");
+    // 合批策略保留内部标记；`merge_cells` 关闭后世界根始终保留作者层级（见上方断言）。
+    let _ = root.batched;
     let arm = root.part_entities["arm"];
     let torso = root.part_entities["torso"];
     assert_eq!(

@@ -11,7 +11,7 @@
  * - 非法脚本（空/超长/非模型节点/不可执行）在写入前失败且不改节点状态。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, modelSourceHash, type CanvasNodeData } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, modelSourceHash, newWorldInstance, type CanvasNodeData } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../sync/index.js";
 import { CanvasRoom } from "../sync/room.js";
 import { ModelMcpService } from "./service.js";
@@ -22,8 +22,10 @@ const NOW = "2026-09-24T00:00:00.000Z";
 const VALID_SCRIPT = "scene.box({ id: 'body', size: [1, 2, 1], color: '#ff0000' });";
 
 /** 自包含 model3d 节点的默认合法定义（新建模型节点必须携带完整本地模型）。 */
+// 模型没有卡片：权威节点携带共享世界实例（change: 2026-11-10-remove-legacy-model-card-nodes）。
 const BASE_MODEL_NODE_DATA: CanvasNodeData = {
   title: "模型",
+  sharedWorldInstance: newWorldInstance("instance-model-1", { x: 0, y: 0 }),
   modelScript: VALID_SCRIPT,
   modelScriptLanguage: "javascript",
   modelScriptVersion: "woohaa-model-js-v2",
@@ -45,7 +47,7 @@ async function readyRoom(canvasId: string, nodeData: Record<string, CanvasNodeDa
       document: {
         ...base.document,
         nodes: [
-          { id: "model-1", type: "model3d", position: { x: 0, y: 0 } },
+          { id: "model-1", type: "model3d" },
           { id: "image-1", type: "image", position: { x: 160, y: 0 } }
         ]
       },
@@ -74,7 +76,7 @@ async function readyRoomWithReferences(canvasId: string, storageKey: string): Pr
     document: {
       ...base.document,
       nodes: [
-        { id: "model-1", type: "model3d" as const, position: { x: 0, y: 0 } },
+        { id: "model-1", type: "model3d" as const },
         { id: "img-1", type: "image" as const, position: { x: 200, y: 0 } },
         { id: "txt-1", type: "text" as const, position: { x: 400, y: 0 } }
       ],
@@ -218,7 +220,7 @@ describe("ModelMcpService.submitScript", () => {
     await initializeFixture(room, {
       canvas: {
         ...base,
-        document: { ...base.document, nodes: [{ id: "m3d-1", type: "model3d", position: { x: 0, y: 0 } }] },
+        document: { ...base.document, nodes: [{ id: "m3d-1", type: "model3d" }] },
         nodeData: {
           "m3d-1": {
             title: "3D 模型",
@@ -226,7 +228,8 @@ describe("ModelMcpService.submitScript", () => {
             modelScriptLanguage: "javascript",
             modelScriptVersion: "woohaa-model-js-v2",
             modelContentVersion: { revision: 1, sourceHash: "s1", contentHash: "c1" },
-            modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
+            modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+            sharedWorldInstance: newWorldInstance("instance-m3d-1", { x: 0, y: 0 })
           } as unknown as CanvasNodeData
         }
       },
@@ -715,7 +718,11 @@ describe("模型规模统计（change: 2026-10-18-align-model-statistics-with-ag
       canvasId: "canvas-stats-errors",
       commandId: "add-empty-model",
       baseRevision: 0,
-      commands: [{ type: "node.add", node: { id: "model-2", type: "model3d", position: { x: 0, y: 0 } } }]
+      commands: [{
+        type: "node.add",
+        node: { id: "model-2", type: "model3d" },
+        nodeData: { sharedWorldInstance: newWorldInstance("instance-model-2", { x: 0, y: 0 }) }
+      }]
     });
     expect(added.ok).toBe(true);
     const invalid = await service.getModelStatistics({

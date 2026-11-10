@@ -28,14 +28,6 @@ export type ResidencyCandidate = {
    * 这类稳定节点按可见需求保留，不能因缺少 card rect 被跳过。
    */
   alwaysVisible?: boolean;
-  /**
-   * 是否消耗「预览渲染槽」（离屏相机 + 渲染目标）。
-   *
-   * 模型卡片需要离屏预览相机；共享世界模型直接绘制，图片/视频使用卡片贴图，均不占预览槽。页级预算
-   * 必须分开：`previewSlots` 是**预览渲染槽**上限（design D3），把它当成全页媒体准入上限会
-   * 让视口内超过 16 个卡片时其余卡片永远不加载，只能靠 hover 变 interactive 才显示。
-   */
-  previewSlot: boolean;
 };
 
 /**
@@ -66,9 +58,7 @@ export function collectResidencyCandidates(
       height: size.height,
       eligible: key !== null,
       // 共享世界模型/导演区没有卡片 rect；模型仍常驻可见，不能按屏幕矩形裁掉。
-      alwaysVisible: worldModel || !node.position,
-      // 共享世界模型直接绘制在世界层，不创建卡片离屏相机；payload 仍需驻留。
-      previewSlot: capabilities.resources.previewSlot && !worldModel
+      alwaysVisible: worldModel || !node.position
     });
   }
   return candidates;

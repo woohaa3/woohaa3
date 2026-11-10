@@ -6,6 +6,7 @@ import {
   createEmptyWoohaa3ServerCanvas,
   createModel3DNodeData,
   model3DNodeDataFields,
+  newWorldInstance,
   type ModelScriptBatchRequest,
   type CanvasNodeData,
 } from "@woohaa3/contracts";
@@ -32,21 +33,24 @@ async function fixture(
   });
   closes.push(() => room.dispose());
   const canvas = createEmptyWoohaa3ServerCanvas("batch", NOW);
-  canvas.document.nodes = ["a", "b"].map((id, i) => ({
+  // 模型没有卡片：权威节点只携带共享世界实例（change: 2026-11-10-remove-legacy-model-card-nodes）。
+  canvas.document.nodes = ["a", "b"].map((id) => ({
     id,
     type: "model3d",
-    position: { x: i * 400, y: 0 },
   }));
-  for (const id of ["a", "b"])
-    canvas.nodeData[id] = model3DNodeDataFields(
-      createModel3DNodeData({
-        title: id,
-        model: {
-          modelScript: SOURCE,
-          modelScriptVersion: "woohaa-model-js-v2",
-        },
-      }),
-    ) as CanvasNodeData;
+  for (const [index, id] of ["a", "b"].entries())
+    canvas.nodeData[id] = {
+      ...(model3DNodeDataFields(
+        createModel3DNodeData({
+          title: id,
+          model: {
+            modelScript: SOURCE,
+            modelScriptVersion: "woohaa-model-js-v2",
+          },
+        }),
+      ) as CanvasNodeData),
+      sharedWorldInstance: newWorldInstance(`instance-${id}`, { x: index * 400, y: 0 }),
+    } as CanvasNodeData;
   await room.initialize({ canvas, roomEpoch: "epoch", createdAt: NOW });
   const history = vi.fn();
   const service = new ModelMcpService({

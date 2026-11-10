@@ -32,13 +32,12 @@ function canvas(): ServerCanvas {
   } as unknown as ServerCanvas;
 }
 
-const hit = (kind: "node" | "model-preview", nodeId: string): HitTarget => ({ kind, nodeId } as HitTarget);
+const hit = (nodeId: string): HitTarget => ({ kind: "node", nodeId } as HitTarget);
 
 describe("canvas pointer target", () => {
-  it("classifies cards, model previews and shared world objects", () => {
-    expect(cardPointerTarget(canvas(), hit("node", "image"))).toMatchObject({ kind: "card", nodeId: "image" });
-    expect(cardPointerTarget(canvas(), hit("model-preview", "image"))).toMatchObject({ kind: "model-preview", nodeId: "image" });
-    expect(cardPointerTarget(canvas(), hit("node", "model"))).toMatchObject({ kind: "world-object", via: "card", scopeId: "area" });
+  it("classifies cards and shared world objects", () => {
+    expect(cardPointerTarget(canvas(), hit("image"))).toMatchObject({ kind: "card", nodeId: "image" });
+    expect(cardPointerTarget(canvas(), hit("model"))).toMatchObject({ kind: "world-object", via: "card", scopeId: "area" });
     expect(cardPointerTarget(canvas(), { kind: "port", nodeId: "image", side: "input" } as HitTarget)).toBeNull();
   });
 

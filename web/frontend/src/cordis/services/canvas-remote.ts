@@ -263,22 +263,6 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
     }
   }
 
-  async function worldConversionRequest(kind: "prepare", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome>;
-  async function worldConversionRequest(kind: "commit", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionCommitOutcome>;
-  async function worldConversionRequest(kind: "prepare" | "commit", body: unknown, signal?: AbortSignal): Promise<import("@woohaa3/contracts").WorldConversionPrepareOutcome | import("@woohaa3/contracts").WorldConversionCommitOutcome> {
-    try {
-      const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/world-conversion-${kind}`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal
-      });
-      const result = await response.json() as import("@woohaa3/contracts").WorldConversionPrepareOutcome | import("@woohaa3/contracts").WorldConversionCommitOutcome;
-      if (!result || typeof result !== "object" || typeof result.ok !== "boolean") throw new Error("invalid response");
-      if (!response.ok && result.ok) throw new Error("invalid response");
-      return result;
-    } catch {
-      return { ok: false, code: signal?.aborted ? "aborted" : "unavailable", message: "画布转换请求失败" };
-    }
-  }
-
   /**
    * 原生录制 JSON 请求（change: 2026-10-17-add-native-offscreen-film-set-recording）。
    *
@@ -309,15 +293,6 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" };
       const { canvasId: _canvasId, ...body } = input;
       return sceneAreaRequest(direction, body, signal) as Promise<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>;
-    },
-    async prepareWorldConversion(input, signal) {
-      if (input.canvasId !== options.canvasId) return { ok: false, code: "canvas-mismatch", message: "画布不匹配" };
-      return worldConversionRequest("prepare", { nodeIds: input.nodeIds }, signal);
-    },
-    async commitWorldConversion(input, signal) {
-      if (input.canvasId !== options.canvasId) return { ok: false, code: "canvas-mismatch", message: "画布不匹配" };
-      const { canvasId: _canvasId, ...body } = input;
-      return worldConversionRequest("commit", body, signal);
     },
     openCanvasSession(canvasId, roomEpoch) {
       if (canvasId !== options.canvasId) {

@@ -14,6 +14,7 @@ import {
   createEmptyWoohaa3ServerCanvas,
   hashModelScript,
   IMAGE_EDIT_DOCUMENT_VERSION,
+  newWorldInstance,
   type ImageProjectDocument,
   modelContentIdentity,
   type CanvasCommand,
@@ -103,10 +104,11 @@ function modelCanvas(script: string, opts: { placement?: unknown } = {}): Server
   return {
     ...base,
     revision: 1,
-    document: { ...base.document, nodes: [{ id: "node-1", type: "model3d", position: { x: 0, y: 0 }, width: 248, height: 232 }] },
+    document: { ...base.document, nodes: [{ id: "node-1", type: "model3d" }] },
     nodeData: {
       "node-1": {
         title: "模型",
+        sharedWorldInstance: newWorldInstance("instance-node-1", { x: 0, y: 0 }),
         modelScript: script,
         modelScriptLanguage: "javascript",
         modelScriptVersion: "woohaa-model-js-v2",
