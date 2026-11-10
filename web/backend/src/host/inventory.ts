@@ -14,6 +14,7 @@ export const BASE_LAYER_INFOS: Readonly<Record<string, HostPluginInfo>> = {
   diagnostics: { label: "诊断日志", description: "服务端接入与同步事件的有界内存缓冲，供调试窗口读取", icon: "logs" },
   log: { label: "日志", description: "结构化日志出口，Cordis 自己的日志也走这里", icon: "logs" },
   gateway: { label: "网关", description: "WebView 经 HTTP / WebSocket 进入本机宿主的唯一入口", icon: "network" },
+  identity: { label: "宿主身份", description: "对外回答「这是哪一份实例」：数据目录、启动时刻与版本，用于同机多实例识别", icon: "identity" },
   access: { label: "访问与身份", description: "部署身份：认证适配器、站点 action 与实例作用域", icon: "identity" },
   config: { label: "配置", description: "YAML 配置文件、密钥文件与设置面读写", icon: "config" },
   restart: { label: "受控重启", description: "管理员请求重启：排空在途工作后以退出码 75 退出，由拉起方重新启动", icon: "config" }

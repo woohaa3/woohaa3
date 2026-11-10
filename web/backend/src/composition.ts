@@ -127,6 +127,13 @@ export type BackendService = {
   close: () => Promise<void>;
   /** 实际生效的结构化日志出口（注入的或内置默认 sink）；进程自己的非结构化行不走这里。 */
   log: (event: Record<string, unknown>) => void;
+  /**
+   * 报告监听成功后真实生效的 origin，供实例登记表记录。
+   *
+   * 必须在 listen 成功之后调用：端口为 0（随机分配）时，只有此刻才知道真实端口，
+   * 提前登记会写下一个别人连不上的地址。
+   */
+  publishOrigin: (origin: string) => void;
   /** 内置默认 sink 的落盘目录；调用方注入了 `logger` 或 `WOOHAA3_LOG_DIR` 为空串时为 null。 */
   logDir: string | null;
   /**
@@ -328,6 +335,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
     log: sink,
     logDir: hostLog?.dir ?? null,
     onRestartRequested: (listener) => service("hostRestart").subscribe(listener),
+    publishOrigin: (origin) => service("hostIdentityRegistration").publishOrigin(origin),
     settled: async () => {
       await layerSettled.catch(() => undefined);
       await ctx.get("application")?.service.settled?.().catch(() => undefined);

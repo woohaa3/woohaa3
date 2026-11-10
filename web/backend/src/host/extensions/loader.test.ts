@@ -134,7 +134,7 @@ describe("扩展层装载器", () => {
     const { settings, load } = await setup();
     // 基础层先登记：宿主自带插件也要在「插件配置」里露面。
     // `diagnostics` 是 base 层新增的诊断缓冲（服务端接入日志窗口的数据源）。
-    expect(settings.plugins().map((plugin) => plugin.id)).toEqual(["diagnostics", "log", "gateway", "access", "config", "restart"]);
+    expect(settings.plugins().map((plugin) => plugin.id)).toEqual(["diagnostics", "log", "gateway", "identity", "access", "config", "restart"]);
 
     const starts: Start[] = [];
     const loaded = await load([samplePlugin(starts)]);

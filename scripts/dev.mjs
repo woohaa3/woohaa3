@@ -462,6 +462,9 @@ async function main() {
         WOOHAA3_AGENT_RUNTIME_SOCKET: supervisor.socketPath,
         WOOHAA3_AGENT_RUNTIME_TOKEN: supervisor.token,
         WOOHAA3_AGENT_WORKSPACE_KEY: supervisor.workspaceKey,
+        // dev 的页面由 vite 提供，后端看不到那个端口。把页面地址显式告诉后端，
+        // 它才好写进实例登记表——否则登记表只有 API 端口，外部工具会选一个打不开页面的地址。
+        WOOHAA3_PUBLIC_ORIGIN: `http://127.0.0.1:${frontendPort}${basePath === "/" ? "" : basePath.replace(/\/+$/, "")}`,
         // node --watch keeps its supervisor alive after the child exits with 75.
         // The backend touches its entry on controlled restart so node --watch starts it again.
         WOOHAA3_DEV_WATCH: watch ? "1" : "0"

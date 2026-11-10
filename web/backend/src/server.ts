@@ -155,7 +155,16 @@ async function main(): Promise<void> {
   });
 
   server.listen(port, host, () => {
-    process.stderr.write(`[backend] http://${host}:${port}\n`);
+    const address = server.address();
+    const actualPort = address !== null && typeof address === "object" ? address.port : port;
+    // 监听成功后才登记：端口为 0 时只有此刻才知道真实端口，提前写会登记一个连不上的地址。
+    const originHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+    try {
+      service.publishOrigin(`http://${originHost}:${actualPort}`);
+    } catch (error) {
+      process.stderr.write(`[backend] 实例登记失败：${error instanceof Error ? error.message : String(error)}\n`);
+    }
+    process.stderr.write(`[backend] http://${host}:${actualPort}\n`);
   });
 }
 

@@ -150,6 +150,8 @@ export type HostServices = {
   config: SettingsService;
   /** 受控重启控制器（change: 2026-10-21-harden-extension-fault-isolation，D6）；进程入口订阅后执行排空与 exit(75)。 */
   hostRestart: import("../api/host-restart-api.js").HostRestartController;
+  /** 实例登记：监听成功后由进程入口调 `publishOrigin` 写入登记表。 */
+  hostIdentityRegistration: import("./base/identity.js").HostIdentityRegistration;
   media: MediaService;
   generation: GenerationService;
   /** 存储扩展点：后端插件注册，media/task 只用 `bucket(namespace)`。 */
