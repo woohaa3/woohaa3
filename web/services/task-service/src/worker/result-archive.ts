@@ -29,6 +29,16 @@ export type ArchivedMedia = {
   contentType: string;
   size: number;
   checksum?: string;
+  /**
+   * 结果字节的不透明位置（`media://<backend>/<opaque>`）。
+   *
+   * **必须与 storageKey 一起保留**：远端托管生成（含 ComfyUI worker 链）公布的
+   * `storage_key` 是任务 id 派生的（`generation-outputs/task-<id>.png`），不满足客户端的
+   * 内容寻址契约（`generation-outputs/<64hex>.<ext>`），只有 locator 能定位字节。
+   * 归档时丢掉它，`isGenerationStableMediaResult` 就会因为没有合法位置而判否，
+   * 结果被写成「成功但无产物」（2026-11-10 现场）。
+   */
+  locator?: string;
 };
 
 export type ResultArchiveOptions = {

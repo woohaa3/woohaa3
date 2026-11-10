@@ -113,6 +113,34 @@ export function projectionCommandId(record: Pick<PptaskExecutionRecord, "taskKey
 }
 
 /**
+ * 「生成已完成但产物未落地」的可见失败补丁。
+ *
+ * 这是对旧行为的修正：旧代码在成功分支末尾用 `else` 兜底写
+ * `result: { kind: "text", text: "" }`，导致图片节点拿到空文本结果——卡片永远空白、
+ * 状态却是成功、连失败提示都没有（2026-11-10 现场）。
+ *
+ * 也不能只「跳过不改」：节点会永久停在 processing，用户同样什么都看不到。终态必须可见，
+ * 并且要区分「产物没落地」与「生成失败」，否则用户会以为要重新生成。
+ */
+function emptySuccessFailurePatch(record: PptaskExecutionRecord, detail: string): CanvasCommand {
+  const reason = `生成已完成但产物未落地（${detail}），请重试或到任务监控查看详情`;
+  return {
+    type: "nodeData.patch",
+    nodeId: record.nodeId,
+    value: {
+      taskStatus: "failed",
+      progress: 100,
+      error: reason,
+      errorMessage: reason,
+      // 清掉可能残留的空文本兜底结果，避免卡片继续渲染成文本。
+      // `null` 是「清除」语义，但 CanvasNodeData.result 类型不接受 null：
+      // 与 upload-asset.ts 的 `result: null as never` 同一处理。
+      result: null as never
+    }
+  };
+}
+
+/**
  * 由终态记录构造命令批次内容。
  *
  * `currentCanvas` 用于 latest-run-wins 判定（runId 是否仍是 active run）与节点存在性检查。
@@ -142,34 +170,40 @@ export function buildProjectionCommands(input: {
   const commands: CanvasCommand[] = [];
 
   if (record.status === "succeeded") {
-    if (record.output?.mediaKind === "image" || record.output?.mediaKind === "video" || record.output?.mediaKind === "audio") {
-      if (!record.output.asset) {
-        return { ok: false, reason: "unknown-node", message: `${record.output.mediaKind} 结果缺少资产` };
-      }
-      commands.push({ type: "asset.upsert", asset: record.output.asset });
+    // 成功必须有可投影产物：二进制结果要带资产，文本结果要带 text 分支。
+    // 缺产物时写成**可见的失败**，见下方分支的说明。
+    const binaryOutput = record.output?.mediaKind === "image"
+      || record.output?.mediaKind === "video"
+      || record.output?.mediaKind === "audio";
+    const mediaAsset = record.output?.asset;
+    if (binaryOutput && !mediaAsset) {
+      commands.push(emptySuccessFailurePatch(record, `${record.output?.mediaKind} 结果缺少资产`));
+    } else if (binaryOutput && mediaAsset && record.output) {
+      const output = record.output;
+      commands.push({ type: "asset.upsert", asset: mediaAsset });
       // 视频海报：独立图片资产，通过稳定 posterAssetId 关联。
-      if (record.output.mediaKind === "video" && record.output.posterAsset) {
-        commands.push({ type: "asset.upsert", asset: record.output.posterAsset });
+      if (output.mediaKind === "video" && output.posterAsset) {
+        commands.push({ type: "asset.upsert", asset: output.posterAsset });
       }
       commands.push({
         type: "nodeData.patch",
         nodeId: record.nodeId,
         value: {
           taskStatus: "successed",
-          outputAssetId: record.output.asset.id,
-          ...(record.output.mediaKind === "video" && record.output.posterAsset
-            ? { posterAssetId: record.output.posterAsset.id }
+          outputAssetId: mediaAsset.id,
+          ...(output.mediaKind === "video" && output.posterAsset
+            ? { posterAssetId: output.posterAsset.id }
             : {}),
-          resourceKind: record.output.asset.mediaKind,
-          ...(record.output.durationSeconds !== undefined
-            ? { durationSeconds: record.output.durationSeconds }
+          resourceKind: mediaAsset.mediaKind,
+          ...(output.durationSeconds !== undefined
+            ? { durationSeconds: output.durationSeconds }
             : {}),
           progress: 100,
           error: null,
           errorMessage: null
         }
       });
-    } else {
+    } else if (record.output?.mediaKind === "text") {
       // 文本结果：直接写进 nodeData（没有媒体 bytes，不需要 COS）。
       commands.push({
         type: "nodeData.patch",
@@ -179,9 +213,11 @@ export function buildProjectionCommands(input: {
           progress: 100,
           error: null,
           errorMessage: null,
-          result: { kind: "text", text: record.output?.text ?? "" }
+          result: { kind: "text", text: record.output.text ?? "" }
         }
       });
+    } else {
+      commands.push(emptySuccessFailurePatch(record, "成功记录没有可投影产物"));
     }
   } else {
     // failed / cancelled：保留原 outputAssetId（只更新任务状态与安全错误）。

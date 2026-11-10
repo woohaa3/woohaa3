@@ -63,6 +63,7 @@ function isTaskResultSummary(value: unknown): value is TaskResultSummary {
   if (value.textTruncated !== undefined && typeof value.textTruncated !== "boolean") return false;
   if (value.mediaState !== undefined && value.mediaState !== "materializing") return false;
   if (value.storageKey !== undefined && typeof value.storageKey !== "string") return false;
+  if (value.locator !== undefined && typeof value.locator !== "string") return false;
   if (value.contentType !== undefined && typeof value.contentType !== "string") return false;
   if (value.size !== undefined && !isNonNegativeInteger(value.size)) return false;
   if (value.checksum !== undefined && typeof value.checksum !== "string") return false;

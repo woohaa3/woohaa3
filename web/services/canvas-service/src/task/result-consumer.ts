@@ -24,6 +24,7 @@ import {
   type ProjectionReceiptStore,
   type PptaskExecutionRecord
 } from "../sync/index.js";
+import { hasStableMediaMetadata } from "@woohaa3/contracts";
 import type { StoredAsset, TaskExecutionDetail } from "@woohaa3/contracts";
 import type { CanvasTaskClient } from "../clients/task-client.js";
 import type { CanvasMediaClient } from "../clients/media-client.js";
@@ -185,6 +186,12 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
  *
  * 图片结果在投影前**再经 Media verify**：这是权威写入前的独立校验，不是重复保存 bytes
  * （design D5）。metadata 缺失或不一致时返回 null（跳过该终态，避免写入不可信资产）。
+ *
+ * 成功的**二进制**结果还要求完整稳定媒体身份（`storageKey` + `checksum`）：只剩
+ * `{ mediaKind }` 占位的「成功」不是可投影产物（典型来源是没装配 Media 的宿主把占位
+ * 结果按原样落库）。返回 null 而不是造一条无产物的成功记录——投影后节点会停在成功态却
+ * 永远没有资产，卡片是一块空白占位且没有任何失败提示。返回 null 不写 receipt，水位按
+ * recordRevision 推进；真实媒体落库后该记录 revision 变大，会被后续轮次重新读到。
  */
 export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRecord | null {
   if (!item.canvasId || !item.nodeId || !item.runId) return null;
@@ -204,6 +211,7 @@ export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRec
     ...(item.error?.message ? { error: item.error.message } : {}),
     terminalAt: item.finishedAt ?? item.updatedAt
   };
+  if (isEmptyBinarySuccess(item)) return null;
   if (status === "succeeded" && item.result) {
     if (item.result.mediaKind === "text") {
       return { ...base, output: { mediaKind: "text", text: item.result.text ?? "" } };
@@ -286,6 +294,19 @@ function defaultContentType(mediaKind: "image" | "video" | "audio"): string {
   if (mediaKind === "video") return "video/mp4";
   if (mediaKind === "audio") return "audio/mpeg";
   return "image/png";
+}
+
+/**
+ * 「成功但没有可投影产物」：二进制媒体结果缺稳定媒体身份。
+ *
+ * 只剩 `{ mediaKind }` 占位时不能投影（见 {@link toExecutionRecord} 的说明）；`mediaKind`
+ * 为 text 的结果不受影响，结果整块缺失时交给投影器的 `empty-success` 分支兜底。
+ */
+function isEmptyBinarySuccess(item: TaskExecutionDetail): boolean {
+  if (item.state !== "succeeded") return false;
+  const result = item.result;
+  if (!result || result.mediaKind === "text") return false;
+  return !hasStableMediaMetadata(result);
 }
 
 function readJobId(item: TaskExecutionDetail): string {

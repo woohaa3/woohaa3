@@ -15,6 +15,17 @@ export type ExecutionOutput = {
   url?: string;
   mediaType?: string;
   text?: string;
+  /**
+   * 稳定对象位置（`media://<backend>/<opaque>`）。远端托管生成 / GPU worker 的结果没有
+   * 可取地址，只有这个不透明位置；消费方必须原样透传，不得解析或据此拼路径。
+   */
+  locator?: string;
+  /** 画布命名空间内的逻辑键。可能不满足内容寻址（worker 链用任务 id 派生），只作兼容。 */
+  storageKey?: string;
+  /** 字节数（provider 已声明时）。 */
+  size?: number;
+  /** 内容校验和（provider 已声明时）。 */
+  checksum?: string;
 };
 
 export type ExecutionResult = { outputCount: number; outputs: ExecutionOutput[]; value: unknown };
@@ -304,6 +315,34 @@ function trim(records: Map<string, unknown>, max: number): string[] {
   return removed;
 }
 
+/**
+ * 稳定媒体信封 → 单条 ExecutionOutput。
+ *
+ * 远端托管生成与 GPU worker 都只回「稳定对象身份」，没有可取地址：位置要么是
+ * `locator`（不透明，任何后端），要么是 `storageKey`（画布命名空间内的逻辑键）。
+ * 两者都没有就不是可用产物，返回 undefined 让调用方按「无产物」处理。
+ */
+function stableMediaOutput(value: unknown): ExecutionOutput | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const media = value as Record<string, unknown>;
+  const locator = typeof media.locator === 'string' && media.locator.startsWith('media://') ? media.locator : undefined;
+  const storageKey = typeof media.storageKey === 'string' && media.storageKey !== '' ? media.storageKey : undefined;
+  if (!locator && !storageKey) return undefined;
+  const mediaType = typeof media.contentType === 'string' ? media.contentType : undefined;
+  const kind = mediaType ? mediaKind(mediaType) : 'image';
+  // text/data 不是媒体产物：稳定信封只应承载二进制结果。
+  if (kind !== 'image' && kind !== 'video' && kind !== 'audio') return undefined;
+  return {
+    kind,
+    label: `输出 1`,
+    ...(mediaType !== undefined ? { mediaType } : {}),
+    ...(locator !== undefined ? { locator } : {}),
+    ...(storageKey !== undefined ? { storageKey } : {}),
+    ...(typeof media.size === 'number' && Number.isFinite(media.size) && media.size >= 0 ? { size: media.size } : {}),
+    ...(typeof media.checksum === 'string' && media.checksum !== '' ? { checksum: media.checksum } : {}),
+  };
+}
+
 function outputs(value: unknown): ExecutionOutput[] {
   if (typeof value === 'string') return [{ kind: 'text', text: value }];
   if (!value || typeof value !== 'object') return [];
@@ -311,6 +350,14 @@ function outputs(value: unknown): ExecutionOutput[] {
   if (Array.isArray(source.content)) {
     const contentOutputs = source.content.flatMap((item, index) => languageContentOutput(item, index));
     if (contentOutputs.length) return contentOutputs;
+  }
+  // 稳定媒体结果（远端托管生成 / GPU worker）：`{ media: { locator|storageKey, contentType, size, checksum } }`。
+  // 这个信封没有 images/videos/outputs 任何一个候选键，此前会抽出空 outputs，导致历史里没有
+  // 任何产物（2026-11-10 现场：结果早已写在 COS，画布节点却是「成功但无产物」）。
+  // 字节位置只认 locator / storageKey，绝不把对象内部结构泄漏成 text 输出。
+  if (source.media !== undefined) {
+    const mediaOutput = stableMediaOutput(source.media);
+    if (mediaOutput) return [mediaOutput];
   }
   // Audio results carry their payload under `audios`/`audio`, which neither
   // the text nor the image/video candidates below would pick up.

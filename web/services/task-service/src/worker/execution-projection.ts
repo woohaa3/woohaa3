@@ -6,6 +6,7 @@ import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { TaskExecutionState, TaskResultSummary } from "@woohaa3/contracts";
 import { describeTaskFailure } from "@woohaa3/contracts";
 import type { SqliteTaskHistoryRepository } from "../repository/history-repository.js";
+import { readStableMediaResult } from "./media-materialization.js";
 import type { TaskAssociation } from "./types.js";
 
 /**
@@ -147,9 +148,26 @@ export function mapState(state: ExecutionRecord["state"]): TaskExecutionState {
 export function readSafeResult(record: ExecutionRecord): TaskResultSummary | undefined {
   const outputs = record.result?.outputs ?? [];
   const binary = outputs.find((output) =>
-    output.url && (output.kind === "image" || output.kind === "video" || output.kind === "audio")
+    (output.url || output.locator || output.storageKey)
+    && (output.kind === "image" || output.kind === "video" || output.kind === "audio")
   );
-  if (binary?.url && (binary.kind === "image" || binary.kind === "video" || binary.kind === "audio")) {
+  if (binary && (binary.kind === "image" || binary.kind === "video" || binary.kind === "audio")) {
+    const stable = readStableMediaResult(record);
+    if (stable) {
+      // 稳定媒体信封（远端托管生成 / GPU worker）：位置与 metadata 已齐备，原样落历史，
+      // 由 materializer 走 verify-and-adopt（locator 优先，跨后端唯一路径）。
+      // 此前这里只写 `{ mediaKind }` 占位，把「已有稳定产物」降级成「无产物」，
+      // 画布投影于是判成 empty success（2026-11-10 现场）。
+      return {
+        mediaKind: binary.kind,
+        ...(stable.media.locator !== undefined ? { locator: stable.media.locator } : {}),
+        ...(stable.media.storageKey !== undefined ? { storageKey: stable.media.storageKey } : {}),
+        contentType: stable.media.contentType,
+        size: stable.media.size,
+        ...(stable.media.checksum !== undefined ? { checksum: stable.media.checksum } : {}),
+        ...(stable.media.durationSeconds !== undefined ? { durationSeconds: stable.media.durationSeconds } : {})
+      };
+    }
     // provider 输出 URL 不落历史：只记录媒体类型占位（真实 storageKey 由 Media import 后写入）。
     return { mediaKind: binary.kind };
   }

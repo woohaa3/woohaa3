@@ -158,6 +158,32 @@ describe("createTaskResultConsumer 补偿重试", () => {
     expect(summary).toMatchObject({ projected: 0, failed: 0 });
     expect(h.projections).toHaveLength(0);
   });
+
+  // 回归（2026-11-10 现场）：二进制任务成功但历史只剩 `{ mediaKind: "image" }` 占位
+  // （没装配 Media 的宿主按原样投影）。旧实现把它当成可投影的「成功」，投影器再兜底成
+  // 「成功 + 空文本」，画布节点于是永久空白。现在这类记录根本不进投影，也不写 receipt，
+  // 等真实媒体落库（revision 变大）后被重新读到。
+  it("成功但缺稳定媒体身份的记录不进入投影", async () => {
+    const h = harness(
+      [{ status: "projected", revision: 1, noop: false }],
+      [{ ...historyRecord(5), result: { mediaKind: "image" } }]
+    );
+    const summary = await h.consumer.reconcileOnce();
+    expect(summary).toMatchObject({ projected: 0, failed: 0, skipped: 0 });
+    expect(h.projections).toHaveLength(0);
+    // 水位照常推进：这不是可重试的投影失败。
+    await h.consumer.reconcileOnce();
+    expect(h.afterCalls.at(-1)).toBe(10);
+  });
+
+  it("文本成功结果仍正常投影（不受媒体身份门禁影响）", async () => {
+    const h = harness(
+      [{ status: "projected", revision: 1, noop: false }],
+      [{ ...historyRecord(5), modelType: "language", result: { mediaKind: "text", text: "done" } }]
+    );
+    expect(await h.consumer.reconcileOnce()).toMatchObject({ projected: 1 });
+    expect(h.projections).toEqual(["run-1"]);
+  });
 });
 
 // Exercise the actual history consumer, authority room and projector together:

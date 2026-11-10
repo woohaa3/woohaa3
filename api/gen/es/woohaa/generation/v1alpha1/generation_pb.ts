@@ -904,6 +904,10 @@ export type MediaOutput = Message<"woohaa.generation.v1alpha1.MediaOutput"> & {
   /**
    * 稳定对象键（客户端媒体逻辑键空间，按画布作用域可读）。
    *
+   * **不保证内容寻址**：GPU worker 链由任务 id 派生（`generation-outputs/task-<id>.png`），
+   * 只有服务端自己产生的结果才满足 `generation-outputs/<sha256>.<ext>`。客户端不得据此
+   * 推 checksum，也不得把它当唯一位置——定位字节一律用 media_locator（字段 8）。
+   *
    * @generated from field: string storage_key = 2;
    */
   storageKey: string;

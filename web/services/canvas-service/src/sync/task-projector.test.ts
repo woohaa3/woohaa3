@@ -185,6 +185,40 @@ describe("终态投影（任务 7.3 / 7.4）", () => {
     expect(exported.canvas.nodeData["n1"].result).toEqual({ kind: "text", text: "结果文本" });
   });
 
+  // 回归（2026-11-10 现场）：远端托管生成的成功终态只剩「无 output」，投影器的文本兜底
+  // 把它写成「成功 + 空文本结果」。节点因此停在成功态却没有资产：卡片是一块永远空白的
+  // 占位块，状态是成功所以也没有失败提示可看，只能从任务库里发现产物其实已经生成。
+  it("成功但缺产物时写成可见失败（不写假成功）", async () => {
+    const { room, projector, receipts } = await setupRoom();
+    const outcome = await projector.project(record({ output: undefined }));
+    expect(outcome.status).toBe("projected");
+
+    const exported = room.exportCanvas();
+    if (!exported.ok) return;
+    const node = exported.canvas.nodeData["n1"];
+    // 不能是「成功 + 空文本」：那样卡片空白且无任何提示。
+    expect(node.taskStatus).toBe("failed");
+    expect(node.result).toBeNull();
+    expect(node.outputAssetId).toBeUndefined();
+    // 失败原因必须可读，且说明是「产物未落地」而不是「生成失败」。
+    expect(node.error).toContain("产物未落地");
+    expect(node.errorMessage).toContain("产物未落地");
+    expect(exported.canvas.assets).toEqual([]);
+    // 同一终态不会重复投影。
+    expect(receipts.size).toBe(1);
+    expect((await projector.project(record({ output: undefined }))).status).toBe("duplicate");
+  });
+
+  it("二进制结果缺资产时同样写成可见失败", async () => {
+    const { room, projector } = await setupRoom();
+    expect((await projector.project(record({ output: { mediaKind: "image" } }))).status).toBe("projected");
+    const exported = room.exportCanvas();
+    if (!exported.ok) return;
+    expect(exported.canvas.nodeData["n1"].taskStatus).toBe("failed");
+    expect(exported.canvas.nodeData["n1"].error).toContain("产物未落地");
+    expect(exported.canvas.assets).toEqual([]);
+  });
+
   it("视频结果：主视频 + 海报资产 + posterAssetId + duration", async () => {
     const { room, projector } = await setupRoom();
     const videoAsset: StoredAsset = {

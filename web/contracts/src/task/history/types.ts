@@ -74,6 +74,13 @@ export type TaskResultSummary = {
   textTruncated?: boolean;
   /** 二进制结果的稳定 metadata（绝不含 bytes 或签名 URL）。 */
   storageKey?: string;
+  /**
+   * 结果字节的不透明位置（`media://<backend>/<opaque>`）。
+   *
+   * 远端托管生成与 GPU worker 的结果只有它，`storageKey` 可能为空或不是内容寻址形态；
+   * 消费方必须优先用它定位字节（见 materializeStableMediaResult 的 locator 分支）。
+   */
+  locator?: string;
   contentType?: string;
   size?: number;
   checksum?: string;
