@@ -42,6 +42,11 @@ env:
   RELEASE_ID: standalone-windows-x64
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Release packaging requires a pinned extension-trust anchor
+  # (scripts/prepare-desktop-host.mjs). This build ships no v2 root, so it declares that
+  # explicitly instead of failing inside prepareDesktopHost after the native builds.
+  # Replace with WOOHAA3_EXTENSION_TRUST_CONFIG once a pinned root is provisioned.
+  WOOHAA_DESKTOP_TRUST_UNAMANAGED: "1"
   # Workflow-dispatch input, passed through the environment so it is never
   # interpolated into a shell program.
   INPUT_VERSION: ${{ inputs.version }}

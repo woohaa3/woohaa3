@@ -1,3 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>
+<plist version="1.0"><dict>
+    <!-- V8 runs the packaged local host (woohaa-node) and needs JIT. -->
+    <key>com.apple.security.cs.allow-jit</key><true/>
+    <!-- The host loads native addons from desktop-host.tar.gz (dsh's
+         node-addon-require-builtin). They are extracted at runtime, so the
+         library-validation rule would reject them unless the archive is
+         re-signed after extraction; it is not. Distribution builds also sign
+         those modules with the same Developer ID, but ad-hoc builds cannot,
+         and an ad-hoc host must still load them. -->
+    <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict></plist>

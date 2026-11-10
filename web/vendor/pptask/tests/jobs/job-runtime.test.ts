@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createMemoryJobRepository, type PptaskJobRecord } from '../../src/index.ts';
+import {
+  createMemoryJobRepository,
+  createPptaskProvider,
+  type PptaskJobRecord,
+} from '../../src/index.ts';
 import { createFakeProvider } from '../support/fake-provider.ts';
 
 describe('Pptask jobs', () => {
@@ -146,6 +150,72 @@ describe('Pptask jobs', () => {
     expect(controller.starts).toBe(1);
     expect(first.state).toBe('succeeded');
     expect(second.state).toBe('succeeded');
+  });
+
+  it('keeps the stable code and retryable flag of a failed job', async () => {
+    // 失败终态是 provider 的结论：`wait()` 抛出来的错误必须带着它给的稳定码与
+    // 可重试标记，否则调用方只能靠正文关键字猜要不要重跑。
+    const store = createMemoryJobRepository();
+    const provider = createPptaskProvider({
+      providerId: 'fake',
+      jobRepository: store,
+      pollIntervalMs: 1,
+      imageModel: modelId => ({
+        maxImagesPerCall: 1,
+        async doStart() {
+          return { operation: { id: 'op-lost' } };
+        },
+        async doStatus(): Promise<any> {
+          return {
+            status: 'error',
+            error: '执行任务的算力节点已失联',
+            code: 'worker-lost',
+            retryable: false,
+          };
+        },
+      }),
+    });
+
+    const job = await provider.jobs.start({
+      model: provider.imageModel('worker-lost'),
+      input: { prompt: 'hello' },
+    });
+
+    const failure = await job.wait().catch(error => error as Error & { code?: string; retryable?: boolean });
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toBe('执行任务的算力节点已失联');
+    expect(failure.code).toBe('worker-lost');
+    expect(failure.retryable).toBe(false);
+    // 记录本身也要留着：重启后 resume 读的是它，不是内存里的错误对象。
+    const record = await store.get(job.id);
+    expect(record?.error).toMatchObject({ code: 'worker-lost', retryable: false });
+  });
+
+  it('omits retryable when the provider declared nothing', async () => {
+    const store = createMemoryJobRepository();
+    const provider = createPptaskProvider({
+      providerId: 'fake',
+      jobRepository: store,
+      pollIntervalMs: 1,
+      imageModel: modelId => ({
+        maxImagesPerCall: 1,
+        async doStart() {
+          return { operation: { id: 'op-plain' } };
+        },
+        async doStatus(): Promise<any> {
+          return { status: 'error', error: 'something went wrong' };
+        },
+      }),
+    });
+
+    const job = await provider.jobs.start({
+      model: provider.imageModel('plain'),
+      input: { prompt: 'hello' },
+    });
+
+    const failure = await job.wait().catch(error => error as Error & { code?: string; retryable?: boolean });
+    expect(failure.retryable).toBeUndefined();
+    expect((await store.get(job.id))?.error).toEqual({ message: 'something went wrong' });
   });
 
   it('creates an independent job for every start call', async () => {

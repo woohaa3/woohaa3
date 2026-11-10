@@ -1,21 +1,28 @@
 #!/usr/bin/env node
 /**
- * Tauri 桌面发行打包入口
+ * Tauri 桌面发行打包
  * （change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，任务 6.7 / 6.9）。
  *
- *   pnpm desktop:bundle                       # 未签名 bundle + manifest
+ *   pnpm desktop:bundle                       # 本机平台 bundle + manifest
  *   pnpm desktop:bundle --ui-url http://127.0.0.1:5180/
  *   pnpm desktop:bundle --bundles app --debug --dry-run
  *   pnpm desktop:icons                        # 由 desktop/icons/source.png 重建图标集
  *
+ * macOS 签名与公证**不在本仓库**：本脚本只负责构建，产物是否需要 Developer ID 签名、
+ * 如何公证、Gatekeeper 是否放行，都由发行方（私有仓的发布脚本）决定并校验。
+ * 发行方需要介入时用这两个口子，公开仓不感知证书细节：
+ * - `APPLE_SIGNING_IDENTITY` 透传给 tauri（缺省 `-`，即 ad-hoc）。
+ * - `WOOHAA_DESKTOP_HOST_PREPARE_COMMAND` 在打 `desktop-host.tar.gz` **之前**执行，参数是
+ *   资源根目录；`desktop-host.tar.gz` 里的原生模块不在 bundle 签名范围内，需要在此时签掉。
+ *
  * 边界（不夸大）：
- * - 只产出**未签名**产物；没有 Developer ID、公证、apt/rpm 仓库或更新源。
+ * - Windows 仍不产出 Authenticode、Linux 仍不产出 apt/rpm 仓库。更新源由 build profile 决定。
  * - Apple Silicon 默认装配 Node、本机宿主、扩展与工具；显式 --ui-url 保留外部服务调试。
  * - 不采集渲染/合成/性能结论：打包过程不验收画面，这些项保持「待人工验证」。
  * - 不启用 `gpu-debug`（design D8 要求发行构建不携带 Bevy pass 名称）。
  */
 import { readSourceIdentity } from "./lib/source-identity.mjs";
-import { prepareDesktopHost } from "./prepare-desktop-host.mjs";
+import { prepareDesktopHost, resolveDesktopTrustConfig } from "./prepare-desktop-host.mjs";
 import { standaloneBundleConfig, createHostArchive, nodeArtifact, prepareStartupFrontend } from "./lib/desktop-host-package.mjs";
 import { spawnSync } from "node:child_process";
 import { packageManagerInvocation } from "../web/scripts/package-manager.mjs";
@@ -58,7 +65,7 @@ const configPath = path.join(desktopDir, "tauri.conf.json");
 const defaultsPath = path.join(process.env.WOOHAA_DESKTOP_PACKAGING_DIR ?? path.join(desktopDir, "build", "packaging"), DESKTOP_DEFAULTS_RESOURCE);
 const require = createRequire(import.meta.url);
 
-const usage = `Tauri 桌面发行打包（未签名）
+const usage = `Tauri 桌面发行打包
 
 用法：
   pnpm desktop:bundle [选项]
@@ -80,6 +87,13 @@ const usage = `Tauri 桌面发行打包（未签名）
   --release-id <id>    覆盖 release 标识
   --dry-run            只打印将执行的步骤与配置，不写盘、不编译
   --help               显示帮助
+
+macOS 签名与公证（由发行方脚本负责，本仓库只透传）：
+  APPLE_SIGNING_IDENTITY              透传给 tauri；缺省为 ad-hoc（-）
+  APPLE_API_KEY / APPLE_API_ISSUER /
+  APPLE_API_KEY_PATH                  或 APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+                                      tauri 据此对 .app 做公证
+  WOOHAA_DESKTOP_HOST_PREPARE_COMMAND 打宿主归档前执行，参数为资源根目录
 `;
 
 function fail(message) {
@@ -88,11 +102,12 @@ function fail(message) {
 }
 
 /** cargo/rustup 通常不在 GUI/CI 的 PATH 里；与其它桌面脚本同一处理方式。 */
-function childEnv() {
+function childEnv(extra = {}) {
   return {
     ...process.env,
     ...(process.platform === "darwin" ? { APPLE_SIGNING_IDENTITY: process.env.APPLE_SIGNING_IDENTITY ?? "-" } : {}),
-    PATH: `${path.join(homedir(), ".cargo", "bin")}${path.delimiter}${process.env.PATH ?? ""}`
+    PATH: `${path.join(homedir(), ".cargo", "bin")}${path.delimiter}${process.env.PATH ?? ""}`,
+    ...extra
   };
 }
 
@@ -103,7 +118,8 @@ function managerCommand(args) {
 
 function run(command, args, options = {}) {
   console.log(`[desktop] $ ${formatCommand(command, args)}`);
-  const result = spawnSync(command, args, { cwd: root, env: childEnv(), stdio: "inherit", ...options });
+  const { env, ...rest } = options;
+  const result = spawnSync(command, args, { cwd: root, env: childEnv(env), stdio: "inherit", ...rest });
   if (result.error) throw new Error(`无法启动 ${command}：${result.error.message}`);
   if (result.status !== 0) throw new Error(`${command} 退出码 ${result.status ?? "null"}`);
 }
@@ -185,7 +201,53 @@ function buildNativeTools() {
   const triple = /host:\s*(\S+)/.exec(probe.stdout ?? "")?.[1];
   if (probe.error || probe.status !== 0 || !triple) throw new Error("无法探测原生 Rust host triple");
   if (triple !== nodeArtifact().triple) throw new Error(`Rust host ${triple} 与本机宿主目标 ${nodeArtifact().triple} 不匹配，请使用对应原生工具链`);
-  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer", "--bin", "world-video-encoder"], { cwd: path.join(root, "bevy"), env: { ...childEnv(), CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
+  run("cargo", ["build", "--release", "--target", triple, "--no-default-features", "--features", "native-renderer", "--bin", "model-renderer", "--bin", "world-video-encoder"], { cwd: path.join(root, "bevy"), env: { CARGO_TARGET_DIR: path.join(root, "bevy/target") } });
+}
+
+/**
+ * 归档前的可选外部钩子。
+ *
+ * 打包流程本身不含签名判断：发行方（私有仓的发布脚本）若需要给 `desktop-host.tar.gz`
+ * 里的原生模块签名，就在 `WOOHAA_DESKTOP_HOST_PREPARE_COMMAND` 里给一条命令，
+ * 本脚本在**创建归档之前**执行它并把资源根目录作为唯一参数传进去。
+ *
+ * 必须是「先签再归档」：归档哈希随后写入 `desktop-runtime.json`，归档生成后再改动树
+ * 会让运行时的 SHA256 校验失败。未配置时不做任何事，公开仓因此保持自足。
+ */
+function runHostPrepareCommand(resourceRoot) {
+  const command = process.env.WOOHAA_DESKTOP_HOST_PREPARE_COMMAND?.trim();
+  if (!command) return null;
+  console.log(`[desktop] 执行归档前钩子：${command}`);
+  runHookCommand({ label: "归档前钩子", command, args: [resourceRoot] });
+  return command;
+}
+
+/** 产物就绪、尚未哈希时的可选外部钩子。 */
+function runArtifactFinalizeCommand({ bundleRoot, releaseId, artifacts }) {
+  const command = process.env.WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND?.trim();
+  if (!command) return null;
+  const kinds = [...new Set(artifacts.map(artifact => artifact.kind))].join(",");
+  console.log(`[desktop] 执行产物收尾钩子：${command}`);
+  runHookCommand({ label: "产物收尾钩子", command, args: [bundleRoot, releaseId, kinds] });
+  return command;
+}
+
+/**
+ * 执行一条由环境变量给出的命令模板（例如 `node /path/to/sign.mjs`）。
+ *
+ * 不能把整个字符串交给 spawnSync 的可执行文件位：`spawnSync("node x.mjs")` 会把
+ * `node x.mjs` 当成一个文件名，直接 ENOENT。也不能用 `shell: true` 加 args——
+ * 那样参数会被 shell 再拆一次，含空格的路径会被截断。这里显式经 `sh -c` 让 shell
+ * 解析命令模板，参数作为 `$@` 原样传入，不做二次拆分。
+ */
+function runHookCommand({ label, command, args }) {
+  const result = spawnSync("/bin/sh", ["-c", `${command} "$@"`, "woohaa-hook", ...args], {
+    cwd: root,
+    env: childEnv(),
+    stdio: "inherit"
+  });
+  if (result.error) throw new Error(`${label}启动失败：${result.error.message}`);
+  if (result.status !== 0) throw new Error(`${label}退出码 ${result.status ?? "null"}`);
 }
 
 function frontendBuildSteps(standalone) {
@@ -254,6 +316,10 @@ async function runBuild(options) {
     throw new Error(`build profile 校验失败（${buildProfile.path ?? "未知路径"}）：\n${detail}`);
   }
   console.log(`[desktop] ${describeBuildProfile(buildProfile)}`);
+  if (!options.dryRun && !options.uiUrl) {
+    const trustConfig = resolveDesktopTrustConfig({ env: process.env, build: resolvedReleaseId, allowUnmanaged: buildProfile.resolved.allowUnmanagedExtensionTrust });
+    console.log(`[desktop] extension trust: ${trustConfig ? "v2 pinned root" : "v1 compatibility (explicit build profile or environment)"}`);
+  }
   const defines = buildDefines(buildProfile.resolved);
   if (defines && !process.env.WOOHAA3_DEFINES?.trim()) {
     process.env.WOOHAA3_DEFINES = JSON.stringify(defines);
@@ -294,12 +360,15 @@ async function runBuild(options) {
     const startupFrontend = prepareStartupFrontend(frontendDist, path.join(path.dirname(defaultsPath), "startup-frontend"));
     override.build = { ...override.build, frontendDist: process.env.WOOHAA_DESKTOP_PROJECT_DIR ? startupFrontend : tauriFrontendDist(startupFrontend, desktopDir) };
     override.plugins = standalone.plugins;
+    // 必须先签再打归档：未签的原生模块会让签好的 woohaa-node 加载失败，而归档哈希是在打包时定死的。
+    // 先跑外部钩子再打归档：签名等改动必须落在归档里，归档哈希随后才写入 runtime 配置。
+    const prepareCommand = runHostPrepareCommand(prepared.resourceRoot);
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
     fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
     fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(endpoint ? { updater: { endpoint, publicKey } } : {}) }));
     override.bundle = { ...override.bundle, ...standalone.bundle, resources: { ...override.bundle?.resources, ...standalone.bundle.resources, [runtimeFile]: "desktop-runtime.json", [hostArchive.path]: "desktop-host.tar.gz", [path.join(root, "bevy/assets/")]: "native-assets/" } };
-    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured" };
+    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured", ...(prepareCommand ? { hostPrepareCommand: prepareCommand } : {}) };
   }
   let nativeComposition = null;
   if (process.env.WOOHAA_DESKTOP_COMPOSITION_IDENTITY) {
@@ -319,6 +388,8 @@ async function runBuild(options) {
     console.log(`  前端 dist：${relative(frontendDist)}`);
     console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
     console.log(`  默认值资源：${relative(defaultsPath)}`);
+    console.log(`  APPLE_SIGNING_IDENTITY：${process.env.APPLE_SIGNING_IDENTITY ? "已设置（透传 tauri）" : "未设置（ad-hoc）"}`);
+    console.log(`  归档前钩子：${process.env.WOOHAA_DESKTOP_HOST_PREPARE_COMMAND?.trim() || "（未配置）"}`);
     console.log(`  ${JSON.stringify(buildDefaultsDocument({ uiUrl: options.uiUrl }), null, 2).split("\n").join("\n  ")}`);
     console.log(`  manifest：${relative(outDirPath(resolved))}/manifest.json`);
     console.log(`  $ ${formatCommand(process.execPath, [cli.entry, ...args])}   (cwd=${relative(desktopDir)})`);
@@ -355,6 +426,8 @@ async function runBuild(options) {
       if (fs.existsSync(bundledNode)) run(bundledNode, ["--input-type=module", "-e", "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(':memory:'); db.close(); console.log('bundled Node',process.versions.node)"]);
     }
   }
+  // 公证/装订会改字节，必须在哈希与复制之前完成。
+  runArtifactFinalizeCommand({ bundleRoot: path.join(desktopDir, "target"), releaseId: resolved.resolvedReleaseId, artifacts: collected });
   const artifacts = [];
   for (const artifact of collected) {
     const { sha256, bytes } = await hashPath(artifact.path);
@@ -406,7 +479,11 @@ async function runBuild(options) {
     target: options.target,
     debug: options.debug,
     notes: [
-      "未签名：没有 Developer ID / 公证（macOS）、Authenticode（Windows）或 apt/rpm 仓库与签名（Linux）。",
+      // 本仓库不判断发行签名：签名、公证与 Gatekeeper 结论由发行方的打包脚本负责，并写入
+      // 它自己的发布记录。这里只声明「本次构建本身做了什么」。
+      platform === "darwin"
+        ? "macOS 签名/公证由发行方脚本负责；本构建不判断产物是否已被 Developer ID 签名或公证。"
+        : "未签名：没有 Authenticode（Windows）或 apt/rpm 仓库与签名（Linux）。",
       "未启用 gpu-debug：发行构建不携带 Bevy pass 资源名。",
       hostPackage ? "本机宿主已装配；真实启动验收记录独立保存。" : "显式外部 UI 调试模式：本机宿主未装配。"
     ]

@@ -101,9 +101,12 @@ export const MODEL_TYPE_PRESETS: Readonly<Record<PresetModelType, ModelTypePrese
   },
   audio: {
     modelType: "audio",
-    // 音频没有画面类参数：提示词 + 音色 / 输出格式 / 语速就是全部语义。
-    // 语音与音乐可以共用这套键；音乐模型的卡片按需剪掉 voice。
-    keys: ["prompt", "voice", "outputFormat", "speed"],
+    // 音频没有画面类参数：提示词 + 音色 / 输出格式 / 语速就是语音合成的全部语义；
+    // 音乐生成只有提示词与歌词。
+    //
+    // **两类共用一种 model_type，但参数集合不同**：语音卡片保留 voice / outputFormat /
+    // speed，音乐卡片剪掉它们只留 lyrics。这靠卡片剪枝实现，不靠前端按模型名判断。
+    keys: ["prompt", "voice", "outputFormat", "speed", "lyrics"],
     required: ["prompt"],
     options: {
       // 服务端 /v1/audio/speech 的缺省音色。具体模型能选哪些音色由卡片收窄；

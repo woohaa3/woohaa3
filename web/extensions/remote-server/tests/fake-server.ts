@@ -17,14 +17,14 @@ export type FakeGenerationTask = {
   state: string;
   polls: number;
   result?: { text?: unknown; media?: unknown };
-  error?: { code: string; retryable: boolean };
+  error?: { code: string; retryable: boolean; message?: string };
 };
 
 /** 一个任务终态怎么返回：文本、稳定媒体或稳定失败码。 */
 export type FakeGenerationTaskResult =
   | { kind: "text"; text: string }
   | { kind: "media"; media: Record<string, unknown> }
-  | { kind: "failed"; code: string; retryable?: boolean };
+  | { kind: "failed"; code: string; retryable?: boolean; message?: string };
 
 export type FakeGenerationOptions = {
   /** 5 个 RPC 全部回 501 unimplemented（模拟服务端尚未实现托管生成）。 */
@@ -854,7 +854,11 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
           state: "TASK_STATE_FAILED",
           idempotencyKey: task.idempotencyKey,
           progress: 0,
-          error: { code: task.error.code, retryable: task.error.retryable },
+          error: {
+            code: task.error.code,
+            retryable: task.error.retryable,
+            ...(task.error.message === undefined ? {} : { message: task.error.message })
+          },
           recordRevision: "2"
         });
       }
@@ -874,13 +878,21 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
       const outcome = generation.taskResult;
       if (outcome.kind === "failed") {
         task.state = "TASK_STATE_FAILED";
-        task.error = { code: outcome.code, retryable: outcome.retryable === true };
+        task.error = {
+          code: outcome.code,
+          retryable: outcome.retryable === true,
+          ...(outcome.message === undefined ? {} : { message: outcome.message })
+        };
         return json({
           taskId: task.taskId,
           state: "TASK_STATE_FAILED",
           idempotencyKey: task.idempotencyKey,
           progress: 0,
-          error: { code: outcome.code, retryable: outcome.retryable === true },
+          error: {
+            code: outcome.code,
+            retryable: outcome.retryable === true,
+            ...(outcome.message === undefined ? {} : { message: outcome.message })
+          },
           recordRevision: "2"
         });
       }

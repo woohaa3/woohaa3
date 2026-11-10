@@ -144,6 +144,8 @@ Content contribution rollout (2026-10-30): trusted `CanvasContentRuntime.contrib
 
 Extension signing integration: `scripts/lib/extension-trust/runtime.mjs` owns pinned-domain refresh, durable receipts and activation gates; `web/backend/src/host/core/extension-manager/` applies the same policy to installs, reloads, quarantine and rollback. `scripts/prepare-desktop-host.mjs` includes verifier modules and optional public `extension-trust.json`, and `desktop-host-data.mjs` selects only the bundled anchor in production. Existing v1 packages under a configured domain require exact signed migration grants.
 
+Desktop release trust selection comes from the build profile's explicit `desktop.allowUnmanagedExtensionTrust` or `WOOHAA_DESKTOP_TRUST_UNAMANAGED=1`; a supplied `WOOHAA3_EXTENSION_TRUST_CONFIG` always takes precedence and is validated without fallback. `scripts/build-desktop.mjs` checks the selection before frontend/native compilation; `prepareDesktopHost` checks it before staging or downloading Node. Empty profiles still require a pinned v2 root or an explicit compatibility choice.
+
 Offline extension trust: domain `metadataUrl` is optional. `bootstrap` seeds empty caches with signed metadata; `scripts/import-extension-trust.mjs` imports the same public material under pinned anchors. No server RPC or online session is required for first installation with fresh offline metadata.
 
 ## Optional native document editor

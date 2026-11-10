@@ -25,17 +25,36 @@ pnpm desktop:bundle --build-frontend --bundles app # macOS application bundle
 pnpm desktop:bundle --dry-run
 ```
 
+Release packaging (`desktop:bundle` with a non-development release id, and `desktop:release`) requires a pinned extension-trust anchor: pass `WOOHAA3_EXTENSION_TRUST_CONFIG=/path/to/extension-trust.json`, or set `WOOHAA_DESKTOP_TRUST_UNAMANAGED=1` to state explicitly that this build ships no v2 root and falls back to v1 bare-key verification. Without either, `prepareDesktopHost` fails after the native builds. CI entry points set the opt-out explicitly so a release does not fail mid-packaging.
+
 The bundled extension set is **directory-authoritative**: every extension package under `web/extensions/` (a directory with a `package.json` whose name starts with `@woohaa3/extension-`) ships with the host. There is no separate inventory file. Non-plugin shared packages live in `web/framework/` and test fixtures in `web/test-fixtures/`, so they are never scanned as extensions.
 
 Bundling does not decide the enable state. `remote-server` ships with `site.defaultEnabled: false`, so it stays off until someone enables it in Settings and configures a server address; a fresh install never shows a dead "server access" entry.
 
 `dev-performance` is a browser-only extension under `web/extensions/`: it supplies the FPS / Draw Call readout merged into the window bar. The packaged app is a `--mode desktop` production build with no `woohaa-development` HTML marker, so the extension registers on the desktop host regardless of that marker, and `getFrameCounters` is exposed for the desktop shell as well as dev builds. Browser production and preview builds still do not register the readout or expose frame counters.
 
-The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. Platform code signing and notarization require the publisher's own credentials; updater signatures are a separate requirement. See [Windows build and lifecycle checks](WINDOWS.md).
+The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. See [Windows build and lifecycle checks](WINDOWS.md).
 
-Update builds require an explicit HTTPS `WOOHAA_DESKTOP_UPDATE_ENDPOINT`, matching `WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY` and updater signing key. `pnpm desktop:release --build-frontend` reads the private key from `WOOHAA_DESKTOP_SIGNING_KEY` or `~/.config/woohaa-release/updater.key`, with the public key in the adjacent `.pub` file. Supply an endpoint such as `https://updates.example.com/macos-arm64/latest.json`. Upload versioned artifacts first and the index last; keep signing keys outside the repository and upload directory.
+## macOS signing and notarization
 
-A configured application checks updates before starting the data-writing host. Failed checks allow the installed version to run; a discovered update must finish downloading, validating and installing before entering the application. Download or installation failure offers retry or exit.
+Signing and notarization are **not** part of this repository. This client builds artifacts; whether
+they are signed with a Developer ID, notarized, and accepted by Gatekeeper is decided and verified by
+the publisher's packaging scripts in the internal parent repository
+(`scripts/ci/release-macos.sh`). Keeping it out of the public client avoids shipping distribution
+credentials and certificate policy in the open repository.
+
+The build exposes two hooks instead of implementing signing:
+
+| Hook | Runs | Argument |
+| --- | --- | --- |
+| `WOOHAA_DESKTOP_HOST_PREPARE_COMMAND` | before `desktop-host.tar.gz` is created | resource root |
+| `WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND` | after bundling, before hashes and `--copy` | bundle root, release id, bundle kinds |
+
+- **Host hook.** Native modules inside `desktop-host.tar.gz` (currently dsh's `node-addon-require-builtin`) sit outside the bundle, so tauri never signs them. The publisher signs them here, *before* archiving, because the archive hash written to `desktop-runtime.json` is computed right after. Without that, a Developer ID `woohaa-node` cannot load them ("mapping process and mapped file have different Team IDs").
+- **Artifact hook.** Notarization and stapling change artifact bytes, so they must finish before `manifest.json` hashes are computed and before `--copy` snapshots the bundles.
+- `APPLE_SIGNING_IDENTITY` (and the notary environment variables) are passed through to tauri unchanged; omitting the identity produces an ad-hoc build. `scripts/build-desktop.mjs` never inspects certificates.
+- `desktop/entitlements.plist` carries `com.apple.security.cs.disable-library-validation` as well as `allow-jit`: an ad-hoc build cannot sign the extracted addon, and the host must still load it. This is an app capability, so it stays here.
+- `manifest.json` records which hooks ran (`hostPackage.hostPrepareCommand`) and states plainly that signing and Gatekeeper conclusions live in the publisher's release record, rather than claiming an outcome this repository did not verify.
 
 ## Data and verification
 

@@ -218,6 +218,21 @@ export const PARAMETER_CONTROLS: readonly ParameterControlSpec[] = [
     })
   },
   {
+    // 歌词是**音乐生成**独有的语义键，语音合成没有这个概念。留空表示纯音乐，
+    // 与上游 /v1/audio/music 的行为一致。音乐卡片保留它、语音卡片剪掉它。
+    key: "lyrics",
+    group: "音频",
+    label: "文本域",
+    control: "textarea",
+    build: () => ({
+      type: "string",
+      title: "歌词",
+      default: "",
+      description: "留空表示纯音乐",
+      "x-component": "Input.TextArea"
+    })
+  },
+  {
     key: "n",
     group: "图片",
     label: "数量",

@@ -104,6 +104,70 @@ describe("parametersAfterModelSwitch", () => {
 
 		expect(next).toEqual({ model: "gemini-3-pro-image", resolution: "4K", aspectRatio: "16:9" });
 	});
+
+	/**
+	 * 现场事故（task-e5f853e773032d20344da5ab64c68509）：MiniMax 语音任务的
+	 * `voice=male-qn-qingse` 被带进 `lyria3`，而 lyria3 只接受 OpenAI 音色名，请求直接 500。
+	 *
+	 * 音乐模型的目录 schema 里没有 voice，所以切模型时它必须被丢弃——这是结构性修复，
+	 * 不依赖参数校验兜底。
+	 */
+	it("语音切到音乐时丢弃音色：音乐模型不声明 voice", () => {
+		const audioConfig: ExecutionPanelModelConfig = {
+			modelOptions: [
+				{ value: "minimax-speech-2.8-hd", label: "MiniMax Speech" },
+				{ value: "lyria3", label: "Lyria 3" },
+			],
+			defaultModel: "minimax-speech-2.8-hd",
+			parameterSchemaByModel: {
+				"minimax-speech-2.8-hd": [
+					{ key: "voice", label: "音色", type: "select", options: [{ value: "male-qn-qingse", label: "青涩" }] },
+					{ key: "speed", label: "语速", type: "number", minimum: 0.5, maximum: 2 },
+				],
+				lyria3: [{ key: "lyrics", label: "歌词", type: "textarea", defaultValue: "" }],
+			},
+			defaultsByModel: {
+				"minimax-speech-2.8-hd": { voice: "male-qn-qingse", speed: 1 },
+				lyria3: { lyrics: "" },
+			},
+		};
+		const next = parametersAfterModelSwitch(
+			audioConfig,
+			{ model: "minimax-speech-2.8-hd", voice: "male-qn-qingse", speed: 1 },
+			"lyria3",
+		);
+
+		expect(next.voice).toBeUndefined();
+		expect(next.speed).toBeUndefined();
+		expect(next).toEqual({ model: "lyria3", lyrics: "" });
+	});
+
+	it("反向切换（音乐到语音）带回语音默认音色", () => {
+		const audioConfig: ExecutionPanelModelConfig = {
+			modelOptions: [
+				{ value: "minimax-speech-2.8-hd", label: "MiniMax Speech" },
+				{ value: "lyria3", label: "Lyria 3" },
+			],
+			defaultModel: "minimax-speech-2.8-hd",
+			parameterSchemaByModel: {
+				"minimax-speech-2.8-hd": [
+					{ key: "voice", label: "音色", type: "select", options: [{ value: "male-qn-qingse", label: "青涩" }] },
+				],
+				lyria3: [{ key: "lyrics", label: "歌词", type: "textarea", defaultValue: "" }],
+			},
+			defaultsByModel: {
+				"minimax-speech-2.8-hd": { voice: "male-qn-qingse" },
+				lyria3: { lyrics: "" },
+			},
+		};
+		const next = parametersAfterModelSwitch(
+			audioConfig,
+			{ model: "lyria3", lyrics: "两只老虎" },
+			"minimax-speech-2.8-hd",
+		);
+
+		expect(next).toEqual({ model: "minimax-speech-2.8-hd", voice: "male-qn-qingse" });
+	});
 });
 
 /**

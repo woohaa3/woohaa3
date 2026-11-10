@@ -104,10 +104,13 @@ export function decodeBuildProfile(raw) {
     if (!isObject(desktop)) push("$.desktop", "必须是对象");
     else {
       for (const key of Object.keys(desktop)) {
-        if (!["update", "allowUnconfiguredUpdate"].includes(key)) push("$.desktop." + key, "未知字段");
+        if (!["update", "allowUnconfiguredUpdate", "allowUnmanagedExtensionTrust"].includes(key)) push("$.desktop." + key, "未知字段");
       }
       if (desktop.allowUnconfiguredUpdate !== undefined && typeof desktop.allowUnconfiguredUpdate !== "boolean") {
         push("$.desktop.allowUnconfiguredUpdate", "必须是布尔值");
+      }
+      if (desktop.allowUnmanagedExtensionTrust !== undefined && typeof desktop.allowUnmanagedExtensionTrust !== "boolean") {
+        push("$.desktop.allowUnmanagedExtensionTrust", "必须是布尔值");
       }
       const update = desktop.update;
       if (update !== undefined) {
@@ -280,6 +283,7 @@ export function loadBuildProfile({ repoRoot, clientRoot, env = {} } = {}) {
     updateEndpointTemplate: profile.cdn ? joinUrl(profile.cdn.baseUrl, profile.cdn.updatePath) : "",
     updatePublicKeys: profile.desktop?.update?.publicKeys ? [...profile.desktop.update.publicKeys] : [],
     allowUnconfiguredUpdate: profile.desktop?.allowUnconfiguredUpdate === true,
+    allowUnmanagedExtensionTrust: profile.desktop?.allowUnmanagedExtensionTrust === true,
     officialKeys: profile.extensionTrust?.officialKeys ? profile.extensionTrust.officialKeys.map(entry => ({ ...entry })) : [],
     cdnBaseUrl: profile.cdn?.baseUrl ?? "",
     extensionDefaults: profile.extensions?.defaultEnabled ? { ...profile.extensions.defaultEnabled } : {},

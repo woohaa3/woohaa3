@@ -15,7 +15,7 @@ import type { PptaskWorker, PptaskWorkerSubmitInput } from '../src/worker.js';
 
 type ScriptedOutcome =
   | { kind: 'pending' }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; code?: string; retryable?: boolean }
   | { kind: 'throw'; message: string }
   | { kind: 'completed' };
 
@@ -42,7 +42,14 @@ function createScriptedProvider(options: {
         const outcome = options.script[Math.min(index, options.script.length - 1)];
         index += 1;
         if (outcome.kind === 'throw') throw new Error(outcome.message);
-        if (outcome.kind === 'error') return { status: 'error', error: outcome.message };
+        if (outcome.kind === 'error') {
+          return {
+            status: 'error',
+            error: outcome.message,
+            ...(outcome.code === undefined ? {} : { code: outcome.code }),
+            ...(outcome.retryable === undefined ? {} : { retryable: outcome.retryable }),
+          };
+        }
         if (outcome.kind === 'pending') return { status: 'pending', phase: 'running', progress: 0.5 };
         const result: ImageModelV4Result = {
           images: [new Uint8Array([1])],
@@ -442,6 +449,60 @@ describe('createPptaskWorker', () => {
     const job = await jobRepository.get(((task.state as { jobId?: string }).jobId)!);
     expect(job?.state).toBe('failed');
     expect(job?.error?.message).toContain('invalid prompt');
+  });
+
+  it('fails immediately when the provider declares the failure non-retryable', async () => {
+    // 正文里有 `503`（正文推断会认为值得重试），但 provider 明确说了重试没用：
+    // 服务端已把任务记成终态，再轮询也只是把同一个失败再看一遍。
+    const jobRepository = createMemoryJobRepository();
+    const { provider, counts } = createScriptedProvider({
+      jobRepository,
+      script: [{
+        kind: 'error',
+        message: '执行任务的算力节点已失联（upstream 503）',
+        code: 'worker-lost',
+        retryable: false,
+      }],
+    });
+    const taskStore = createMemoryPptaskTaskStore();
+    const worker = track(createPptaskWorker(baseOptions(taskStore, jobRepository, provider)));
+
+    await worker.submit(imageSubmit('req-1'));
+
+    const task = await waitFor(async () => {
+      const current = await taskStore.find('req-1');
+      return current?.status === 'failed' ? current : null;
+    });
+    expect(task.attempt).toBe(1);
+    expect(task.consecutiveFailures).toBe(1);
+    expect(counts.statuses).toBe(1);
+    const job = await jobRepository.get(((task.state as { jobId?: string }).jobId)!);
+    expect(job?.state).toBe('failed');
+    expect(job?.error).toMatchObject({ code: 'worker-lost', retryable: false });
+  });
+
+  it('still retries a transient provider failure that declares nothing', async () => {
+    const jobRepository = createMemoryJobRepository();
+    const { provider, counts } = createScriptedProvider({
+      jobRepository,
+      script: [
+        { kind: 'error', message: 'upstream 503 temporarily unavailable' },
+        { kind: 'completed' },
+      ],
+    });
+    const taskStore = createMemoryPptaskTaskStore();
+    const worker = track(createPptaskWorker(baseOptions(taskStore, jobRepository, provider)));
+
+    await worker.submit(imageSubmit('req-1'));
+
+    const task = await waitFor(async () => {
+      const current = await taskStore.find('req-1');
+      return current?.status === 'completed' ? current : null;
+    });
+    // 重试会重新领取任务（attempt 递增），这正是"没被判成不可重试"的证据。
+    expect(task.attempt).toBeGreaterThan(1);
+    expect(task.consecutiveFailures ?? 0).toBeGreaterThan(0);
+    expect(counts.statuses).toBeGreaterThanOrEqual(2);
   });
 
   it('fails the task when the provider cannot be resolved', async () => {

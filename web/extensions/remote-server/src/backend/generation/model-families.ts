@@ -24,6 +24,7 @@ import {
   imageFamilyParameters,
   imageParameterFamily,
   imageRequestFields,
+  musicRequestFields,
   videoFamilyFor,
   videoFamilyParameters,
   videoRequestFields,
@@ -159,8 +160,23 @@ export function translateParameters(
   if (modelType === "audio") {
     // 只有卡片识别出的音频模型才翻译：未识别的模型保持服务端下发的字段名，
     // 由服务端与 LiteLLM 按它们自己的约定处理。
-    if (cardFor(providerModelId, "audio") === undefined) return parameters;
+    const card = cardFor(providerModelId, "audio");
+    if (card === undefined) return parameters;
+    // 语音与音乐是两条上游路由，参数集合不同：音乐只认 lyrics，绝不发 voice / speed /
+    // response_format（上游会忽略它们或报参数错误，而真正的问题是它们不属于这条路由）。
+    if (isMusicCard(card)) return { ...musicRequestFields(parameters) };
     return { ...audioRequestFields(parameters) };
   }
   return parameters;
+}
+
+/**
+ * 判定一张音频卡片是不是音乐生成。
+ *
+ * 依据卡片保留的语义键，而不是 id 关键字：卡片是「这个模型能用哪些参数」的唯一来源，
+ * 音乐卡片恰好剪掉了 voice。这样新增一个音乐模型只要写对卡片，不必再维护一份 id 名单。
+ */
+function isMusicCard(card: { modelType: string; keeps: readonly string[] }): boolean {
+  if (card.modelType !== "audio") return false;
+  return !card.keeps.includes("voice");
 }

@@ -317,10 +317,19 @@ export function createPptaskWorker(options: PptaskWorkerOptions): PptaskWorker {
       if (record?.state === 'cancelled') {
         throw new Error(`Job cancelled: ${handle.id}`);
       }
-      // Provider-declared failures leave the record terminal (`failed`);
-      // surface them as retryable so the retry path can un-fail the record.
+      // Provider-declared failures leave the record terminal (`failed`).
+      // Keep the record's structured fields on the thrown error: the retry
+      // decision otherwise degrades to keyword matching on the message, and a
+      // provider that said "don't retry" (retryable === false) would be retried
+      // whenever its text happens to contain e.g. "不可用".
       if (record?.state === 'failed') {
-        throw new Error(record.error?.message ?? `Job failed: ${handle.id}`);
+        const declared = new Error(record.error?.message ?? `Job failed: ${handle.id}`) as Error & {
+          code?: string;
+          retryable?: boolean;
+        };
+        if (record.error?.code !== undefined) declared.code = record.error.code;
+        if (record.error?.retryable !== undefined) declared.retryable = record.error.retryable;
+        throw declared;
       }
       throw error;
     } finally {

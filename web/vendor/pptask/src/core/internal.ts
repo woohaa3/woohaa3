@@ -37,21 +37,26 @@ export function serializeError(error: unknown): {
   stack?: string;
   status?: number;
   code?: string;
+  retryable?: boolean;
 } {
   if (error instanceof Error) {
     // ProviderHttpError 之类携带结构化字段的错误要把 status/code 带出去，
     // 否则历史只剩一句拼接字符串，无法区分鉴权失败/限流/参数错。
-    const structured = error as Error & { status?: unknown; code?: unknown };
+    const structured = error as Error & { status?: unknown; code?: unknown; retryable?: unknown };
     const status = typeof structured.status === 'number' && Number.isFinite(structured.status)
       ? structured.status
       : undefined;
     const code = typeof structured.code === 'string' && structured.code !== '' ? structured.code : undefined;
+    // 只有 provider 明确表态时才带 retryable：缺省仍按错误正文推断，不能把
+    // "没判断过"写成 true/false。
+    const retryable = typeof structured.retryable === 'boolean' ? structured.retryable : undefined;
     return {
       name: error.name,
       message: error.message,
       stack: error.stack,
       ...(status !== undefined ? { status } : {}),
       ...(code !== undefined ? { code } : {}),
+      ...(retryable !== undefined ? { retryable } : {}),
     };
   }
   return { message: String(error) };

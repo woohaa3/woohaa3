@@ -20,7 +20,25 @@ import type {
   PptaskJobTransition,
   PptaskModel,
   PptaskModelType,
+  PptaskSerializedError,
 } from './types.ts';
+
+/**
+ * 把失败的作业记录还原成"带结构化字段的错误"。
+ *
+ * 只抛 `new Error(message)` 会让稳定码与可重试标记在半路丢失：worker 随后只能靠关键字
+ * 猜要不要重试，于是"算力节点失联"这类不可重试的失败也会被重试若干轮。
+ */
+function toJobFailure(record: PptaskJobRecord, fallback: string): Error {
+  const error = new Error(record.error?.message ?? fallback) as Error & {
+    code?: string;
+    retryable?: boolean;
+  };
+  const code = record.error?.code;
+  if (typeof code === 'string' && code !== '') error.code = code;
+  if (record.error?.retryable !== undefined) error.retryable = record.error.retryable;
+  return error;
+}
 
 type CreateJobsOptions = {
   providerId: string;
@@ -273,12 +291,25 @@ export function createJobs(options: CreateJobsOptions): PptaskJobs {
       }
       if (status.status === 'error') {
         const finishedAt = new Date().toISOString();
+        // 稳定码与可重试标记是错误的一部分：只留正文时下游只能靠关键字猜，
+        // 而"同一个正文、不同处置"的失败（如算力节点失联 vs 服务端临时不可用）
+        // 恰恰要靠这两个字段区分。
+        // 结果联合里的 `completed` 分支与 `RESULT` 相交，泛型下无法按 status 收窄出
+        // code/retryable；这两个字段都是可选的，直接按存在性读取即可。
+        const detail = status as { code?: unknown; retryable?: unknown };
+        const code = typeof detail.code === 'string' && detail.code !== '' ? detail.code : undefined;
+        const retryable = typeof detail.retryable === 'boolean' ? detail.retryable : undefined;
+        const failure: PptaskSerializedError = {
+          message: status.error,
+          ...(code !== undefined ? { code } : {}),
+          ...(retryable !== undefined ? { retryable } : {}),
+        };
         const updated = await updateRecord(jobId, current => {
           if (isTerminal(current.state)) return current;
           return transition({
             ...current,
             state: 'failed',
-            error: { message: status.error },
+            error: failure,
             finishedAt,
             updatedAt: finishedAt,
           }, 'failed', finishedAt);
@@ -341,7 +372,7 @@ export function createJobs(options: CreateJobsOptions): PptaskJobs {
     for await (const event of watch<RESULT>(jobId, waitOptions)) {
       const record = event.job;
       if (record.state === 'succeeded') return record.result as RESULT;
-      if (record.state === 'failed') throw new Error(record.error?.message ?? `Job failed: ${jobId}`);
+      if (record.state === 'failed') throw toJobFailure(record, `Job failed: ${jobId}`);
       if (record.state === 'cancelled') throw createAbortError(`Job cancelled: ${jobId}`);
     }
     throw new Error(`Job ended without a result: ${jobId}`);

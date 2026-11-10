@@ -54,6 +54,16 @@ export type PptaskOperationStatusResult<RESULT extends object> =
   | {
       status: 'error';
       error: string;
+      /**
+       * 稳定失败码（provider 声明时才有）。会随任务记录一起落到错误里，
+       * 让"同一个正文、不同处置"的失败可区分（如 `worker-lost` vs `unavailable`）。
+       */
+      code?: string;
+      /**
+       * 该失败值不值得重新提交。只有 provider 明确表态时才带：
+       * 缺省表示"按错误正文推断"，`false` 表示重试也没用。
+       */
+      retryable?: boolean;
       providerMetadata?: SharedV4ProviderMetadata;
     };
 
@@ -163,6 +173,11 @@ export type PptaskSerializedError = {
   status?: number;
   /** 上游业务错误码（ProviderHttpError 才有）。 */
   code?: string;
+  /**
+   * 是否值得重试。只有 provider 明确表态时才带：
+   * 缺省表示"按错误正文推断"（沿用既有的瞬时错误判定），`false` 表示重试也没用。
+   */
+  retryable?: boolean;
 };
 
 export type PptaskJobRecord<RESULT = unknown> = {

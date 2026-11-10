@@ -513,7 +513,15 @@ export function decodeSubmitResponse(payload: unknown): DecodedSubmitResponse {
   };
 }
 
-export type DecodedTaskFailure = { code: string; retryable: boolean };
+/**
+ * 失败事实：稳定码 + 是否可重试 + 可展示的短语。
+ *
+ * `message` 由服务端给出（proto 的 `TaskFailure.message`）：它只放**已脱敏的固定短语**，
+ * 不含上游正文、主机名或凭据。worker 链的失败必须靠它——`worker-lost` 与 `unavailable`
+ * 的处置不同（换台机器重试 vs 等会儿再试），只说稳定码的话界面只能给一句笼统的话。
+ * 取不到时调用方按码回退到本地短语表。
+ */
+export type DecodedTaskFailure = { code: string; retryable: boolean; message: string | null };
 
 export type DecodedTaskText = { content: Array<{ type: "text"; text: string }> };
 export type DecodedTaskMedia = {
@@ -623,10 +631,16 @@ export function decodeTask(payload: unknown): DecodedTask {
   }
   const failureRecord = readRecordField(record, "error");
   const failureCode = failureRecord === null ? null : readStringField(failureRecord, "code");
+  const failureMessage = failureRecord === null ? null : readStringField(failureRecord, "message");
   const failure: DecodedTaskFailure | null =
     failureCode === null
       ? null
-      : { code: failureCode, retryable: readBoolField(failureRecord as Record<string, unknown>, "retryable") === true };
+      : {
+          code: failureCode,
+          retryable: readBoolField(failureRecord as Record<string, unknown>, "retryable") === true,
+          // 空白正文等同于没给：界面不该显示一个空白的失败原因。
+          message: failureMessage !== null && failureMessage.trim() !== "" ? failureMessage : null
+        };
 
   const resultRecord = readRecordField(record, "result");
   const textRaw = record.text ?? resultRecord?.text;
