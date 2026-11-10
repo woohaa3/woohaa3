@@ -160,14 +160,7 @@ export function createCosBackend(
   cos: CosLike = new COS({
     SecretId: config.secretId,
     SecretKey: config.secretKey
-  }) as unknown as CosLike,
-  /**
-   * 后端身份与能力覆盖。
-   *
-   * 公开临时桶复用同一套 COS 调用，只是 id / 名称不同、并且**不暴露 `presign`**：
-   * 它的地址不签名，签名会给出一条带时效的私有地址，语义完全相反。
-   */
-  options: { backendId?: string; label?: string; signing?: boolean } = {}
+  }) as unknown as CosLike
 ): StorageBackend {
   const base = () => ({ Bucket: config.bucketName, Region: config.region });
   const prefix = config.prefix.replace(/^\/+|\/+$/g, "");
@@ -176,8 +169,8 @@ export function createCosBackend(
   const keyFor = (key: string) => (prefix ? `${prefix}/${key}` : key);
 
   const backend: StorageBackend = {
-    backendId: options.backendId ?? COS_STORAGE_BACKEND_ID,
-    label: options.label ?? COS_STORAGE_LABEL,
+    backendId: COS_STORAGE_BACKEND_ID,
+    label: COS_STORAGE_LABEL,
     ownerExtensionId: COS_STORAGE_PLUGIN_ID,
     async putStream(key, bytes, contentType, options) {
       options.signal?.throwIfAborted();
@@ -245,7 +238,7 @@ export function createCosBackend(
         throw error;
       }
     },
-    ...(options.signing === false ? {} : { async presign(key, options) {
+    async presign(key, options) {
       const data = await runCos<{ Url: string }>((callback) =>
         cos.getObjectUrl(
           {
@@ -259,7 +252,7 @@ export function createCosBackend(
       );
       if (!data.Url?.trim()) throw new Error(`无法生成 COS 访问地址：${key}`);
       return data.Url.replace(/^http:\/\//i, "https://");
-    } })
+    }
   };
 
   const removeObject = cos.deleteObject;
@@ -272,17 +265,44 @@ export function createCosBackend(
   return backend;
 }
 
+let nextCredentialEpoch = 0;
+
 export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CONFIG.fields> {
   return {
     name: COS_STORAGE_PLUGIN_ID,
     label: COS_STORAGE_LABEL,
     icon: "cloud",
     configPrefix: COS_STORAGE_CONFIG_PREFIX,
-    inject: ["log", "storage"],
+    inject: ["log", "storage", "exposer"],
     Config: COS_STORAGE_CONFIG,
     apply(ctx, config) {
       const log = ctx.log.scope(COS_STORAGE_PLUGIN_ID);
       const resolved = resolveCosConfig(config);
+      const credentialEpoch = ++nextCredentialEpoch;
+
+      // 同一份 COS 配置同时提供持久存储与临时签名外链。
+      // 未配置时仍提供配置入口；只有配置齐全的来源参与能力中心计数和自动路由。
+      ctx.effect(() => ctx.exposer.register({
+        exposerId: COS_STORAGE_BACKEND_ID,
+        label: COS_STORAGE_LABEL,
+        ownerExtensionId: COS_STORAGE_PLUGIN_ID,
+        requiresReplica: true,
+        targetBackendId: COS_STORAGE_BACKEND_ID,
+        temporaryHosting: {
+          category: "provider",
+          priority: 100,
+          validitySeconds: DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
+          ready: () => resolved.ok,
+          credentialEpoch: () => credentialEpoch
+        },
+        async expose(input) {
+          const backend = ctx.storage.resolve(COS_STORAGE_BACKEND_ID);
+          if (!backend?.presign) throw new Error("COS / S3 对象存储未配置");
+          return backend.presign(`${input.namespace}/${input.key}`, {
+            expiresSeconds: input.expiresSeconds ?? DEFAULT_SIGNED_URL_EXPIRES_SECONDS
+          }, input.scope);
+        }
+      }));
 
       // 私有桶：缺配置只记日志，由 core 的就绪检查决定主存储是否可用。
       if (resolved.ok) {

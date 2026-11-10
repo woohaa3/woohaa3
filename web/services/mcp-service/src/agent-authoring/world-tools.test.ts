@@ -349,6 +349,65 @@ it("samples the published timeline with its origin and reports data-only evidenc
  expect((await callTool(base,"get_world_model_rig",{instanceId:"foreign"},issued.token)).result?.isError).toBe(true);
 });
 
+it.each([
+  ["outside-scope", { ok: false, code: "outside-scope", message: "模型 footprint 超出导演区" }, "outside-scope", "resize_scene_area"],
+  ["version-conflict", { ok: false, code: "version-conflict", message: "模型版本已变化" }, "version-conflict", "get_world_context"],
+  ["version-unknown", { ok: false, code: "outside-scope", message: "无法确认目标当前版本", spatialReason: "version-unknown" }, "version-unknown", "无法确认"]
+] as const)("keeps the %s failure visible with actionable diagnostics", async (_name, failure, kind, hint) => {
+  const issued = grant();
+  const base = await start({
+    read: () => ({ ok: false, code: "not-issued", message: "not used" }),
+    async write() { return failure; },
+    async complete() { return failure; }
+  }, issued);
+  const result = await callTool(base, "create_world_model", {
+    modelScript: "scene.box({});",
+    transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 }
+  }, issued.token);
+  expect(result.result?.isError).toBe(true);
+  const structured = result.result?.structuredContent ?? {};
+  expect(structured).toMatchObject({ ok: false, code: failure.code, message: failure.message, failureKind: kind });
+  if ("spatialReason" in failure) expect(structured.spatialReason).toBe(failure.spatialReason);
+  const text = result.result?.content?.[0]?.text ?? "";
+  expect(text).toContain(`[${kind}]`);
+  expect(text).toContain(hint);
+
+  const moved = await callTool(base, "move_world_model", {
+    instanceId: "actor",
+    expectedVersion: "actor-v1",
+    transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 }
+  }, issued.token);
+  expect(moved.result?.structuredContent).toMatchObject({ ok: false, failureKind: kind });
+  expect(moved.result?.content?.[0]?.text).toContain(`[${kind}]`);
+});
+
+it("describes the default 4x4 area and the resize prerequisite", async () => {
+  const issued = grant();
+  const base = await start({
+    read: () => ({ ok: false, code: "not-issued", message: "not used" }),
+    async write() { throw new Error("unused"); },
+    async complete() { throw new Error("unused"); }
+  }, issued);
+  const response = await fetch(`${base}${MODEL_MCP_HTTP_PATH}`, {
+    method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream",
+      "mcp-protocol-version": "2025-03-26", authorization: `Bearer ${issued.token}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} })
+  });
+  const raw = await response.text();
+  const json = response.headers.get("content-type")?.includes("text/event-stream")
+    ? raw.split("\n").filter(line => line.startsWith("data:")).at(-1)!.slice(5).trim()
+    : raw;
+  const catalog = JSON.parse(json) as { result: { tools: Array<{ name: string; description: string }> } };
+  const describe = (name: string) => catalog.result.tools.find(tool => tool.name === name)?.description ?? "";
+  for (const name of ["get_world_context", "create_world_model", "resize_scene_area"]) {
+    expect(describe(name)).toContain("4×4");
+    expect(describe(name)).toContain("resize_scene_area");
+  }
+  const create = describe("create_world_model");
+  for (const term of ["outside-scope", "version-conflict", "version-unknown"]) expect(create).toContain(term);
+  expect(describe("resize_scene_area")).toContain("重新 get_world_context");
+});
+
 it("rejects rig and scene sample tools when camera or 2D grants omit them", async () => {
   for (const scope of [{kind:"world-camera",cameraId:"camera"},{kind:"workflow-group-2d",groupId:"group"}] as const) {
     const issued = grant();

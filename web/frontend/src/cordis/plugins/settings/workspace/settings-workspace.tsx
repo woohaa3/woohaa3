@@ -20,6 +20,8 @@
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button } from "@woohaa3/ui/primitives";
+import { canvasAppearanceStore } from "../../../services/canvas-appearance.js";
+import { Switch } from "@woohaa3/ui/primitives";
 import { SegmentedControl } from "@woohaa3/ui/primitives";
 import { ActivityIcon, ChatIcon, PluginIcon, SettingsIcon, SparklesIcon, SunIcon } from "@woohaa3/ui/icons";
 import type { ThemeService } from "../../../contract/platform.js";
@@ -445,7 +447,7 @@ export function SettingsWorkspace({
         ) : view.section === "runtimes" ? (
           <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>
         ) : view.section === "appearance" ? (
-          <Panel title="外观" hint="主题只保存在此浏览器。">
+          <Panel title="外观" hint="外观偏好只保存在此浏览器。">
             <ThemeSection theme={theme} />
           </Panel>
         ) : view.section === "about" ? (
@@ -536,6 +538,7 @@ function ThemeSection({ theme }: { theme: ThemeService }) {
   const snapshot = useSyncExternalStore(theme.subscribe, theme.getSnapshot, theme.getSnapshot);
   const [error, setError] = useState<string | null>(null);
   const ids = theme.presetIds();
+  const appearance = useSyncExternalStore(canvasAppearanceStore.subscribe, canvasAppearanceStore.getSnapshot, canvasAppearanceStore.getSnapshot);
   return (
     <>
       <SegmentedControl
@@ -548,6 +551,15 @@ function ThemeSection({ theme }: { theme: ThemeService }) {
         options={ids.map((id) => ({ value: id, label: THEME_LABELS[id] ?? id }))}
         dataAttributes={{ "data-testid": "settings-theme" }}
       />
+      <div className="settings-appearance__light">
+        <span>全局左下光照</span>
+        <Switch
+          checked={appearance.globalLightEnabled}
+          onCheckedChange={canvasAppearanceStore.setGlobalLightEnabled}
+          testId="settings-global-light"
+        />
+      </div>
+      {appearance.error ? <p className="settings-page__error">{appearance.error}</p> : null}
       {ids.length <= 1 ? <p className="settings-page__hint">目前只内置了一套主题。</p> : null}
       {error ? <p className="settings-page__error" role="alert">{error}</p> : null}
     </>

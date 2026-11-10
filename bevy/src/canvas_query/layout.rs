@@ -623,6 +623,25 @@ pub(crate) const NODE_ACTION_TOOLBAR_ICON_SIZE: f32 = 16.0;
 pub(crate) const NODE_ACTION_TOOLBAR_ICON_GAP: f32 = 6.0;
 /// 设置箭头独立宽度（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_CHEVRON_WIDTH: f32 = 24.0;
+
+/// 节点动作槽里「图标 + 文案」整块的横向起点（屏幕像素，相对槽左边缘）。
+///
+/// 动作槽至少有 `NODE_ACTION_TOOLBAR_ACTION_MIN_WIDTH` 宽以保可点区域；短文案若始终贴左内边距，
+/// 槽右侧会空出一大块看起来没对齐（「试听」这类两字动作最明显）。槽有富余时把整块内容居中，
+/// 没有富余（文案把槽撑满）时退回左内边距。
+pub(crate) fn node_action_content_x(slot_width: f32, label: &str, has_icon: bool) -> f32 {
+    let icon_width = if has_icon {
+        NODE_ACTION_TOOLBAR_ICON_SIZE + NODE_ACTION_TOOLBAR_ICON_GAP
+    } else {
+        0.0
+    };
+    let spare = slot_width - icon_width - estimated_text_width(label, NODE_ACTION_TOOLBAR_FONT);
+    if spare > NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0 {
+        spare / 2.0
+    } else {
+        NODE_ACTION_TOOLBAR_ACTION_PAD
+    }
+}
 /// 动作分组之间的细分隔线占位宽度（世界单位）。
 pub(crate) const NODE_ACTION_TOOLBAR_SEPARATOR: f32 = 2.0;
 /// 动作标签字号与模型名摘要字号（世界单位）。
@@ -692,6 +711,21 @@ pub(crate) fn label_pool_plan(existing: usize, desired: usize) -> (usize, usize,
     )
 }
 
+/// 内容区底部为历史条预留的高度（历史条自身 + 间隙）。
+const BODY_FOOTER: f32 = 20.0;
+
+/// 富内容卡片正文行数上限：正文从 `y + 56` 起、行距 18，按默认卡片高度留出底部历史条，
+/// 与标签槽位数保持一致（每张卡片固定产出 `BODY_MAX_LINES` 个正文槽位，空槽位不显示）。
+pub(crate) const BODY_MAX_LINES: usize = 6;
+
+/// 富内容卡片正文可用行数：正文从 `y + 56` 起、行距 18，且不能压到底部历史条。
+///
+/// 默认高度（232）算满即达 `BODY_MAX_LINES`；卡片被压矮时减少行数，避免正文盖住底部历史条。
+pub(crate) fn body_line_budget(height: f32) -> usize {
+    let available = (height - BODY_FOOTER - 56.0).max(0.0);
+    ((available / 18.0).floor() as usize).clamp(1, BODY_MAX_LINES)
+}
+
 /// 按估算宽度截断文本；超出时追加省略号，控制字符替换为空格。
 pub(crate) fn shortened(text: &str, max_width: f32, size: f32) -> String {
     let mut width = 0.0;
@@ -705,6 +739,106 @@ pub(crate) fn shortened(text: &str, max_width: f32, size: f32) -> String {
         result.push(if c.is_control() { ' ' } else { c });
     }
     result
+}
+
+/// 按估算宽度贪心换行；只有超过 `max_lines` 才在最后一行追加省略号。
+///
+/// 卡片正文（尤其历史失败/取消原因）必须先用满预览区宽度再换行，不能在第一行提前省略。
+/// 保留显式换行（`\n`）；控制字符替换为空格。断行优先落在词间空格，整行放得下的单词不拆开；
+/// 单个超长单词（如无空格的 URL、哈希、长英文标识）才按字符切分。
+pub(crate) fn wrapped_lines(
+    text: &str,
+    max_width: f32,
+    size: f32,
+    max_lines: usize,
+) -> Vec<String> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+    let limit = max_width.max(size);
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        wrap_paragraph(paragraph, limit, size, &mut lines);
+    }
+    while lines.len() > 1 && lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        if let Some(last) = lines.last_mut() {
+            *last = shortened(&format!("{last}…"), limit, size);
+        }
+    }
+    lines
+}
+
+/// 贪心填充单个段落（不含 `\n`）到 `lines`。
+///
+/// 以空白分隔词，整词放得下就追加（词间保留一个空格）；放不下就换行后再放；只有单行都放不
+/// 下的长词才按字符切分。空段落保留一个空行，与显式 `\n` 的语义一致。
+fn wrap_paragraph(paragraph: &str, limit: f32, size: f32, lines: &mut Vec<String>) {
+    let chars: Vec<char> = paragraph
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    // 空段落（含只有空白的段落）保留一行空行，避免正文里段落间隔被吞掉。
+    if chars.iter().all(|c| c.is_whitespace()) {
+        lines.push(String::new());
+        return;
+    }
+    let mut line = String::new();
+    let mut width = 0.0f32;
+    let mut pending_space = false;
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index].is_whitespace() {
+            // 词间空白压缩成一个空格，行首空白丢弃。
+            pending_space = !line.is_empty();
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < chars.len() && !chars[index].is_whitespace() {
+            index += 1;
+        }
+        let word: String = chars[start..index].iter().collect();
+        let space_width = if pending_space {
+            estimated_char_width(' ', size)
+        } else {
+            0.0
+        };
+        let word_width = estimated_text_width(&word, size);
+        if width + space_width + word_width <= limit {
+            if pending_space {
+                line.push(' ');
+                width += space_width;
+            }
+            line.push_str(&word);
+            width += word_width;
+        } else if word_width <= limit {
+            // 整词放不下但自己占得下一行：换行，不在行尾留空格。
+            lines.push(std::mem::take(&mut line));
+            line.push_str(&word);
+            width = word_width;
+        } else {
+            // 单个长词超过整行：换行后按字符切分。
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+                width = 0.0;
+            }
+            for c in word.chars() {
+                let char_width = estimated_char_width(c, size);
+                if width + char_width > limit && !line.is_empty() {
+                    lines.push(std::mem::take(&mut line));
+                    width = 0.0;
+                }
+                line.push(c);
+                width += char_width;
+            }
+        }
+        pending_space = false;
+    }
+    lines.push(line);
 }
 
 #[cfg(test)]
@@ -852,6 +986,45 @@ mod tests {
         assert_eq!(shortened("abc", 100.0, 12.0), "abc");
         assert_eq!(shortened("中\u{0007}文", 100.0, 12.0), "中 文");
         assert!(shortened(&"宽".repeat(50), 40.0, 12.0).ends_with('…'));
+    }
+
+    #[test]
+    fn wrapped_lines_uses_full_width_before_ellipsis() {
+        // 失败原因必须先用满预览区宽度再换行，不能一行提前省略。
+        let text = format!("失败：{}", "很长的错误原因".repeat(20));
+        let lines = wrapped_lines(&text, 96.0, 12.0, 6);
+        assert_eq!(lines.len(), 6);
+        assert!(lines
+            .iter()
+            .all(|line| estimated_text_width(line, 12.0) <= 96.0 + 1e-3));
+        assert!(lines.last().unwrap().ends_with('…'));
+
+        let short = format!("失败：{}", "原因".repeat(10));
+        let wrapped = wrapped_lines(&short, 96.0, 12.0, 6);
+        assert!(wrapped.len() > 1);
+        assert!(!wrapped.last().unwrap().ends_with('…'));
+    }
+
+    #[test]
+    fn wrapped_lines_keeps_explicit_newlines_and_breaks_words_at_spaces() {
+        let lines = wrapped_lines("第一行\n第二行", 200.0, 12.0, 6);
+        assert_eq!(lines, vec!["第一行".to_string(), "第二行".to_string()]);
+
+        // 英文长词在空格处断行，不把单词拆开。
+        let text = "provider timeout while calling upstream endpoint";
+        let lines = wrapped_lines(text, 120.0, 12.0, 6);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| !line.starts_with(' ')));
+        assert!(lines.iter().any(|line| line.split(' ').count() > 1));
+        assert_eq!(lines.join(" ").split_whitespace().collect::<Vec<_>>().join(" "), text);
+    }
+
+    #[test]
+    fn wrapped_lines_respects_line_budget() {
+        assert!(wrapped_lines("内容", 96.0, 12.0, 0).is_empty());
+        // 行数足够时保留全部内容，不追加省略号。
+        let lines = wrapped_lines("短正文", 200.0, 12.0, 6);
+        assert_eq!(lines, vec!["短正文".to_string()]);
     }
 
     #[test]
@@ -1006,6 +1179,36 @@ mod tests {
             summary: None,
         };
         assert!(node_action_toolbar(&node, &empty, None, None).is_none());
+    }
+
+    #[test]
+    fn node_action_content_centers_short_labels_in_spare_room() {
+        let node = action_node(500.0, 300.0);
+        let actions = crate::protocol::NodeActions {
+            actions: vec![crate::protocol::NodeAction {
+                id: "audio-preview".into(),
+                label: "试听".into(),
+                icon: None,
+                icon_only: false,
+                enabled: true,
+                menu: false,
+                tone: String::new(),
+            }],
+            summary: None,
+        };
+        let layout = node_action_toolbar(&node, &actions, None, None).expect("layout");
+        let width = layout.slots[0].rect.2;
+        let text = estimated_text_width("试听", NODE_ACTION_TOOLBAR_FONT);
+        // 两字动作被最小宽度撑宽：内容居中，不再贴着左内边距。
+        assert!(width - (NODE_ACTION_TOOLBAR_ACTION_PAD * 2.0 + text) > 1.0);
+        let x = node_action_content_x(width, "试听", false);
+        assert!((x - (width - text) / 2.0).abs() < 1e-3);
+        // 文案把槽撑满时退回左内边距。
+        let tight = node_action_content_x(text, "试听", false);
+        assert!((tight - NODE_ACTION_TOOLBAR_ACTION_PAD).abs() < 1e-3);
+        // 带图标时图标宽度也计入占用。
+        let with_icon = node_action_content_x(width, "试听", true);
+        assert!(with_icon < x);
     }
 
     #[test]

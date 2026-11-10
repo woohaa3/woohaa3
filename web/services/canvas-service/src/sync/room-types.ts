@@ -31,6 +31,54 @@ export type RoomSubmitOptions = {
   worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
 };
 
+/**
+ * Spatial rejection reasons the room can report back to a caller.
+ *
+ * These must stay distinguishable end to end: `version-conflict` is a real
+ * version mismatch, `version-unknown` means the authority could not verify the
+ * version at all, and `outside-scope` means the target legitimately falls
+ * outside the issued scope. `unavailable` means the write capability was
+ * missing when the commit was attempted.
+ */
+export type RoomSpatialReason =
+  | "outside-scope"
+  | "version-conflict"
+  | "version-unknown"
+  | "invalid-data"
+  | "unavailable"
+  | "request-conflict"
+  | "lease-conflict"
+  | "stale-epoch"
+  | "cancelled"
+  | "unverified-stop";
+
+/** Ground-plane point in world meters (see `GroundAabb`). */
+export type RoomGroundPoint = { u: number; v: number };
+
+/** Ground-plane bounds in world meters. */
+export type RoomGroundBounds = { min: RoomGroundPoint; max: RoomGroundPoint };
+
+/** Axis of the ground plane along which a target overflows its scope. */
+export type RoomGroundAxis = "u" | "v";
+
+/**
+ * Actionable geometry for an out-of-scope world write.
+ *
+ * Present only when the authority could actually read the offending geometry;
+ * it is never synthesized from guesses. Values are the same ones the authority
+ * classified, so a caller can explain which axis overflowed and by how much.
+ */
+export type RoomSpatialDiagnostic = {
+  /** Ground-plane footprint that was classified (actual/occupied area). */
+  actual?: RoomGroundBounds;
+  /** Ground-plane bounds the target had to stay inside (authorized area). */
+  bounds?: RoomGroundBounds;
+  /** Ground-plane anchor the authority classified. */
+  anchor?: RoomGroundPoint;
+  /** Axes whose footprint leaves `bounds`. Empty/absent when not applicable. */
+  outsideAxes?: RoomGroundAxis[];
+};
+
 export type RoomCommandResult =
   | {
       ok: true;
@@ -65,7 +113,10 @@ export type RoomCommandResult =
       currentRevision?: number;
       preconditionIndex?: number;
       conflict?: import("../world-authoring/spatial-leases.js").LeaseConflict;
-      spatialReason?: string;
+      /** Typed authority reason for a `spatial-rejected` result; never flattened by the room. */
+      spatialReason?: RoomSpatialReason;
+      /** Actionable out-of-scope geometry, when the authority could read it. */
+      spatialDiagnostic?: RoomSpatialDiagnostic;
     };
 
 /** published 前进的来源：本 room 执行的命令，或从远端同步上游合入的 update。 */

@@ -172,6 +172,15 @@
 .settings-page__item + .settings-page__item { border-top: 1px solid var(--mc-border); }
 .settings-page__item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .settings-page__item-label { font-weight: 600; }
+.settings-appearance__light {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 320px;
+  margin-top: 20px;
+  font-size: 13px;
+}
 .settings-page__item-description { margin: 4px 0 8px; font-size: 12px; color: var(--mc-text-muted); }
 .settings-page__item-control { display: flex; align-items: center; gap: 8px; }
 /* 刷新结果这类整句回显：按钮单独一行，结果换行落到下面，不跟按钮挤在同一行撑破容器。 */

@@ -72,6 +72,12 @@
 .agent-assistant__capability-models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .agent-assistant__capability-models > span { padding: 2px 7px; border-radius: 5px; background: var(--app-web-subtle); color: var(--assistant-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .agent-assistant__capability-suppliers .ui-button { flex-shrink: 0; white-space: nowrap; }
+.agent-assistant__balance {
+	color: var(--assistant-secondary);
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
 .agent-assistant__state { display: inline-flex; align-items: center; gap: 7px; color: var(--assistant-secondary); font-size: 12px; white-space: nowrap; }
 .agent-assistant__state::before { content: ""; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
 .agent-assistant__state[data-tone="warning"] { color: var(--app-status-warning); }
@@ -82,9 +88,15 @@
 .agent-assistant__empty--service .ui-button { margin-top: 8px; padding-inline: 24px; }
 .agent-assistant__empty-note { padding: 24px; border: 1px dashed var(--app-web-border); border-radius: 12px; background: var(--app-web-panel); text-align: center; font-size: 12px; }
 .agent-assistant__list li { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 66px; padding: 12px 16px; border-bottom: 1px solid var(--app-web-border); }
-.agent-assistant__source-list li { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; }
+.agent-assistant__source-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+.agent-assistant__meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; white-space: nowrap; }
 .agent-assistant__identity { min-width: 0; overflow-wrap: anywhere; }
 .agent-assistant__identity > strong { font-size: 13px; font-weight: 600; }
+/* 提供商列表行统一为「图标 + 标题」：图标固定 24px 方框，文字垂直居中。 */
+.agent-assistant__source-list .agent-assistant__identity > strong { display: inline-flex; align-items: center; gap: 10px; }
+.agent-assistant__source-list .agent-assistant__provider-mark { width: 24px; height: 24px; flex: 0 0 24px; }
+.agent-assistant__source-list .agent-assistant__provider-mark .plugin-card__icon,
+.agent-assistant__source-list .agent-assistant__provider-mark .plugin-card__icon-image { width: 24px; height: 24px; }
 .agent-assistant__status { margin-top: 4px !important; font-size: 12px; }
 .agent-assistant__actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .agent-assistant__add { min-width: 0; }
@@ -202,3 +214,17 @@
 
 .canvas-history--embedded .canvas-history__detail-preview video { width: 100%; max-height: 300px; }
 .canvas-history--embedded .canvas-history__detail-preview .ui-audio-player { width: 100%; padding: 16px; }
+
+.agent-assistant__hosting-list .agent-assistant__identity { flex: 1; }
+.agent-assistant__hosting-list { overflow: visible; isolation: isolate; }
+.agent-assistant__hosting-list li { position: relative; background: var(--app-web-panel); }
+.agent-assistant__hosting-list li:first-child { border-radius: 11px 11px 0 0; }
+.agent-assistant__hosting-list li:last-child { border-radius: 0 0 11px 11px; }
+.agent-assistant__hosting-list li[data-dragging="true"] { z-index: 1; will-change: transform; border-radius: 8px; box-shadow: 0 8px 20px var(--app-web-shadow); cursor: grabbing; }
+.agent-assistant__hosting-drag { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 36px; padding: 0; border: 0; border-radius: 6px; color: var(--assistant-secondary); background: transparent; cursor: grab; touch-action: none; user-select: none; }
+.agent-assistant__hosting-drag:hover:not(:disabled) { color: var(--app-web-text-primary); background: var(--app-web-subtle); }
+.agent-assistant__hosting-drag:active:not(:disabled) { cursor: grabbing; }
+.agent-assistant__hosting-drag:disabled { opacity: .4; cursor: default; }
+.agent-assistant__hosting-name { display: inline-flex; align-items: center; gap: 7px; }
+.agent-assistant__hosting-priority { display: inline-flex; flex-shrink: 0; color: var(--app-interaction-accent); }
+.agent-assistant__hosting-priority > svg { fill: currentColor; }

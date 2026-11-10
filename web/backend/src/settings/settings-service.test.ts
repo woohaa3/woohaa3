@@ -380,3 +380,15 @@ describe("扩展启停落在配置文件", () => {
     expect(service.unknownKeys()).not.toContain("extensions.prompt-snippets.enabled");
   });
 });
+
+
+it("图床列表顺序与恢复自动选择一起保存，重启后读取同一优先顺序", async () => {
+  const files = tempFiles();
+  const { service } = await start(files);
+  const values = { "exposer.order": "cos,runninghub-temporary", "exposer.primary": "auto" };
+  expect(await service.update(values)).toMatchObject({ ok: true });
+  expect(service.get("exposer.order")).toBe(values["exposer.order"]);
+  const { service: restarted } = await start(files);
+  expect(restarted.get("exposer.order")).toBe(values["exposer.order"]);
+  expect(restarted.get("exposer.primary")).toBe("auto");
+});

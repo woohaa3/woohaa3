@@ -287,6 +287,7 @@ export function create2dInputFamily(core: InteractionCore) {
           nodeId: cardTarget.nodeId,
           selected: state.selected,
           additive: event.shiftKey,
+          via: cardTarget.via,
           scopeId: cardTarget.scopeId
         })
       : null;
@@ -344,6 +345,7 @@ export function create2dInputFamily(core: InteractionCore) {
           nodeId: pickedNodeId,
           selected: state.selected,
           additive: event.shiftKey,
+          via: pickedTarget.via,
           scopeId: pickedTarget.scopeId
         });
         if (plan.gesture === "scope") {
@@ -515,6 +517,7 @@ export function create2dInputFamily(core: InteractionCore) {
           nodeId: hitNodeId,
           selected: state.selected,
           additive: event.shiftKey,
+          via: cardTarget.via,
           scopeId: cardTarget.scopeId
         }),
         setSelection,

@@ -833,6 +833,25 @@ describe("world authoring response codec", () => {
     expect(decodeWorldAuthoringFailure({ ...conflict, conflicts: [{ target: { kind: "camera" } }] }).ok).toBe(false);
     expect(decodeWorldAuthoringFailure({ ok: false, code: "", message: "x" }).ok).toBe(false);
   });
+
+  it("preserves out-of-scope geometry without accepting a half-typed diagnostic", () => {
+    const diagnostic = {
+      actual: { min: { u: 5, v: 5 }, max: { u: 6, v: 6 } },
+      bounds,
+      anchor: { u: 5, v: 5 },
+      outsideAxes: ["u"]
+    };
+    expect(decodeWorldAuthoringFailure({ ok: false, code: "outside-scope", message: "outside", spatialReason: "outside-scope", spatialDiagnostic: diagnostic })).toEqual({
+      ok: true,
+      value: { ok: false, code: "outside-scope", message: "outside", spatialReason: "outside-scope", spatialDiagnostic: diagnostic }
+    });
+    expect(decodeWorldAuthoringFailure({ ok: false, code: "outside-scope", message: "outside",
+      spatialDiagnostic: { ...diagnostic, bounds: { min: { u: 0, v: 0 } } } }).ok).toBe(false);
+    expect(decodeWorldAuthoringFailure({ ok: false, code: "outside-scope", message: "outside",
+      spatialDiagnostic: { ...diagnostic, outsideAxes: ["w"] } }).ok).toBe(false);
+    expect(decodeWorldAuthoringFailure({ ok: false, code: "outside-scope", message: "outside",
+      spatialDiagnostic: { ...diagnostic, surprise: 1 } }).ok).toBe(false);
+  });
 });
 
 it("decodes the issued camera-only tool context without losing its typed scope", () => {

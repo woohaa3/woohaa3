@@ -31,7 +31,7 @@ import {
   sampleWorldAnimationInArea,
   worldCameraRotationLookingAt
 } from "@woohaa3/contracts";
-import { auditWrap, errorResult, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
+import { auditWrap, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
 import { hashText } from "./planner-hash.js";
 
 export type AssistantWorldToolClient = {
@@ -181,6 +181,58 @@ function denied(message: string) {
   };
 }
 
+/**
+ * Host failure codes that must stay distinguishable in the assistant-visible
+ * receipt. `version-unknown` is the host's reason for "cannot verify the current
+ * version", so it must not be flattened into an ordinary `outside-scope`.
+ */
+type HostFailure = {
+  code: string;
+  message: string;
+  conflicts?: unknown;
+  spatialReason?: string;
+};
+
+const versionUnknownReason = "version-unknown";
+
+/** Treat a host reason of `version-unknown` as its own action-visible failure kind. */
+function failureKind(failure: HostFailure): "outside-scope" | "version-conflict" | "version-unknown" | string {
+  if (failure.spatialReason === versionUnknownReason) return "version-unknown";
+  return failure.code;
+}
+
+const kindRemedies: Record<string, string> = {
+  "outside-scope": "目标不在本轮宿主签发范围内：不要填写其他范围，也不要猜测版本；改动范围须用户明确要求后再用 resize_scene_area 并重新 get_world_context。",
+  "version-conflict": "目标的版本已变化：重新 get_world_context（或使用上一条写入回执的 version）取得真实版本后重试，不要复用旧版本或换对象绕过。",
+  "version-unknown": "宿主无法确认目标的当前版本（通常是旧宿主或模型资源未就绪）：不要伪造版本、不要换对象绕过；如实说明无法验证该项，必要时重新 get_world_context 后再尝试。",
+  "lease-conflict": "目标正被其他运行占用：如实报告占用，不要换对象绕过或伪造版本。",
+  "stale-epoch": "写能力已失效：本轮不能继续写入，如实报告并等待宿主重新签发。",
+  "not-ready": "目标尚未就绪：如实报告现状，不要猜测版本或伪造诊断。"
+};
+
+/**
+ * Assistant-visible failure receipt. Keeps every host field (structured `code`,
+ * `message`, `conflicts`, `spatialReason`) so the caller can tell outside-scope
+ * and version-conflict/version-unknown apart, and adds an action hint without
+ * inventing diagnostics the host did not report.
+ */
+function worldFailure(failure: HostFailure) {
+  const kind = failureKind(failure);
+  const code = failure.code;
+  const remedy = kindRemedies[kind];
+  const reasonLine = failure.spatialReason ? `（宿主原因：${failure.spatialReason}）` : "";
+  const conflictLine = failure.conflicts ? `\n占用/冲突信息：${JSON.stringify(failure.conflicts)}` : "";
+  const text = `[${kind}] ${failure.message}${reasonLine}${conflictLine}${remedy ? `\n处理建议：${remedy}` : ""}`;
+  const payload: Record<string, unknown> = { code, message: failure.message, failureKind: kind };
+  if (failure.spatialReason !== undefined) payload.spatialReason = failure.spatialReason;
+  if (failure.conflicts !== undefined) payload.conflicts = failure.conflicts;
+  if (remedy) payload.remedy = remedy;
+  return { content: [{ type: "text" as const, text }], structuredContent: { ok: false, ...payload }, isError: true as const };
+}
+
+const defaultAreaSideMeters = 4;
+const defaultAreaNote = `新建导演区默认 ${defaultAreaSideMeters}×${defaultAreaSideMeters} 米（以地面中心为原点，u/v 各 ±${defaultAreaSideMeters / 2} 米）；大场景须先用 resize_scene_area 显式扩区，扩区后重新 get_world_context 取得新的 bounds 与 scopeVersion 再写入。`;
+
 const motionConventions = {
   walking: "Prefer motion.instance.walk with animationRig.walkProfile for supported upright humanoids: distance-driven strides, rounded constant-speed closed route, tangent heading and fixed stance sole targets with two-bone IK. Other profiles use explicit part animation; no guessed IK.",
   modelForward: "Use animationRig.spatial.forwardLocal in model XYZ; humanoid +Z maps to world -v at identity; unsupported profiles may be unknown",
@@ -207,7 +259,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "读取世界助手上下文",
       description:
-        "读取宿主为本轮签发的导演区/2D 组/所选镜头范围、版本、可写模型/镜头和只读参考；镜头范围返回 camera.settings 完整配置与 sceneModels 只读空间信息，只能调整该镜头；导演区 sceneArea 返回当前发布 revision、animationOrigin 与完整 animationScript（null 表示没有动画），sceneModels 返回导演区内可写/只读模型的世界变换（含朝向）与本地包围盒、真实 rig 空间描述，animationBudget 返回逻辑通道预算与已编写插值段、关键帧和循环的分项计数，motionConventions 区分模型 +Z 与镜头 -Z，用于推导动画支点、尺寸和镜头取景，bounds 是导演区地面范围。返修前先读取原脚本，保留未要求修改的轨道和参数。目标与版本来自宿主任命，不接受模型自报；2D 组只返回只读参考。",
+        "读取宿主为本轮签发的导演区/2D 组/所选镜头范围、版本、可写模型/镜头和只读参考；镜头范围返回 camera.settings 完整配置与 sceneModels 只读空间信息，只能调整该镜头；导演区 sceneArea 返回当前发布 revision、animationOrigin 与完整 animationScript（null 表示没有动画），sceneModels 返回导演区内可写/只读模型的世界变换（含朝向）与本地包围盒、真实 rig 空间描述，animationBudget 返回逻辑通道预算与已编写插值段、关键帧和循环的分项计数，motionConventions 区分模型 +Z 与镜头 -Z，用于推导动画支点、尺寸和镜头取景，bounds 是导演区地面范围。新建导演区默认 4×4 米；大场景须先用 resize_scene_area 显式扩区，扩区后重新 get_world_context 取得新 bounds 与 scopeVersion 再写入。返修前先读取原脚本，保留未要求修改的轨道和参数。目标与版本来自宿主任命，不接受模型自报；2D 组只返回只读参考。",
       inputSchema: z.strictObject({}),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
@@ -216,7 +268,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
       const bound = worldGrant(deps);
       if (!bound) return denied("本轮没有宿主签发的世界创作上下文");
       const outcome = await bound.client.read({ canvasId: bound.canvasId, contextId: bound.world.contextId });
-      if (!outcome.ok) return errorResult({ code: outcome.code, message: outcome.message } as never);
+      if (!outcome.ok) return worldFailure(outcome);
       return structured({ ...outcome.view, animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, `世界范围：${outcome.view.scope.scope.kind}`);
     }
   );
@@ -231,11 +283,11 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     const bound = worldGrant(deps);
     if (!bound) return denied("本轮没有宿主签发的世界创作上下文");
     const result = await bound.client.read({ canvasId: bound.canvasId, contextId: bound.world.contextId });
-    if (!result.ok) return errorResult({ code: result.code, message: result.message } as never);
+    if (!result.ok) return worldFailure(result);
     if (result.view.scope.scope.kind !== "scene-area") return denied("本轮不是导演区范围");
     const model = result.view.sceneModels?.find(model => model.instanceId === instanceId);
-    if (!model) return errorResult({ code: "outside-scope", message: "模型不在本轮读取范围" } as never);
-    if (!model.animationRig) return errorResult({ code: "not-ready", message: "模型动画部件无法编译" } as never);
+    if (!model) return worldFailure({ code: "outside-scope", message: `模型 ${instanceId} 不在本轮读取范围` });
+    if (!model.animationRig) return worldFailure({ code: "not-ready", message: `模型 ${instanceId} 的动画部件无法编译` });
     return structured({ ok: true, instanceId, transform: model.transform, animationRig: model.animationRig, animationBudget: animationBudget(result.view.sceneArea?.animationScript), motionConventions }, "实际模型动画部件");
   });
 
@@ -249,13 +301,13 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     const bound = worldGrant(deps);
     if (!bound) return denied("本轮没有宿主签发的世界创作上下文");
     const result = await bound.client.read({ canvasId: bound.canvasId, contextId: bound.world.contextId });
-    if (!result.ok) return errorResult({ code: result.code, message: result.message } as never);
+    if (!result.ok) return worldFailure(result);
     const area = result.view.sceneArea;
-    if (result.view.scope.scope.kind !== "scene-area" || !area?.animationScript) return errorResult({ code: "invalid-data", message: "导演区没有已发布动画" } as never);
+    if (result.view.scope.scope.kind !== "scene-area" || !area?.animationScript) return worldFailure({ code: "invalid-data", message: "导演区没有已发布动画" });
     const script = area.animationScript;
-    if (times.some(time => time > script.duration)) return errorResult({ code: "invalid-data", message: "采样时间超过动画时长" } as never);
+    if (times.some(time => time > script.duration)) return worldFailure({ code: "invalid-data", message: "采样时间超过动画时长" });
     const compiled = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
-    if (!compiled.ok) return errorResult({ code: "invalid-data", message: compiled.message } as never);
+    if (!compiled.ok) return worldFailure({ code: "invalid-data", message: compiled.message });
     const samples = times.map(time => {
       const sample = sampleWorldAnimationInArea(compiled.ir, time, area.animationOrigin);
       const neighboringTime = time < script.duration ? Math.min(script.duration, time + 0.01) : Math.max(0, time - 0.01);
@@ -273,7 +325,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "在导演区创建模型",
       description:
-        "在宿主签发的导演区内创建新模型实例。transform.position 是模型根的世界 u/v/h，不等于脚底；变换后的稳定地面锚点须落在 get_world_context.bounds 内（边线算内部）；节点身份由宿主生成，传入的 nodeId 会被忽略。人形使用绑定姿态脚底锚点，其他已准备模型使用几何底部中心；身体越界不影响归属，2D 组范围没有此能力。",
+        "在宿主签发的导演区内创建新模型实例。transform.position 是模型根的世界 u/v/h，不等于脚底；变换后的稳定地面锚点须落在 get_world_context.bounds 内（边线算内部）；" + defaultAreaNote + "节点身份由宿主生成，传入的 nodeId 会被忽略。人形使用绑定姿态脚底锚点，其他已准备模型使用几何底部中心；身体越界不影响归属，2D 组范围没有此能力。失败回执会带 code/失败类别（如 outside-scope、version-conflict、version-unknown）与处理建议：outside-scope 表示超出本轮 bounds，version-conflict/version-unknown 表示版本已变化或无法确认，需重新 get_world_context 取真实版本后重试，不要伪造版本。",
       inputSchema: z.strictObject({
         instanceId: z.string().min(1).optional(),
         modelScript: z.string().min(1),
@@ -315,7 +367,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           contextId: bound.world.contextId,
           operation
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `已创建模型 ${outcome.instanceId ?? resolvedNodeId}`), code: undefined };
       })
   );
@@ -353,7 +405,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             ...(pose ? { transform: pose as WorldTransform } : {})
           }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `已替换模型 ${instanceId}`), code: undefined };
       })
   );
@@ -386,7 +438,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             transform: pose as WorldTransform
           }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `已移动模型 ${instanceId}`), code: undefined };
       })
   );
@@ -422,7 +474,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             loop: loop ?? false
           }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         // Saving already succeeded. Readback or diagnostic failure must not turn
         // the committed write into a reported failure or certify another script.
         const unavailable = (reason: string) => ({ verification: "sampled-data-only" as const, status: "unavailable" as const, reason });
@@ -470,7 +522,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "调整导演区范围",
       description:
-        "显式扩大或缩小导演区的地面范围。bounds 使用世界 u/v 米，min 不能超过 max；只改范围，不移动、不缩放模型与镜头，缩小后落在范围外的对象会变成只读。expectedScopeVersion 必须来自 get_world_context.sceneArea.scopeVersion，写入成功后会推进。范围调整必须对应用户的明确要求，不能作为取得对象写权限的隐含步骤。",
+        "显式扩大或缩小导演区的地面范围。bounds 使用世界 u/v 米，min 不能超过 max；只改范围，不移动、不缩放模型与镜头，缩小后落在范围外的对象会变成只读。expectedScopeVersion 必须来自 get_world_context.sceneArea.scopeVersion，写入成功后会推进，因此扩区后必须重新 get_world_context 才能继续写入。新建导演区默认 4×4 米；大场景模型/镜头放不下时先用本工具（resize_scene_area）显式扩区，扩区后必须重新 get_world_context 取得新 bounds 与版本再写入，不要靠移动对象去绕过范围。范围调整必须对应用户的明确要求，不能作为取得对象写权限的隐含步骤。",
       inputSchema: z.strictObject({
         expectedScopeVersion: z.string().min(1),
         bounds: groundAabb
@@ -484,7 +536,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
         if (bounds.min.u > bounds.max.u || bounds.min.v > bounds.max.v) {
           return {
-            result: errorResult({ code: "invalid-data", message: "bounds.min 不能超过 bounds.max" } as never),
+            result: worldFailure({ code: "invalid-data", message: "bounds.min 不能超过 bounds.max" }),
             code: "invalid-data"
           };
         }
@@ -497,7 +549,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             bounds
           }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, "已调整导演区范围"), code: undefined };
       })
   );
@@ -521,7 +573,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
         const resolved = resolveCameraRotation(settings);
         if ("message" in resolved) {
-          return { result: errorResult({ code: "invalid-data", message: resolved.message } as never), code: "invalid-data" };
+          return { result: worldFailure({ code: "invalid-data", message: resolved.message }), code: "invalid-data" };
         }
         const payload = cameraSettingsPayload(settings, resolved.rotation);
         const contentHash = hashText(JSON.stringify({ workId: deps.grant!.workId, settings: payload, cardPosition: cardPosition ?? null }));
@@ -538,7 +590,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             ...(cardPosition ? { cardPosition } : {})
           }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `已创建镜头 ${outcome.cameraId ?? cameraId}${cameraViewSuffix(outcome.view)}`), code: undefined };
       })
   );
@@ -565,14 +617,14 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         if (settings.lookAt || settings.rotation) {
           const resolved = resolveCameraRotation(settings);
           if ("message" in resolved) {
-            return { result: errorResult({ code: "invalid-data", message: resolved.message } as never), code: "invalid-data" };
+            return { result: worldFailure({ code: "invalid-data", message: resolved.message }), code: "invalid-data" };
           }
           derived = resolved.rotation;
         }
         const patch = cameraSettingsPatchPayload(settings, derived);
         if (Object.keys(patch).length === 0) {
           return {
-            result: errorResult({ code: "invalid-data", message: "镜头设置至少需要一个字段" } as never),
+            result: worldFailure({ code: "invalid-data", message: "镜头设置至少需要一个字段" }),
             code: "invalid-data"
           };
         }
@@ -586,7 +638,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
             settings: patch
           }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `已保存镜头 ${cameraId}${cameraViewSuffix(outcome.view)}`), code: undefined };
       })
   );
@@ -619,7 +671,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           },
           evidence: { grantToken: deps.grant!.token }
         });
-        if (!outcome.ok) return { result: errorResult({ code: outcome.code, message: outcome.message } as never), code: outcome.code };
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `镜头完成已留档 ${cameraId}`), code: undefined };
       })
   );

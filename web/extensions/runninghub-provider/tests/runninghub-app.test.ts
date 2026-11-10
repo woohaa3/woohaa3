@@ -50,11 +50,23 @@ describe("RunningHub App interaction（任务 3.1）", () => {
     expect(descriptor.required).not.toBe(true);
   });
 
-  it("激活时以 owner=runninghub-provider 注册 runninghub-app@1，dispose 释放", () => {
+  it("激活时以 owner=runninghub-provider 注册 runninghub-app@1 与余额贡献，dispose 释放", () => {
     const registry = fakeRegistry();
     const effects: Array<() => void> = [];
+    const slotContributions: Array<{ slot: string; id: string; owner?: string; providerId?: string; render: unknown }> = [];
     const ctx = {
       modelInteractions: registry,
+      slots: {
+        register: (slot: string, contribution: { id: string; owner?: string; providerId?: string; render: unknown }) => {
+          const entry = { slot, ...contribution };
+          slotContributions.push(entry);
+          return () => {
+            const index = slotContributions.indexOf(entry);
+            if (index >= 0) slotContributions.splice(index, 1);
+          };
+        }
+      },
+      applicationRemote: { transport: { request: async () => ({ ok: false, code: "unavailable", error: "test" }) } },
       effect: (factory: () => () => void) => {
         effects.push(factory());
       }
@@ -66,9 +78,17 @@ describe("RunningHub App interaction（任务 3.1）", () => {
     expect(definition.id).toBe(RUNNINGHUB_APP_INTERACTION_ID);
     expect(definition.version).toBe(RUNNINGHUB_APP_INTERACTION_VERSION);
     expect(definition.owner).toBe("runninghub-provider");
+    expect(slotContributions).toHaveLength(1);
+    expect(slotContributions[0]).toMatchObject({
+      slot: "agent-assistant.provider-balance",
+      id: "runninghub-provider-provider-balance",
+      owner: "runninghub-provider",
+      providerId: "runninghub"
+    });
 
     for (const dispose of effects) dispose();
     expect(registry.registered).toHaveLength(0);
+    expect(slotContributions).toHaveLength(0);
   });
 
   it("前端入口不静态 import Provider/后端实现（浏览器构建边界）", () => {

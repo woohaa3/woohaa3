@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PassThrough } from "node:stream";
-import { StorageObjectNotFoundError, type HostExtensionContext, type StorageBackend } from "@woohaa3/contracts";
+import { StorageObjectNotFoundError, type HostExtensionContext, type StorageBackend, type StorageExposer } from "@woohaa3/contracts";
 import { COS_ENV_KEYS,
   DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
   createCosBackend,
@@ -106,16 +106,17 @@ function fakeCos(options: {
 function fakeCtx(): {
   ctx: HostExtensionContext;
   registered: StorageBackend[];
-  exposers: Array<{ exposerId: string }>;
+  exposers: StorageExposer[];
   logs: Array<Record<string, unknown>>;
   disposers: Array<() => void>;
 } {
   const registered: StorageBackend[] = [];
-  const exposers: Array<{ exposerId: string }> = [];
+  const exposers: StorageExposer[] = [];
   const logs: Array<Record<string, unknown>> = [];
   const disposers: Array<() => void> = [];
   const ctx = {
     storage: {
+      resolve: (id: string) => registered.find(backend => backend.backendId === id),
       register(backend: StorageBackend) {
         registered.push(backend);
         return () => {
@@ -129,9 +130,9 @@ function fakeCtx(): {
         logs.push(event);
       }
     },
-    // 公开临时桶与私有桶并列注册：这里也收集 address 提供者，便于断言「配了才注册」。
+    // 地址能力与存储后端共享配置与生命周期。
     exposer: {
-      register: (item: { exposerId: string }) => {
+      register: (item: StorageExposer) => {
         exposers.push(item);
         return () => {
           const index = exposers.indexOf(item);
@@ -200,13 +201,14 @@ describe("配置归一化（缺项不再抛错）", () => {
     await createCosStoragePlugin().apply(ctx, {});
 
     expect(registered).toEqual([]);
-    expect(exposers).toEqual([]);
+    expect(exposers.map(item => item.exposerId)).toEqual(["cos"]);
+    expect(exposers[0]!.temporaryHosting!.ready!()).toBe(false);
     expect(logs).toEqual([
       { event: "cos-storage-unconfigured", missing: ["secretId", "secretKey", "bucketName", "bucketUrl", "prefix"] }
     ]);
   });
 
-  it("配置齐备时只注册 cos 后端；公开桶归 local-storage，不再由本插件提供", async () => {
+  it("配置齐备时注册 COS 存储与临时图床，签名复用同一后端并随卸载撤销", async () => {
     const { ctx, registered, exposers, logs, disposers } = fakeCtx();
     await createCosStoragePlugin().apply(ctx, {
       secretId: "id",
@@ -218,13 +220,23 @@ describe("配置归一化（缺项不再抛错）", () => {
 
     expect(registered.map((backend) => backend.backendId)).toEqual(["cos"]);
     expect(registered[0]?.label).toBe("COS / S3 对象存储");
-    // 私有桶自带 presign，因此它同时是一个隐式地址提供者（不需要注册 exposer）。
+    // 已有 presign 继续提供签名，图床只负责声明与转发。
     expect(registered[0]?.presign).toBeTypeOf("function");
-    expect(exposers).toEqual([]);
+    expect(exposers).toHaveLength(1);
+    expect(exposers[0]).toMatchObject({
+      exposerId: "cos", label: "COS / S3 对象存储", ownerExtensionId: "cos-storage",
+      requiresReplica: true, targetBackendId: "cos",
+      temporaryHosting: { category: "provider", priority: 100, validitySeconds: 900 }
+    });
+    expect(exposers[0]!.temporaryHosting!.ready!()).toBe(true);
+    registered[0]!.presign = async (key, options) => `https://signed.invalid/${key}?expires=${options?.expiresSeconds}`;
+    expect(await exposers[0]!.expose({ namespace: "media", key: "shot.png" })).toBe("https://signed.invalid/media/shot.png?expires=900");
+    expect(await exposers[0]!.expose({ namespace: "media", key: "shot.png", expiresSeconds: 60 })).toContain("expires=60");
     expect(logs).toEqual([{ event: "cos-storage-activated", backendId: "cos" }]);
 
     disposers.forEach((dispose) => dispose());
     expect(registered).toEqual([]);
+    expect(exposers).toEqual([]);
   });
 });
 

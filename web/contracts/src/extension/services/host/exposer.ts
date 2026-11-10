@@ -14,7 +14,7 @@
  *
  * 临时图床（change: 2026-11-07-add-runninghub-llm-and-provider-temporary-hosting）：
  * 提供者在 `temporaryHosting` 上声明「这类地址是临时外链」，并给出稳定优先级、就绪条件与
- * 请求约束。默认策略是自动：优先符合当前请求的提供商，没有提供商时用 Woohaa3 内置临时图床。
+ * 请求约束。默认策略按用户保存的来源顺序选择；未排序来源按扩展声明优先级及稳定 ID 追加。
  */
 import type { StorageScope } from "./storage.js";
 
@@ -60,7 +60,7 @@ export type StorageExposeRequest = {
   readonly signal?: AbortSignal;
 };
 
-/** 临时图床类别：提供商提供的外链，或 Woohaa3 内置服务。 */
+/** 临时图床类别：提供商提供的外链，或扩展声明的后备服务。 */
 export type TemporaryHostingCategory = "provider" | "builtin";
 
 /** 临时图床对素材的声明约束（缺省表示不限制）。 */
@@ -79,10 +79,23 @@ export type TemporaryHostingDeclaration = {
   readonly category: TemporaryHostingCategory;
   readonly priority?: number;
   readonly constraints?: TemporaryHostingConstraints;
-  /** 该来源承诺的有效窗口；用于判断本次请求所需窗口能否被满足。 */
-  readonly validitySeconds?: number;
+  /**
+   * 该来源承诺的有效窗口；用于判断本次请求所需窗口能否被满足。
+   *
+   * - 数字：来源能确认的最小窗口；
+   * - `null`：**明确未知/不承诺**——上游没有返回期限时不能按宿主缺省一天冒充承诺。
+   *   未知窗口仍可服务「不要求未来有效性」的请求，但任何正数窗口要求都会排除该来源；
+   * - 缺省：沿用「来源只声明了临时图床能力、未单独声明窗口」的历史语义（宿主上限一天），
+   *   已有来源不受影响。
+   */
+  readonly validitySeconds?: number | null;
   /** 配置完整、扩展已启用且上传实现就绪；返回 false 时不能成为候选。 */
   readonly ready?: () => boolean;
+  /**
+   * 来源自己的就绪说明（可选，例如「未登录」）。能力中心在来源列表里优先显示它，
+   * 让「已配置但当前不可用」与「真的没配置」不再混为一谈；只读，不得触发上传或登录。
+   */
+  readonly statusNote?: () => string | null;
   /**
    * 凭据修订。一次请求在开始前冻结该值，读取完成后再次比对；变化时旧响应不得算作成功。
    * 缺省表示该来源没有可轮换的凭据。
@@ -101,6 +114,8 @@ export type TemporaryHostingCandidateView = {
   readonly configured: boolean;
   /** 当前请求条件下是否可用。 */
   readonly available: boolean;
+  /** 来源自己的就绪说明；没有时为 null。 */
+  readonly statusNote?: string | null;
   readonly selected: boolean;
   /** 最近一次真实调用失败；与「已验证通过」分开表达。 */
   readonly lastError: string | null;
@@ -183,8 +198,8 @@ export type HostExposerService = {
    * 取外部地址的解析顺序：
    * ① 画布覆盖：指定 id 只用该来源；空串表示禁用。
    * ② 全局显式来源：只用该来源。
-   * ③ 自动：先提供商临时图床，再 Woohaa3 内置临时图床；当前后端 presign 不抢占。
-   * 自动选中的提供商出现可恢复失败时，符合条件的内置来源最多回退一次。
+   * ③ 自动：按用户保存顺序（未列出的按扩展优先级 / ID 追加）选择合格来源。
+   * 可恢复失败时按同一顺序尝试下一个合格来源，每个来源最多一次。
    */
   expose(input: StorageExposeInput): Promise<string>;
   /** 能力中心读取的权威路由快照；只读，不上传、不生成、不改配置。 */

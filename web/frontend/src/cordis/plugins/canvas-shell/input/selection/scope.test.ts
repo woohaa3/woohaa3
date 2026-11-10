@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/contracts";
-import { enclosingAuthoringScope, hasSelectedSiblingInScope, scopeSelectionPrecedence } from "./scope.js";
+import { enclosingAuthoringScope, hasSelectedSiblingInScope, scopeSelectionPrecedence, selectsCardDirectly } from "./scope.js";
 
 function canvas(): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("c1");
@@ -83,6 +83,14 @@ describe("enclosingAuthoringScope", () => {
 
   it("returns null for nodes outside any container", () => {
     expect(enclosingAuthoringScope(canvas(), "loose")).toBeNull();
+  });
+});
+
+describe("selectsCardDirectly", () => {
+  it("lets the camera's 2D card bypass the container, but not its 3D pick", () => {
+    expect(selectsCardDirectly(canvas(), "camera", "card")).toBe(true);
+    expect(selectsCardDirectly(canvas(), "camera", "pick")).toBe(false);
+    expect(selectsCardDirectly(canvas(), "model", "card")).toBe(false);
   });
 });
 

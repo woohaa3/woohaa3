@@ -247,7 +247,7 @@ async function runBuild(options) {
   if (targetError) throw new Error(targetError);
   assertPlatformAndIcons({ platform });
   // 更新源、信任根与构建期常量都来自 build profile；env 只在 loader 内作为加载期覆盖。
-  // 必须在 buildFrontend 之前加载：公开桶与官方信任根要通过 WOOHAA3_DEFINES 进入前端/后端产物。
+  // 必须在 buildFrontend 之前加载：官方信任根要通过 WOOHAA3_DEFINES 进入前端/后端产物。
   const buildProfile = loadBuildProfile({ repoRoot: path.dirname(root), env: process.env });
   if (!buildProfile.ok) {
     const detail = buildProfile.errors.map((error) => `  ${error.path}: ${error.message}`).join("\n");

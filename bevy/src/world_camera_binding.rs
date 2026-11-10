@@ -1,6 +1,6 @@
 //! 共享世界镜头的**单实例绑定**渲染层路由：卡片预览、第一人称编辑预览与页面捕获三处共用。
 //!
-//! 共享世界里的每个实例都待在主画布层 0，主画布因此保持不变。未绑定镜头继续看整层 0
+//! 共享世界里的每个实例都待在主画布层 0，主画布因此保持不变。未绑定镜头看专用世界内容层 11
 //! （真实共享世界构图）；绑定镜头只看目标实例，所以目标模型根额外加入一条从共享
 //! `preview_layers` 池租来的专用层，绑定相机只渲染该层。缺目标绝不退回全世界：相机渲染空层，
 //! 捕获返回稳定失败码。
@@ -17,8 +17,8 @@ use crate::app::PreviewLayerPool;
 use crate::model3d::ModelVisuals;
 use crate::protocol::{GraphNode, Scene};
 
-/// 主画布 / 共享世界层：所有实例与网格所在层。
-pub(crate) const WORLD_LAYER: usize = 0;
+/// 拍摄用共享世界内容层：含世界几何，不含全局方向光与网格。
+pub(crate) const WORLD_LAYER: usize = crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER;
 
 /// 当前持有绑定层租约的实例：`instanceId → layer`。
 #[derive(Resource, Default)]
@@ -29,7 +29,7 @@ pub(crate) struct WorldCameraBinding {
 /// 一帧内某个镜头的绑定解析结果。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BindingResolution {
-    /// 未绑定：相机看整层 0（真实共享世界）。
+    /// 未绑定：相机看整层世界内容 11（真实共享世界）。
     WholeWorld,
     /// 绑定到 `node_id` 实例，只渲染租来的 `layer`。
     Instance { node_id: String, layer: usize },
@@ -49,8 +49,9 @@ impl BindingResolution {
 }
 
 impl WorldCameraBinding {
-    /// 当前活跃绑定层（用于把绑定层并入场景灯光）。
-    pub(crate) fn layers(&self) -> impl Iterator<Item = usize> + '_ {
+    /// 测试核对当前活跃绑定层；不并入全局灯光。
+    #[cfg(test)]
+    fn layers(&self) -> impl Iterator<Item = usize> + '_ {
         self.layers.values().copied()
     }
 
@@ -121,7 +122,7 @@ impl WorldCameraBinding {
     }
 }
 
-/// 相机渲染层：绑定实例只看该层，未绑定看整层 0，缺失/不可用渲染空层。
+/// 相机渲染层：绑定实例只看该层，未绑定看整层世界内容 11，缺失/不可用渲染空层。
 /// `editor_guide` 只在编辑取景加上 9 号辅助层，且**不会**带回世界层 0。
 pub(crate) fn camera_layers(resolution: &BindingResolution, editor_guide: bool) -> RenderLayers {
     let mut layers = match resolution.instance_layer() {
@@ -157,30 +158,6 @@ pub(crate) fn capture_layers(
         BindingResolution::Missing => Err("capture-instance-not-found"),
         BindingResolution::Unavailable => Err("capture-binding-unavailable"),
     }
-}
-
-/// 把活跃绑定层并入场景方向光，使绑定相机与共享世界同一受光。只并集：已释放层残留在灯上是
-/// 惰性的，且数量以池容量为界。
-pub(crate) fn merge_light_layers(commands: &mut Commands, layers: &[usize]) {
-    if layers.is_empty() {
-        return;
-    }
-    let layers = layers.to_vec();
-    commands.queue(move |world: &mut World| {
-        let mut lights = world.query_filtered::<Entity, With<DirectionalLight>>();
-        let entities: Vec<_> = lights.iter(world).collect();
-        for entity in entities {
-            let existing = world
-                .get::<RenderLayers>(entity)
-                .cloned()
-                .unwrap_or_default();
-            let mut merged = existing;
-            for &layer in &layers {
-                merged = merged.with(layer);
-            }
-            world.entity_mut(entity).insert(merged);
-        }
-    });
 }
 
 fn node_for_instance<'a>(scene: &'a Scene, instance_id: &str) -> Option<&'a GraphNode> {
@@ -241,7 +218,8 @@ mod tests {
         let mut bindings = WorldCameraBinding::default();
         let resolution = bindings.resolve(&scene, &mut pool, None);
         assert_eq!(resolution, BindingResolution::WholeWorld);
-        assert!(camera_layers(&resolution, false).intersects(&RenderLayers::layer(0)));
+        assert!(camera_layers(&resolution, false).intersects(&RenderLayers::layer(WORLD_LAYER)));
+        assert!(!camera_layers(&resolution, false).intersects(&RenderLayers::layer(0)));
         assert!(bindings.layers().next().is_none());
     }
 

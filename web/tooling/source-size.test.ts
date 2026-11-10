@@ -74,6 +74,8 @@ describe("业务源码规模门禁（≤500 物理行）", () => {
     expect(physicalLines("a\r\nb\r\n")).toBe(2);
     expect(isBusinessSourceFile("web/contracts/src/canvas/render-scene.ts")).toBe(true);
     expect(isBusinessSourceFile("web/contracts/src/canvas/render-scene.test.ts")).toBe(false);
+    expect(isBusinessSourceFile("web/extensions/demo/backend-dist/entry.mjs")).toBe(false);
+    expect(isBusinessSourceFile("web/extensions/demo/browser-dist/chunks/entry.js")).toBe(false);
     expect(isBusinessSourceFile("web/e2e/helpers.ts")).toBe(false);
     expect(isBusinessSourceFile("web/frontend/src/bevy-wasm/x.d.ts")).toBe(false);
     expect(isBusinessSourceFile("web/frontend/src/bevy-wasm/woohaa_bevy_canvas.js")).toBe(false);

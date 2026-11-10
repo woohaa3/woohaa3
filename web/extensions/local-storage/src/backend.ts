@@ -5,10 +5,6 @@
  * namespace（形如 `media/sha256-xxx.png`），落到磁盘就是 `${root}/${key}`。这是「完全本地」
  * 的缺省后端 —— 没有 `presign`：本地没有公网身份，字节放在哪它说了算，出不出地址它说了不算。
  *
- * 对外地址的补丁也在这里：本插件可选地注册一个**公开临时桶**提供者（见 `public-bucket.ts`），
- * 把本地字节推到公开只读的对象存储，供第三方 API 直接拉取。它是自动模式的内置后备；
- * 桶信息未配置时如实不可用，不虚构凭据。
- *
  * contentType 用 sidecar 文件 `${root}/${key}.meta.json` 保存（内容 `{"contentType":"..."}`）：
  * 媒体 verify 会比对 contentType，所以 `put` 必须写 sidecar；读不到 sidecar 时按扩展名推断。
  *
@@ -23,7 +19,6 @@ import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import {
   defineConfigSchema,
-  StorageExposeUnavailableError,
   StorageObjectNotFoundError,
   type ExtensionPlugin,
   type StorageBackend,
@@ -31,13 +26,6 @@ import {
   type StorageObject,
   type StorageObjectStat
 } from "@woohaa3/contracts";
-import {
-  LOCAL_PUBLIC_EXPOSER_ID,
-  createPublicBucketExposer,
-  publicBucketDefaults,
-  resolvePublicBucketConfig,
-  type PublicBucketConfig
-} from "./public-bucket.js";
 
 export const LOCAL_STORAGE_PLUGIN_ID = "local-storage";
 export const LOCAL_STORAGE_BACKEND_ID = "local";
@@ -53,9 +41,6 @@ export const LOCAL_STORAGE_LOCATOR_PREFIX = `media://local/`;
 /** sidecar 后缀；与对象同目录，删除对象时一并删除。 */
 const META_SUFFIX = ".meta.json";
 
-/** 构建期注入的公开桶信息：设置页展示为默认值，运行期也用它兜底。 */
-const PUBLIC_BUCKET_DEFAULTS = publicBucketDefaults();
-
 export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
   root: {
     kind: "string",
@@ -63,53 +48,6 @@ export const LOCAL_STORAGE_CONFIG = defineConfigSchema({
     reload: "hot",
     label: "存储根目录",
     description: "本地对象存储根目录；相对路径按进程 cwd 解析"
-  },
-  // 公开临时桶：本地部署唯一能拿到「第三方自己拉得动」的地址的方式。地址不签名，
-  // 桶内内容由运维侧定期清理；开启后也**不会**自动成为部署默认提供者。
-  // 桶名 / 域名 / 前缀由构建期注入（WOOHAA3_DEFINES），仓库里不带任何具体桶。
-  publicEnabled: {
-    kind: "boolean",
-    reload: "hot",
-    legacyEnv: "COS_PUBLIC_ENABLED",
-    default: true,
-    label: "启用 Woohaa3 临时图床",
-    description: "把素材上传到公开存储并获取临时外链；内容会被定期清理"
-  },
-  publicBucketName: {
-    kind: "string",
-    ...(PUBLIC_BUCKET_DEFAULTS.bucketName ? { default: PUBLIC_BUCKET_DEFAULTS.bucketName } : {}),
-    reload: "hot",
-    label: "临时图床桶名称",
-    description: "临时图床存储桶名（含 APPID 后缀）；留空用构建期注入值"
-  },
-  publicBucketUrl: {
-    kind: "url",
-    protocols: ["https:", "http:"],
-    ...(PUBLIC_BUCKET_DEFAULTS.bucketUrl ? { default: PUBLIC_BUCKET_DEFAULTS.bucketUrl } : {}),
-    reload: "hot",
-    label: "临时图床地址",
-    description: "临时图床存储访问域名；留空用构建期注入值，region 由它解析"
-  },
-  publicPrefix: {
-    kind: "string",
-    ...(PUBLIC_BUCKET_DEFAULTS.prefix ? { default: PUBLIC_BUCKET_DEFAULTS.prefix } : {}),
-    reload: "hot",
-    label: "临时图床前缀",
-    description: "临时图床存储内的对象前缀；留空用构建期注入值，最终键为 <prefix>/<namespace>/<key>"
-  },
-  publicSecretId: {
-    kind: "string",
-    secret: true,
-    reload: "hot",
-    label: "临时图床 SecretId",
-    description: "临时图床桶可匿名写入时留空；否则依次读 COS_PUBLIC_SECRET_ID、COS_SECRET_ID，或复用「COS / S3 对象存储」的凭据"
-  },
-  publicSecretKey: {
-    kind: "string",
-    secret: true,
-    reload: "hot",
-    label: "临时图床 SecretKey",
-    description: "公开读写的桶可留空（匿名写入）；否则依次读 COS_PUBLIC_SECRET_KEY、COS_SECRET_KEY，或复用「COS / S3 对象存储」的凭据"
   }
 });
 
@@ -279,7 +217,7 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
     label: LOCAL_STORAGE_LABEL,
     icon: "storage",
     configPrefix: LOCAL_STORAGE_CONFIG_PREFIX,
-    inject: ["log", "storage", "exposer", "config"],
+    inject: ["log", "storage"],
     Config: LOCAL_STORAGE_CONFIG,
     apply(ctx, config) {
       const log = ctx.log.scope(LOCAL_STORAGE_PLUGIN_ID);
@@ -287,61 +225,6 @@ export function createLocalStoragePlugin(): ExtensionPlugin<typeof LOCAL_STORAGE
       ctx.effect(() => ctx.storage.register(backend));
       log({ event: "local-storage-activated", backendId: backend.backendId });
 
-      // 内置临时图床：自动模式在没有提供商候选时使用。即使桶信息暂缺也注册为候选，
-      // 让能力中心能显示「未配置」并直达本插件配置；ready=false 时不会参与自动选择。
-      if (config.publicEnabled !== true) {
-        log({ event: "local-public-disabled" });
-        return;
-      }
-      const defaults = publicBucketDefaults();
-      const bucketName = (config.publicBucketName ?? "").trim() || (defaults.bucketName ?? "").trim();
-      const bucketUrl = ((config.publicBucketUrl ?? "").trim() || (defaults.bucketUrl ?? "").trim()).replace(/\/+$/, "");
-      const prefix = ((config.publicPrefix ?? "").trim() || (defaults.prefix ?? "").trim()).replace(/^\/+|\/+$/g, "");
-      const missing = [
-        ...(bucketName ? [] : ["publicBucketName"]),
-        ...(bucketUrl ? [] : ["publicBucketUrl"]),
-        ...(prefix ? [] : ["publicPrefix"])
-      ];
-      if (missing.length > 0) {
-        // 桶信息是「推到哪」的前提；凭据可以晚到（cos-storage 比本插件晚装载），所以不在这里判。
-        // 仍注册候选，但 ready=false：不虚构凭据、不参与自动选择，配置补齐后热重载生效。
-        log({ event: "local-public-unconfigured", missing });
-      }
-      const resolveConfig = (): PublicBucketConfig => {
-        // 凭据按用时的最新配置解析：公开桶自己的 → COS_PUBLIC_* → storage.cos / COS_SECRET_*。
-        const shared = ctx.config?.section("storage.cos") ?? {};
-        const resolved = resolvePublicBucketConfig({
-          ...(config.publicSecretId ? { secretId: config.publicSecretId } : {}),
-          ...(config.publicSecretKey ? { secretKey: config.publicSecretKey } : {}),
-          ...(typeof shared.secretId === "string" && shared.secretId ? { sharedSecretId: shared.secretId } : {}),
-          ...(typeof shared.secretKey === "string" && shared.secretKey ? { sharedSecretKey: shared.secretKey } : {}),
-          bucketName,
-          bucketUrl,
-          prefix,
-          env: process.env
-        });
-        if (!resolved.ok) {
-          throw new StorageExposeUnavailableError(`Woohaa3 临时图床未配置：${resolved.missing.join("、")}`);
-        }
-        return resolved.config;
-      };
-      ctx.effect(() =>
-        ctx.exposer.register({
-          ...createPublicBucketExposer({ resolveConfig, storage: ctx.storage }),
-          // 设置页据此把「打开该提供者的配置」链回本插件。
-          ownerExtensionId: LOCAL_STORAGE_PLUGIN_ID,
-          // 内置临时图床：提供商候选都不可用时自动模式的后备；也能被手动选择。
-          // 桶信息缺失时 ready=false，能力中心显示未配置，自动路由不会选中。
-          temporaryHosting: { category: "builtin", priority: 1000, validitySeconds: 24 * 60 * 60, ready: () => missing.length === 0 }
-        })
-      );
-      log({
-        event: missing.length === 0 ? "local-public-activated" : "local-public-registered-unconfigured",
-        exposerId: LOCAL_PUBLIC_EXPOSER_ID,
-        bucketName,
-        bucketUrl,
-        prefix
-      });
     }
   };
 }

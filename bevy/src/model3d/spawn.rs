@@ -123,6 +123,10 @@ pub(super) fn spawn_v2(
     strategy: super::batch_strategy::BatchStrategy,
     barriers: &HashSet<String>,
 ) -> ModelRoot {
+    #[cfg(feature = "explicit-instancing")]
+    let strategy = if strategy == super::batch_strategy::BatchStrategy::Explicit {
+        super::batch_strategy::BatchStrategy::Automatic
+    } else { strategy };
     let root = commands
         .spawn((
             ModelAnchor,

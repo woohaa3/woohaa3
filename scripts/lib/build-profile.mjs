@@ -16,7 +16,7 @@ export const BUILD_PROFILE_SCHEMA_VERSION = 1;
 const PROFILE_FILE = "build-profile.json";
 const LOCAL_PROFILE_FILE = "build-profile.local.json";
 const ALLOWED_ROOT_FIELDS = new Set([
-  "$schema", "schemaVersion", "profileId", "publicBucket", "cdn", "desktop", "dev", "extensionTrust", "extensions", "frontendBuild", "settings"
+  "$schema", "schemaVersion", "profileId", "cdn", "desktop", "dev", "extensionTrust", "extensions", "frontendBuild", "settings"
 ]);
 const SECRET_KEY = /secret|token|password|private_?key|api_?key/i;
 const PEM_PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
@@ -79,19 +79,6 @@ export function decodeBuildProfile(raw) {
     push("$.profileId", "必须匹配 ^[a-z0-9][a-z0-9._-]{0,63}$");
   }
   pushSecretErrors(raw, "$", push);
-
-  const bucket = raw.publicBucket;
-  if (bucket !== undefined) {
-    if (!isObject(bucket)) push("$.publicBucket", "必须是对象");
-    else {
-      for (const key of Object.keys(bucket)) {
-        if (!["bucketName", "bucketUrl", "prefix"].includes(key)) push("$.publicBucket." + key, "未知字段");
-      }
-      if (typeof bucket.bucketName !== "string" || bucket.bucketName.length === 0) push("$.publicBucket.bucketName", "必须是非空字符串");
-      if (typeof bucket.bucketUrl !== "string" || !HTTPS_URL.test(bucket.bucketUrl)) push("$.publicBucket.bucketUrl", "必须是 https URL");
-      if (typeof bucket.prefix !== "string" || bucket.prefix.length === 0 || bucket.prefix.startsWith("/")) push("$.publicBucket.prefix", "必须非空且不以 / 开头");
-    }
-  }
 
   const cdn = raw.cdn;
   if (cdn !== undefined) {
@@ -293,7 +280,6 @@ export function loadBuildProfile({ repoRoot, clientRoot, env = {} } = {}) {
     updateEndpointTemplate: profile.cdn ? joinUrl(profile.cdn.baseUrl, profile.cdn.updatePath) : "",
     updatePublicKeys: profile.desktop?.update?.publicKeys ? [...profile.desktop.update.publicKeys] : [],
     allowUnconfiguredUpdate: profile.desktop?.allowUnconfiguredUpdate === true,
-    publicBucket: profile.publicBucket ? { ...profile.publicBucket } : null,
     officialKeys: profile.extensionTrust?.officialKeys ? profile.extensionTrust.officialKeys.map(entry => ({ ...entry })) : [],
     cdnBaseUrl: profile.cdn?.baseUrl ?? "",
     extensionDefaults: profile.extensions?.defaultEnabled ? { ...profile.extensions.defaultEnabled } : {},
@@ -325,12 +311,6 @@ export function updateEndpointFor(resolved, platformKey) {
   return template.replaceAll("{platformKey}", platformKey);
 }
 
-/** 派生 esbuild 构建期常量；没有 bucket 时返回 null（而不是空串桶）。 */
-export function publicBucketDefines(resolved) {
-  if (!resolved.publicBucket) return null;
-  return { __WOOHAA3_PUBLIC_BUCKET__: resolved.publicBucket };
-}
-
 /**
  * 官方扩展信任根常量。
  *
@@ -349,7 +329,6 @@ export function settingDefaultDefines(resolved) {
 
 export function buildDefines(resolved) {
   const merged = {
-    ...(publicBucketDefines(resolved) ?? {}),
     ...(officialTrustDefines(resolved) ?? {}),
     ...(settingDefaultDefines(resolved) ?? {})
   };

@@ -15,6 +15,7 @@
 import type { InteractionState, Viewport } from "./interaction-core.js";
 import type { ModelGestureFamily } from "./model-gesture-family.js";
 import { ContinuousWheelOwner, nativeWheelTarget } from "./input/continuous-wheel-owner.js";
+import { setAlignmentGuides } from "./alignment-snap.js";
 
 /** 拖动粘连 Q/E 路由与取消（change: add-drag-touch-connections）。 */
 export type AttachKeyboardController = import("./interaction-core.js").DragAttachKeyboardController & {
@@ -92,6 +93,8 @@ export function createSurfaceInteractions(deps: SurfaceInteractionDeps): Surface
     state.draft = null;
     state.localPositions = new Map();
     state.localSizes = new Map();
+    // 取消瞬时手势后同样推进版本号：覆盖层据此撤下旧参考线。
+    setAlignmentGuides(state, []);
     deps.clearWorldGroundPreviews?.();
     deps.clearWorldCameraPreviews?.();
     state.viewportPreview = null;

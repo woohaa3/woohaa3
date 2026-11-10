@@ -11,13 +11,18 @@
  */
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import type { ModelInteractionRegistry } from "@woohaa3/frontend/extension-api";
-import { RUNNINGHUB_PLUGIN_ID } from "../shared.js";
+import type {
+  ApplicationRemoteService,
+  ModelInteractionRegistry,
+  SlotsService
+} from "@woohaa3/frontend/extension-api";
+import { RUNNINGHUB_PLUGIN_ID, RUNNINGHUB_PROVIDER_ID } from "../shared.js";
 import {
   RunningHubAppPanel,
   RUNNINGHUB_APP_INTERACTION_ID,
   RUNNINGHUB_APP_INTERACTION_VERSION
 } from "./runninghub-app-panel.js";
+import { createRunningHubProviderBalanceRenderer } from "./provider-balance.js";
 
 export { RUNNINGHUB_PLUGIN_ID } from "../shared.js";
 export { RUNNINGHUB_APP_INTERACTION_ID, RUNNINGHUB_APP_INTERACTION_VERSION } from "./runninghub-app-panel.js";
@@ -25,6 +30,8 @@ export { RUNNINGHUB_APP_INTERACTION_ID, RUNNINGHUB_APP_INTERACTION_VERSION } fro
 /** 宿主在 extension scope 注入的能力。 */
 type ExtensionContext = Context & {
   modelInteractions: ModelInteractionRegistry;
+  slots: SlotsService;
+  applicationRemote: ApplicationRemoteService;
 };
 
 export function runningHubAppInteractionExtension(): Plugin.Function<void> {
@@ -37,10 +44,19 @@ export function runningHubAppInteractionExtension(): Plugin.Function<void> {
         Panel: RunningHubAppPanel
       });
       ctx.effect(() => () => dispose(), "runninghub-app-interaction");
+
+      const removeProviderBalance = ctx.slots.register("agent-assistant.provider-balance", {
+        id: `${RUNNINGHUB_PLUGIN_ID}-provider-balance`,
+        owner: RUNNINGHUB_PLUGIN_ID,
+        priority: 0,
+        providerId: RUNNINGHUB_PROVIDER_ID,
+        render: createRunningHubProviderBalanceRenderer(ctx.applicationRemote.transport)
+      });
+      ctx.effect(() => () => removeProviderBalance(), "runninghub-provider-balance");
     },
     {
       name: RUNNINGHUB_PLUGIN_ID,
-      inject: ["modelInteractions"]
+      inject: ["modelInteractions", "slots", "applicationRemote"]
     }
   );
 }

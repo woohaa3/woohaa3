@@ -2,7 +2,7 @@
  * 设置 · 关于：只展示**运行时能判定**的事实，不伪造版本或环境。
  *
  * 这里刻意解答「为什么生成任务说没有对外地址」：把主存储、对外地址提供者、已注册的
- * 扩展点与公开临时桶的启用/注册状态摊开，用户不用去翻日志。
+ * 扩展点与临时图床的注册状态摊开，用户不用去翻日志。
  */
 import type { ReactNode } from "react";
 import type { SettingsSnapshot } from "@woohaa3/contracts";

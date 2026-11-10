@@ -19,6 +19,7 @@ import {
 import { applyRunStateProjection, executingScopeIds } from "./run-state-projection.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
+import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
 import { modelPreviewStore } from "../../services/model-preview-store.js";
 import type { InteractionControllerOptions } from "./interaction-types.js";
 import type { Viewport } from "./interaction-core.js";
@@ -149,6 +150,7 @@ export function buildSceneWithResources(
     animationPlayback: options.getAnimationPlayback?.() ?? null,
     focusTransition: options.getFocusTransition?.() ?? null
   });
+  scene.globalLightEnabled = canvasAppearanceStore.getSnapshot().globalLightEnabled;
   const isModelLoading = options.getModelLoading?.() ?? options.isModelLoading;
   for (const node of scene.nodes) {
     if (node.worldCamera && options.videoSessions?.hasRealFrame(node.id)

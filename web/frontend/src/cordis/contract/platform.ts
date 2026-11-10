@@ -604,9 +604,51 @@ export type SlotContributionMap = {
     render: ComponentType<{ canvasId: string; active: boolean; onClose: () => boolean }>;
   };
   "agent-assistant.configuration": {
-    kind: "login" | "installed" | "api-key";
+    kind: "login" | "installed" | "api-key" | "provider-login";
     label: string;
+    /** Optional explanatory copy for provider-login methods. */
+    description?: string;
+    /** Optional brand/glyph icon for provider-login methods. */
+    icon?: string;
+    /** Optional generated-model capability tags, used by the capability-filtered provider list. */
+    modelTypes?: readonly import("@woohaa3/contracts").CanvasTaskModelType[];
+    /** Optional sort order among provider methods. */
+    setupOrder?: number;
+    /** Provider id this login method belongs to; provider-balance rows are matched by it. */
+    providerId?: string;
+    /**
+     * Optional configured-state store for provider-login methods.
+     *
+     * When present, the method appears in the main provider list only while
+     * `getSnapshot()` is true; it remains available from the add-connection
+     * flow so an anonymous user can still start login/authorization.
+     */
+    configured?: {
+      getSnapshot: () => boolean;
+      subscribe: (listener: () => void) => () => void;
+    };
     render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }>;
+  };
+  /**
+   * 提供商列表行里的余额读数（可选）。
+   *
+   * 宿主在「模型提供商」列表按 `providerId` 找到该贡献并渲染；扩展自己决定读取方式与展示
+   * 文案，宿主不认识任何具体供应商的余额接口。没有贡献或没有可读余额时不占位。
+   */
+  "agent-assistant.provider-balance": {
+    providerId: string;
+    render: ComponentType;
+  };
+  /**
+   * 临时图床来源的「如何让它就绪」面板（可选）。
+   *
+   * 能力中心按候选的 `ownerExtensionId` 找到该贡献并渲染，替代通用的凭据表单。用于来源的
+   * 就绪条件不是可编辑配置、而是扩展自己的账号状态（例如需要先扫码登录）的场景；宿主不按
+   * 扩展 ID 分支，也不在只读列表里替扩展发起登录。
+   */
+  "agent-assistant.hosting-source": {
+    ownerExtensionId: string;
+    render: ComponentType<{ onSaved?: () => void }>;
   };
   "provider-credentials.top": { render: ComponentType<{ requestClose?: () => void }> };
   /**

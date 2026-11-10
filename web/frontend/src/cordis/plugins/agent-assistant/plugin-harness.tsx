@@ -23,11 +23,17 @@ function DraftInput() {
 
 export async function cleanupHarness() { act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; }
 
-export async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics"} = {canvasId: "canvas", nodeId: "node"}, overrides: Partial<AgentConversationService> = {}, models?: Pick<GenerationModelsStatusService, "getSnapshot" | "subscribe">) {
+export async function render(connections: AgentConnectionView[] = [], configure = false, settingsStore?: ReturnType<typeof createBackendSettingsStore>, payload: {canvasId?: string; nodeId?: string; kind?: string; page?: "add"; connectionId?: string; section?: "generation-history" | "diagnostics"} = {canvasId: "canvas", nodeId: "node"}, overrides: Partial<AgentConversationService> = {}, models?: Pick<GenerationModelsStatusService, "getSnapshot" | "subscribe">, providerLogin = false, hostingSource = false, providerLoginConfigured = true) {
   const slots = new SlotRegistry();
   if (configure) slots.register("agent-assistant.configuration", { id: "api", owner: "sdk-agent", kind: "api-key", label: "API Key", render: ({ onSaved }) => <><DraftInput /><button onClick={() => onSaved?.("c1")}>保存测试连接</button><SelectInput label="配置类型" value="one" onValueChange={() => {}} options={[{value:"one",label:"类型一"},{value:"two",label:"类型二"}]} /></> });
   if (configure) slots.register("agent-assistant.configuration", { id: "local", owner: "local-agent", kind: "installed", label: "我有本地 agent", render: () => <p>本机工具配置</p> });
   if (configure) slots.register("agent-assistant.configuration", { id: "oauth", owner: "oauth-agent", kind: "login", label: "账号授权", render: () => <p>ChatGPT 授权</p> });
+  if (providerLogin) slots.register("agent-assistant.configuration", {
+    id: "provider-login", owner: "demo-provider", kind: "provider-login", label: "Demo 微信登录", description: "使用微信扫码登录。", modelTypes: ["image", "video"], setupOrder: 60,
+    ...(providerLoginConfigured ? {} : { configured: { getSnapshot: () => false, subscribe: () => () => undefined } }),
+    render: () => <p>微信扫码登录</p>
+  });
+  if (hostingSource) slots.register("agent-assistant.hosting-source", { id: "demo-hosting-source", owner: "demo-provider", ownerExtensionId: "sdpppx-provider", render: () => <p>来源自己的登录面板</p> });
   const listConnections = vi.fn(async () => ({ ok: true as const, value: connections }));
   const sourceViews = connections.filter(item => item.authMode !== "local-login").map(item => ({
     serviceConnectionId: `source:${item.connectionId}`, scope: "personal", kind: item.authMode === "oauth" ? "oauth" : "api", name: item.name,

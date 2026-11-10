@@ -274,6 +274,7 @@ fn replace_mesh(
             let entity = commands
                 .spawn((
                     IsometricGrid,
+                    bevy::light::NotShadowCaster,
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(material),
                     NoFrustumCulling,

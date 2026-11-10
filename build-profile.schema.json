@@ -22,10 +22,6 @@
       "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
       "description": "构建日志与产物标注用的画像标识。"
     },
-    "publicBucket": {
-      "description": "派生 __WOOHAA3_PUBLIC_BUCKET__；三者都必需。",
-      "$ref": "#/$defs/publicBucket"
-    },
     "desktop": {
       "type": "object",
       "additionalProperties": false,
@@ -197,28 +193,6 @@
       "type": "string",
       "pattern": "^MCowBQYDK2Vw[A-Za-z0-9+/]*={0,2}$",
       "$comment": "Ed25519 SPKI DER 的 base64（DER 前缀 MCowBQYDK2Vw）。"
-    },
-    "publicBucket": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "bucketName",
-        "bucketUrl",
-        "prefix"
-      ],
-      "properties": {
-        "bucketName": {
-          "type": "string",
-          "minLength": 1
-        },
-        "bucketUrl": {
-          "$ref": "#/$defs/httpsUrl"
-        },
-        "prefix": {
-          "type": "string",
-          "pattern": "^[^/][^\\s]*$"
-        }
-      }
     }
   }
 }

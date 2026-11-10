@@ -951,3 +951,72 @@ it("explains a move rejected by the spatial authority with actual and authorized
   expect(!result.ok && result.message).toContain("u=[0, 10]");
   expect(!result.ok && result.message).toContain("重新授权"); expect(JSON.stringify(canvas)).toBe(before);
 });
+
+describe("assistant spatial failure codes", () => {
+  async function issueMove(commitFailure: Record<string, unknown>, canvas = canvasFixture()) {
+    canvas.nodeData.area = {sceneArea:{kind:"scene-area",version:"shared-world-v1",areaId:"area-1",scopeVersion:"scope-1",
+      animationOrigin:{u:0,v:0},bounds:{min:{u:0,v:0},max:{u:10,v:10}}}};
+    const identity = {kind:"instance" as const,instanceId:"instance-1"};
+    const version = worldObjectVersion(canvas,identity)!;
+    const {service} = harness({canvas,context:contextFor(scope,[{...identity,version}]),commitFailure});
+    const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:scope.scope});
+    if(!issued.ok) throw Error(issued.message);
+    return {service, canvas, identity, version, contextId:issued.context.contextId};
+  }
+
+  const moveOutside = (identity: {instanceId:string}, version: string) => ({kind:"set-model-transform" as const,operationId:"move",
+    instanceId:identity.instanceId,expectedVersion:version,transform:{version:"shared-world-v1" as const,position:{u:1000,v:1000,h:0},
+      rotation:[0,0,0,1] as [number,number,number,number],scale:1}});
+
+  it("distinguishes outside-scope, version-conflict and version-unknown", async () => {
+    const outside = await issueMove({ok:false,code:"spatial-rejected",spatialReason:"outside-scope",message:"空间写入资格无效"});
+    const outsideResult = await outside.service.write({contextId:outside.contextId,operation:moveOutside(outside.identity,outside.version)});
+    expect(outsideResult).toMatchObject({ok:false,code:"outside-scope",spatialReason:"outside-scope"});
+
+    const conflict = await issueMove({ok:false,code:"spatial-rejected",spatialReason:"version-conflict",message:"空间写入资格无效"});
+    const conflictResult = await conflict.service.write({contextId:conflict.contextId,operation:moveOutside(conflict.identity,conflict.version)});
+    expect(conflictResult).toMatchObject({ok:false,code:"version-conflict",spatialReason:"version-conflict"});
+
+    const unknown = await issueMove({ok:false,code:"spatial-rejected",spatialReason:"version-unknown",message:"空间写入资格无效"});
+    const unknownResult = await unknown.service.write({contextId:unknown.contextId,operation:moveOutside(unknown.identity,unknown.version)});
+    expect(unknownResult).toMatchObject({ok:false,code:"version-conflict",spatialReason:"version-unknown"});
+    expect(!unknownResult.ok && unknownResult.message).toContain("无法核对");
+    // version-unknown must never be reported as a scope error.
+    expect(!unknownResult.ok && unknownResult.code).not.toBe("outside-scope");
+  });
+
+  it("carries the authority's out-of-scope geometry into the assistant failure", async () => {
+    const authority = {actual:{min:{u:1000,v:1000},max:{u:1002,v:1002}},bounds:{min:{u:0,v:0},max:{u:10,v:10}},outsideAxes:["u" as const,"v" as const]};
+    const {service, identity, version, contextId} = await issueMove({ok:false,code:"spatial-rejected",spatialReason:"outside-scope",
+      message:"空间写入资格无效",spatialDiagnostic:authority});
+    const result = await service.write({contextId,operation:moveOutside(identity,version)});
+    expect(!result.ok && result.spatialDiagnostic).toEqual({
+      actual:{min:{u:1000,v:1000},max:{u:1002,v:1002}},
+      bounds:{min:{u:0,v:0},max:{u:10,v:10}},
+      outsideAxes:["u","v"]
+    });
+    // The assistant explains with the same geometry the room reported.
+    expect(!result.ok && result.message).toContain("u=[1000, 1002]");
+    expect(!result.ok && result.message).toContain("u=[0, 10]");
+  });
+
+  it("exposes the director-area bounds and overflowing axes when creating an outside camera", async () => {
+    const canvas = canvasFixture();
+    canvas.nodeData.area = {sceneArea:{kind:"scene-area",version:"shared-world-v1",areaId:"area-1",scopeVersion:"scope-1",
+      animationOrigin:{u:0,v:0},bounds:{min:{u:0,v:0},max:{u:10,v:10}}}};
+    const {service} = harness({canvas});
+    const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:scope.scope});
+    if(!issued.ok) throw Error(issued.message);
+    const result = await service.write({contextId:issued.context.contextId,operation:{
+      kind:"create-world-camera",operationId:"create-outside",nodeId:"node-outside",cameraId:"camera-outside",
+      settings:{position:{u:50,v:2,h:1},rotation:[0,0,0,1],projection:{kind:"perspective",verticalFovRadians:0.8,nearMeters:0.1,farMeters:100},
+        captureMode:{kind:"static"},aspect:{width:16,height:9},boundInstanceId:null}}});
+    expect(result).toMatchObject({ok:false,code:"outside-scope"});
+    expect(!result.ok && result.spatialDiagnostic).toEqual({
+      anchor:{u:50,v:2},
+      actual:{min:{u:50,v:2},max:{u:50,v:2}},
+      bounds:{min:{u:0,v:0},max:{u:10,v:10}},
+      outsideAxes:["u"]
+    });
+  });
+});

@@ -256,7 +256,8 @@ function resultFailure(result: RoomCommandResult, canvas?: ServerCanvas): WorldA
   if (result.code === "spatial-rejected") {
     return failure("spatial-rejected", "空间写入资格无效", {
       spatialReason: result.spatialReason,
-      conflicts: conflictsFor(result.conflict, canvas)
+      conflicts: conflictsFor(result.conflict, canvas),
+      ...(result.spatialDiagnostic ? { spatialDiagnostic: result.spatialDiagnostic } : {})
     });
   }
   if (result.code === "command-id-reused" || result.code === "request-id-reused") return failure("operation-conflict", "相同 operationId 使用了不同意图");

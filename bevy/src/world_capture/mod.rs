@@ -1,13 +1,13 @@
 //! 页面内共享世界镜头捕获：同一 Bevy App 内的一次性离屏渲染。
 //!
 //! 页面触发取景时把「镜头身份 + 输出尺寸 + 稳定 identity」交给本模块（`world_capture::wire`）。
-//! 模块在**既有 App** 里按冻结请求解析 `CurrentScene` 里的镜头姿态/投影，在页面世界层
-//! （layer 0，即镜头卡片现在渲染的那一层）建一次性离屏相机（`RenderTarget::Image`），
+//! 模块在**既有 App** 里按冻结请求解析 `CurrentScene` 里的镜头姿态/投影，在镜头内容层
+//! （未绑定为 layer 11，绑定为目标实例租约层）建一次性离屏相机（`RenderTarget::Image`），
 //! 稳定若干帧后用 `Screenshot::image` 回读 RGBA，随即拆相机、删图像。
 //!
 //! 与镜头卡片预览一样直接复用页面世界实体，不重建模型、不新建 App/context、不写规范状态。
-//! 捕获是生成输入，**不含等距网格**：作业期间把网格挪到停放层，结束由
-//! `world_camera_preview::sync` 复位。作业严格串行（一个在飞），迟到的结果按
+//! 捕获是生成输入，**不含等距网格**，使用相机专属环境光并忽略全局方向光，
+//! 不改变主画布照明或网格。作业严格串行（一个在飞），迟到的结果按
 //! `(requestId, generation)` 丢弃。
 
 pub(crate) mod wire;
@@ -225,6 +225,7 @@ fn start(
     let camera = commands
         .spawn((
             Camera3d::default(),
+            crate::model3d::shadows::camera_lighting(),
             bevy::render::view::NoIndirectDrawing,
             Camera {
                 // 固定浅色底：捕获是生成输入，不跟随页面主题。

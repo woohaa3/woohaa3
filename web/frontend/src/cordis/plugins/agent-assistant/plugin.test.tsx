@@ -13,6 +13,37 @@ import { api, cleanupHarness, declaredSite, local, oauth, render } from "./plugi
 let root: Root | undefined; let runtime: FrontendRuntime | undefined;
 afterEach(async () => { await cleanupHarness(); act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; });
 
+it("provider-login 贡献同时出现在模型提供商列表，配置直接打开该登录面板", async () => {
+  const f = await render([], false, undefined, { canvasId: "canvas", nodeId: "node" }, {}, undefined, true);
+  await f.click("模型提供商");
+  const list = f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list')!;
+  expect(list.textContent).toContain("Demo 微信登录");
+  const row = [...list.querySelectorAll("li")].find(item => item.textContent?.includes("Demo 微信登录"))!;
+  await act(async () => row.querySelector<HTMLButtonElement>("button")!.click());
+  await act(async () => { await import("../settings/provider-settings-cards.js"); });
+  expect(f.el.textContent).toContain("微信扫码登录");
+});
+
+it("未配置的 provider-login 不占用模型提供商列表，但仍可从添加连接进入登录", async () => {
+  const f = await render([], false, undefined, { canvasId: "canvas", nodeId: "node" }, {}, undefined, true, false, false);
+  await f.click("模型提供商");
+  const list = f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list');
+  expect(list?.textContent ?? "").not.toContain("Demo 微信登录");
+  expect(f.el.textContent).toContain("添加你的第一个模型提供商");
+
+  await f.click("添加连接");
+  const drawer = f.el.querySelector(".agent-assistant__drawer-layer:not([hidden])")!;
+  expect([...drawer.querySelectorAll(".agent-assistant__method strong")].map(item => item.textContent)).toContain("Demo 微信登录");
+});
+
+it("provider-login 贡献作为独立供应商方法出现，并在选中后渲染其面板", async () => {
+  const f = await render([], false, undefined, { kind: "generation", page: "add" }, {}, undefined, true);
+  const methods = [...f.el.querySelectorAll(".agent-assistant__method")].map(item => item.querySelector("strong")?.textContent);
+  expect(methods).toContain("Demo 微信登录");
+  await f.configure("Demo 微信登录");
+  expect(f.el.textContent).toContain("微信扫码登录");
+});
+
 it("按 demo 显示能力总览和五项侧栏，MCP 与模型提供商独立", async () => {
   const f = await render();
   expect([...f.el.querySelectorAll(".agent-assistant__sidebar > button > span")].map(button => button.textContent)).toEqual(["能力总览", "本地 Agent", "模型提供商", "MCP 服务", "生成历史"]);
@@ -564,14 +595,14 @@ it("Agent 详情在有目标时显式使用提供商并返回原节点", async (
   } finally { globalThis.removeEventListener("woohaa3-agent-assistant-selection", selected); }
 });
 
-it("临时图床展示权威路由快照、当前选择与最近真实失败", async () => {
+it("临时图床展示优先级图标与最近真实失败", async () => {
   const fetchSnapshot = vi.fn(async () => ({ ok: true as const, snapshot: {
     settings: [], plugins: [], files: { config: "c", secrets: "s" },
     extensionPoints: { temporaryHosting: {
       mode: "auto" as const, selectionSource: "auto" as const, selectedId: "runninghub-temporary",
       candidates: [
         { exposerId: "runninghub-temporary", label: "RunningHub 临时图床", category: "provider" as const, ownerExtensionId: "runninghub-provider", priority: 10, configured: true, available: true, selected: true, lastError: "401 unauthorized" },
-        { exposerId: "local-public", label: "Woohaa3 临时图床", category: "builtin" as const, ownerExtensionId: "local-storage", priority: 1000, configured: true, available: true, selected: false, lastError: null }
+        { exposerId: "cos", label: "COS / S3 对象存储", category: "provider" as const, ownerExtensionId: "cos-storage", priority: 100, configured: true, available: true, selected: false, lastError: null }
       ],
       error: null, lastFailure: { exposerId: "runninghub-temporary", message: "401 unauthorized" }
     } }
@@ -585,9 +616,11 @@ it("临时图床展示权威路由快照、当前选择与最近真实失败", a
   await f.click("临时图床");
   const detail = f.el.querySelector('[data-capability-detail="hosting"]')!;
   expect(detail.textContent).toContain("RunningHub 临时图床");
-  expect(detail.textContent).toContain("当前选择");
+  expect(detail.textContent).not.toContain("当前选择");
+  expect(detail.querySelectorAll('[data-hosting-priority="first"]')).toHaveLength(1);
+  expect(detail.querySelector('[data-hosting-priority="first"]')?.closest("li")?.textContent).toContain("RunningHub");
   expect(detail.textContent).toContain("最近失败：401 unauthorized");
-  expect(detail.textContent).toContain("Woohaa3 临时图床");
+  expect(detail.textContent).toContain("COS / S3 对象存储");
   expect(detail.querySelectorAll("ul")).toHaveLength(1);
   expect(detail.querySelectorAll("ul li")).toHaveLength(2);
   expect(detail.textContent).not.toContain("内置服务");
@@ -595,14 +628,14 @@ it("临时图床展示权威路由快照、当前选择与最近真实失败", a
   expect(detail.textContent).not.toContain("暂未接入");
 });
 
-it("临时图床来源未配置时显示未配置，并可从候选进入配置", async () => {
+it("临时图床未配置来源不进入能力列表，仍可从配置抽屉进入配置", async () => {
   const fetchSnapshot = vi.fn(async () => ({ ok: true as const, snapshot: {
     settings: [], plugins: [], files: { config: "c", secrets: "s" },
     extensionPoints: { temporaryHosting: {
       mode: "auto" as const, selectionSource: "auto" as const, selectedId: null,
       candidates: [
         { exposerId: "runninghub-temporary", label: "RunningHub 临时图床", category: "provider" as const, ownerExtensionId: "runninghub-provider", priority: 10, configured: false, available: false, selected: false, lastError: null },
-        { exposerId: "local-public", label: "Woohaa3 临时图床", category: "builtin" as const, ownerExtensionId: "local-storage", priority: 1000, configured: false, available: false, selected: false, lastError: null }
+        { exposerId: "cos", label: "COS / S3 对象存储", category: "provider" as const, ownerExtensionId: "cos-storage", priority: 100, configured: false, available: false, selected: false, lastError: null }
       ],
       error: "没有可用的临时图床，请检查提供商配置",
       lastFailure: null
@@ -615,8 +648,13 @@ it("临时图床来源未配置时显示未配置，并可从候选进入配置"
   await f.click("临时图床");
   const detail = f.el.querySelector('[data-capability-detail="hosting"]')!;
   expect(detail.textContent).toContain("没有可用的临时图床");
-  expect(detail.textContent).toContain("Woohaa3 临时图床");
-  expect(detail.textContent).toContain("配置");
+  expect(detail.querySelectorAll("ul li")).toHaveLength(0);
+  expect(detail.textContent).not.toContain("RunningHub 临时图床");
+  expect(detail.textContent).not.toContain("COS / S3 对象存储");
+  expect(detail.textContent).toContain("尚未配置临时图床来源");
+  await f.click("配置");
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("RunningHub 临时图床");
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("COS / S3 对象存储");
 });
 
 function hostingSnapshot(configured = false, primary = "auto", lockedBy: string | null = null): SettingsSnapshot {
@@ -638,6 +676,31 @@ function hostingSnapshot(configured = false, primary = "auto", lockedBy: string 
   };
 }
 
+it("临时图床列表只展示已配置来源，就绪说明留在配置入口", async () => {
+  const fetchSnapshot = vi.fn(async () => ({ ok: true as const, snapshot: {
+    settings: [], plugins: [], files: { config: "c", secrets: "s" },
+    extensionPoints: { temporaryHosting: {
+      mode: "auto" as const, selectionSource: "auto" as const, selectedId: null,
+      candidates: [
+        { exposerId: "sdpppx-temporary", label: "SDPPPX 临时图床", category: "provider" as const, ownerExtensionId: "sdpppx-provider", priority: 10, configured: false, available: false, selected: false, statusNote: "未登录 SDPPPX", lastError: null },
+        { exposerId: "cos", label: "COS / S3 对象存储", category: "provider" as const, ownerExtensionId: "cos-storage", priority: 100, configured: true, available: false, selected: false, statusNote: null, lastError: null }
+      ],
+      error: "没有可用的临时图床，请检查提供商配置",
+      lastFailure: null
+    } }
+  } }));
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot, write: async () => ({ ok: false as const, code: "unavailable", error: "test" }) }));
+  await act(async () => { await Promise.resolve(); });
+  await f.click("临时图床");
+  const detail = f.el.querySelector('[data-capability-detail="hosting"]')!;
+  expect(detail.textContent).not.toContain("SDPPPX");
+  expect(detail.querySelectorAll("ul li")).toHaveLength(1);
+  expect(detail.textContent).toContain("COS / S3 对象存储");
+  expect(detail.textContent).toContain("当前请求不可用");
+  await f.click("配置");
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("未登录 SDPPPX");
+});
+
 it("模型目录读取失败不影响图床数量与配置，保存失败保留密钥，成功后返回详情刷新状态", async () => {
   const snapshot = () => hostingSnapshot(configured);
   let configured = false;
@@ -650,7 +713,8 @@ it("模型目录读取失败不影响图床数量与配置，保存失败保留�
   expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).toContain("已配置 0 个提供商");
   expect(f.el.querySelector('[data-capability="hosting"]')?.textContent).not.toContain("读取失败");
   await f.click("临时图床");
-  const rowConfig = f.el.querySelector<HTMLButtonElement>('[data-capability-detail="hosting"] li button')!;
+  await f.click("配置");
+  const rowConfig = f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer li button')!;
   await act(async () => rowConfig.click());
   expect(f.el.querySelector('[data-page="overview"]')?.getAttribute("data-state")).toBe("active");
   const field = f.el.querySelector<HTMLInputElement>('.agent-assistant__drawer [data-setting-key="providers.test.apiKey"] input')!;
@@ -665,40 +729,156 @@ it("模型目录读取失败不影响图床数量与配置，保存失败保留�
   expect(write).toHaveBeenLastCalledWith({ "providers.test.apiKey": "test-key" });
   expect(f.el.querySelector(".agent-assistant__drawer")).toBeNull();
   expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).toContain("已配置 1 个提供商");
-  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).toContain("当前选择");
+  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).not.toContain("当前选择");
+  expect(f.el.querySelector('[data-hosting-priority="first"]')?.closest("li")?.textContent).toContain("测试图床");
 });
 
-it("临时图床策略显式保存，失败保留选择，成功后同步指定来源", async () => {
-  const write = vi.fn(async () => ({ ok: true as const, snapshot: hostingSnapshot(true, "test-hosting") }))
-    .mockResolvedValueOnce({ ok: false, code: "unavailable", error: "暂时无法保存" } as never);
-  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot: hostingSnapshot(true) }), write }));
+function sortableHostingSnapshot() {
+  const snapshot = hostingSnapshot(true, "test-hosting");
+  snapshot.settings.push({ ...snapshot.settings[0]!, key: "exposer.order", value: "", lockedBy: null });
+  const route = snapshot.extensionPoints!.temporaryHosting!;
+  snapshot.extensionPoints!.temporaryHosting = { ...route, candidates: [
+    ...route.candidates,
+    { ...route.candidates[0]!, exposerId: "cos", label: "COS / S3 对象存储", ownerExtensionId: "cos-storage", selected: false },
+    { ...route.candidates[0]!, exposerId: "sdpppx-temporary", label: "SDPPPX", ownerExtensionId: "sdpppx-provider", configured: false, available: false, selected: false }
+  ] };
+  return snapshot;
+}
+
+function hostingPointer(target: EventTarget, type: string, clientY: number) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientY });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  target.dispatchEvent(event);
+}
+
+function mockHostingRects(el: HTMLElement) {
+  el.querySelectorAll<HTMLElement>("[data-hosting-id]").forEach(row => {
+    vi.spyOn(row, "getBoundingClientRect").mockImplementation(() => {
+      const index = [...row.parentElement!.children].indexOf(row);
+      const offset = Number(row.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? 0);
+      return { top: index * 80 + offset, height: 80 } as DOMRect;
+    });
+  });
+}
+
+it("临时图床在列表拖动排序，保存失败保留顺序并可重试，成功后刷新保持排序", async () => {
+  const snapshot = sortableHostingSnapshot();
+  const write = vi.fn(async () => {
+    const route = snapshot.extensionPoints!.temporaryHosting!;
+    snapshot.extensionPoints!.temporaryHosting = {
+      ...route, mode: "auto", selectionSource: "auto", selectedId: "cos",
+      candidates: [route.candidates[1]!, route.candidates[0]!, route.candidates[2]!]
+    };
+    snapshot.settings.find(entry => entry.key === "exposer.order")!.value = "cos,test-hosting,sdpppx-temporary";
+    return { ok: true as const, snapshot: { ...snapshot } };
+  }).mockResolvedValueOnce({ ok: false, code: "unavailable", error: "暂时无法保存" } as never);
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write }));
+  await f.click("临时图床");
+  expect(f.el.querySelector('[aria-label="临时图床来源"]')).toBeNull();
+  const ids = () => [...f.el.querySelectorAll<HTMLElement>("[data-hosting-id]")].map(row => row.dataset.hostingId);
+  mockHostingRects(f.el);
+  const handle = f.el.querySelector<HTMLButtonElement>('[data-hosting-id="cos"] .agent-assistant__hosting-drag')!;
+  const dragged = handle.closest("li")!;
+  const neighbour = f.el.querySelector<HTMLElement>('[data-hosting-id="test-hosting"]')!;
+  const animate = vi.fn(() => ({ cancel: vi.fn(), onfinish: null }));
+  neighbour.animate = animate as unknown as HTMLElement["animate"];
+  dragged.animate = animate as unknown as HTMLElement["animate"];
+  await act(async () => hostingPointer(handle, "pointerdown", 120));
+  await act(async () => hostingPointer(document, "pointermove", 118));
+  expect(dragged.style.transform).toBe("translateY(-2px)");
+  expect(ids()).toEqual(["test-hosting", "cos"]);
+  await act(async () => hostingPointer(document, "pointermove", 100));
+  expect(dragged.style.transform).toBe("translateY(-20px)");
+  expect(ids()).toEqual(["test-hosting", "cos"]);
+  await act(async () => hostingPointer(document, "pointermove", 10));
+  expect(ids()).toEqual(["cos", "test-hosting"]);
+  expect(dragged.getBoundingClientRect().top).toBe(-30);
+  expect(animate).toHaveBeenCalledWith([{ transform: "translateY(-80px)" }, { transform: "translateY(0px)" }], expect.objectContaining({ duration: 180 }));
+  expect(f.el.querySelector('[data-hosting-priority="first"]')?.closest("li")?.getAttribute("data-hosting-id")).toBe("cos");
+  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).not.toContain("当前选择");
+  expect(write).not.toHaveBeenCalled();
+  await act(async () => hostingPointer(document, "pointerup", 10));
+  expect(dragged.style.transform).toBe("");
+  expect(animate).toHaveBeenCalledWith([{ transform: "translateY(-30px)" }, { transform: "translateY(0px)" }], expect.objectContaining({ duration: 180 }));
+  expect(f.el.textContent).toContain("暂时无法保存");
+  expect(ids()).toEqual(["cos", "test-hosting"]);
+  await f.click("重试");
+  expect(write).toHaveBeenLastCalledWith({ "exposer.order": "cos,test-hosting,sdpppx-temporary", "exposer.primary": "auto" });
+  expect(ids()).toEqual(["cos", "test-hosting"]);
+  expect(f.el.textContent).not.toContain("暂时无法保存");
+  await f.click("刷新状态");
+  expect(ids()).toEqual(["cos", "test-hosting"]);
+});
+
+it("取消拖动或拖回原位置不保存，配置抽屉只提供来源配置", async () => {
+  const snapshot = sortableHostingSnapshot();
+  const write = vi.fn();
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write }));
+  await f.click("临时图床");
+  mockHostingRects(f.el);
+  const handle = f.el.querySelector<HTMLButtonElement>('[data-hosting-id="cos"] .agent-assistant__hosting-drag')!;
+  await act(async () => hostingPointer(handle, "pointerdown", 120));
+  await act(async () => hostingPointer(document, "pointermove", 10));
+  await act(async () => hostingPointer(document, "pointercancel", 10));
+  expect(f.el.querySelector<HTMLElement>("[data-hosting-id]")!.dataset.hostingId).toBe("test-hosting");
+  expect(handle.closest("li")!.style.transform).toBe("");
+  await act(async () => hostingPointer(handle, "pointerdown", 120));
+  await act(async () => hostingPointer(document, "pointermove", 10));
+  await act(async () => hostingPointer(document, "pointerup", 120));
+  expect(write).not.toHaveBeenCalled();
+  await f.click("配置");
+  expect(f.el.querySelector('.agent-assistant__drawer [role="combobox"]')).toBeNull();
+  expect(f.el.querySelector('.agent-assistant__drawer')?.textContent).toContain("SDPPPX");
+});
+
+it("临时图床来源有专用贡献时，配置抽屉渲染扩展自己的就绪面板", async () => {
+  const snapshot = hostingSnapshot(false);
+  snapshot.extensionPoints!.temporaryHosting = {
+    ...snapshot.extensionPoints!.temporaryHosting!,
+    candidates: [{ exposerId: "sdpppx-temporary", label: "SDPPPX 临时图床", category: "provider", ownerExtensionId: "sdpppx-provider", priority: 10, configured: false, available: false, selected: false, statusNote: "未登录 SDPPPX", lastError: null }],
+    selectedId: null,
+    error: "没有可用的临时图床"
+  };
+  const write = vi.fn();
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write }), {}, {}, undefined, false, true);
   await f.click("临时图床");
   await f.click("配置");
+  const rowConfig = f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer li button')!;
+  await act(async () => rowConfig.click());
+  const drawer = f.el.querySelector(".agent-assistant__drawer")!;
+  expect(drawer.textContent).toContain("来源自己的登录面板");
+  expect(drawer.textContent).not.toContain("当前来源没有可编辑的配置");
   expect(write).not.toHaveBeenCalled();
-  await act(async () => f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer [aria-label="临时图床来源"]')!.click());
-  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent === "测试图床")!.click());
-  expect(write).not.toHaveBeenCalled();
-  await f.click("保存");
-  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("暂时无法保存");
-  expect(f.el.querySelector('.agent-assistant__drawer [aria-label="临时图床来源"]')?.textContent).toContain("测试图床");
-  await f.click("保存");
-  expect(write).toHaveBeenLastCalledWith({ "exposer.primary": "test-hosting" });
-  expect(f.el.querySelector(".agent-assistant__drawer")).toBeNull();
-  expect(f.el.querySelector('[data-capability-detail="hosting"] li')?.textContent).toContain("当前选择");
-  expect(f.el.querySelector('[data-capability-detail="hosting"]')?.textContent).not.toMatch(/自动 ·|指定 ·/);
 });
 
-it("环境锁定的图床策略只能查看，手动失效来源仍可辨认", async () => {
-  const snapshot = hostingSnapshot(true, "removed-hosting", "WOOHAA_EXPOSER");
-  snapshot.extensionPoints!.temporaryHosting = { ...snapshot.extensionPoints!.temporaryHosting!, selectedId: "removed-hosting" };
+it("没有专用贡献时，来源不可编辑就如实说明，不伪造登录或上传", async () => {
+  const snapshot = hostingSnapshot(false);
+  snapshot.extensionPoints!.temporaryHosting = {
+    ...snapshot.extensionPoints!.temporaryHosting!,
+    candidates: [{ exposerId: "sdpppx-temporary", label: "SDPPPX 临时图床", category: "provider", ownerExtensionId: "sdpppx-provider", priority: 10, configured: false, available: false, selected: false, statusNote: "未登录 SDPPPX", lastError: null }],
+    selectedId: null,
+    error: "没有可用的临时图床"
+  };
   const write = vi.fn();
   const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write }));
   await f.click("临时图床");
   await f.click("配置");
-  const select = f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer [aria-label="临时图床来源"]')!;
-  expect(select.disabled).toBe(true);
-  expect(select.textContent).toContain("removed-hosting（未注册）");
-  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("WOOHAA_EXPOSER");
+  const rowConfig = f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer li button')!;
+  await act(async () => rowConfig.click());
+  expect(f.el.querySelector(".agent-assistant__drawer")?.textContent).toContain("当前来源没有可编辑的配置");
+  expect(write).not.toHaveBeenCalled();
+});
+
+it("环境锁定的图床来源禁止排序，配置抽屉不再展示自动或手动下拉框", async () => {
+  const snapshot = sortableHostingSnapshot();
+  snapshot.settings[0]!.lockedBy = "WOOHAA_EXPOSER";
+  const write = vi.fn();
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot }), write }));
+  await f.click("临时图床");
+  expect([...f.el.querySelectorAll<HTMLButtonElement>(".agent-assistant__hosting-drag")].every(button => button.disabled)).toBe(true);
+  expect(f.el.textContent).toContain("WOOHAA_EXPOSER");
+  await f.click("配置");
+  expect(f.el.querySelector('.agent-assistant__drawer [aria-label="临时图床来源"]')).toBeNull();
   expect(write).not.toHaveBeenCalled();
 });
 
@@ -723,3 +903,39 @@ it("Agent 详情无目标仅配置，来源不可用禁用使用", async () => {
 });
 
 
+
+
+it("COS 图床复用存储配置，保存后进入已配置列表且可再次编辑", async () => {
+  let configured = false;
+  const snapshot = (): SettingsSnapshot => ({
+    settings: [{
+      key: "storage.cos.secretId", kind: "string", label: "SecretId", description: "", reload: "hot", secret: true,
+      source: "file", lockedBy: null, value: null, configured, pendingRestart: false, ownerExtensionId: "cos-storage"
+    }],
+    plugins: [], files: { config: "c", secrets: "s" },
+    extensionPoints: { temporaryHosting: {
+      mode: "auto", selectionSource: "auto", selectedId: configured ? "cos" : null,
+      candidates: [{ exposerId: "cos", label: "COS / S3 对象存储", category: "provider", ownerExtensionId: "cos-storage", priority: 100,
+        configured, available: configured, selected: configured, lastError: null }], error: null, lastFailure: null
+    } }
+  });
+  const write = vi.fn(async () => { configured = true; return { ok: true as const, snapshot: snapshot() }; });
+  const f = await render([], false, createBackendSettingsStore({ fetchSnapshot: async () => ({ ok: true, snapshot: snapshot() }), write }));
+  await f.click("临时图床");
+  expect(f.el.querySelectorAll('[data-capability-detail="hosting"] li')).toHaveLength(0);
+  await f.click("配置");
+  await act(async () => f.el.querySelector<HTMLButtonElement>('.agent-assistant__drawer li button')!.click());
+  const field = f.el.querySelector<HTMLInputElement>('[data-setting-key="storage.cos.secretId"] input')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "cos-id");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await f.click("保存");
+  expect(write).toHaveBeenLastCalledWith({ "storage.cos.secretId": "cos-id" });
+  const detail = f.el.querySelector('[data-capability-detail="hosting"]')!;
+  expect(detail.textContent).toContain("已配置 1 个提供商");
+  expect(detail.querySelectorAll("li")).toHaveLength(1);
+  expect(detail.textContent).toContain("COS / S3 对象存储");
+  await act(async () => detail.querySelector<HTMLButtonElement>("li .agent-assistant__actions button")!.click());
+  expect(f.el.querySelector('[data-setting-key="storage.cos.secretId"]')).not.toBeNull();
+});

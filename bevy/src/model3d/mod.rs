@@ -31,6 +31,7 @@ pub(crate) mod focus_transition;
 pub(crate) mod grid;
 pub(crate) mod pick;
 pub(crate) mod scene;
+pub(crate) mod shadows;
 pub(crate) mod shot_adapter;
 // 跨后端容差比较：不依赖 Bevy，可在 CI 上单测；真实取图由带 GPU 的环境提供。
 // change: 2026-10-09-refactor-large-source-files-and-remove-compatibility D02 —— 该模块只被
@@ -107,16 +108,16 @@ pub(crate) use layout::model_unit;
 
 use bevy::camera::visibility::RenderLayers;
 
-/// 模型实体渲染层：主画布层（0）+ 截图层，使截图像机只看到模型，不含网格/gizmo/2D chrome
+/// 模型实体渲染层：主画布（0）+ 截图（7）+ 拍摄世界内容（11），不含编辑辅助。
 /// （change: add-model-editor-gizmo-shot-capture，任务 3.3）。
 pub(crate) fn model_render_layers() -> RenderLayers {
     #[cfg(feature = "canvas-core")]
     {
-        RenderLayers::from_layers(&[0, capture::CAPTURE_LAYER])
+        RenderLayers::from_layers(&[0, capture::CAPTURE_LAYER, crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER])
     }
     #[cfg(not(feature = "canvas-core"))]
     {
-        RenderLayers::from_layers(&[0])
+        RenderLayers::from_layers(&[0, crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER])
     }
 }
 

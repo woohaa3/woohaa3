@@ -1040,11 +1040,48 @@ export function decodeWorldAuthoringFailure(value: unknown): Decode<WorldAuthori
   if (!conflicts.ok) return decodeFailure(conflicts.code, value);
   const spatialReason = ownField(value, "spatialReason");
   if (spatialReason !== undefined && !isNonEmptyWorldId(spatialReason)) return invalid(value);
+  const spatialDiagnostic = decodeSpatialDiagnostic(ownField(value, "spatialDiagnostic"));
+  if (!spatialDiagnostic.ok) return decodeFailure(spatialDiagnostic.code, value);
   return ok({
     ok: false,
     code: code as WorldAuthoringFailure["code"],
     message,
     ...(conflicts.value === undefined ? {} : { conflicts: conflicts.value }),
-    ...(spatialReason === undefined ? {} : { spatialReason })
+    ...(spatialReason === undefined ? {} : { spatialReason }),
+    ...(spatialDiagnostic.value === undefined ? {} : { spatialDiagnostic: spatialDiagnostic.value })
   });
+}
+
+function decodeGroundPoint(value: unknown): { u: number; v: number } | null {
+  if (!isJsonRecord(value)) return null;
+  const u = ownField(value, "u");
+  const v = ownField(value, "v");
+  return isFiniteWorldNumber(u) && isFiniteWorldNumber(v) ? { u, v } : null;
+}
+
+/** Optional out-of-scope geometry; a malformed diagnostic never smuggles half-typed bounds. */
+function decodeSpatialDiagnostic(value: unknown): Decode<WorldAuthoringFailure["spatialDiagnostic"]> {
+  if (value === undefined) return ok(undefined);
+  if (!recordWithKeys(value, ["actual", "bounds", "anchor", "outsideAxes"])) return invalid(value);
+  const actualRaw = ownField(value, "actual");
+  const boundsRaw = ownField(value, "bounds");
+  const anchorRaw = ownField(value, "anchor");
+  const axesRaw = ownField(value, "outsideAxes");
+  const actual = actualRaw === undefined ? undefined : decodeGroundAabb(actualRaw) ?? undefined;
+  if (actualRaw !== undefined && !actual) return invalid(value);
+  const bounds = boundsRaw === undefined ? undefined : decodeGroundAabb(boundsRaw) ?? undefined;
+  if (boundsRaw !== undefined && !bounds) return invalid(value);
+  const anchor = anchorRaw === undefined ? undefined : decodeGroundPoint(anchorRaw) ?? undefined;
+  if (anchorRaw !== undefined && !anchor) return invalid(value);
+  const outsideAxes = axesRaw === undefined
+    ? undefined
+    : decodeList(axesRaw, item => item === "u" || item === "v" ? ok(item as "u" | "v") : invalid<"u" | "v">(item));
+  if (outsideAxes && !outsideAxes.ok) return invalid(value);
+  const diagnostic: NonNullable<WorldAuthoringFailure["spatialDiagnostic"]> = {
+    ...(actual === undefined ? {} : { actual }),
+    ...(bounds === undefined ? {} : { bounds }),
+    ...(anchor === undefined ? {} : { anchor }),
+    ...(outsideAxes !== undefined && outsideAxes.ok && outsideAxes.value !== undefined ? { outsideAxes: outsideAxes.value } : {})
+  };
+  return ok(diagnostic);
 }

@@ -349,6 +349,8 @@ export type CanvasRenderScene = {
    * fingerprint 参与 `renderSceneEquals`，仅主题变化也会触发一次 `set_scene`。
    */
   theme: AppThemeSnapshot;
+  /** Browser-local global directional light and shadows. Missing means enabled. */
+  globalLightEnabled?: boolean;
   /**
    * 模型聚焦瞬时投影（change: add-model-focus-viewing）。
    * 缺省表示普通正交画布；携带时 Bevy 切换到透视聚焦并只渲染目标。

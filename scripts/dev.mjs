@@ -24,7 +24,7 @@ import { agentRuntimeDirectory } from "./lib/agent-runtime-endpoints.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url));
 
 /**
- * 开发构建也吃 build profile 的构建期常量（公开桶、官方信任根、设置默认值）。
+ * 开发构建也吃 build profile 的构建期常量（官方信任根、设置默认值）。
  *
  * 这些值只在公开仓库的构建期机制里出现，源码不落具体桶；开发环境若完全不注入，内置
  * 临时图床会在界面上表现为「未配置」，与同一份 profile 打出的桌面/部署产物不一致。

@@ -13,7 +13,7 @@ it("零提供者显示添加入口，Agent 直接显示本地连接和模型提�
   expect(f.el.querySelector('[data-capability="agent"]')?.textContent).not.toContain("已配置 0");
   for (const kind of ["model3d", "hosting"]) {
     expect(f.el.querySelector(`[data-capability="${kind}"]`)?.getAttribute("data-empty")).toBe("false");
-    expect(f.el.querySelector(`[data-capability="${kind}"]`)?.textContent).toContain(kind === "model3d" ? "暂未接入" : "上传不可用");
+    expect(f.el.querySelector(`[data-capability="${kind}"]`)?.textContent).toContain(kind === "model3d" ? "暂未接入" : "给模型提供临时图片访问地址不可用");
   }
   await f.click("连接本地 Agent");
   expect(f.el.querySelector('[data-ai-page="agents"]')?.closest("[hidden]")).toBeNull();

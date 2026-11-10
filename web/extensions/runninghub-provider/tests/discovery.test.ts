@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createRunningHubProviderPlugin, RUNNINGHUB_REFRESH_PATH } from "../src/backend.js";
+import { RUNNINGHUB_BALANCE_PATH } from "../src/balance.js";
 import { catalogLogicalIds, discoverRunningHubModels, registryEntries } from "../src/discovery.js";
 import { findRunningHubModel, runningHubRegistry } from "../src/shared.js";
 
@@ -179,7 +180,8 @@ describe("刷新路由", () => {
     const { ctx, handlers, registered } = fakeContext();
     const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch() });
     plugin.apply(ctx, { apiKey: "key" } as never);
-    expect(handlers).toHaveLength(1);
+    // 刷新路由与余额路由各注册一条；刷新在前。
+    expect(handlers).toHaveLength(2);
 
     const res = fakeResponse();
     const handled = await handlers[0]!({ method: "POST", url: RUNNINGHUB_REFRESH_PATH }, res);
@@ -201,6 +203,29 @@ describe("刷新路由", () => {
     expect(
       registered[0]!.models.find((model) => model.providerModelId === "api/seedream-v5-lite")?.notice
     ).toBe("站点在售");
+  });
+
+  it("余额路由用当前 Key 查询账户信息并回规范化读数", async () => {
+    const { ctx, handlers } = fakeContext();
+    const plugin = createRunningHubProviderPlugin({
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe("https://www.runninghub.ai/uc/openapi/accountStatus");
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer key");
+        return Response.json({
+          code: 0,
+          data: { remainMoney: "12", currency: "CNY", remainCoins: "1200", currentTaskCounts: "1", apiType: "NORMAL" }
+        });
+      }) as typeof globalThis.fetch
+    });
+    plugin.apply(ctx, { apiKey: "key" } as never);
+    expect(handlers).toHaveLength(2);
+    const res = fakeResponse();
+    expect(await handlers[1]!({ method: "GET", url: RUNNINGHUB_BALANCE_PATH }, res)).toBe(true);
+    expect(res.state.status).toBe(200);
+    expect(JSON.parse(res.state.body)).toMatchObject({
+      ok: true,
+      balance: { remainMoney: 12, currency: "CNY", remainCoins: 1200, currentTaskCounts: 1 }
+    });
   });
 
   it("别的路径不处理；未授权回 401", async () => {
