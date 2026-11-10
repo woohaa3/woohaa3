@@ -26,7 +26,7 @@ export function checkPublicBoundary(root,{files=sourceFiles(root)}={}){
   if (/^api\/gen\/es\/.*\/(?:[a-z0-9_]+_admin_pb\.ts|ops_pb\.ts|rbac_pb\.ts|inspect_pb\.ts)$/.test(file)) errors.push(`${file}: administrative contract in public bindings`);
   const basename=path.basename(file);
   const sample=/^(?:\.env\.(?:example|sample|template)|config\.(?:example|sample|template)\.json|woohaa\.(?:config|secrets)\.(?:example|sample|template)\.ya?ml)$/.test(basename);
-  if(!sample&&/^(?:\.env(?:\..+)?|woohaa\.(?:secrets|config)\.ya?ml|config\.local\.json|updater\.key|auth\.json|credentials\.json|.*\.(?:sqlite3?|sqlite-wal|sqlite-shm|woohaa|p12|pfx))$/.test(basename))errors.push(`${file}: local credentials or data in public checkout`);
+  if(!sample&&/^(?:\.env(?:\..+)?|woohaa\.(?:secrets|config)\.ya?ml|config\.local\.json|updater\.key|auth\.json|credentials\.json|.*\.(?:sqlite3?|sqlite-wal|sqlite-shm|woohaa|p12|pfx|p8|pem|key))$/.test(basename))errors.push(`${file}: local credentials or data in public checkout`);
   if(outside(root,fs.realpathSync(absolute))){errors.push(`${file}: symlink outside public checkout`);continue;}
   if(!fs.statSync(absolute).isFile()||fs.statSync(absolute).size>4*1024*1024)continue;
   const bytes=fs.readFileSync(absolute);if(bytes.includes(0))continue;
@@ -36,7 +36,7 @@ export function checkPublicBoundary(root,{files=sourceFiles(root)}={}){
    if(/https?:\/\/[^\s'"<>]*(?:\.woa\.com|mirrors\.tencent\.com|zaohuacdn\.com|woohaa3-\d+\.cos\.[a-z0-9-]+\.myqcloud\.com|\.forgeax\.com|\.internal)(?=[:/\s'"<>]|$)/i.test(content))errors.push(`${file}: private deployment endpoint`);
    if(/x-tai-identity|x-rio-seq|x-ext-data|SmartGate|太湖/.test(content))errors.push(`${file}: corporate integration details`);
    if(/asset_canvas_dzs|infinspire-(?:api|contracts)|InfinspireCanvas|resolveInfinspire/.test(content))errors.push(`${file}: private source reference`);
-   if(/-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/.test(content))errors.push(`${file}: private key material`);
+   if(/-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]{32,}?-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----/.test(content))errors.push(`${file}: private key material`);
   }
   for(const match of content.matchAll(/^\s*(?:import|export)\s+(?:[^;\n]*?\s+from\s*)?["']([^"']+)["']|(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)|new URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url/gm))inspect(file,match[1]??match[2]??match[3]);
   if(path.basename(file)==='Cargo.toml')for(const match of content.matchAll(/\bpath\s*=\s*["']([^"']+)["']/g))inspect(file,match[1]);
