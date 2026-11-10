@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GLB_MAX_FILE_BYTES,
+  MediaObjectNotFoundError,
   createEmptyWoohaa3ServerCanvas,
   decodeWorldInstanceData,
   normalizeGlbModelReference,
@@ -128,6 +129,34 @@ async function persistent(canvas: ServerCanvas, read: ReturnType<typeof readFrom
 }
 
 describe("trusted GLB world authority", () => {
+  it.each(["local", "http"])("identifies a missing %s GLB outside the area and recovers after its original bytes return", async transport => {
+    const bytes = glb(), canvas = fixture(bytes);
+    canvas.assets[0].title = "蝠翼拦截机.glb";
+    canvas.nodeData.model.sharedWorldInstance = {
+      kind: "world-instance", version: "shared-world-v1", instanceId: TARGET.instanceId, transform: pose(-40, -40)
+    };
+    const original = structuredClone(canvas);
+    let missing = true;
+    const read = vi.fn(async () => {
+      if (missing) {
+        if (transport === "local") throw new MediaObjectNotFoundError("private-storage-key");
+        throw Object.assign(new Error("private-storage-url"), { status: 404 });
+      }
+      return { bytes, contentType: TYPE };
+    });
+    const authority = createWorldAuthoringAuthority({ media: { read } });
+    const failed = await authority.prepareCanvas(canvas, AREA);
+    expect(failed).toEqual({ ok: false, code: "not-ready",
+      message: "无法准备场景模型。模型「蝠翼拦截机.glb」（model）：GLB 文件在当前存储中不存在，请恢复原文件或重新导入模型" });
+    expect(authority.cacheFor(canvas.id, { scope: AREA, scopeVersion: "scope-1" })).toBeNull();
+    expect(await authority.prepareContent(canvas.nodeData.model, canvas)).toBeNull();
+    missing = false;
+    const recovered = await authority.prepareCanvas(canvas, AREA);
+    expect(recovered.ok).toBe(true);
+    if (recovered.ok) expect(recovered.snapshot.writable).toEqual([]);
+    expect(canvas).toEqual(original);
+  });
+
   it("derives actual hierarchical geometry and applies only the shared-world root transform", async () => {
     const bytes = glb(1, true);
     const canvas = fixture(bytes);

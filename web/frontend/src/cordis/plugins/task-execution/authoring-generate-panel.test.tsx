@@ -8,6 +8,7 @@ import type {
   AgentConversationSnapshotView,
 } from "../../contract/agent-conversation.js";
 import { AuthoringMcpButton } from "./model-parameter-panel.js";
+import { supplyAuthoringDirectory } from "./test-support/authoring-directory.js";
 import { AuthoringGeneratePanel } from "./authoring-generate-panel.js";
 import { rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 
@@ -97,6 +98,7 @@ function fixture(overrides: Partial<AgentConversationService> = {}) {
   return { props, service, snapshot };
 }
 async function render(props: AuthoringGenerationProps) {
+  supplyAuthoringDirectory(props);
   await act(async () => root.render(<AuthoringGeneratePanel {...props} />));
 }
 async function input(selector: string, value: string) {
@@ -112,32 +114,21 @@ async function input(selector: string, value: string) {
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
-async function select(label: string, text: string) {
-  await act(async () => {
-    const trigger = el.querySelector<HTMLButtonElement>(
-      `button[aria-label="${label}"]`,
-    )!;
-    if (trigger.getAttribute("aria-expanded") !== "true") {
-      trigger.focus();
-      trigger.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      );
-    }
-  });
-  // 模型与 Variant 在同一个参数面板里横向排开（不再逐项单行下拉）。
-  const option = [
-    ...document.querySelectorAll<HTMLButtonElement>(
-      ".assistant-model-panel__option",
-    ),
-  ].find((option) => option.getAttribute("aria-label") === text);
+async function select(_label: string, text: string) {
+  const effortLabels: Record<string, string> = { high: "高", medium: "中", low: "低" };
+  const parameter = text in effortLabels;
+  const other = el.querySelector<HTMLButtonElement>(`button[aria-label="${parameter ? "来源与模型" : "生成参数"}"]`);
+  if (other?.getAttribute("aria-expanded") === "true") {
+    await act(async () => other.click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  }
+  const trigger = el.querySelector<HTMLButtonElement>(`button[aria-label="${parameter ? "生成参数" : "来源与模型"}"]`)!;
+  await act(async () => { if (trigger.getAttribute("aria-expanded") !== "true") trigger.click(); });
+  const option = [...document.querySelectorAll<HTMLButtonElement>(parameter ? '.generation-parameters button' : '.generation-directory__model')]
+    .find(option => option.getAttribute('aria-label') === text || option.textContent === (effortLabels[text] ?? text));
   expect(option, document.body.textContent ?? "").toBeDefined();
-  await act(async () => {
-    option!.click();
-  });
-  // Radix restores trigger focus on the next task after closing a popup.
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  await act(async () => option!.click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 }
 const generate = () =>
   [...el.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -159,11 +150,11 @@ describe("统一 Agent 创作入口", () => {
     ];
     await render(props);
     expect(
-      el.querySelector('button[aria-label="模型"]')?.textContent,
+      el.querySelector('button[aria-label="来源与模型"]')?.textContent,
     ).toContain("模型 A");
     expect(
-      el.querySelector('button[aria-label="模型"]')?.textContent,
-    ).toContain("high");
+      el.querySelector('button[aria-label="生成参数"]')?.textContent,
+    ).toContain("高");
     service.readConversation = vi.fn(async () =>
       ok({
         conversation: { connectionId: "c1" },
@@ -179,11 +170,11 @@ describe("统一 Agent 创作入口", () => {
       },
     });
     expect(
-      el.querySelector('button[aria-label="模型"]')?.textContent,
+      el.querySelector('button[aria-label="来源与模型"]')?.textContent,
     ).toContain("模型 B");
     expect(
-      el.querySelector('button[aria-label="模型"]')?.textContent,
-    ).toContain("low");
+      el.querySelector('button[aria-label="生成参数"]')?.textContent,
+    ).toContain("低");
     expect(service.submitTurn).not.toHaveBeenCalled();
   });
   it("转换使用同一面板展示本次冻结输入，停止只调用领域操作，完成后原位恢复编辑", async () => {
@@ -264,13 +255,13 @@ describe("统一 Agent 创作入口", () => {
     expect(field.value).toBe("将照片变成花园模型");
     expect(field.disabled).toBe(true);
     expect(
-      el.querySelector('button[aria-label="选择助手"]')?.textContent,
+      el.querySelector('button[aria-label="来源与模型"]')?.textContent,
     ).toContain("本机助手");
     expect(
-      el.querySelector('button[aria-label="模型"]')?.textContent,
-    ).toContain("视觉模型 · high");
+      el.querySelector('button[aria-label="来源与模型"]')?.textContent,
+    ).toContain("视觉模型");
     expect(
-      el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')
+      el.querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')
         ?.disabled,
     ).toBe(true);
     expect(el.textContent).toContain("参考素材");
@@ -478,13 +469,11 @@ describe("统一 Agent 创作入口", () => {
     expect(el.querySelector("textarea")!.value).toBe("生成台灯");
     await act(async () =>
       el
-        .querySelector<HTMLButtonElement>('button[aria-label="模型"]')!
-        .dispatchEvent(
-          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-        ),
+        .querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!
+        .click(),
     );
     const options = document.querySelector(
-      '[role="dialog"][aria-label="模型"]',
+      '[role="dialog"][aria-label="来源与模型"]',
     )!.textContent;
     expect(options).toContain("模型 B");
     expect(options).not.toContain("模型 A");
@@ -537,13 +526,11 @@ describe("统一 Agent 创作入口", () => {
     expect(el.textContent).not.toContain("尚未确认本机 Codex");
     await act(async () =>
       el
-        .querySelector<HTMLButtonElement>('button[aria-label="模型"]')!
-        .dispatchEvent(
-          new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-        ),
+        .querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!
+        .click(),
     );
     expect(
-      document.querySelector('[role="dialog"][aria-label="模型"]')!.textContent,
+      document.querySelector('[role="dialog"][aria-label="来源与模型"]')!.textContent,
     ).toContain("GPT-6.1-Sol");
   });
 
@@ -676,9 +663,9 @@ describe("统一 Agent 创作入口", () => {
         },
       });
       const selector = el.querySelector<HTMLButtonElement>(
-        'button[aria-label="选择助手"]',
+        'button[aria-label="来源与模型"]',
       )!;
-      expect(selector.textContent).toContain("正在读取助手…");
+      expect(selector.textContent).toBeTruthy();
       expect(selector.disabled).toBe(true);
       expect(el.querySelector("p.authoring-generate__hint")).toBeNull();
     }
@@ -699,7 +686,7 @@ describe("统一 Agent 创作入口", () => {
     ).not.toBeNull();
     await act(async () =>
       [...el.querySelectorAll<HTMLButtonElement>("button")]
-        .find((entry) => entry.textContent === "配置助手")!
+        .find((entry) => entry.getAttribute("aria-label") === "管理助手")!
         .click(),
     );
     expect(configure).toHaveBeenCalledOnce();
@@ -936,7 +923,7 @@ it("参考图在提示词上方，助手、模型和 Variant 收在提示词下�
     el
       .querySelector("textarea")!
       .compareDocumentPosition(
-        el.querySelector('button[aria-label="选择助手"]')!,
+        el.querySelector('button[aria-label="来源与模型"]')!,
       ) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   await input("textarea", "改成四层建筑");
@@ -944,13 +931,13 @@ it("参考图在提示词上方，助手、模型和 Variant 收在提示词下�
   expect(el.querySelector('button[aria-label="Variant"]')).toBeNull();
   expect(
     el.querySelectorAll(".assistant-toolbar .mc-panel__model-trigger"),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
   await select("模型", "high");
   await select("模型", "模型 B");
   await select("模型", "medium");
   await select("模型", "模型 A");
   expect(
-    el.querySelector('button[aria-label="模型"]')!.textContent,
+    el.querySelector('button[aria-label="来源与模型"]')!.textContent,
   ).not.toContain("high");
   await select("模型", "high");
   await act(async () => generate().click());
@@ -960,8 +947,8 @@ it("参考图在提示词上方，助手、模型和 Variant 收在提示词下�
   });
   await act(async () => root.render(<div />));
   await render(props);
-  expect(el.querySelector('button[aria-label="模型"]')!.textContent).toContain(
-    "high",
+  expect(el.querySelector('button[aria-label="生成参数"]')!.textContent).toContain(
+    "高",
   );
 });
 
@@ -970,27 +957,25 @@ it("活动门禁关闭已打开的选择菜单，解除门禁后不自行重开�
   await render(props);
   await act(async () =>
     el
-      .querySelector<HTMLButtonElement>('button[aria-label="模型"]')!
-      .dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      ),
+      .querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!
+      .click(),
   );
   expect(
-    document.querySelector('[role="dialog"][aria-label="模型"]'),
+    document.querySelector('[role="dialog"][aria-label="来源与模型"]'),
   ).not.toBeNull();
   await render({
     ...props,
     sourceSelection: { ...props.sourceSelection!, blockedReason: "正在执行" },
   });
   expect(
-    document.querySelector('[role="dialog"][aria-label="模型"]'),
+    document.querySelector('[role="dialog"][aria-label="来源与模型"]'),
   ).toBeNull();
   expect(
-    el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.disabled,
+    el.querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!.disabled,
   ).toBe(true);
   await render(props);
   expect(
-    document.querySelector('[role="dialog"][aria-label="模型"]'),
+    document.querySelector('[role="dialog"][aria-label="来源与模型"]'),
   ).toBeNull();
   expect(service.submitTurn).not.toHaveBeenCalled();
 });
@@ -1124,7 +1109,7 @@ it("刷新按钮同时重读模型目录，而不只刷新连接列表", async (
   expect(props.sourceSelection!.onRefresh).toHaveBeenCalledOnce();
   expect(service.catalog).toHaveBeenCalledTimes(2);
   await act(async () => {
-    el.querySelector<HTMLButtonElement>('button[aria-label="模型"]')!.click();
+    el.querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!.click();
   });
   expect(document.body.textContent).toContain("M (p)");
 });

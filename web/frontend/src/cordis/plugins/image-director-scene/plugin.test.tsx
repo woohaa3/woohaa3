@@ -7,6 +7,26 @@ import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state
 import { ImageDirectorPanel, imageDirectorSceneExtension } from "./plugin.js";
 import { rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 
+it("keeps model-specific effort drafts when the creation dialog closes and reopens", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const scope = "director-effort-drafts";
+  rememberAssistantPreference(scope, { sourceId: "adapter", connectionId: "connection", model: "a", reasoningEffort: "high" });
+  const service = { getDataScopeId: () => scope, listConnections: async () => ({ ok: true, value: [{ connectionId: "connection", adapterId: "adapter", name: "助手", ready: true, capabilities: { tools: true, targets: ["world"], textDelivery: { imageInput: true, maxImages: 1 } }, models: [{ id: "a", label: "模型 A", reasoningEfforts: ["high"] }, { id: "b", label: "模型 B", reasoningEfforts: ["low"] }] }] }) };
+  const ctx = { get: () => service, canvasSession: { isWritable: () => true }, canvasNavigation: { openDialog: vi.fn() } };
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const render = (key: string) => root.render(<ImageDirectorPanel key={key} ctx={ctx as never} canvasId={scope} nodeId="image" visible onClose={() => {}} />);
+  const choose = async (label: string) => {
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.generation-directory__model')].find(b => b.textContent?.includes(label))!.click());
+  };
+  try {
+    await act(async () => render("first"));
+    await choose("模型 B"); expect(host.querySelector('button[aria-label="生成参数"]')?.textContent).not.toContain("高");
+    await act(async () => render("reopened"));
+    await choose("模型 A"); expect(host.querySelector('button[aria-label="生成参数"]')?.textContent).toContain("高");
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); }
+});
+
 it("uses the original dialog and assistant toolbar, then closes on explicit generation", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const canvas = createEmptyWoohaa3ServerCanvas("dialog-test");

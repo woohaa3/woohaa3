@@ -12,6 +12,7 @@
  */
 import {
   findAdaptiveOption,
+  parameterPresentation,
   isPptaskParameterControl,
   requirementOfOption,
   type CanvasTaskCatalogModel
@@ -25,7 +26,7 @@ const EXCLUDED_PARAMETER_KEYS = new Set(["prompt", "urls"]);
  * 按 catalog 的 `inputSchema` 投影参数表。
  *
  * - `enum` → select（带语义时额外透传 `semantic` / `adaptiveValue`）；
- * - number 且带 minimum/maximum → slider，否则 number；
+ * - number/integer 默认直接输入，只有显式 slider 声明才显示滑杆；
  * - boolean → checkbox；
  * - `prompt` / `urls` 不进参数表：前者是面板自己的提示词框，后者是参考输入能力；
  * - schema `default` 与 `defaultInput` 一起作为默认参数。
@@ -38,12 +39,12 @@ export function projectParameterFields(
   const fields: ExecutionPanelParameterField[] = [];
 
   for (const [key, rawSchema] of Object.entries(properties)) {
-    if (EXCLUDED_PARAMETER_KEYS.has(key)) continue;
+    if (EXCLUDED_PARAMETER_KEYS.has(key) || model.bindings?.some(binding => binding.field === key)) continue;
     const schema = readObject(rawSchema);
     if (!schema) continue;
     const label = readString(schema.title) ?? key;
     const defaultValue = schema.default ?? model.defaultInput[key];
-    const isRequired = required.includes(key) ? { required: true } : {};
+    const isRequired = { schema, ...(required.includes(key) ? { required: true } : {}), presentation: parameterPresentation(schema), ...(typeof schema.unit === "string" ? { unit: schema.unit } : {}) };
 
     const enumOptions = readEnumOptions(schema.enum);
     if (enumOptions.length > 0) {
@@ -80,7 +81,7 @@ export function projectParameterFields(
         key,
         label,
         type: "boolean",
-        defaultValue: defaultValue === true,
+        defaultValue: typeof defaultValue === "boolean" ? defaultValue : undefined,
         ...isRequired,
         hiddenWhen: readHiddenWhen(schema["x-hidden-when"])
       });
@@ -90,11 +91,12 @@ export function projectParameterFields(
       const minimum = readNumber(schema.minimum);
       const maximum = readNumber(schema.maximum);
       const step = readNumber(schema.step) ?? readNumber(schema["multipleOf"]);
-      const slider = minimum !== undefined && maximum !== undefined;
+      const slider = parameterPresentation(schema).control === "slider" && minimum !== undefined && maximum !== undefined;
       fields.push({
         key,
         label,
         type: "number",
+        integer: type === "integer",
         ...(slider ? { control: "slider" as const } : {}),
         minimum,
         maximum,
@@ -105,9 +107,12 @@ export function projectParameterFields(
       });
       continue;
     }
-    if (type === "array" || type === "object") continue;
+    if (type === "array" || type === "object") {
+      fields.push({ key, label, type: "unsupported", defaultValue, ...isRequired } as ExecutionPanelParameterField);
+      continue;
+    }
 
-    const multiline = schema["x-component"] === "Input.TextArea";
+    const multiline = schema["x-component"] === "Input.TextArea" || parameterPresentation(schema).control === "textarea";
     fields.push({
       key,
       label,
@@ -127,12 +132,12 @@ export function projectParameterDefaults(
 ): Record<string, unknown> {
   const defaults: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(model.defaultInput)) {
-    if (EXCLUDED_PARAMETER_KEYS.has(key)) continue;
+    if (EXCLUDED_PARAMETER_KEYS.has(key) || model.bindings?.some(binding => binding.field === key)) continue;
     defaults[key] = value;
   }
   const properties = readObject(model.inputSchema.properties) ?? {};
   for (const [key, rawSchema] of Object.entries(properties)) {
-    if (EXCLUDED_PARAMETER_KEYS.has(key)) continue;
+    if (EXCLUDED_PARAMETER_KEYS.has(key) || model.bindings?.some(binding => binding.field === key)) continue;
     const schema = readObject(rawSchema);
     if (schema?.default !== undefined) defaults[key] = schema.default;
   }

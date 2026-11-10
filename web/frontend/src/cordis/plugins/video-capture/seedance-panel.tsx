@@ -8,6 +8,7 @@
  */
 import { useState } from "react";
 import { ExecutionPanelShell, executionRunSnapshot } from "../../ui/index.js";
+import { AssistantToolbar, GenerationParameters } from "@woohaa3/ui/assistant";
 import { Button } from "@woohaa3/ui";
 import type { ModelPanelProps } from "../../contract/model-interaction.js";
 
@@ -114,14 +115,7 @@ export function SeedanceVideoPanel(props: ModelPanelProps) {
         ) : null}
         <div className="mc-panel__grid-item" style={{ gridColumn: "span 24" }}>
           <span className="mc-panel__grid-control">
-            <Button
-              tone="primary"
-              className="mc-panel__run"
-              disabled={!canRun}
-              onClick={handleRun}
-            >
-              {busy ? "生成中" : "执行生成"}
-            </Button>
+            <AssistantToolbar assistant={props.renderers?.modelSelector?.()} parameters={<GenerationParameters fields={[]} parameters={{}} open={false} onOpenChange={() => {}} onChange={() => {}} />} submit={<Button tone="primary" className="mc-panel__run" disabled={!canRun} onClick={handleRun}>{busy ? "生成中" : "执行生成"}</Button>} />
           </span>
         </div>
         {blockingReasons.length > 0 ? (

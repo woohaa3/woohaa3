@@ -205,7 +205,8 @@ describe("world authoring authority", () => {
     canvas.document.nodes.push({ id: "broken", type: "model3d", position: { x: 0, y: 0 } });
     const authority = createWorldAuthoringAuthority({ executeScene });
     const prepared = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
-    expect(prepared).toMatchObject({ ok: false, code: "not-ready" });
+    expect(prepared).toMatchObject({ ok: false, code: "not-ready",
+      message: "无法准备场景模型。模型「broken」：模型脚本为空，请修复模型内容" });
   });
 
   it("recovers after a transient bounds preparation failure without authorizing unknown", async () => {

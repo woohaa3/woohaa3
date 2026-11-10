@@ -78,7 +78,7 @@ describe("panelModelConfigForCatalog", () => {
     expect(config.defaultModel).toBe("gpt-image-2");
   });
 
-  it("enum → select，number 带范围 → slider，boolean → checkbox，TextArea → textarea", () => {
+  it("enum → select，number 带范围仍为精确输入，boolean → checkbox，TextArea → textarea", () => {
     const config = panelModelConfigForCatalog(CATALOG, "image-generation");
     const fields = config.parameterSchemaByModel?.["gpt-image-2"] ?? [];
     const byKey = Object.fromEntries(fields.map((field) => [field.key, field]));
@@ -90,8 +90,7 @@ describe("panelModelConfigForCatalog", () => {
     ]);
     expect(byKey.outputCompression).toMatchObject({
       type: "number",
-      control: "slider",
-      minimum: 0,
+            minimum: 0,
       maximum: 100
     });
     expect(byKey.outputCompression.hiddenWhen).toEqual([{ field: "outputFormat", equals: "png" }]);

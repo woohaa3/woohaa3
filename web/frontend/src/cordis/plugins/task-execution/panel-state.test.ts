@@ -19,13 +19,13 @@ describe("derivePanelDraft", () => {
     });
   });
 
-  it("草稿按字段覆盖规范值（合并顺序与批量执行一致）", () => {
+  it("模型草稿替换参数集合，避免带入另一模型的规范参数", () => {
     const draft = derivePanelDraft(
       { prompt: "规范提示词", parameters: { ratio: "16:9", resolution: "2K" } },
       { prompt: "本地未提交", parameters: { ratio: "1:1" } }
     );
     expect(draft.prompt).toBe("本地未提交");
-    expect(draft.parameters).toEqual({ ratio: "1:1", resolution: "2K" });
+    expect(draft.parameters).toEqual({ ratio: "1:1" });
   });
 
   it("规范与草稿都缺失时给出空值而不是 undefined", () => {

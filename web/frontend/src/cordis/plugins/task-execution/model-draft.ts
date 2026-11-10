@@ -72,3 +72,15 @@ export function createModelDraftStore(): ModelDraftStore {
     }
   };
 }
+
+const legacyClaims = new WeakMap<object, string>();
+/** Read an explicitly identified legacy draft once. Ambiguous source identities are never inferred. */
+export function migrateLegacyModelDraft(store: ModelDraftStore, input: { nodeId: string; modelKey: string; sourceId: string; target: string; partition: string }) {
+  const legacy = nodeDraftStore.get(input.nodeId, input.modelKey);
+  if (!legacy || (legacy.parameters?.model !== undefined && legacy.parameters.model !== input.modelKey)) return false;
+  const source = typeof legacy.parameters?.serviceConnectionId === "string" ? legacy.parameters!.serviceConnectionId : "";
+  if (source !== input.sourceId || legacyClaims.has(legacy)) return false;
+  legacyClaims.set(legacy, input.target);
+  store.patch(input.target, input.partition, legacy);
+  return true;
+}

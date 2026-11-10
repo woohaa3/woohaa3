@@ -12,12 +12,12 @@ const CONFIG: ExecutionPanelModelConfig = {
 	parameterSchemaByModel: {
 		"gpt-image-2": [
 			{
-				key: "resolution", label: "图片分辨率", type: "select",
+				presentation: { semanticId: "image.resolution" }, key: "resolution", label: "图片分辨率", type: "select",
 				options: ["1K", "2K", "4K"].map((value) => ({ value, label: value })),
 				defaultValue: "1K",
 			},
 			{
-				key: "aspectRatio", label: "图片比例", type: "select",
+				presentation: { semanticId: "image.aspect-ratio" }, key: "aspectRatio", label: "图片比例", type: "select",
 				options: ["auto", "1:1", "16:9"].map((value) => ({ value, label: value })),
 				defaultValue: "1:1",
 			},
@@ -30,12 +30,12 @@ const CONFIG: ExecutionPanelModelConfig = {
 		],
 		"gemini-3-pro-image": [
 			{
-				key: "resolution", label: "图片分辨率", type: "select",
+				presentation: { semanticId: "image.resolution" }, key: "resolution", label: "图片分辨率", type: "select",
 				options: ["1K", "2K", "4K"].map((value) => ({ value, label: value })),
 				defaultValue: "1K",
 			},
 			{
-				key: "aspectRatio", label: "图片比例", type: "select",
+				presentation: { semanticId: "image.aspect-ratio" }, key: "aspectRatio", label: "图片比例", type: "select",
 				options: ["auto", "1:1", "16:9"].map((value) => ({ value, label: value })),
 				defaultValue: "auto",
 			},
@@ -190,9 +190,9 @@ describe("parametersOnOpen", () => {
 		});
 	});
 
-	it("null 与空串不压掉默认值（恢复损坏草稿时也要能提交）", () => {
+	it("空白中间值保留供修正，不用默认值掩盖未完成输入", () => {
 		expect(parametersOnOpen(CONFIG, { resolution: null, quality: "" }, "gpt-image-2")).toMatchObject({
-			resolution: "1K", quality: "high",
+			resolution: null, quality: "",
 		});
 	});
 });
@@ -204,7 +204,7 @@ describe("missingRequiredParameters", () => {
 			...CONFIG.parameterSchemaByModel,
 			"seedance-video": [
 				{
-					key: "resolution", label: "分辨率", type: "select", required: true,
+					presentation: { semanticId: "image.resolution" }, key: "resolution", label: "分辨率", type: "select", required: true,
 					options: ["480p", "720p", "1080p"].map((value) => ({ value, label: value })),
 					defaultValue: "720p",
 				},
@@ -235,7 +235,7 @@ describe("missingRequiredParameters", () => {
 				...REQUIRED.parameterSchemaByModel,
 				hidden: [
 					{
-						key: "resolution", label: "分辨率", type: "select", required: true,
+						presentation: { semanticId: "image.resolution" }, key: "resolution", label: "分辨率", type: "select", required: true,
 						options: [{ value: "720p", label: "720p" }],
 						hiddenWhen: [{ field: "mode", equals: "fixed" }],
 					},

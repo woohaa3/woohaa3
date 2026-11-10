@@ -4,14 +4,15 @@ import type { CurrentUserService } from "../current-user.js";
 import type { CanvasSession } from "../canvas-session.js";
 
 type DirectoryService = Pick<AgentConversationService, "listConnections" | "catalog"> & Partial<Pick<AgentConversationService, "invalidateDirectory">>;
-type DirectorySnapshot = {
+export type DirectorySnapshot = {
+  sourceStates: Record<string, { status: "loading" | "ready" | "failed"; error?: string }>;
   connections: AgentConnectionView[];
   catalogs: Record<string, AgentCatalogResponse>;
   ready: boolean;
   loadingMessage: string;
   error: string;
 };
-const empty = (): DirectorySnapshot => ({ connections: [], catalogs: {}, ready: false, loadingMessage: "正在读取助手连接…", error: "" });
+const empty = (): DirectorySnapshot => ({ sourceStates: {}, connections: [], catalogs: {}, ready: false, loadingMessage: "正在读取助手连接…", error: "" });
 const MAX_AGE_MS = 60_000;
 
 /** Shared API reads: reuse successful results and in-flight requests across every assistant UI. */
@@ -66,6 +67,17 @@ export class AgentDirectoryStore {
   private pending: Promise<void> | null = null;
   private generation = 0;
   private loadedAt = -Infinity;
+  private activeReads = 0;
+  private readWaiters: Array<() => void> = [];
+  private async readCatalog(adapterId: string) {
+    if (this.activeReads < 4) this.activeReads++;
+    else await new Promise<void>(resolve => this.readWaiters.push(resolve));
+    try { return await this.service.catalog(adapterId); }
+    finally {
+      const next = this.readWaiters.shift();
+      if (next) next(); else this.activeReads--;
+    }
+  }
 
   constructor(private service: DirectoryService) {}
   getSnapshot = () => this.snapshot;
@@ -84,6 +96,21 @@ export class AgentDirectoryStore {
     this.publish(empty());
   };
 
+  retry = async (adapterId: string): Promise<void> => {
+    const generation = this.generation;
+    this.publish({ sourceStates: { ...this.snapshot.sourceStates, [adapterId]: { status: "loading" } } });
+    try {
+      const result = await this.readCatalog(adapterId);
+      if (generation !== this.generation) return;
+      const sourceStates: DirectorySnapshot["sourceStates"] = { ...this.snapshot.sourceStates, [adapterId]: result.ok ? { status: "ready" } : { status: "failed", error: result.error } };
+      const error = Object.entries(sourceStates).flatMap(([id, state]) => state.status === "failed" ? [`${this.snapshot.connections.filter(c => c.adapterId === id).map(c => c.name).join(" / ")}：${state.error}`] : []).join("；");
+      this.publish({ sourceStates, error,
+        ...(result.ok ? { catalogs: { ...this.snapshot.catalogs, [adapterId]: result.value } } : {}) });
+    } catch (error) {
+      if (generation === this.generation) this.publish({ sourceStates: { ...this.snapshot.sourceStates, [adapterId]: { status: "failed", error: String(error) } } });
+    }
+  };
+
   load = (force = false): Promise<void> => {
     if (!force && this.pending) return this.pending;
     if (!force && this.snapshot.ready && Date.now() - this.loadedAt < MAX_AGE_MS) return Promise.resolve();
@@ -100,7 +127,7 @@ export class AgentDirectoryStore {
         const result = await this.service.listConnections();
         if (!current()) return;
         if (!result.ok) throw new Error(result.error);
-        const waiting = new Map([...new Set(result.value.map(c => c.adapterId))].map(id => [
+        const waiting = new Map([...new Set(result.value.filter(c => !c.models?.length).map(c => c.adapterId))].map(id => [
           id, [...new Set(result.value.filter(c => c.adapterId === id).map(c => c.name))].join(" / ")
         ]));
         const names = new Map(waiting);
@@ -109,20 +136,34 @@ export class AgentDirectoryStore {
           if (current() && waiting.size) this.publish({ loadingMessage: `正在读取模型与能力（${total - waiting.size}/${total}）：${[...waiting.values()].join("、")}…` });
         };
         progress();
-        const entries = await Promise.all([...waiting.keys()].map(async id => {
-          try { return [id, await this.service.catalog(id)] as const; }
-          finally { waiting.delete(id); progress(); }
+        this.publish({ connections: result.value, ready: true, sourceStates: Object.fromEntries(result.value.map(c => [c.adapterId, { status: waiting.has(c.adapterId) ? "loading" : "ready" }])) });
+        const ids = [...waiting.keys()];
+        const entries: Array<readonly [string, Awaited<ReturnType<DirectoryService["catalog"]>>]> = [];
+        let cursor = 0;
+        await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+          while (cursor < ids.length && current()) {
+            const id = ids[cursor++]!;
+            let catalog: Awaited<ReturnType<DirectoryService["catalog"]>>;
+            try { catalog = await this.readCatalog(id); }
+            catch (error) { catalog = { ok: false, code: "catalog-error", error: error instanceof Error ? error.message : "目录读取失败" }; }
+            entries.push([id, catalog]);
+            if (current()) this.publish({
+              sourceStates: { ...this.snapshot.sourceStates, [id]: catalog.ok ? { status: "ready" } : { status: "failed", error: catalog.error } },
+              ...(catalog.ok ? { catalogs: { ...this.snapshot.catalogs, [id]: catalog.value } } : {})
+            });
+            waiting.delete(id); progress();
+          }
         }));
         if (!current()) return;
         const failures = entries.flatMap(([id, catalog]) => catalog.ok ? [] : [`${names.get(id)}：${catalog.error}`]);
-        this.loadedAt = failures.length ? -Infinity : Date.now();
+        // Keep a just-observed failure visible until explicit retry or normal cache expiry.
+        this.loadedAt = Date.now();
         // 单次读取失败（进程冷启动、回合进行中）不应清空已经可用的目录：保留上一次成功结果，
         // 只把原因放进 error，下一次刷新仍会尝试真实目录。
         const catalogs = { ...previousCatalogs };
         for (const [id, catalog] of entries) {
           if (!catalog.ok) continue;
-          const previous = catalogs[id];
-          if (catalog.value.models.length === 0 && previous && previous.models.length > 0) continue;
+
           catalogs[id] = catalog.value;
         }
         this.publish({

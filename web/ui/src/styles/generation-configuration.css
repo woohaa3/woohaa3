@@ -1,0 +1,45 @@
+.generation-directory.ui-popover { width: min(608px, calc(100vw - 32px)); max-width: min(608px, calc(100vw - 32px)); max-height: var(--radix-popover-content-available-height, 640px); padding: 0; overflow: hidden; font-size: 13px; color: var(--app-web-text-primary); background: var(--app-web-panel); }
+.generation-directory button, .generation-parameters button { color: inherit; font: inherit; cursor: pointer; }
+.generation-directory input, .generation-parameters input, .generation-parameters select, .generation-parameters textarea { box-sizing: border-box; min-width: 0; color: var(--app-web-text-primary); background: var(--app-web-panel); border: 1px solid var(--app-web-border); border-radius: 6px; padding: 8px 10px; font: inherit; caret-color: var(--app-interaction-accent); }
+.generation-directory__search { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--app-web-border); }
+.generation-directory__search input { width: 100%; border: 0; padding: 4px 0; outline: none; }
+.generation-directory__body { display: grid; grid-template-columns: 150px minmax(0, 1fr); height: min(384px, calc(var(--radix-popover-content-available-height, 640px) - 118px)); min-height: 140px; }
+.generation-directory__sources { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--app-web-border); padding: 8px; gap: 6px; background: var(--app-web-subtle); }
+.generation-directory__sources input { width: 100%; font-size: 12px; padding: 6px; }
+.generation-directory__source-list { overflow-y: auto; }
+.generation-directory__source-list button { display: block; text-align: left; width: 100%; padding: 9px 8px; border: 0; border-radius: 6px; background: transparent; overflow-wrap: anywhere; }
+.generation-directory__source-list small { display: block; color: var(--app-web-text-muted); }
+.generation-directory__source-list button[data-selected="true"] { background: var(--app-interaction-accent-soft); color: var(--app-interaction-accent); }
+.generation-directory__results { display: flex; flex-direction: column; min-height: 0; }
+.generation-directory__incomplete { padding: 8px 12px; font-size: 12px; max-height: 100px; overflow-y: auto; border-bottom: 1px solid var(--app-web-border); }
+.generation-directory__incomplete button { margin-left: 8px; border: 0; background: transparent; color: var(--app-interaction-accent); }
+.generation-directory__list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.generation-directory__model { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--app-web-border); background: transparent; text-align: left; }
+.generation-directory__model:hover, .generation-directory__source-list button:hover { background: var(--app-web-subtle); }
+.generation-directory__model:disabled { opacity: .55; cursor: default; }
+.generation-directory__model-text { flex: 1; min-width: 0; }
+.generation-directory__model-text strong, .generation-directory__model-text small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generation-directory__model-text strong { font-weight: 500; font-size: 13px; line-height: 22px; }
+.generation-directory__model-text small, .generation-directory__origin { color: var(--app-web-text-muted); font-size: 12px; }
+.generation-directory__origin { max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generation-directory__origin small { display: block; }
+.generation-directory__footer { display: flex; gap: 16px; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid var(--app-web-border); }
+.generation-directory__footer span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.generation-directory__footer button, .generation-parameters__header button { flex-shrink: 0; border: 0; background: transparent; color: var(--app-interaction-accent); }
+.generation-directory__empty { padding: 32px 20px; color: var(--app-web-text-muted); }
+.generation-directory__empty button { display: block; margin-top: 12px; padding: 0; color: var(--app-interaction-accent); border: 0; background: none; }
+.generation-parameters.mc-panel__settings-menu { display: flex; flex-direction: column; width: 400px; max-width: calc(100vw - 32px); max-height: min(620px, var(--radix-popover-content-available-height, 620px)); padding: 0; font-size: 13px; }
+.generation-parameters__header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--app-web-border); }
+.generation-parameters__body { overflow-y: auto; overscroll-behavior: contain; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+.generation-parameters__advanced { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 0 0; border: 0; border-top: 1px solid var(--app-web-border); background: none; text-align: left; }
+.generation-parameters__error { display: block; margin-top: 5px; color: var(--app-status-danger); }
+.generation-parameters__switch { appearance: none; width: 32px; height: 18px; border-radius: 12px !important; padding: 2px !important; background: var(--app-web-border-strong) !important; cursor: pointer; }
+.generation-parameters__switch::after { content: ""; display: block; width: 12px; height: 12px; border-radius: 50%; background: var(--app-web-panel); transition: transform 120ms ease-out; }
+.generation-parameters__switch:checked { background: var(--app-interaction-accent) !important; }
+.generation-parameters__switch:checked::after { transform: translateX(14px); }
+.generation-parameters__numeric { width: 88px; font-variant-numeric: tabular-nums; }
+.assistant-toolbar__selection { flex: 1 1 180px; min-width: 90px; max-width: 300px; }
+.assistant-toolbar__parameters { flex: 0 1 auto; min-width: 64px; max-width: 220px; }
+.assistant-toolbar__submit { flex-shrink: 0; margin-left: auto; padding-left: 16px; }
+.assistant-toolbar .mc-panel__model-trigger, .assistant-toolbar .mc-panel__settings-trigger { min-width: 0; max-width: 100%; }
+.mc-panel__model-label, .mc-panel__settings-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

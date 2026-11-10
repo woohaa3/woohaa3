@@ -106,6 +106,7 @@ export function ExecutionPanel({
 	pendingLabel = "生成中",
 	showExpand = true,
 	showModelSelector = true,
+    modelSelectorSlot,
 	showRun = true,
 	showPolish = true,
 	showFormatToolbar = true,
@@ -322,7 +323,7 @@ export function ExecutionPanel({
 
 	const parameterSheet = (
 		<div className="mc-panel__parameters">
-			{showModelSelector ? (
+			{modelSelectorSlot ?? (showModelSelector ? (
 				<div className="mc-panel__model">
 					<ModelSelector
 						model={model}
@@ -336,8 +337,8 @@ export function ExecutionPanel({
 						}
 					/>
 				</div>
-			) : null}
-			{fields.length > 0 ? (
+			) : null)}
+			{true ? (
 				<SettingsMenu
 					fields={fields}
 					parameters={effectiveParameters}

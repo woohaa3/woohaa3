@@ -1,3 +1,7 @@
+import { useOptionalService } from "../../react.js";
+import { MediaConfiguration } from "../../ui/assistant-execution/media-configuration.js";
+import { mediaDraftTarget, mediaDraftPartition, switchMediaParameters, mediaParameterEditingError, visibleMediaParameters } from "./configuration-draft.js";
+import { recordAcceptedGeneration, generationIdentity } from "../../services/assistant-execution/recent.js";
 /**
  * Model Execution Host
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1–4.3 / design D4 / D8）。
@@ -54,7 +58,7 @@ import {
 } from "./node-panel-helpers.js";
 import { resolveModelExecutionContext } from "./model-execution-context.js";
 import { explicitWorldCaptureSelection } from "./capture-camera.js";
-import { createModelDraftStore } from "./model-draft.js";
+import { createModelDraftStore, migrateLegacyModelDraft } from "./model-draft.js";
 import {
   ModelInteractionDiagnosticView,
   ModelPanelErrorBoundary,
@@ -74,6 +78,7 @@ import type { ExecutionOrigin } from "./execution-launch.js";
 export type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
 
 const defaultDraftStore = createModelDraftStore();
+const mediaSourceSelections = new Map<string, string>();
 
 function executionButtonOrigin(button: HTMLButtonElement | null): ExecutionOrigin | undefined {
   if (!button) return;
@@ -106,6 +111,11 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     queueMicrotask(() => { if (launchOrigin.current === origin) launchOrigin.current = undefined; });
   };
   const props = rawProps;
+  const agentService = useOptionalService("agentConversationService");
+  const space = agentService?.getDataScopeId?.() ?? "page";
+  const [sourceSelections, setSourceSelections] = useState<Record<string, string>>(() => Object.fromEntries(mediaSourceSelections));
+  const [configurationNotice, setConfigurationNotice] = useState("");
+  const [sourceError, setSourceError] = useState("");
   const {
     canvasId,
     selectedNodeId,
@@ -191,7 +201,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   // 未确认的本地选择优先；保存后读取规范字段，撤销/别页修改也由同一投影恢复。
   const selectionSnapshot = useSyncExternalStore(
     draftStore.subscribe,
-    useCallback(() => (context ? draftStore.getSelection(context.nodeId) ?? "" : ""), [context, draftStore])
+    useCallback(() => (context ? draftStore.getSelection(mediaDraftTarget(space, canvasId, context.nodeId)) ?? "" : ""), [context, draftStore, space, canvasId])
   );
 
   const targetModelKey = useMemo(() => {
@@ -207,11 +217,24 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   }, [context, panelKind, selectionSnapshot, typedModels, modelConfig]);
   useEffect(() => {
     if (context && selectionSnapshot && canvas?.nodeData[context.nodeId]?.preferredModelKey === selectionSnapshot) {
-      draftStore.clearSelection(context.nodeId);
+      draftStore.clearSelection(mediaDraftTarget(space, canvasId, context.nodeId));
     }
-  }, [canvas, context, selectionSnapshot, draftStore]);
+  }, [canvas, context, selectionSnapshot, draftStore, space, canvasId]);
 
-  const draft = useNodeDraft(context?.nodeId ?? null, targetModelKey);
+  const draftNodeId = mediaDraftTarget(space, canvasId, context?.nodeId);
+  const sourceId = sourceSelections[draftNodeId] ?? (typeof context?.nodeData.parameters?.serviceConnectionId === "string" ? context.nodeData.parameters.serviceConnectionId : "");
+  const draftModelKey = mediaDraftPartition(targetModelKey, sourceId);
+  const storedDraft = useNodeDraft(context ? draftNodeId : null, draftModelKey);
+
+  useEffect(() => {
+    if (context && !storedDraft && (context.nodeData.preferredModelKey === targetModelKey || context.nodeData.parameters?.model === targetModelKey)) {
+      migrateLegacyModelDraft(draftStore, { nodeId: context.nodeId, modelKey: targetModelKey, sourceId, target: draftNodeId, partition: draftModelKey });
+    }
+  }, [context, storedDraft, targetModelKey, sourceId, draftNodeId, draftModelKey, draftStore]);
+  const canonicalParameters = context?.nodeData.parameters;
+  const matchingCanonical = !canonicalParameters?.model || canonicalParameters.model === targetModelKey;
+  const draft = storedDraft ?? (context ? { prompt: typeof context.nodeData.prompt === "string" ? context.nodeData.prompt : "", parameters: matchingCanonical ? canonicalParameters ?? {} : {} } : undefined);
+
   const model = useMemo(
     () => typedModels.find((entry) => entry.modelKey === targetModelKey) ?? null,
     [typedModels, targetModelKey]
@@ -325,38 +348,38 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     (patch: { prompt?: string; parameters?: Record<string, unknown> }) => {
       if (!context) return;
       const nextModel = patch.parameters?.model;
-      if (
-        typeof nextModel === "string" &&
-        nextModel !== "" &&
-        nextModel !== targetModelKey &&
-        typedModels.some((entry) => entry.modelKey === nextModel)
-      ) {
-        // 模型切换：按目标 Plugin 分区写草稿，避免污染当前 modelKey 的参数。
-        draftStore.patch(context.nodeId, nextModel, {
-          prompt: patch.prompt ?? derivePanelDraft(context.nodeData, draft).prompt,
-          ...(patch.parameters !== undefined ? { parameters: patch.parameters } : {})
-        });
-        draftStore.setSelection(context.nodeId, nextModel);
+      const nextSource = typeof patch.parameters?.serviceConnectionId === "string" ? patch.parameters.serviceConnectionId : sourceId;
+      if (typeof nextModel === "string" && nextModel && (nextModel !== targetModelKey || nextSource !== sourceId) && typedModels.some(e => e.modelKey === nextModel)) {
+        const next = typedModels.find(e => e.modelKey === nextModel)!;
+        const partition = mediaDraftPartition(nextModel, nextSource);
+        const own = draftStore.get(draftNodeId, partition);
+        const restored = switchMediaParameters(model, next, parameters, own.parameters);
+        const values = restored.parameters;
+        draftStore.patch(draftNodeId, partition, { prompt: patch.prompt ?? draftPrompt, parameters: { ...values, model: nextModel, serviceConnectionId: nextSource || undefined } });
+        mediaSourceSelections.set(draftNodeId, nextSource);
+        setSourceSelections(current => ({ ...current, [draftNodeId]: nextSource }));
+        draftStore.setSelection(draftNodeId, nextModel);
         saveModelSelection(context.nodeId, nextModel);
+        setConfigurationNotice(restored.resetLabels.length ? `已恢复默认：${restored.resetLabels.join("、")}` : "");
         return;
       }
       // 参数手势：把连续变更合并为一次可撤销的本地条目（任务 1.6）。
       if (patch.parameters !== undefined && props.onParameterGesture
         && applyParameterDraft({
           draftStore,
-          nodeId: context.nodeId,
-          modelKey: targetModelKey,
+          nodeId: draftNodeId,
+          modelKey: draftModelKey,
           values: patch.parameters,
-          onGesture: props.onParameterGesture
+          onGesture: input => props.onParameterGesture?.({ ...input, nodeId: context.nodeId })
         })) {
         return;
       }
-      draftStore.patch(context.nodeId, targetModelKey, {
+      draftStore.patch(draftNodeId, draftModelKey, {
         ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
         ...(patch.parameters !== undefined ? { parameters: patch.parameters } : {})
       });
     },
-    [context, draft, draftStore, targetModelKey, typedModels, props, saveModelSelection]
+    [context, draft, draftStore, targetModelKey, typedModels, props, saveModelSelection, draftNodeId, draftModelKey, sourceId, model, parameters, draftPrompt]
   );
 
   /**
@@ -390,6 +413,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         return { ok: false, error: "模型尚未就绪，任务未提交" };
       }
       const nodeId = context.nodeId;
+      const editingError = sourceError || (model ? mediaParameterEditingError(model, input.parameters) : "模型已失效，请重新选择");
+      if (editingError) { setSubmitError(editingError); return { ok: false, error: editingError }; }
       // schema 默认值必须进入提交快照（A9 / change: 2026-11-06-guard-video-generation-inputs）：
       // 面板显示的 720p / 5 秒不能只停在控件上，否则 Provider 仍会收到缺字段的请求。
       const resolvedParameters = resolveModelSubmissionParameters(
@@ -398,10 +423,10 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
           inputSchema: model?.inputSchema,
           defaultInput: model?.defaultInput
         },
-        input.parameters,
+        model ? visibleMediaParameters(model, input.parameters) : input.parameters,
         { prompt: input.prompt, skipRequired: ["prompt"] }
       );
-      draftStore.persist(nodeId, targetModelKey, { prompt: input.prompt, parameters: resolvedParameters });
+      draftStore.persist(draftNodeId, draftModelKey, { prompt: input.prompt, parameters: resolvedParameters });
       setSubmitError(null);
 
       const reasons = resolveBlockingReasons({
@@ -452,14 +477,15 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         if (!mounted.current || outcome.code === "stale-scope") {
           return { ok: false, error: outcome.error };
         }
-        draftStore.patch(nodeId, targetModelKey, { prompt: input.prompt });
+        draftStore.patch(draftNodeId, draftModelKey, { prompt: input.prompt });
         if (outcome.error === EMPTY_UPSTREAM_TEXT_MESSAGE) showEmptyUpstreamAlert();
         else setSubmitError(outcome.error);
         return { ok: false, error: outcome.error };
       }
+      recordAcceptedGeneration(space, panelKind, generationIdentity(sourceId || model?.providerId || "", targetModelKey));
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture, space, sourceId, draftNodeId, draftModelKey, sourceError]
   );
 
   const submitIntent = useCallback(
@@ -551,6 +577,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       data-node-id={context.nodeId}
       data-presentation={expanded ? "expanded" : "compact"}
     >
+      {configurationNotice || sourceError ? <p className="mc-panel__notice">{sourceError || configurationNotice}</p> : null}
       {diagnostic ? (
         <>
           <ModelInteractionDiagnosticView diagnostic={diagnostic} />
@@ -594,6 +621,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             requestPresentation={submitIntent}
             {...(binding?.actions || panelActions ? { actions: { ...binding?.actions, ...panelActions } } : {})}
             renderers={{
+              modelSelector: () => <MediaConfiguration key={draftNodeId} models={typedModels} modelKey={targetModelKey} sourceId={sourceId} space={space} purpose={panelKind ?? "media"} service={agentService} disabled={readOnly || pendingSelection} onValidation={setSourceError} onManage={() => dialogs.open({ dialogId: "settings" })} onSelect={(key, source) => patchDraft({ parameters: { model: key, serviceConnectionId: source } })} />,
               references: () => referencesSlot,
               promptEditor: ({ value, onChange, disabled, placeholder, onSubmit }) => (
                 <MentionEditor

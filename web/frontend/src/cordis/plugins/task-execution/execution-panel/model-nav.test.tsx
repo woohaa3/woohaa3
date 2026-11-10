@@ -35,13 +35,13 @@ const BASE_PROPS = {
 describe("ExecutionPanel Dock 组合", () => {
 	it("默认渲染内联模型选择器与主操作", () => {
 		const html = renderToStaticMarkup(<ExecutionPanel {...BASE_PROPS} />);
-		expect(html).toContain('aria-label="选择生成模型"');
+		expect(html).toContain('aria-label="来源与模型"');
 		expect(html).toContain("mc-panel__send");
 	});
 
 	it("showModelSelector=false 时不渲染内联模型选择器", () => {
 		const html = renderToStaticMarkup(<ExecutionPanel {...BASE_PROPS} showModelSelector={false} />);
-		expect(html).not.toContain('aria-label="选择生成模型"');
+		expect(html).not.toContain('aria-label="来源与模型"');
 		// 参数菜单仍可用。
 		expect(html).toContain('aria-label="生成参数"');
 	});

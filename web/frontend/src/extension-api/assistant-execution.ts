@@ -8,3 +8,6 @@ export type { AssistantInputScope, AssistantSubmissionPort, AssistantInputResult
 export { AssistantModelSelector } from "@woohaa3/ui/assistant";
 export { agentModelSelection, agentDirectoryModels } from "../cordis/services/assistant-execution/selection.js";
 export { agentDirectory } from "../cordis/services/assistant-execution/directory.js";
+
+export { GenerationModelDirectory, GenerationParameters, ReasoningParameters } from "@woohaa3/ui/assistant";
+export type { GenerationDirectoryProps, GenerationParameterField } from "@woohaa3/ui/assistant";

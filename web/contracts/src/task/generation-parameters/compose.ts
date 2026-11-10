@@ -1,3 +1,4 @@
+import { CONTROL_PRESENTATION } from "./controls.js";
 /**
  * 卡片 → 目录模型的合成。
  *
@@ -117,6 +118,14 @@ export function composePresetCard(card: PresetCard): ComposedPresetCard {
   }
 
   const inputSchema: Record<string, unknown> = { type: "object", properties };
+  for (const [key, raw] of Object.entries(properties)) {
+    const field = raw as Record<string, unknown>;
+    const presentation = CONTROL_PRESENTATION[key];
+    if (presentation) field["x-pptask-presentation"] = { ...presentation };
+    if (key === "durationSeconds") field.unit = "秒";
+    if (key === "speed") field.unit = "倍";
+  }
+
   const required = [
     ...new Set([...preset.required, ...(family?.required ?? [])])
   ].filter((key) => kept.has(key));

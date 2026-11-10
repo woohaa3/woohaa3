@@ -1,11 +1,15 @@
+import { agentDirectory } from "../../services/assistant-execution/directory.js";
+import { agentDirectoryModels } from "../../services/assistant-execution/selection.js";
+import { AssistantConfiguration, ReasoningParameters } from "../../ui/assistant-execution/configuration.js";
+import { generationIdentity, recordAcceptedGeneration } from "../../services/assistant-execution/recent.js";
 import { AGENT_ROLE_BINDINGS } from "../../services/agent-role-bindings.js";
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AssistantComposer, AssistantConnectionSelector, AssistantModelSelector, AssistantToolbar } from "@woohaa3/ui/assistant";
+import { AssistantComposer, AssistantToolbar } from "@woohaa3/ui/assistant";
 import { Dialog } from "@woohaa3/ui/dialogs";
 import { Button } from "@woohaa3/ui/primitives";
 import { ImageIcon, SparklesIcon } from "@woohaa3/ui/icons";
-import { createHighEntropyId, IMAGE_DIRECTOR_SCENE_DEFAULT_PROMPT, type AgentConnectionView, type AgentModelView, type AgentReasoningEffort } from "@woohaa3/contracts";
+import { createHighEntropyId, IMAGE_DIRECTOR_SCENE_DEFAULT_PROMPT, type AgentReasoningEffort } from "@woohaa3/contracts";
 import { definePlugin } from "../../plugin.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
@@ -15,7 +19,7 @@ import type { AgentConversationServiceHandle } from "../../services/agent-conver
 import "./style.css";
 
 export const IMAGE_DIRECTOR_PLUGIN_ID = "image-director-scene";
-type Draft = { prompt: string; connectionId: string; model: string; variant: string };
+type Draft = { prompt: string; connectionId: string; model: string; variant: string; efforts?: Record<string, string> };
 const drafts = new Map<string, Draft>();
 const initial = (): Draft => ({ prompt: IMAGE_DIRECTOR_SCENE_DEFAULT_PROMPT, connectionId: "", model: "", variant: "" });
 function imageReady(nodeId: string) {
@@ -30,29 +34,30 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
   const key = JSON.stringify([scope, canvasId, nodeId]);
   const [draft, setDraft] = useState(() => { const preference = readAssistantPreference(scope); return drafts.get(key) ?? { ...initial(), connectionId: preference?.connectionId ?? "", model: preference?.model ?? "", variant: preference?.reasoningEffort ?? "" }; });
   const draftRef = useRef(draft);
-  const [connections, setConnections] = useState<AgentConnectionView[]>([]);
-  const [catalogModels, setCatalogModels] = useState<readonly AgentModelView[]>([]);
+  const directory = service ? agentDirectory(service, scope) : null;
+  const directoryView = useSyncExternalStore(directory?.subscribe ?? (() => () => {}), directory?.getSnapshot ?? (() => null), directory?.getSnapshot ?? (() => null));
+  const connections = directoryView?.connections ?? [];
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<"connection" | "model" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const refreshing = !!directoryView?.loadingMessage;
   const submitting = useRef(false);
   const live = useRef(true);
   const selectionIntent = useRef<DirectorSceneSelectionIntent | null>(null);
   useEffect(() => { live.current = true; return () => { live.current = false; selectionIntent.current?.cancel(); }; }, []);
   const requestId = useRef<string | null>(null);
-  const update = (patch: Partial<Draft>) => { const next = { ...draftRef.current, ...patch }; draftRef.current = next; drafts.set(key, next); setDraft(next); };
-  useEffect(() => { let live = true; const refresh = () => { void service?.listConnections().then(result => { if (!live) return; if (result.ok) setConnections(result.value); else setError(result.error); }); }; refresh(); window.addEventListener("focus", refresh); return () => { live = false; window.removeEventListener("focus", refresh); }; }, [service]);
+  const update = (patch: Partial<Draft>) => {
+    const previous = draftRef.current;
+    const efforts = { ...previous.efforts, [generationIdentity(previous.connectionId, previous.model)]: previous.variant, ...patch.efforts };
+    const next = { ...previous, ...patch, efforts };
+    efforts[generationIdentity(next.connectionId, next.model)] = next.variant;
+    draftRef.current = next; drafts.set(key, next); setDraft(next);
+  };
+  useEffect(() => { void directory?.load(); }, [directory]);
   const connection = connections.find(item => item.connectionId === draft.connectionId);
-  useEffect(() => {
-    if (!connection || connection.models.length || !service) { setCatalogModels([]); return; }
-    let live = true;
-    void service.catalog(connection.adapterId).then(result => { if (!live) return; if (result.ok) setCatalogModels(result.value.models); else setError(result.error); });
-    return () => { live = false; };
-  }, [service, connection?.connectionId, connection?.adapterId, connection?.models.length, catalogAttempt]);
-  const models = connection?.models.length ? connection.models : catalogModels;
+  const models = agentDirectoryModels(connection?.models, connection ? directoryView?.catalogs[connection.adapterId]?.models : undefined);
   const model = models.find(item => item.id === draft.model);
+  useEffect(() => { if (model && draft.variant && !model.reasoningEfforts?.includes(draft.variant as AgentReasoningEffort)) { update({ variant: "" }); setError("新模型不支持原思考强度，已恢复默认"); } }, [model, draft.variant]);
   const modelCapabilities = connection?.models.find(item => item.id === draft.model)?.capabilities;
   const candidateCapability = modelCapabilities?.textDelivery ?? connection?.capabilities.textDelivery;
   const selectionInvalid = !connection?.ready || !connection.capabilities.tools || !connection.capabilities.targets?.includes("world") || !candidateCapability?.imageInput || candidateCapability.maxImages < 1 || !model || (!!draft.variant && !model.reasoningEfforts?.includes(draft.variant as AgentReasoningEffort));
@@ -67,6 +72,7 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
     try {
       const result = await service.submitImageDirectorScene({ canvasId, adapterId: connection.adapterId, connectionId: connection.connectionId, requestId: requestId.current, entry: { action: "generate", roleId: AGENT_ROLE_BINDINGS.sceneDirector, canvasId, nodeId, connectionId: connection.connectionId, model: model.id, ...(draft.variant ? { reasoningEffort: draft.variant as AgentReasoningEffort } : {}), prompt: draft.prompt } });
       if (result.ok) {
+        recordAcceptedGeneration(scope, "image-director", generationIdentity(connection.connectionId, model.id));
         rememberAssistantPreference(scope, { sourceId: connection.adapterId, connectionId: connection.connectionId, model: model.id, reasoningEffort: draft.variant as AgentReasoningEffort | "" });
         if (live.current) {
           const directorId = result.value.turn.target.nodeId;
@@ -79,15 +85,7 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
     } catch (cause) { if (live.current) setError(cause instanceof Error ? cause.message : "创建未完成"); }
     finally { selectionIntent.current?.cancel(); selectionIntent.current = null; submitting.current = false; if (live.current) setBusy(false); }
   };
-  const refresh = async () => {
-    if (!service || refreshing) return;
-    setRefreshing(true);
-    try {
-      const result = await service.listConnections();
-      if (result.ok) { setConnections(result.value); setCatalogAttempt(value => value + 1); setError(null); }
-      else setError(result.error);
-    } finally { setRefreshing(false); }
-  };
+  const refresh = () => directory?.load(true);
   const start = <Button tone="primary" loading={busy} disabled={selectionInvalid || !draft.prompt.trim()} onClick={() => void submit()}>生成</Button>;
   return <div className="image-director-panel" style={{ display: visible ? undefined : "none" }}>
     <Dialog.Content ariaLabel="生成模型与导演区" size="md" onOverlayClick={onClose}>
@@ -100,8 +98,16 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
     <div className="image-director-settings">
     <AssistantComposer className="image-director-prompt" rows={6} disabled={busy} value={draft.prompt} placeholder="描述希望生成的场景，或修改默认提示词。" onChange={prompt => update({ prompt })} onSubmit={() => void submit()} />
     <AssistantToolbar disabled={busy} refreshing={refreshing} onRefresh={() => void refresh()} onManage={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId } })} submit={start}
-      assistant={<AssistantConnectionSelector disabled={busy} empty={!connections.length} model={draft.connectionId} options={connections.map(item => ({ value: item.connectionId, label: item.name, disabled: !item.ready || !item.capabilities.tools || !item.capabilities.targets?.includes("world") || !item.capabilities.textDelivery?.imageInput }))} open={open === "connection"} onOpenChange={value => setOpen(value ? "connection" : null)} onChange={value => update({ connectionId: value, model: "", variant: "" })} />}
-      parameters={<AssistantModelSelector disabled={busy} model={draft.model} options={models.map(item => { const capability = connection?.models.find(value => value.id === item.id)?.capabilities?.textDelivery ?? connection?.capabilities.textDelivery; return { value: item.id, label: item.label, disabled: !capability?.imageInput }; })} open={open === "model"} onOpenChange={value => setOpen(value ? "model" : null)} onChange={value => update({ model: value, variant: "" })} variant={{ value: draft.variant, options: [{ value: "", label: "默认" }, ...(model?.reasoningEfforts ?? []).map(value => ({ value, label: value }))], onChange: value => update({ variant: value }) }} />}
+      assistant={service ? <AssistantConfiguration service={service} purpose="image-director" connectionId={draft.connectionId} model={draft.model} open={open === "connection"} onOpenChange={value => setOpen(value ? "connection" : null)} disabled={busy}
+        reasonFor={(c, id) => { const capability = c.models?.find(m => m.id === id)?.capabilities?.textDelivery ?? c.capabilities.textDelivery; return !c.capabilities.tools || !c.capabilities.targets?.includes("world") ? "此连接不支持场景创作" : !capability?.imageInput ? "此模型不支持参考图片" : undefined; }}
+        onSelect={(c, id) => {
+          const variant = c.connectionId === draft.connectionId && id === draft.model ? draft.variant : draft.efforts?.[generationIdentity(c.connectionId, id)] ?? "";
+          const options = agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === id)?.reasoningEfforts ?? [];
+          setError(draft.variant && !variant && !options.includes(draft.variant as AgentReasoningEffort) ? "新模型不支持原思考强度，已恢复默认" : null);
+          update({ connectionId: c.connectionId, model: id, variant });
+        }} /> : null}
+      parameters={<ReasoningParameters value={draft.variant} options={model?.reasoningEfforts ?? []} open={open === "model"} onOpenChange={value => setOpen(value ? "model" : null)} disabled={busy} onChange={value => update({ variant: value })} />}
+
     />
     <p className="image-director-hint">Enter 生成，Shift+Enter 换行</p>
     </div>

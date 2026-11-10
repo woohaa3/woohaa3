@@ -25,6 +25,7 @@ import {
   decodeWorldCamera,
   decodeWorldInstanceData,
   isValidStorageKey,
+  isMediaObjectNotFoundError,
   parseGlbModel,
   quatRotate,
   stableStringify,
@@ -439,80 +440,101 @@ export function createWorldAuthoringAuthority(
 
   const scopeRefOf = (scope: WorldScopeVersion): AuthorityScopeRef => ({ ...scope.scope });
 
-  async function prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas) {
+  async function prepareGeometry(fields: Record<string, unknown>, canvas?: ServerCanvas): Promise<
+    | { ok: true; contentVersion: string; localAabb: Aabb; localGroundAnchor: Vec3 }
+    | { ok: false; reason: string }
+  > {
+    const failure = (reason: string) => ({ ok: false as const, reason });
     const contentVersion = instanceContentVersion(fields, canvas);
     if (fields.modelSourceKind === "glb") {
-      if (!canvas || !options.media?.read) return null;
+      if (!canvas || !options.media?.read) return failure("GLB 资源读取服务未就绪，请稍后重试");
       const reference = decodeGlbModelReference(fields);
-      if (!reference.ok) return null;
+      if (!reference.ok) return failure("GLB 资源引用无效，请重新导入模型");
       const asset = canvas.assets.find(entry => entry.id === reference.value.assetId);
       const metadata = asset?.metadata;
-      if (asset?.status !== "ready" || asset.mediaKind !== "file" || !metadata) return null;
+      if (asset?.status !== "ready" || asset.mediaKind !== "file" || !metadata) return failure("GLB 资源未就绪，请检查模型资产");
       const { storageKey, checksum, size, contentType } = metadata;
       if (!isValidStorageKey(storageKey) || typeof checksum !== "string" || !/^[0-9a-f]{64}$/.test(checksum) ||
         typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0 || size > GLB_MAX_FILE_BYTES ||
-        contentType !== "model/gltf-binary") return null;
-      if (storageKey !== `sha256-${checksum}` && !storageKey.startsWith(`generation-outputs/${checksum}.`)) return null;
+        contentType !== "model/gltf-binary") return failure("GLB 资源元数据无效，请重新导入模型");
+      if (storageKey !== `sha256-${checksum}` && !storageKey.startsWith(`generation-outputs/${checksum}.`)) return failure("GLB 资源校验信息不一致，请重新导入模型");
       const cached = localAabbCache.get(contentVersion);
-      if (cached) return { contentVersion, ...cached };
+      if (cached) return { ok: true, contentVersion, ...cached };
       try {
         const raw = await options.media.read(storageKey, canvas.id);
         if (raw.contentType !== contentType || raw.bytes.byteLength !== size || raw.bytes.byteLength > GLB_MAX_FILE_BYTES ||
-          createHash("sha256").update(raw.bytes).digest("hex") !== checksum) return null;
+          createHash("sha256").update(raw.bytes).digest("hex") !== checksum) return failure("GLB 文件与资产校验信息不一致，请重新导入模型");
         const parsed = parseGlbModel(raw.bytes);
-        if (!parsed.ok) return null;
+        if (!parsed.ok) return failure("GLB 文件无法解析，请检查文件格式后重新导入");
         // GLB hierarchy/TRS is already in the parsed ops. Shared-world rendering
         // applies only the instance root, never the legacy card modelPlacement.
         const localAabb = v2SceneAabb(parsed.ops);
-        if (!localAabb) return null;
+        if (!localAabb) return failure("GLB 没有可计算位置的几何内容");
         const localGroundAnchor = modelGroundAnchorLocal(parsed.ops, null);
-        if (!localGroundAnchor) return null;
+        if (!localGroundAnchor) return failure("GLB 几何无法计算落地位置");
         localAabbCache.set(contentVersion, { localAabb, localGroundAnchor });
-        return { contentVersion, localAabb, localGroundAnchor };
-      } catch {
-        return null;
+        return { ok: true, contentVersion, localAabb, localGroundAnchor };
+      } catch (error) {
+        if (isMediaObjectNotFoundError(error) || (error as { status?: unknown } | null)?.status === 404) {
+          return failure("GLB 文件在当前存储中不存在，请恢复原文件或重新导入模型");
+        }
+        if ((error as { code?: unknown } | null)?.code === "limit-exceeded") return failure("GLB 文件超过当前资源读取上限");
+        return failure("GLB 资源读取失败，请检查存储连接后重试");
       }
     }
     const cached = localAabbCache.get(contentVersion);
-    if (cached) return { contentVersion, ...cached };
-    if (typeof fields.modelScript !== "string" || fields.modelScript.trim().length === 0) return null;
+    if (cached) return { ok: true, contentVersion, ...cached };
+    if (typeof fields.modelScript !== "string" || fields.modelScript.trim().length === 0) return failure("模型脚本为空，请修复模型内容");
     try {
       const stored = fields.modelRig == null ? null : storedHumanoidRig(fields.modelRig);
-      if (stored && !stored.ok) return null;
+      if (stored && !stored.ok) return failure("模型骨骼参数无效，请修复模型内容");
       const rig = stored?.ok ? stored.value : null;
       const execution = await (options.executeScene ?? executeSceneIr)(fields.modelScript, fields.modelScriptVersion, rig ? { rig: rig.parameters } : {});
-      if (!execution.ok) return null;
+      if (!execution.ok) return failure(`模型脚本执行失败：${execution.message}`);
       const localAabb = v2SceneAabb(execution.ops);
-      if (!localAabb) return null;
+      if (!localAabb) return failure("模型脚本没有生成可计算位置的几何内容");
       const localGroundAnchor = modelGroundAnchorLocal(execution.ops, rig);
-      if (!localGroundAnchor) return null;
+      if (!localGroundAnchor) return failure("模型几何无法计算落地位置");
       localAabbCache.set(contentVersion, { localAabb, localGroundAnchor });
-      return { contentVersion, localAabb, localGroundAnchor };
+      return { ok: true, contentVersion, localAabb, localGroundAnchor };
     } catch {
-      return null;
+      return failure("模型脚本执行异常，请重试或检查模型内容");
     }
   }
 
-  async function collectInstances(canvas: ServerCanvas): Promise<{ records: Map<string, InstanceRecord>; unknown: boolean }> {
+  async function prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas) {
+    const prepared = await prepareGeometry(fields, canvas);
+    if (!prepared.ok) return null;
+    const { ok: _, ...content } = prepared;
+    return content;
+  }
+
+  async function collectInstances(canvas: ServerCanvas) {
     const records = new Map<string, InstanceRecord>();
-    let unknown = false;
+    const failures: string[] = [];
     for (const node of canvas.document.nodes) {
       const fields = nodeData(canvas, node.id);
       if (!fields || fields.sharedWorldInstance === undefined) continue;
+      const asset = canvas.assets.find(entry => entry.id === fields.modelAssetId);
+      const label = nonEmpty(fields.title) ? fields.title : asset?.title;
+      const describeFailure = (reason: string) => failures.push(`模型「${label || node.id}」${label ? `（${node.id}）` : ""}：${reason}`);
       const decoded = decodeWorldInstanceData(fields.sharedWorldInstance);
       if (!decoded.ok) {
-        unknown = true;
+        describeFailure("世界实例变换无效，请修复模型位置");
         continue;
       }
       const data = decoded.value;
       const contentVersion = instanceContentVersion(fields, canvas);
-      const prepared = await prepareContent(fields, canvas);
-      const localAabb = prepared?.localAabb ?? null;
-      const localGroundAnchor = prepared?.localGroundAnchor ?? null;
-      if (!localAabb || !localGroundAnchor) unknown = true;
+      const prepared = await prepareGeometry(fields, canvas);
+      const localAabb = prepared.ok ? prepared.localAabb : null;
+      const localGroundAnchor = prepared.ok ? prepared.localGroundAnchor : null;
+      if (!prepared.ok) describeFailure(prepared.reason);
       records.set(data.instanceId, instanceRecord(node.id, data, contentVersion, localAabb, localGroundAnchor));
     }
-    return { records, unknown };
+    const failureMessage = failures.length
+      ? `无法准备场景模型。${failures.slice(0, 3).join("；")}${failures.length > 3 ? `；另有 ${failures.length - 3} 个模型需要修复` : ""}`
+      : null;
+    return { records, failureMessage };
   }
 
   function collectCameras(canvas: ServerCanvas): Map<string, CameraRecord> {
@@ -533,9 +555,9 @@ export function createWorldAuthoringAuthority(
     if (!nonEmpty(scope.areaId)) return { ok: false, code: "invalid-data", message: "导演区身份无效" };
     const found = findArea(canvas, scope.areaId);
     if (!found) return { ok: false, code: "outside-scope", message: "导演区不存在" };
-    const { records: instances, unknown } = await collectInstances(canvas);
+    const { records: instances, failureMessage } = await collectInstances(canvas);
     const cameras = collectCameras(canvas);
-    if (unknown) return { ok: false, code: "not-ready", message: "存在无法确定权威落地锚点的模型" };
+    if (failureMessage) return { ok: false, code: "not-ready", message: failureMessage };
 
     const writable: WorldObjectVersion[] = [];
     const readOnly: WorldObjectVersion[] = [];
@@ -595,9 +617,9 @@ export function createWorldAuthoringAuthority(
     if (!nonEmpty(groupId)) return { ok: false, code: "invalid-data", message: "2D 组身份无效" };
     const found = findGroup(canvas, groupId);
     if (!found) return { ok: false, code: "outside-scope", message: "2D 组不存在" };
-    const { records: instances, unknown } = await collectInstances(canvas);
+    const { records: instances, failureMessage } = await collectInstances(canvas);
     const cameras = collectCameras(canvas);
-    if (unknown) return { ok: false, code: "not-ready", message: "存在无法确定权威落地锚点的模型" };
+    if (failureMessage) return { ok: false, code: "not-ready", message: failureMessage };
 
     const readOnly: WorldObjectVersion[] = [];
     const objects: WorldObjectAuthorityEntry[] = [];

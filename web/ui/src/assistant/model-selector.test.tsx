@@ -1,40 +1,33 @@
 /** @vitest-environment jsdom */
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { AssistantModelSelector, AssistantListSelector } from "./model-selector.js";
+import { GenerationModelDirectory } from "./generation-directory.js";
+import { ReasoningParameters } from "./generation-parameters.js";
 import { UiProvider } from "../primitives/UiProvider.js";
 let root: Root; let host: HTMLDivElement;
 afterEach(() => { act(() => root?.unmount()); host?.remove(); });
 function mount(node: React.ReactNode) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); act(() => root.render(<UiProvider>{node}</UiProvider>)); }
-it("accepts the empty-string Variant exactly once and keeps model selection controlled", () => {
-  const change = vi.fn(), variant = vi.fn(), open = vi.fn();
-  mount(<AssistantModelSelector model="a" options={[{ value: "a", label: "模型" }, { value: "off", label: "失效", disabled: true }]} open onOpenChange={open} onChange={change} variant={{ value: "deep", options: [{ value: "", label: "默认 Variant" }], onChange: variant }} />);
-  act(() => document.querySelector<HTMLButtonElement>('[aria-label="失效"]')!.click()); expect(change).not.toHaveBeenCalled();
-  act(() => document.querySelector<HTMLButtonElement>('[aria-label="默认 Variant"]')!.click()); expect(variant).toHaveBeenCalledTimes(1); expect(variant).toHaveBeenCalledWith(""); expect(open).toHaveBeenCalledWith(false);
+function input(field: HTMLInputElement, value: string) { act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value); field.dispatchEvent(new Event("input", { bubbles: true })); }); }
+const sources = Array.from({ length: 30 }, (_, i) => ({ identity: `s${i}`, label: `来源 ${i}`, status: "ready" as const }));
+const entries = sources.flatMap(s => Array.from({ length: 500 }, (_, i) => ({ identity: `${s.identity}/${i}`, sourceIdentity: s.identity, modelIdentity: String(i), modelId: `upstream/model-${i}`, label: `模型 ${i}`, sourceLabel: s.label })));
+it("bounds 30×500 models, browses sources without committing, searches real IDs and selects atomically", () => {
+ const select = vi.fn(), close = vi.fn(); mount(<GenerationModelDirectory sources={sources} entries={entries} selected="s0/0" open onOpenChange={close} onSelect={select} />);
+ expect(document.querySelectorAll('.generation-directory__model').length).toBeLessThanOrEqual(16);
+ act(() => [...document.querySelectorAll<HTMLButtonElement>('.generation-directory__source-list button')].find(b => b.textContent === '来源 29')!.click());
+ expect(select).not.toHaveBeenCalled();
+ input(document.querySelector('input[placeholder="搜索模型名称、ID 或来源"]')!, 'model-499');
+ const model = document.querySelector<HTMLButtonElement>('.generation-directory__model')!;
+ expect(model.textContent).toContain('来源 29'); act(() => model.click());
+ expect(select).toHaveBeenCalledWith(expect.objectContaining({ identity: 's29/499', modelId: 'upstream/model-499' })); expect(close).toHaveBeenCalledWith(false);
 });
-it("a disabled controlled selector cannot open or select stale entries", () => {
-  const change = vi.fn(), open = vi.fn(); mount(<AssistantListSelector model="lost" options={[]} open disabled onOpenChange={open} onChange={change} />);
-  expect(document.querySelector('[role="menu"]')).toBeNull(); act(() => host.querySelector("button")!.click()); expect(change).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(host.textContent).toContain("lost");
+it("keeps failed sources incomplete and zero-result recovery does not select anything", () => {
+ const select = vi.fn(), retry = vi.fn();mount(<GenerationModelDirectory sources={[{ identity:'off',label:'失败来源',status:'failed',error:'offline' }]} entries={[]} selected="old" open onOpenChange={vi.fn()} onSelect={select} onRetry={retry} />);
+ expect(document.body.textContent).toContain('已读取的来源中无匹配');
+ act(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '重试')!.click());expect(retry).toHaveBeenCalledWith('off');expect(select).not.toHaveBeenCalled();
 });
-function typeInto(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-  act(() => { setter.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
-}
-it("长模型目录提供搜索，按名称或 provider 过滤并给出无匹配提示", () => {
-  const options = Array.from({ length: 10 }, (_, index) => ({ value: `m${index}`, label: `模型 ${index} (provider-${index % 2})` }));
-  mount(<AssistantModelSelector model="m0" options={options} open onOpenChange={vi.fn()} onChange={vi.fn()} />);
-  const input = document.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]')!;
-  expect(input).not.toBeNull();
-  typeInto(input, "provider-1");
-  const labels = [...document.querySelectorAll(".assistant-model-panel__option")].map(option => option.textContent);
-  expect(labels).toHaveLength(5);
-  expect(labels.every(label => label?.includes("provider-1"))).toBe(true);
-  typeInto(input, "没有这个模型");
-  expect(document.querySelectorAll(".assistant-model-panel__option")).toHaveLength(0);
-  expect(document.body.textContent).toContain("没有匹配的模型");
-});
-it("短列表不显示搜索框", () => {
-  mount(<AssistantModelSelector model="a" options={[{ value: "a", label: "模型 A" }, { value: "b", label: "模型 B" }]} open onOpenChange={vi.fn()} onChange={vi.fn()} />);
-  expect(document.querySelector('input[aria-label="搜索模型"]')).toBeNull();
+it("edits every real effort continuously and default remains the omitted empty value", () => {
+ const change=vi.fn();function Fixture(){ const [value,set]=useState('ultra');return <ReasoningParameters value={value} options={['none','minimal','low','medium','high','xhigh','max','ultra']} open onOpenChange={vi.fn()} onChange={v=>{change(v);set(v);}} />; }mount(<Fixture />);
+ const select=document.querySelector<HTMLSelectElement>('select')!;
+ expect(select.options).toHaveLength(9);act(()=>{select.value='';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(change).toHaveBeenCalledWith('');expect(document.querySelector('.generation-parameters')).not.toBeNull();
 });
