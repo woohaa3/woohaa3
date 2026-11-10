@@ -1,0 +1,6 @@
+# PhotoCraft host-served fonts, in craft-fonts' manifest format
+# (family | style | file | scripts | licence | licence file | sha256 | source).
+# Files are served next to index.html (fonts/); the web build copies this manifest to app/fonts/.
+# Noto Sans SC is the UI and document fallback for Simplified Chinese, Traditional Chinese and
+# Japanese; one face covers Han, kana, Greek and Cyrillic (it has no Hangul).
+Noto Sans SC | Regular | fonts/NotoSansSC-Regular.otf | Hans,Hant,Jpan | OFL-1.1 | fonts/OFL-NotoSansSC.txt | faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9 | https://github.com/notofonts/noto-cjk

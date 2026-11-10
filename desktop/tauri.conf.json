@@ -18,6 +18,22 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "vendor/photocraft/LICENSE-MIT": "licenses/photocraft/LICENSE-MIT",
+      "vendor/photocraft/LICENSE-APACHE": "licenses/photocraft/LICENSE-APACHE",
+      "vendor/photocraft/NOTICE": "licenses/photocraft/NOTICE",
+      "vendor/photocraft/ATTRIBUTION.md": "licenses/photocraft/ATTRIBUTION.md",
+      "vendor/photocraft/assets/app-icon/LICENSE.txt": "licenses/photocraft/assets/app-icon/LICENSE.txt",
+      "vendor/photocraft/assets/dict/LICENSE-SCOWL.txt": "licenses/photocraft/assets/dict/LICENSE-SCOWL.txt",
+      "vendor/photocraft/assets/fonts/OFL-Inter.txt": "licenses/photocraft/assets/fonts/OFL-Inter.txt",
+      "vendor/photocraft/assets/fonts/OFL-JetBrainsMono.txt": "licenses/photocraft/assets/fonts/OFL-JetBrainsMono.txt",
+      "vendor/photocraft/assets/icons/LICENSE-lucide.txt": "licenses/photocraft/assets/icons/LICENSE-lucide.txt",
+      "vendor/photocraft/assets/icons/LICENSE-noun-magnetic-lasso.txt": "licenses/photocraft/assets/icons/LICENSE-noun-magnetic-lasso.txt",
+      "vendor/photocraft/assets/icons/LICENSE-symmetry-axes.txt": "licenses/photocraft/assets/icons/LICENSE-symmetry-axes.txt",
+      "vendor/photocraft/crates/algo/data/LICENSE-libfacedetection.txt": "licenses/photocraft/crates/algo/data/LICENSE-libfacedetection.txt",
+      "vendor/photocraft/crates/ui-egui/src/LICENSE-solarized.txt": "licenses/photocraft/crates/ui-egui/src/LICENSE-solarized.txt",
+      "vendor/photocraft/crates/ui-egui/src/i18n/LICENSE-translations.txt": "licenses/photocraft/crates/ui-egui/src/i18n/LICENSE-translations.txt"
+    },
     "category": "GraphicsAndDesign",
     "shortDescription": "画布式多媒体创作工作台：在同一画布组织、生成与编辑素材。",
     "icon": [

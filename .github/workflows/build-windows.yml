@@ -201,6 +201,20 @@ jobs:
           echo "pnpm desktop:bundle ${args[*]}"
           pnpm desktop:bundle "${args[@]}"
 
+      - name: Verify native PhotoCraft in the Windows executable
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const output = execFileSync('desktop/target/release/woohaa-desktop.exe', ['--probe-editors'], {encoding: 'utf8'});
+          const provider = JSON.parse(output).providers.find(p => p.provider_id === 'photocraft-native');
+          assert.ok(provider, 'Missing built-in PhotoCraft editor');
+          for (const capability of ['native-ui', 'shared-texture', 'export']) {
+            assert.ok(provider.capabilities.includes(capability), 'Missing PhotoCraft capability: ' + capability);
+          }
+          NODE
+
       - name: Build offline large-canvas experience kit
         run: |
           set -euo pipefail

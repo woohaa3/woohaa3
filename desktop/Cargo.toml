@@ -14,7 +14,12 @@ name = "woohaa_desktop_host"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["native-ui"]
+native-ui = [
+    "desktop", "dep:photocraft-ui-egui", "dep:eframe", "dep:egui",
+    "dep:parking_lot", "dep:rfd", "dep:tempfile",
+]
+desktop = ["dep:photocraft-engine", "dep:photocraft-io", "dep:photocraft-raster", "dep:photocraft-gpu"]
 # Explicit opt-in for optimized local performance trial variants.
 diagnostic-performance = []
 # GPU 调试构建（change: 2026-10-14-migrate-canvas-to-tauri-native-bevy，design D8，任务 2.6）。
@@ -26,6 +31,16 @@ gpu-debug = ["woohaa_bevy_canvas/gpu-debug"]
 native-only-entry = []
 
 [dependencies]
+photocraft-engine = { path = "vendor/photocraft/crates/engine", optional = true }
+photocraft-io = { path = "vendor/photocraft/crates/io", optional = true }
+photocraft-raster = { path = "vendor/photocraft/crates/raster", optional = true }
+photocraft-gpu = { path = "vendor/photocraft/crates/gpu", optional = true }
+photocraft-ui-egui = { path = "vendor/photocraft/crates/ui-egui", optional = true }
+eframe = { version = "0.36", default-features = false, features = ["wgpu"], optional = true }
+egui = { version = "0.36", default-features = false, optional = true }
+parking_lot = { version = "0.12", optional = true }
+rfd = { version = "0.16", optional = true }
+tempfile = { version = "3", optional = true }
 woohaa-media-image = { path = "../media-image" }
 woohaa_recording_supervisor = { path = "supervisor" }
 # 与 Bevy lock 中的 raw-window-handle 0.6.2 一致（避免第二个不兼容版本）。
@@ -45,6 +60,7 @@ log = "0.4"
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
 # 精确锁定（P0 任务 1.1）：见 notes/dependency-lock.md 与 desktop/Cargo.lock。
 tauri = { version = "=2.12.3", default-features = false, features = ["wry", "x11", "common-controls-v6", "unstable", "macos-private-api", "devtools"] }
+eframe = { version = "0.36", default-features = false, features = ["x11"], optional = true }
 gtk = "0.18"
 gdkx11 = "0.18"
 

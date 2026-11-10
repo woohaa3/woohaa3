@@ -58,7 +58,7 @@ import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 // Explicit external composition projects use the same packaging pipeline.
-// Standalone client builds keep their empty-provider desktop project.
+// Standalone builds use the desktop project with its built-in PhotoCraft provider.
 const desktopDir = path.resolve(process.env.WOOHAA_DESKTOP_PROJECT_DIR ?? path.join(root, "desktop"));
 const iconsDir = path.join(root, "desktop", "icons");
 const configPath = path.join(desktopDir, "tauri.conf.json");
