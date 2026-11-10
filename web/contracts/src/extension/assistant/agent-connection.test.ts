@@ -171,7 +171,7 @@ describe("回合连接引用与旧请求兼容", () => {
   it("接受回合解码保留 connectionId", () => {
     const decoded = decodeAcceptTurnRequest({
       requestId: "req-1",
-      entry: { action: "discuss", canvasId: "canvas-1", prompt: "hi", connectionId: "conn-1" }
+      entry: { roleId: "test/role", action: "discuss", canvasId: "canvas-1", prompt: "hi", connectionId: "conn-1" }
     });
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
@@ -222,8 +222,8 @@ describe("固定 API 引擎版本契约", () => {
 
 
 it("回合解码保留思考强度并拒绝非法值，旧请求省略时仍兼容", () => {
-  const entry = { action: "generate", canvasId: "canvas", nodeId: "node", model: "model", prompt: "modify" };
-  expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, reasoningEffort: "high" } })).toMatchObject({ ok: true, value: { entry: { reasoningEffort: "high" } } });
+  const entry = { roleId: "test/role", action: "generate", canvasId: "canvas", nodeId: "node", model: "model", prompt: "modify" };
+  expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, reasoningEffort: "high" } })).toMatchObject({ ok: true, value: { entry: { roleId: "test/role", reasoningEffort: "high" } } });
   expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, reasoningEffort: "garbage" } })).toMatchObject({ ok: false });
   expect(isAgentEntryIntent({ ...entry, reasoningEffort: "garbage" })).toBe(false);
   const legacy = decodeAcceptTurnRequest({ requestId: "r", entry });

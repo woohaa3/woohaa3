@@ -25,7 +25,6 @@ import {
   normalizeSelfContained3D,
   validateMediaContentPatch,
   validateImageEditPatch,
-  validateModelCamerasPatch,
   validateSelfContained3DNodePatch,
   validateVideoEditIntentsPatch
 } from "./node-data-validation.js";
@@ -282,8 +281,6 @@ export function patchNodeData(
   }
   const intentRejection = validateVideoEditIntentsPatch(value);
   if (intentRejection) return intentRejection;
-  const cameraRejection = validateModelCamerasPatch(value);
-  if (cameraRejection) return cameraRejection;
   const imageEditRejection = validateImageEditPatch(value);
   if (imageEditRejection) return imageEditRejection;
   const mediaRejection = validateMediaContentPatch(work, nodeId, value);

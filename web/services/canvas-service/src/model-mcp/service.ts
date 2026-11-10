@@ -21,10 +21,6 @@ import {
   submitScript
 } from "./script-submission.js";
 import {
-  mutateCameras,
-  mutateCamerasBatch
-} from "./camera-service.js";
-import {
   reconcileModelHistory,
   reportScript
 } from "./history-reporting.js";
@@ -38,10 +34,6 @@ import {
   type ModelMcpServiceDependencies,
   type ModelStatisticsInput,
   type ModelStatisticsOutcome,
-  type MutateCamerasBatchInput,
-  type MutateCamerasBatchOutcome,
-  type MutateCamerasInput,
-  type MutateCamerasOutcome,
   type RenderPreviewInput,
   type RenderPreviewOutcome,
   type ReportScriptOutcome,
@@ -67,10 +59,6 @@ export type {
   RenderPreviewOutcome,
   ApplyCommandsInput,
   ApplyCommandsOutcome,
-  MutateCamerasInput,
-  MutateCamerasOutcome,
-  MutateCamerasBatchInput,
-  MutateCamerasBatchOutcome,
   ModelStatisticsInput,
   ModelStatisticsOutcome,
   ModelMcpServiceDependencies
@@ -122,16 +110,6 @@ export class ModelMcpService {
   /** 通用语义命令提交。 */
   async applyCommands(input: ApplyCommandsInput): Promise<ApplyCommandsOutcome> {
     return applyCommands(this.deps, this.actorId, input);
-  }
-
-  /** 单条镜头读改写。 */
-  async mutateCameras(input: MutateCamerasInput): Promise<MutateCamerasOutcome> {
-    return mutateCameras(this.deps, this.actorId, input);
-  }
-
-  /** 批量镜头读改写。 */
-  async mutateCamerasBatch(input: MutateCamerasBatchInput): Promise<MutateCamerasBatchOutcome> {
-    return mutateCamerasBatch(this.deps, this.actorId, input);
   }
 
   /** 补齐模型历史登记（reconciliation）。 */

@@ -6,7 +6,6 @@
  */
 import {
   decodeImageEditDocument,
-  decodeModelCameras,
   decodeModelPlacement,
   encodeNodeGenerationIdentity,
   hashModelScript,
@@ -16,7 +15,6 @@ import {
   nodeHistoryEntryId,
   type CanvasCommand,
   type ImageEditCompleteRequest,
-  type ModelCamera,
   type NodeGenerationHistoryEntry,
   type ServerCanvas,
   type StoredAsset
@@ -185,10 +183,9 @@ export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: stri
   const version = typeof data?.modelScriptVersion === "string" ? data.modelScriptVersion : "";
   if (language === "" || version === "") return null;
   const placement = decodeModelPlacement(data?.modelPlacement) ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
-  const modelCameras = readCameras(data);
   const sourceHash = hashModelScript(modelScript);
   // 保留规范镜头感知的摆放快照键（不改变既有身份语义）。
-  const identity = { kind: "model-edit" as const, sourceHash, snapshotKey: modelCameraSnapshotKey(placement, modelCameras) };
+  const identity = { kind: "model-edit" as const, sourceHash, snapshotKey: modelPlacementSnapshotKey(placement) };
   return {
     version: "woohaa-node-generation-history-v1",
     entryId: nodeHistoryEntryId({ canvasId: canvas.id, nodeId, identity }),
@@ -208,22 +205,6 @@ export function buildModelEditEntryFromCanvas(canvas: ServerCanvas, nodeId: stri
       version,
       sourceHash,
       placement,
-      ...(modelCameras ? { modelCameras } : {})
     }
   };
-}
-
-export function modelCameraSnapshotKey(placement: { offset: { x: number; y: number; z: number }; scale: number; yaw: number }, cameras: ModelCamera[] | null): string {
-  const placementKey = modelPlacementSnapshotKey(placement);
-  if (!cameras || cameras.length === 0) return placementKey;
-  const cameraKey = cameras
-    .map((camera) => `${camera.id}:${camera.azimuth}:${camera.elevation}:${camera.distance}:${camera.aspect}:${camera.focusOffset?.x ?? 0},${camera.focusOffset?.y ?? 0},${camera.focusOffset?.z ?? 0}`)
-    .join("|");
-  return `${placementKey}:${cameraKey}`;
-}
-
-export function readCameras(data: Record<string, unknown> | undefined): ModelCamera[] | null {
-  if (!data || data.modelCameras === undefined) return null;
-  const decoded = decodeModelCameras(data.modelCameras);
-  return decoded.ok && decoded.value.length > 0 ? decoded.value : null;
 }

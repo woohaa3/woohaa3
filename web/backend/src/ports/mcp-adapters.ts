@@ -9,7 +9,6 @@
 import type { AgentCanvasInternalService, ModelMcpService } from "@woohaa3/canvas-service";
 import type {
   CanvasCommand,
-  McpCameraMutation,
   SupportedModelScriptVersion
 } from "@woohaa3/contracts";
 import type { CanvasMcpClient } from "@woohaa3/mcp-service";
@@ -82,15 +81,6 @@ export function modelMcpServiceToClient(
         commandId: input.commandId,
         baseRevision: input.baseRevision,
         commands: input.commands
-      }) as never;
-    },
-    async mutateCameras(input) {
-      if (!service?.mutateCameras) return unavailable as never;
-      return service.mutateCameras({
-        canvasId: canvasId(input.canvasId),
-        nodeId: input.nodeId,
-        requestId: input.requestId,
-        mutation: input.mutation
       }) as never;
     },
     // 模型批量作者（model-script-batch）：进程内直接复用 Canvas 权威服务，不经 HTTP；
@@ -166,4 +156,4 @@ export function agentCanvasServiceToClient(
   };
 }
 
-export type { CanvasCommand, McpCameraMutation };
+export type { CanvasCommand };

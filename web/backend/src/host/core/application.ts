@@ -1,4 +1,7 @@
 import { createSiteProviderSource } from "./service-connection-sources.js";
+import { createAgentRuntimeBridge } from "./agent-runtime-bridge.js";
+import { randomBytes } from "node:crypto";
+import path from "node:path";
 import { createAssistantTextPort } from "../../ports/assistant-text.js";
 import { createImageDirectorPort } from "../../ports/image-director-scene.js";
 import { deriveRunIdentity } from "@woohaa3/canvas-service";
@@ -17,9 +20,11 @@ import type {
 import { TASKS_INSPECT_ACTION } from "@woohaa3/contracts";
 import {
   createApplicationService,
+  createAgentRoleRegistry,
   createCanvasSourceRegistry
 } from "@woohaa3/application-service";
 import type { ChatGptServiceOptions } from "@woohaa3/extension-oauth-agent/backend";
+import { STANDARD_AGENT_ROLE_IDS } from "@woohaa3/extension-standard-agent-roles/shared";
 import { createBackendExtensionManifest, type LoadedExtensionHost } from "../../extensions/manifest.js";
 import { resolveHostSecretStore } from "../../composition/config.js";
 import { projectMcpDiscovery } from "../../mcp-discovery.js";
@@ -168,6 +173,83 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     });
     // 启停由控制面管理：只登记本次装配里**有后端入口**的扩展；开关即 acquire/release，运行中生效。
     const siteGate = createSiteGate((config.treeExtensions ?? []).filter((name) => siteIds.has(name)));
+    // Agent 角色注册表：宿主创建一次，Application 与扩展作用域共用同一实例。
+    // 工具目录来自 MCP 的真实注册面（含条件式 world/skill 工具），不维护第二份手写清单。
+    const agentRoles = createAgentRoleRegistry({
+      availableTools: () => ctx.mcp.toolCatalog(),
+      logger: (event) => ctx.log.scope("agent-roles")(event)
+    });
+    // 角色上下文只从领域权威读取（owner/画布/目标由宿主确认），浏览器请求不能伪造。
+    const roleAuthoring = createInProcessAuthoringServices({
+      canvas: ctx.canvas,
+      mediaSign: async (storageKey, expiresSeconds) => {
+        try {
+          return { ok: true as const, url: await ctx.media.port().sign(storageKey, expiresSeconds) };
+        } catch (error) {
+          return { ok: false as const, message: error instanceof Error ? error.message : "签名失败" };
+        }
+      },
+      toolGrantRegistry: ctx.toolGrants,
+      logger: (event) => ctx.log.scope("agent-role-context")(event)
+    });
+    const roleContextFor = async (input: { owner: string; canvasId: string; nodeId?: string; action: string; mode?: string }) => {
+      if (!input.nodeId) return {};
+      const read = await roleAuthoring.authoring.readNode({
+        delegation: { subject: input.owner, authLevel: "authenticated" },
+        canvasId: input.canvasId,
+        nodeId: input.nodeId
+      });
+      if (!read.ok) return { action: input.action };
+      return {
+        action: input.action,
+        ...(input.mode ? { mode: input.mode } : {}),
+        canvasId: input.canvasId,
+        nodeId: input.nodeId,
+        nodeType: read.nodeType,
+        title: read.title,
+        prompt: read.prompt,
+        ...(read.source !== undefined ? { source: read.source } : {}),
+        ...(read.modelContentVersion ? { modelContentVersion: read.modelContentVersion } : {}),
+        references: read.references
+      };
+    };
+    // 独立执行器接入：daemon 的 local-agent executor 通过本机依赖桥回调连接/授权/画布读取。
+    // 配置缺失时本机执行明确不可用；不允许通过开关绕回进程内执行。
+    const executorSocket = env.WOOHAA3_AGENT_RUNTIME_SOCKET?.trim() ?? "";
+    const executorToken = env.WOOHAA3_AGENT_RUNTIME_TOKEN?.trim() ?? "";
+    const executorWorkspace = env.WOOHAA3_AGENT_WORKSPACE_KEY?.trim() ?? "";
+    let agentRuntime: import("@woohaa3/application-service").HostRuntimeOptions | undefined;
+    if (executorSocket && executorToken && executorWorkspace) {
+      const socketDir = path.dirname(executorSocket);
+      const bridgeSocket = process.platform === "win32"
+        ? `\\\\.\\pipe\\woohaa-host-bridge-${executorWorkspace}`
+        : path.join(socketDir, "host-bridge.sock");
+      const bridgeToken = randomBytes(24).toString("base64url");
+      const runtimeCanvas = createExtensionNodeFacade(ctx.canvas, "agent-runtime-bridge");
+      const bridge = await createAgentRuntimeBridge({
+        socketPath: bridgeSocket,
+        token: bridgeToken,
+        workspaceKey: executorWorkspace,
+        tools: roleAuthoring.tools,
+        canvasRead: ({ subject, canvasId }) => runtimeCanvas.read({ subject, canvasId, permission: "read" }),
+        mediaRead: async ({ storageKey, canvasId }) => {
+          const resources = ctx.media.port().resources;
+          if (!resources) throw new Error("媒体资源端口不可用");
+          return resources.read(storageKey, canvasId);
+        },
+        logger: (event) => ctx.log.scope("agent-runtime-bridge")(event)
+      });
+      ctx.effect(() => () => void bridge.close());
+      agentRuntime = {
+        socketPath: executorSocket,
+        token: executorToken,
+        workspaceKey: executorWorkspace,
+        executor: "",
+        hostCalls: bridge,
+        bridge: { socketPath: bridgeSocket, token: bridgeToken, workspaceKey: executorWorkspace },
+        mcpEndpoint: mcpEndpoint.url
+      };
+    }
     const servicesFor = createServicesFactory(ctx, env, foundationStorage);
     const { generation, mcp, storage } = ctx;
 
@@ -257,6 +339,11 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       ...(env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean),
     ]);
     const service = createApplicationService({
+      agentRoles,
+      // 业务入口的显式角色绑定：文本/图片交付由宿主领域入口执行，角色插件只提供实现。
+      roleBindings: { textAuthor: STANDARD_AGENT_ROLE_IDS.textAuthor },
+      roleContextFor,
+      ...(agentRuntime ? { agentRuntime } : {}),
       // The Agent Runtime Supervisor outlives this watched backend.  Preserve
       // unresolved turns while the backend reconnects instead of converting a
       // lost in-process receipt into a terminal failure.

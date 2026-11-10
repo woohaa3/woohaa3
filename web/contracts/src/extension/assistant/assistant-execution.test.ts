@@ -5,7 +5,7 @@ import { isAgentAdapterCapabilities } from "./conversation.js";
 
 describe("assistant execution identity", () => {
   it("keeps candidate bytes host-only and checks optional delivery capability shape", () => {
-    const result = decodeAcceptTurnRequest({ requestId: "request", candidate: { images: ["private"] }, entry: { action: "discuss", canvasId: "canvas", prompt: "Question", candidate: { images: ["private"] } } });
+    const result = decodeAcceptTurnRequest({ requestId: "request", candidate: { images: ["private"] }, entry: { roleId: "test/role", action: "discuss", canvasId: "canvas", prompt: "Question", candidate: { images: ["private"] } } });
     expect(result.ok).toBe(false);
     const caps = { discussion: true, tools: true, models: "remote", targets: [] };
     expect(isAgentAdapterCapabilities(caps)).toBe(true);
@@ -28,8 +28,8 @@ describe("assistant execution identity", () => {
   });
   it("decodes a public frozen connection assertion without accepting private fields", () => {
     const connection = { connectionId: "connection", adapterId: "adapter", configRevision: 2, credentialEpoch: 3 };
-    const entry = { action: "discuss", canvasId: "canvas", prompt: "Question", connection };
-    expect(decodeAcceptTurnRequest({ requestId: "request", entry })).toMatchObject({ ok: true, value: { entry: { connection } } });
+    const entry = { roleId: "test/role", action: "discuss", canvasId: "canvas", prompt: "Question", connection };
+    expect(decodeAcceptTurnRequest({ requestId: "request", entry })).toMatchObject({ ok: true, value: { entry: { roleId: "test/role", connection } } });
     expect(decodeAcceptTurnRequest({ requestId: "request", entry: { ...entry, connection: { ...connection, token: "secret" } } }).ok).toBe(false);
   });
 });

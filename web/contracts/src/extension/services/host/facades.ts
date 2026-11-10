@@ -6,6 +6,7 @@
  * 存在与否决定能力，不要假定一定注入。
  */
 import type { ApplicationAuthoringServices, ApplicationPersonalGenerationFacade } from "../../assistant/authoring.js";
+import type { ApplicationExtensionAgentRoleFacade } from "./agent-roles.js";
 import type { AgentConnectionBinding, AgentReasoningEffort } from "../../assistant/conversation.js";
 import type { ServerCanvas } from "../../../canvas/domain/types.js";
 import type { TaskInspectionFacade } from "../../host/app-page.js";
@@ -140,17 +141,31 @@ export type ApplicationExtensionCanvasAccessFacade = {
 
 /** Structured assistant work uses the host conversation ledger and configured assistant connections. */
 export type ApplicationExtensionAssistantFacade = {
-  submit(input: { subject: string; canvasId: string; nodeId: string; requestId: string;
-    connection: AgentConnectionBinding; model?: string;
-    reasoningEffort?: AgentReasoningEffort; prompt: string;
-    outputSchema: Record<string, unknown>; references: readonly { storageKey: string; checksum: string }[];
-  }): Promise<{ ok: true; conversation?: { conversationId: string; requestId: string } } | { ok: false; code: string; message: string }>;
   query(input: { subject: string; canvasId: string; nodeId: string; requestId: string }): Promise<{
     state: string; text?: string; error?: { code: string; message: string };
     /** Exact host ledger identity for read-only conversation navigation. */
     conversation?: { conversationId: string; requestId: string };
   } | null>;
   cancel(input: { subject: string; canvasId: string; nodeId: string; requestId: string }): Promise<void>;
+  /**
+   * 角色/输入形式的新提交（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 业务扩展只提交显式角色 id 与输入；宿主负责解析、能力匹配与 prepare。
+   */
+  submitRole(input: {
+    subject: string;
+    canvasId: string;
+    nodeId: string;
+    requestId: string;
+    connection: AgentConnectionBinding;
+    roleId: string;
+    roleInput: unknown;
+    /** 扩展作为领域入口准备好的权威上下文（只在该可信入口内传递）。 */
+    roleContext: unknown;
+    model?: string;
+    reasoningEffort?: AgentReasoningEffort;
+    references?: readonly { storageKey: string; checksum: string }[];
+  }): Promise<{ ok: true; conversation?: { conversationId: string; requestId: string } } | { ok: false; code: string; message: string }>;
 };
 
 /** 仅操作通用 extension3d 节点，使用 Canvas 现有授权、CAS 与命令提交。 */
@@ -162,6 +177,7 @@ export type ApplicationExtensionNodeFacade = {
 
 /** 公共 Context 暴露给插件的受限服务集合；核心 Context 不属于可关闭插件集合。 */
 export type ApplicationExtensionServices = {
+  executor?: import("./executor.js").ApplicationExtensionExecutorFacade;
   serviceConnections?: ApplicationServiceConnectionFacade;
   assistants?: ApplicationExtensionAssistantFacade;
   extensionNodes?: ApplicationExtensionNodeFacade;
@@ -192,4 +208,10 @@ export type ApplicationExtensionServices = {
    * repository 查询前校验；只交给声明该 action 的 extension。
    */
   taskInspection?: TaskInspectionFacade;
+  /**
+   * Agent 角色准备面（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 只交给受信后端扩展的业务入口；浏览器不可达。缺失时扩展必须按能力拒绝，不回退自带模板。
+   */
+  agentRoles?: ApplicationExtensionAgentRoleFacade;
 };

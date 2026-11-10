@@ -15,9 +15,11 @@ import { createHash } from "node:crypto";
 import type {
   AgentAdapterRunOutcome,
   AgentConnectionBinding,
-  AgentConnectionView,
   AgentConversationAdapterEvent,
-  AgentEntryIntent,
+    AgentEntryIntent,
+  AgentRoleChannelCapabilities,
+  AgentRoleDescriptor,
+  AgentRoleRef,
   AgentTargetSnapshot,
   ConversationEventType,
   ConversationSnapshot,
@@ -26,9 +28,13 @@ import type {
   ConversationTurnStatus,
   AgentCatalogSnapshot,
   AgentAdapterAuthState,
-  AgentAdapterCapabilities
+  AgentAdapterCapabilities,
+  PreparedAgentRoleTurn
 } from "@woohaa3/contracts";
 import {
+  agentRoleRefEquals,
+  decodePreparedAgentRoleTurn,
+  decodeAgentRoleDefinition,
   UNCONFIRMED_RESULT_ERROR_CODE,
   UNCONFIRMED_RESULT_MESSAGE,
   UNCONFIRMED_WRITE_ERROR_CODE,
@@ -42,6 +48,7 @@ import type {
 import { isTerminalTurnStatus } from "../repository/agent-conversation-repository.js";
 import type { AgentAdapterRegistry } from "../extensions/agent-adapter-registry.js";
 import type { AgentConnectionRegistry } from "../extensions/agent-connection-registry.js";
+import type { AgentRoleRegistry } from "../agent-roles/registry.js";
 import {
   buildSnapshot as projectionBuildSnapshot,
   clamp,
@@ -65,15 +72,26 @@ export type AgentConversationServiceOptions = {
   /**
    * 连接发现注册表（change: 2026-10-16-...，任务 2.1/2.3）。
    *
-   * 可选：未注入时按 adapter 解析兼容默认连接（既有 ChatGPT 行为不变）。
+   * 新调用必须显式选择已登记的连接。
    */
   connections?: AgentConnectionRegistry;
   /**
-   * 兼容默认连接解析（旧数据/未显式选连接时）。
+   * 角色注册表（change: 2026-11-07-add-pluggable-agent-roles）。
    *
-   * 返回该 owner + adapter 的兼容默认连接（既有 ChatGPT）；未配置时返回 null（不伪造）。
+   * 注入后，新回合必须显式选择已注册角色；缺失时不回退执行通道里的旧业务模板。
    */
-  defaultConnectionFor?: (input: { owner: string; adapterId: string }) => Promise<AgentConnectionView | null> | AgentConnectionView | null;
+  agentRoles?: AgentRoleRegistry;
+  /**
+   * 权威角色上下文（只由受信宿主按 owner/画布/目标准备；浏览器不可达）。
+   */
+  roleContextFor?: (input: {
+    owner: string;
+    canvasId: string;
+    nodeId?: string;
+    action: string;
+    mode?: string;
+    roleId: string;
+  }) => Promise<unknown> | unknown;
   /** 每会话事件保留窗口（用于 resync 判定）；缺省 2000。 */
   maxEvents?: number;
   /** 单页消息数（分页读取的传输参数，不是总量截断）；缺省 200。 */
@@ -123,6 +141,13 @@ export const DEFINITE_FAILURE_ERROR_CODES: readonly string[] = [
   "variant-unavailable",
   "budget-exceeded",
   "cancelled",
+  "role-not-found",
+  "role-unavailable",
+  "role-version-conflict",
+  "role-input-invalid",
+  "role-context-invalid",
+  "role-requirement-unsatisfied",
+  "role-prepare-failed"
 ];
 
 export function isDefiniteFailureCode(code: string | undefined): boolean {
@@ -141,7 +166,14 @@ export type AgentConversationServiceError = {
     | "capability-unsupported"
     | "budget-exceeded"
     | "storage-failed"
-    | "active-turn";
+    | "active-turn"
+    | "role-not-found"
+    | "role-unavailable"
+    | "role-version-conflict"
+    | "role-input-invalid"
+    | "role-context-invalid"
+    | "role-requirement-unsatisfied"
+    | "role-prepare-failed";
   message: string;
 };
 
@@ -203,11 +235,24 @@ export type AgentConversationService = {
   readConversation(input: { owner: string; conversationId: string; cursor?: number; beforeMessageSequence?: number; turnOffset?: number }):
     | { ok: true; snapshot: ConversationSnapshot }
     | { ok: false; error: AgentConversationServiceError };
-  acceptTurn(input: { owner: string; conversationId: string; requestId: string; entry: AgentEntryIntent; connection?: AgentConnectionBinding | null }): AcceptTurnResult;
+  acceptTurn(input: {
+    owner: string;
+    conversationId: string;
+    requestId: string;
+    entry: AgentEntryIntent;
+    connection?: AgentConnectionBinding | null;
+    /**
+     * 受信领域入口直接提供的角色输入/上下文（扩展 facade 使用）。
+     *
+     * 只在进程内出现；浏览器请求没有该通道，HTTP 解码器也不接受。提供时在**受理时**同步
+     * prepare 并冻结，dispatch 直接复用。
+     */
+    trustedRole?: { input: unknown; context: unknown };
+  }): AcceptTurnResult;
   /**
    * 解析本回合要冻结的连接身份（change: 2026-10-16-...，任务 2.2/2.3）。
    *
-   * 显式选择必须经连接注册表校验属于该 owner；缺失时映射兼容默认连接。API 在接受回合前调用，
+   * 显式选择必须经连接注册表校验属于该 owner；缺失时拒绝。API 在接受回合前调用，
    * 把结果作为 `connection` 传入 `acceptTurn`（保持后者同步，便于复用/测试）。
    */
   resolveConnectionBinding(input: { owner: string; adapterId: string; connectionId?: string }):
@@ -231,6 +276,25 @@ export type AgentConversationService = {
   /** 由宿主领域链在 run/task 接受后显式关联（不从节点 active run 反推）。 */
   linkRun(input: { owner: string; requestId: string; runId?: string; taskId?: string }): { ok: true; turn: ConversationTurn } | { ok: false; error: AgentConversationServiceError };
   catalog(input: { owner: string; adapterId?: string }): Promise<{ ok: true; models: AgentCatalogSnapshot["models"]; error?: string; authState: AgentAdapterAuthState; capabilities: AgentAdapterCapabilities } | { ok: false; error: AgentConversationServiceError }>;
+  /**
+   * 只读角色目录与能力匹配投影（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 只解析 adapter 能力并读注册表；不准备、不推理、不签发授权。
+   */
+  listRoles(input: { owner: string; adapterId?: string }):
+    | { ok: true; roles: readonly AgentRoleDescriptor[] }
+    | { ok: false; error: AgentConversationServiceError };
+  /**
+   * 角色插件停用/升级时精确收回活动回合（不删除历史，不影响其他角色/连接）。
+   */
+  onRoleRevoked(namespacedId: string): void;
+  /**
+   * 记录领域入口准备的规范回合（delivery 路径）：冻结角色身份必须与受理时一致。
+   * 只写 prepared 摘要，不重新准备或推理。
+   */
+  recordPrepared(input: { owner: string; requestId: string; prepared: PreparedAgentRoleTurn }):
+    | { ok: true }
+    | { ok: false; error: AgentConversationServiceError };
   /** 重启恢复：读取未结算回合并核对 adapter 回执；无法证明时结算 failed，不自动重推理。 */
   reconcileUnknown(): Promise<ConversationTurnRecord[]>;
   deleteAll(input: { owner: string; canvasId: string }): void;
@@ -246,6 +310,8 @@ export function createAgentConversationService(options: AgentConversationService
   const maxMessageChars = options.maxMessageChars ?? Infinity;
   const dispatches = new Map<string, Promise<void>>();
   const controllers = new Map<string, AbortController>();
+  /** 活动回合的冻结角色（停用/升级时按角色精确取消）。 */
+  const activeRoles = new Map<string, AgentRoleRef>();
   let acceptingTrustedDelivery = false;
   let acceptingStructuredHash: string | undefined;
   const connections = options.connections;
@@ -254,29 +320,7 @@ export function createAgentConversationService(options: AgentConversationService
 
   const resolveAdapter = (adapterId: string | undefined) => registry.resolve(adapterId);
 
-  /**
-   * 解析该 owner + adapter 的兼容默认连接（旧数据/未显式选择）。
-   *
-   * 未注入兜底解析时返回 null：调用方不伪造连接身份（旧历史仍可读）。
-   */
-  const resolveDefaultConnection = async (owner: string, adapterId: string): Promise<AgentConnectionView | null> => {
-    if (!options.defaultConnectionFor) {
-      const visible = connections ? await connections.listConnections({ owner }) : [];
-      const defaults = visible.filter((view) => view.adapterId === adapterId && view.authMode === "oauth");
-      return defaults.length === 1 ? defaults[0]! : null;
-    }
-    try {
-      return await options.defaultConnectionFor({ owner, adapterId });
-    } catch {
-      return null;
-    }
-  };
-
-  /**
-   * 解析本回合要冻结的连接身份：优先显式选择，其次兼容默认连接；都没有时返回 null。
-   *
-   * 显式选择必须经连接注册表校验属于该 owner（跨 owner/未知连接拒绝，不静默降级）。
-   */
+  /** 新调用必须显式选择归属于当前 owner 的连接。 */
   const resolveTurnConnection = async (
     owner: string,
     adapterId: string,
@@ -295,8 +339,7 @@ export function createAgentConversationService(options: AgentConversationService
         binding: { connectionId: view.connectionId, adapterId: view.adapterId, configRevision: view.configRevision, credentialEpoch: view.credentialEpoch }
       };
     }
-    const fallback = await resolveDefaultConnection(owner, adapterId);
-    return { ok: true, binding: fallback ? { connectionId: fallback.connectionId, adapterId: fallback.adapterId, configRevision: fallback.configRevision, credentialEpoch: fallback.credentialEpoch } : null };
+    return { ok: false, error: { code: "connection-unavailable", message: "请求必须明确选择助手连接" } };
   };
 
   // 投影绑定 store：把存储记录转成公开 DTO（纯函数在 projection 模块）。
@@ -349,8 +392,31 @@ export function createAgentConversationService(options: AgentConversationService
       finishTurn(turn, { status: "failed", error: { code: "adapter-unavailable", message: bound.message } });
       return;
     }
+    // 角色准备先于推理：required 缺失或 input/context 非法时直接失败，不调用模型。
+    let prepared: PreparedAgentRoleTurn | undefined;
+    const frozenForDispatch = frozenRole(turn);
+    if (delivery) {
+      const registration = frozenForDispatch ? options.agentRoles?.resolve(frozenForDispatch.namespacedId) : null;
+      if (frozenForDispatch && (!registration || !agentRoleRefEquals(registration.ref, frozenForDispatch))) {
+        finishTurn(turn, {
+          status: "failed",
+          error: { code: "role-version-conflict", message: "角色实现已停用或升级，本回合不再接受新的执行；历史仍可查询" }
+        });
+        return;
+      }
+    } else {
+      const rolePrepared = await prepareFrozenRole(turn, entry, bound.handle.capabilities);
+      if (!rolePrepared.ok) {
+        finishTurn(turn, { status: "failed", error: { code: rolePrepared.code, message: rolePrepared.message } });
+        return;
+      }
+      prepared = rolePrepared.prepared;
+    }
+
     const controller = new AbortController();
     controllers.set(turn.turnId, controller);
+    const frozenForRun = frozenRole(turn);
+    if (frozenForRun) activeRoles.set(turn.turnId, frozenForRun);
     store.updateTurn(turn.turnId, { status: "running", stage: "running" }, now());
     appendEvent(turn.conversationId, turn.turnId, turn.requestId, "stage", { stage: "running" });
 
@@ -432,6 +498,7 @@ export function createAgentConversationService(options: AgentConversationService
         turnId: turn.turnId,
         requestId: turn.requestId,
         intent: entry,
+        ...(prepared ? { prepared } : {}),
         ...(candidate ? { candidate } : {}),
         ...(turnConnection(turn) ? { connection: turnConnection(turn)! } : {}),
         history,
@@ -443,6 +510,7 @@ export function createAgentConversationService(options: AgentConversationService
     } finally {
       acceptingEvents = false;
       controllers.delete(turn.turnId);
+      activeRoles.delete(turn.turnId);
     }
     // 回合结束：结算仍在增长的助手消息（否则它的完成事件/摘要不会落库）。
     stream.flush();
@@ -537,6 +605,126 @@ export function createAgentConversationService(options: AgentConversationService
       status: "failed",
       error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE }
     });
+  };
+
+  /** 执行通道真实能力 → 角色匹配输入（不从角色或不存在的旧授权推导）。 */
+  const channelCapabilities = (capabilities: AgentAdapterCapabilities): AgentRoleChannelCapabilities => ({
+    toolCalling: capabilities.tools,
+    imageInput: capabilities.candidateGeneration?.imageInput ?? capabilities.textDelivery?.imageInput ?? false,
+    structuredOutput: capabilities.candidateGeneration
+      ? "validated-json"
+      : capabilities.textDelivery
+        ? "validated-json"
+        : "none",
+    nativeCapabilities: [...(capabilities.nativeCapabilities ?? [])]
+  });
+
+  /** 角色输入只含用户输入与动作；业务变体在 inputSchema 里表达。 */
+  const roleInput = (entry: AgentEntryIntent): unknown => ({
+    prompt: entry.prompt,
+    action: entry.action,
+    ...(entry.mode !== undefined ? { mode: entry.mode } : {})
+  });
+
+  const roleTarget = (turn: ConversationTurnRecord): import("@woohaa3/contracts").AgentRoleTargetRef => {
+    const target = JSON.parse(turn.targetJson) as AgentTargetSnapshot;
+    return {
+      canvasId: turn.canvasId,
+      ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
+      ...(target.mode !== undefined ? { mode: target.mode } : {}),
+      ...(target.cameraId !== undefined ? { cameraId: target.cameraId } : {}),
+      ...(target.worldScope ? {
+        worldScope: target.worldScope.kind === "scene-area"
+          ? { kind: "scene-area" as const, areaId: target.worldScope.areaId }
+          : { kind: "world-camera" as const, cameraId: target.worldScope.cameraId }
+      } : {})
+    };
+  };
+
+  const frozenRole = (turn: ConversationTurnRecord): AgentRoleRef | null => {
+    if (!turn.roleRefJson) return null;
+    try { return JSON.parse(turn.roleRefJson) as AgentRoleRef; } catch { return null; }
+  };
+
+  /**
+   * 受理时解析角色：只做注册/可用性判定（同步），上下文校验与 prepare 在 dispatch 前完成。
+   */
+  const resolveRoleForAccept = (
+    entry: AgentEntryIntent,
+    capabilities: AgentAdapterCapabilities
+  ): { ok: true; ref?: AgentRoleRef } | { ok: false; error: AgentConversationServiceError } => {
+    // 所有新调用必须通过角色注册表；独立组合也不提供旧入口。
+    if (!options.agentRoles) return { ok: false, error: { code: "role-unavailable", message: "宿主未启用 Agent 角色注册表" } };
+    if (!entry.roleId) return { ok: false, error: { code: "role-not-found", message: "请求没有选择明确角色；核心不按模式或连接猜角色" } };
+    const role = options.agentRoles.resolve(entry.roleId);
+    if (!role) return { ok: false, error: { code: "role-not-found", message: `角色不存在或未启用：${entry.roleId}` } };
+    const availability = options.agentRoles.availability(entry.roleId, channelCapabilities(capabilities));
+    if (!availability.available) {
+      const code = availability.missing && availability.missing.length > 0
+        ? "role-requirement-unsatisfied"
+        : "role-unavailable";
+      return { ok: false, error: { code, message: availability.reason ?? "角色不可用" } };
+    }
+    return { ok: true, ref: role.ref };
+  };
+
+  /**
+   * dispatch 前准备冻结角色。required 缺失或 input/context 非法时**不调用模型**。
+   * 已准备并冻结的回合直接复用（重传/重启不重新准备）。
+   */
+  const prepareFrozenRole = async (
+    turn: ConversationTurnRecord,
+    entry: AgentEntryIntent,
+    capabilities: AgentAdapterCapabilities
+  ): Promise<{ ok: true; prepared: PreparedAgentRoleTurn } | { ok: false; code: string; message: string }> => {
+    const frozen = frozenRole(turn);
+    if (!frozen) return { ok: false, code: "role-not-found", message: "该回合没有冻结角色身份" };
+    if (turn.preparedJson) {
+      const decoded = decodePreparedAgentRoleTurn(JSON.parse(turn.preparedJson) as unknown);
+      if (decoded.ok && agentRoleRefEquals(decoded.value.roleRef, frozen)) return { ok: true, prepared: decoded.value };
+      return { ok: false, code: "role-version-conflict", message: "冻结的角色准备内容不可用，请以新请求重新生成" };
+    }
+    const registry = options.agentRoles;
+    if (!registry) return { ok: false, code: "role-unavailable", message: "宿主未启用 Agent 角色注册表" };
+    const registration = registry.resolve(frozen.namespacedId);
+    if (!registration) return { ok: false, code: "role-unavailable", message: `角色实现已停用：${frozen.namespacedId}` };
+    // 角色升级后不得用新模板重算旧请求：冻结修订必须仍与当前实现一致。
+    if (!agentRoleRefEquals(registration.ref, frozen)) {
+      return { ok: false, code: "role-version-conflict", message: "角色已被升级，请用新请求重新生成；本回合保留原记录" };
+    }
+    const definition = decodeAgentRoleDefinition(registration.definition);
+    if (!definition.ok) return { ok: false, code: "role-unavailable", message: "角色定义不可用" };
+    let context: unknown = {};
+    try {
+      context = (await options.roleContextFor?.({
+        owner: turn.owner,
+        canvasId: turn.canvasId,
+        ...(entry.nodeId !== undefined ? { nodeId: entry.nodeId } : {}),
+        action: entry.action,
+        ...(entry.mode !== undefined ? { mode: entry.mode } : {}),
+        roleId: frozen.namespacedId
+      })) ?? {};
+    } catch (error) {
+      return { ok: false, code: "role-context-invalid", message: `角色上下文准备失败：${error instanceof Error ? error.message : String(error)}` };
+    }
+    const prepared = registry.prepare({
+      roleId: frozen.namespacedId,
+      input: roleInput(entry),
+      context,
+      target: roleTarget(turn),
+      requestId: turn.requestId,
+      ...(JSON.parse(turn.targetJson) as AgentTargetSnapshot).expectedContentHash !== undefined
+        ? { expectedContentHash: (JSON.parse(turn.targetJson) as AgentTargetSnapshot).expectedContentHash! }
+        : {},
+      channel: channelCapabilities(capabilities),
+      attachments: (entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
+    });
+    if (!prepared.ok) return { ok: false, code: prepared.code, message: prepared.message };
+    if (!agentRoleRefEquals(prepared.turn.roleRef, frozen)) {
+      return { ok: false, code: "role-version-conflict", message: "角色准备结果与冻结身份不一致" };
+    }
+    store.updateTurn(turn.turnId, { preparedJson: safeJson(prepared.turn) }, now());
+    return { ok: true, prepared: prepared.turn };
   };
 
   const service: AgentConversationService = {
@@ -687,7 +875,9 @@ export function createAgentConversationService(options: AgentConversationService
       if (input.entry.action !== "discuss" && binding.nodeId && input.entry.nodeId !== binding.nodeId) return fail("unauthorized", "目标节点与会话不一致");
 
       if (input.entry.mode === "text" && input.entry.action !== "discuss" && !acceptingTrustedDelivery) return fail("capability-unsupported", "文本生成必须经过可信文本交付入口");
-      const inputHash = hashIntent(input.entry, input.connection ?? null) + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "");
+      const inputHash = hashIntent(input.entry, input.connection ?? null)
+        + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "")
+        + (input.trustedRole ? `:${createHash("sha256").update(JSON.stringify(input.trustedRole.input ?? null)).digest("hex")}` : "");
       const existing = store.findTurnByRequest(input.owner, input.requestId);
       if (existing) {
         if (existing.conversationId !== binding.conversationId || existing.canvasId !== binding.canvasId) return fail("request-id-reused", "requestId 已绑定其它会话或画布");
@@ -702,6 +892,10 @@ export function createAgentConversationService(options: AgentConversationService
       const resolved = registry.resolve(binding.adapterId);
       if (!resolved.ok) return fail("adapter-unavailable", resolved.message);
       const capabilities = resolved.handle.capabilities;
+      // 显式角色解析（change: 2026-11-07-add-pluggable-agent-roles）：核心不按 mode、
+      // 显示名或连接猜业务职责；未选择角色即拒绝。
+      const roleResolved = resolveRoleForAccept(input.entry, capabilities);
+      if (!roleResolved.ok) return roleResolved;
       if (!capabilities.discussion && input.entry.action === "discuss") {
         return fail("capability-unsupported", "该 adapter 不支持讨论");
       }
@@ -716,11 +910,52 @@ export function createAgentConversationService(options: AgentConversationService
         return fail("malformed-request", "对象动作缺少 clipId，拒绝退化成整体片场修改");
       }
 
-      // 冻结本回合来源连接身份（design D7）：由 API 在接受前解析后传入；缺失时为兼容默认连接或 null。
+      // 冻结本回合来源连接身份（design D7）：由 API 在接受前解析后传入；缺失时不可发起新的执行。
       const connection = input.connection ?? null;
       // 会话冻结的连接与本次请求不一致时拒绝（不静默换来源）。
       if (binding.connectionId && connection && binding.connectionId !== connection.connectionId) {
         return fail("connection-unavailable", "该会话已冻结其它来源连接，请先切换来源");
+      }
+
+      // 受信领域入口提供角色输入/上下文时在受理时同步准备并冻结。
+      let trustedPrepared: PreparedAgentRoleTurn | undefined;
+      let trustedRoleInputDigest: string | undefined;
+      if (input.trustedRole && roleResolved.ref) {
+        if (!options.agentRoles) return fail("role-unavailable", "宿主未启用 Agent 角色注册表");
+        const targetRef: import("@woohaa3/contracts").AgentRoleTargetRef = {
+          canvasId: input.entry.canvasId,
+          ...(input.entry.nodeId !== undefined ? { nodeId: input.entry.nodeId } : {}),
+          ...(input.entry.mode !== undefined ? { mode: input.entry.mode } : {})
+        };
+        const prepared = options.agentRoles.prepare({
+          roleId: roleResolved.ref.namespacedId,
+          input: input.trustedRole.input,
+          context: input.trustedRole.context,
+          target: targetRef,
+          requestId: input.requestId,
+          ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {}),
+          channel: channelCapabilities(capabilities),
+          attachments: (input.entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
+        });
+        if (!prepared.ok) {
+          const code: AgentConversationServiceError["code"] = [
+            "role-not-found",
+            "role-unavailable",
+            "role-version-conflict",
+            "role-input-invalid",
+            "role-context-invalid",
+            "role-requirement-unsatisfied",
+            "role-prepare-failed"
+          ].includes(prepared.code)
+            ? prepared.code as AgentConversationServiceError["code"]
+            : "role-unavailable";
+          return { ok: false, error: { code, message: prepared.message } };
+        }
+        if (!agentRoleRefEquals(prepared.turn.roleRef, roleResolved.ref)) {
+          return fail("role-version-conflict", "角色准备结果与解析到的角色身份不一致");
+        }
+        trustedPrepared = prepared.turn;
+        trustedRoleInputDigest = prepared.turn.inputDigest;
       }
 
       const turnId = createId("turn");
@@ -737,7 +972,8 @@ export function createAgentConversationService(options: AgentConversationService
         ...(input.entry.model !== undefined ? { model: input.entry.model } : {}),
         ...(input.entry.reasoningEffort !== undefined ? { reasoningEffort: input.entry.reasoningEffort } : {}),
         ...(connection ? { connectionId: connection.connectionId } : {}),
-        ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {})
+        ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {}),
+        ...(roleResolved.ref ? { role: roleResolved.ref } : {})
       };
       store.createTurn({
         turnId,
@@ -755,6 +991,9 @@ export function createAgentConversationService(options: AgentConversationService
         connectionAdapterId: connection?.adapterId ?? null,
         connectionConfigRevision: connection?.configRevision ?? null,
         connectionCredentialEpoch: connection?.credentialEpoch ?? null,
+        ...(roleResolved.ref ? { roleRefJson: safeJson(roleResolved.ref) } : {}),
+        ...(trustedPrepared ? { preparedJson: safeJson(trustedPrepared) } : {}),
+        roleInputDigest: trustedRoleInputDigest ?? createHash("sha256").update(JSON.stringify(roleInput(input.entry))).digest("hex"),
         // 受理时冻结历史基准（任务 3.1）：只把此刻已完成的合法前缀纳入本回合，不读并发回合的半条输出。
         historySequence: store.maxMessageSequence(binding.conversationId),
         createdAt: timestamp,
@@ -865,6 +1104,45 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
       return { ok: true, models: snapshot.models, authState, capabilities, ...(error ? { error } : {}) };
+    },
+
+    listRoles(input) {
+      if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
+      if (!options.agentRoles) return fail("role-unavailable", "宿主未启用 Agent 角色注册表");
+      const resolved = resolveAdapter(input.adapterId);
+      if (!resolved.ok) return fail("adapter-unavailable", resolved.message);
+      const channel = channelCapabilities(resolved.handle.capabilities);
+      const roles = options.agentRoles.list().map((descriptor) => {
+        const availability = options.agentRoles!.availability(descriptor.ref.namespacedId, channel);
+        // 公开目录只投影身份/专长/能力需求/可用原因；工具与内建能力清单留在宿主内部。
+        const { tools: _tools, nativeCapabilities: _native, ...publicDescriptor } = descriptor;
+        return {
+          ...publicDescriptor,
+          available: availability.available,
+          ...(availability.reason ? { reason: availability.reason } : {})
+        };
+      });
+      return { ok: true, roles };
+    },
+
+    recordPrepared(input) {
+      const record = store.findTurnByRequest(input.owner, input.requestId);
+      if (!record) return fail("not-found", "未找到该请求");
+      const frozen = frozenRole(record);
+      if (!frozen || !agentRoleRefEquals(frozen, input.prepared.roleRef)) {
+        return fail("role-version-conflict", "准备结果与回合冻结的角色身份不一致");
+      }
+      store.updateTurn(record.turnId, { preparedJson: safeJson(input.prepared), roleInputDigest: input.prepared.inputDigest }, now());
+      return { ok: true };
+    },
+
+    onRoleRevoked(namespacedId) {
+      // 只取消冻结该角色的活动回合；无关角色与连接继续运行，历史不删除。
+      for (const [turnId, ref] of [...activeRoles]) {
+        if (ref.namespacedId !== namespacedId) continue;
+        activeRoles.delete(turnId);
+        controllers.get(turnId)?.abort();
+      }
     },
 
     async reconcileUnknown() {

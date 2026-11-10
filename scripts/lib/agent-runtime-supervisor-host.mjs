@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { hashKey, supervisorEndpoint } from "./agent-runtime-endpoints.mjs";
 
 /** 默认探活间隔：足够快地把故障窗口缩到 2 秒级，又不至于频繁写日志。 */
@@ -87,7 +87,25 @@ export function createAgentSupervisorHost({
 } = {}) {
 	const socketPath = supervisorEndpoint({ workspaceKey, runtimeDir });
 	const tokenPath = path.join(runtimeDir, "token");
-	const script = path.join(root, "scripts", "agent-runtime-supervisor.mjs");
+	const packageDir = path.join(root, "packages", "execution-runtime");
+	const script = path.join(packageDir, "dist", "cli.js");
+
+	/** dev 启动器不跑完整 build：只在产物缺失时构建一次，避免每次启动都等打包。 */
+	const ensureScript = () => {
+		if (!fs.existsSync(script)) {
+			try {
+				execFileSync("pnpm", ["-C", "web", "--filter", "woohaa3-executor", "run", "build"], {
+					cwd: root,
+					stdio: "inherit",
+					shell: process.platform === "win32"
+				});
+			} catch (error) {
+				throw new Error(`woohaa3-executor 构建失败：${describeError(error)}`);
+			}
+			if (!fs.existsSync(script)) throw new Error("woohaa3-executor 构建后仍缺少 dist/cli.js");
+		}
+		return script;
+	};
 	/** token 在本次会话内固定：文件被删掉后重建新 token 会让已注入后端的环境失效。 */
 	let token = "";
 	let config = null;
@@ -128,7 +146,7 @@ export function createAgentSupervisorHost({
 				try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
 			}
 		}
-		const child = spawn(process.execPath, [script, "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
+		const child = spawn(process.execPath, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
 			cwd: root, detached: true, stdio: "ignore", windowsHide: true
 		});
 		child.unref();

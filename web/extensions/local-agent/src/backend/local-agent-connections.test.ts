@@ -14,6 +14,7 @@ import { createLocalAgentConversationAdapter, createLocalAgentDescriptors, type 
 import { LOCAL_AGENT_ADAPTERS } from "../shared.js";
 import type { ProcessManager, ProcessHandle } from "./process-manager.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportResult } from "./transports/transport.js";
+import { buildTestPreparedTurn, toolsForTestIntent } from "@woohaa3/test-fixtures-agent-role-turns";
 
 const codexAdapter = LOCAL_AGENT_ADAPTERS.find((adapter) => adapter.adapterId === "codex-appserver")!;
 const opencodeAdapter = LOCAL_AGENT_ADAPTERS.find((adapter) => adapter.adapterId === "opencode-server")!;
@@ -132,13 +133,29 @@ function fakeToolFacade(authorize: ApplicationToolDelegationFacade["authorize"] 
 }
 
 function runInput(overrides: Partial<AgentAdapterRunInput> = {}, emitted: unknown[] = []): AgentAdapterRunInput {
+  const intent = overrides.intent ?? { action: "generate" as const, canvasId: "canvas-1", nodeId: "n1", mode: "model3d" as const, prompt: "生成一个立方体" };
   return {
     owner: "u1",
     canvasId: "canvas-1",
     conversationId: "conv-1",
     turnId: "turn-1",
     requestId: "req-1",
-    intent: { action: "generate", canvasId: "canvas-1", nodeId: "n1", mode: "model3d", prompt: "生成一个立方体" },
+    intent,
+    // 通道测试统一注入宿主已准备的规范请求；真实链路由 application-service 准备。
+    prepared: buildTestPreparedTurn({
+      requestId: overrides.requestId ?? "req-1",
+      target: {
+        canvasId: intent.canvasId,
+        ...(intent.nodeId ? { nodeId: intent.nodeId } : {}),
+        ...(intent.mode ? { mode: intent.mode } : {}),
+        ...(intent.cameraId ? { cameraId: intent.cameraId } : {})
+      },
+      prompt: intent.prompt,
+      tools: toolsForTestIntent(intent),
+      output: overrides.candidate
+        ? { kind: "candidate", schema: overrides.candidate.outputSchema }
+        : { kind: "tool-receipts" }
+    }),
     connection: { connectionId: "c1", adapterId: "codex-appserver", configRevision: 1, credentialEpoch: 1 },
     history: [],
     signal: new AbortController().signal,
@@ -173,19 +190,19 @@ describe("local-agent 连接描述（任务 3.1）", () => {
 });
 
 describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
-  it.each(["read-only", "failed-write"])("does not report success for %s and does not spend grants on notifications", async kind => {
+  it.each(["read-only", "validate_canvas_script", "validate_canvas_plan", "failed-write"])("does not report success for %s and does not spend grants on notifications", async kind => {
     const { service } = fakeService([record()]);
     const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
     const { facade } = fakeToolFacade();
     const authorize = vi.spyOn(facade, "authorize");
     const { transport } = fakeTransport(input => {
-      const tool = kind === "read-only" ? "get_model_node" : "submit_model_script";
+      const tool = kind === "read-only" ? "get_model_node" : kind.startsWith("validate_") ? kind : "submit_model_script";
       input.onEvent({ type: "tool-started", tool, callId: "call" });
-      input.onEvent({ type: "tool-completed", tool, callId: "call", ok: kind === "read-only", summary: "validation rejected" });
+      input.onEvent({ type: "tool-completed", tool, callId: "call", ok: kind !== "failed-write", summary: "validation rejected" });
       return { ok: true, outcome: { status: "succeeded" } };
     });
     const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
-    expect(await adapter.run(runInput())).toMatchObject({ status: "failed", error: { code: "canvas-not-modified" } });
+    expect(await adapter.run(runInput({ prepared: buildTestPreparedTurn({ requestId: "req-1", target: { canvasId: "canvas-1", nodeId: "n1" }, prompt: "test", tools: ["get_model_node", "submit_model_script", "validate_canvas_script", "validate_canvas_plan"] }) }))).toMatchObject({ status: "failed", error: { code: "canvas-not-modified" } });
     expect(authorize).not.toHaveBeenCalled();
   });
   it("exposes real model-scoped tools and revokes only this owner", async () => {
@@ -202,7 +219,7 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(inputs[0]!.prompt).toContain("root");
     expect(revoke).toHaveBeenLastCalledWith("req-1", { subject: "u1", authLevel: "authenticated" });
     issue.mockClear();
-    await adapter.run({ ...input, requestId: "discussion", intent: { ...input.intent, action: "discuss" } });
+    await adapter.run(runInput({ requestId: "discussion", intent: { ...input.intent, action: "discuss" } }));
     expect(issue).not.toHaveBeenCalled();
     expect(inputs[1]!.toolToken).toBeNull();
   });
@@ -300,6 +317,29 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(natives).toEqual([expect.objectContaining({ nativeId: "thread-9", credentialEpoch: 1 })]);
     // transport 证据来自真实探测回调；测试假传输未回调则不伪造。
     expect(patches).toHaveLength(0);
+  });
+
+  it("忽略 MCP 资源探测伪工具，不把它计成 tool-not-allowed", async () => {
+    const { service } = fakeService([record()]);
+    const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
+    const emitted: unknown[] = [];
+    const { transport } = fakeTransport(input => {
+      input.onEvent({ type: "tool-started", tool: "list_mcp_resources", callId: "r1" });
+      input.onEvent({ type: "tool-completed", tool: "list_mcp_resources", callId: "r1", ok: false, summary: "method not found" });
+      input.onEvent({ type: "tool-started", tool: "list_mcp_resource_templates", callId: "r2" });
+      input.onEvent({ type: "tool-completed", tool: "list_mcp_resource_templates", callId: "r2", ok: false, summary: "method not found" });
+      input.onEvent({ type: "tool-started", tool: "submit_model_script", callId: "w1" });
+      input.onEvent({ type: "tool-completed", tool: "submit_model_script", callId: "w1", ok: true });
+      return { ok: true, outcome: { status: "succeeded", assistantText: "done" } };
+    });
+    const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: fakeToolFacade().facade, mcpEndpoint: MCP_ENDPOINT });
+    const outcome = await adapter.run(runInput({}, emitted));
+    expect(outcome.status).toBe("succeeded");
+    expect(emitted).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool-completed", tool: "list_mcp_resources" }),
+      expect.objectContaining({ type: "tool-completed", tool: "list_mcp_resource_templates" })
+    ]));
+    expect(emitted).toEqual(expect.arrayContaining([expect.objectContaining({ type: "tool-completed", tool: "submit_model_script" })]));
   });
 
   it("目标回合缺少工具委托时在启动进程前失败，不让模型空答", async () => {
@@ -439,22 +479,6 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.error?.code).toBe("runtime-missing");
     expect(patches.some((patch) => patch.transport?.state === "unavailable")).toBe(true);
-  });
-
-  it("query 只回答本进程已落定终态，不重跑推理", async () => {
-    const { service } = fakeService([record()]);
-    const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
-    const { transport, inputs } = fakeTransport({ ok: true, outcome: { status: "succeeded", assistantText: "done" } });
-    const { facade } = fakeToolFacade();
-    const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
-    // 未执行前无记录：宿主应保留既有回执（unknown），不重推理。
-    expect(await adapter.query!({ owner: "u1", requestId: "req-1" })).toBeNull();
-    await adapter.run(runInput());
-    expect(inputs).toHaveLength(1);
-    const reconciled = await adapter.query!({ owner: "u1", requestId: "req-1" });
-    expect(reconciled).toMatchObject({ status: "succeeded", assistantText: "done" });
-    // 核对不再触发新的传输调用。
-    expect(inputs).toHaveLength(1);
   });
 
   it("停用/未启用时拒绝新回合，且不启动进程", async () => {
@@ -598,15 +622,4 @@ it.each(LOCAL_AGENT_ADAPTERS)("$adapterId candidate run passes images/schema wit
   records[0]!.credentialEpoch++;
   expect(await adapter.run(input)).toMatchObject({ status: "failed" });
   expect(inputs).toHaveLength(1);
-});
-
-it("stops the exact candidate process using its persisted context", async () => {
-  const { service } = fakeService([record()]);
-  const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
-  const stop = vi.fn(async () => {});
-  manager.stop = stop;
-  const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: {}, argsFor: () => [] });
-  const input = runInput({ requestId: "request:3", conversationId: "request:3", intent: { action: "discuss", canvasId: "canvas-1", nodeId: "n1", prompt: "scene" }, connection: { connectionId: "c1", adapterId: "codex-appserver", configRevision: 1, credentialEpoch: 1 } });
-  await expect(adapter.cancel!({ owner: input.owner, requestId: input.requestId, candidateContext: { canvasId: input.canvasId, conversationId: input.conversationId, connection: input.connection!, intent: input.intent } })).rejects.toThrow("无法确认");
-  expect(stop).toHaveBeenCalledWith({ adapterId: "codex-appserver", owner: input.owner, connectionId: nativeContextKey(input.owner, "c1", nativeContextFor(input, "codex-appserver:1:")) });
 });

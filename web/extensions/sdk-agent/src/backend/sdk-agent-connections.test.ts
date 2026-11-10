@@ -4,13 +4,36 @@ import type { ConnectionMetadataRecord, ConnectionService } from "@woohaa3/agent
 import { findSdkAgentAdapter } from "../shared.js";
 import { createSdkAgentConversationAdapter, sdkReasoningEfforts } from "./sdk-agent-connections.js";
 import type { AgentSdkTransport } from "./adapters/agent-sdk-adapter.js";
+import { buildTestPreparedTurn, toolsForTestIntent } from "@woohaa3/test-fixtures-agent-role-turns";
 
 function fixture(runtimeVersion: string | undefined = "codex-agent-sdk@0.161.0:1") {
   const record: ConnectionMetadataRecord = { owner: "owner", connectionId: "connection", adapterId: "openai-responses", name: "API", runCategory: "agent-sdk", authMode: "api-key", configRevision: 1, credentialEpoch: 1, createdAt: "now", updatedAt: "now", runtimeVersion, models: ["fixture"] };
   const service = { get: vi.fn(async (owner: string) => owner === "owner" ? record : null), readCredential: vi.fn(async () => ({ secret: "real-key-never-given-to-sdk" })), setRuntimeProbe: vi.fn(), setStatus: vi.fn(), resolveNativeBinding: vi.fn(async () => null), setNativeBinding: vi.fn() } as unknown as ConnectionService;
   const run = vi.fn<AgentSdkTransport["run"]>(async () => ({ ok: true, assistantText: "reply", toolCalls: [], finishReason: "stop" }));
   const create = (available = true, inFlight?: Set<Promise<unknown>>, allowedHosts = ["api.openai.com"]) => createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, { service, inFlight, allowedHosts, allowHttp: false, ...(available ? { transports: { "codex-agent-sdk": { run } } } : {}) });
-  const input = (overrides: Partial<AgentAdapterRunInput> = {}): AgentAdapterRunInput => ({ owner: "owner", conversationId: "conversation", canvasId: "canvas", requestId: "request", turnId: "turn", connection: { connectionId: "connection", adapterId: "openai-responses", configRevision: 1, credentialEpoch: 1 }, history: [], intent: { action: "discuss", canvasId: "canvas", prompt: "reply", model: "fixture" }, signal: new AbortController().signal, emit: vi.fn(), ...overrides });
+  const input = (overrides: Partial<AgentAdapterRunInput> = {}): AgentAdapterRunInput => {
+    const intent = overrides.intent ?? { action: "discuss" as const, canvasId: "canvas", prompt: "reply", model: "fixture" };
+    return {
+      owner: "owner",
+      conversationId: "conversation",
+      canvasId: "canvas",
+      requestId: "request",
+      turnId: "turn",
+      connection: { connectionId: "connection", adapterId: "openai-responses", configRevision: 1, credentialEpoch: 1 },
+      history: [],
+      intent,
+      prepared: buildTestPreparedTurn({
+        requestId: overrides.requestId ?? "request",
+        target: { canvasId: intent.canvasId, ...(intent.nodeId ? { nodeId: intent.nodeId } : {}), ...(intent.mode ? { mode: intent.mode } : {}) },
+        prompt: intent.prompt,
+        tools: toolsForTestIntent(intent),
+        output: overrides.candidate ? { kind: "candidate", schema: overrides.candidate.outputSchema } : { kind: "tool-receipts" }
+      }),
+      signal: new AbortController().signal,
+      emit: vi.fn(),
+      ...overrides
+    };
+  };
   return { record, service, run, create, input };
 }
 
@@ -153,7 +176,7 @@ it.each(["outside-scope", "spatial-rejected", "write-forbidden", "version-confli
   const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, {
     service: f.service, allowHttp: false, allowedHosts: ["api.openai.com"],
     transports: { "codex-agent-sdk": { run: f.run } }, mcpServerUrl: "http://127.0.0.1:1/mcp",
-    tools: { authorize: vi.fn(), issue: async () => { throw Object.assign(new Error("对象 model-a 超出范围，请调整导演区 real-key-never-given-to-sdk https://private.invalid/path token=secret"), { code }); }, revoke: vi.fn() }
+    tools: { issue: async () => { throw Object.assign(new Error("对象 model-a 超出范围，请调整导演区 real-key-never-given-to-sdk https://private.invalid/path token=secret"), { code }); }, revoke: vi.fn() }
   });
   const outcome = await adapter.run(f.input({ intent: { action: "modify", mode: "world", canvasId: "canvas", nodeId: "area", worldScope: { kind: "scene-area", areaId: "area" }, prompt: "修改", model: "fixture" } }));
   expect(outcome).toMatchObject({ status: "failed", error: { code, message: expect.stringContaining("对象 model-a 超出范围") } });

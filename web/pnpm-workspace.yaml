@@ -8,6 +8,7 @@ packages:
   - runtime-components
   - extensions/*
   - ../extensions/*
+  - ../packages/*
   - framework/*
   - test-fixtures/*
   - tooling

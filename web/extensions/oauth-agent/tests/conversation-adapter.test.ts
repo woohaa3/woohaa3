@@ -26,6 +26,7 @@ import {
 import type { ChatGptAuthSnapshot } from "@woohaa3/contracts";
 import type { ChatGptService } from "../src/backend/service.js";
 import type { GenerateRequest, GenerationProgress } from "../src/backend/generation.js";
+import { buildTestPreparedTurn, toolsForTestIntent } from "@woohaa3/test-fixtures-agent-role-turns";
 
 type SnapshotState = ChatGptAuthSnapshot["state"];
 
@@ -97,13 +98,22 @@ function fakeService(overrides: {
 
 function runInput(overrides: Partial<AgentAdapterRunInput> = {}): AgentAdapterRunInput {
   const events: AgentConversationAdapterEvent[] = [];
+  const intent = overrides.intent ?? { action: "discuss" as const, canvasId: "cv", prompt: "你好" };
   const input: AgentAdapterRunInput = {
     owner: "user-a",
     canvasId: "cv",
     conversationId: "conv-1",
     turnId: "turn-1",
     requestId: "req-1",
-    intent: { action: "discuss", canvasId: "cv", prompt: "你好" },
+    intent,
+    prepared: buildTestPreparedTurn({
+      requestId: overrides.requestId ?? "req-1",
+      target: { canvasId: intent.canvasId, ...(intent.nodeId ? { nodeId: intent.nodeId } : {}), ...(intent.mode ? { mode: intent.mode } : {}), ...(intent.cameraId ? { cameraId: intent.cameraId } : {}) },
+      prompt: intent.prompt,
+      messages: [{ role: "user", content: intent.prompt }],
+      tools: toolsForTestIntent(intent),
+      output: overrides.candidate ? { kind: "candidate", schema: overrides.candidate.outputSchema } : { kind: "tool-receipts" }
+    }),
     history: [],
     signal: new AbortController().signal,
     emit: (event) => events.push(event),
@@ -285,10 +295,9 @@ describe("ChatGPT 会话 adapter · 目标执行", () => {
           action: "generate",
           canvasId: "cv",
           nodeId: "n1",
-          mode: "camera",
+          mode: "model3d",
           model: "gpt-6.1-sol",
-          prompt: "调整镜头",
-          cameraId: "cam-9",
+          prompt: "生成模型",
           expectedContentHash: "hash-abc"
         },
         emit: (event) => events.push(event)
@@ -301,10 +310,9 @@ describe("ChatGPT 会话 adapter · 目标执行", () => {
       requestId: "req-1",
       canvasId: "cv",
       nodeId: "n1",
-      mode: "camera",
+      mode: "model3d",
       model: "gpt-6.1-sol",
-      prompt: "调整镜头",
-      selectedCameraId: "cam-9",
+      prompt: "生成模型",
       expectedContentHash: "hash-abc"
     });
   });

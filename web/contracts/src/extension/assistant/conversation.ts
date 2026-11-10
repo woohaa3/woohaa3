@@ -18,6 +18,8 @@
  */
 import { isBoolean, isBoundedId, isJsonObject, isStringArray } from "../../validation.js";
 import type { AssistantWorldScopeSelection } from "../../canvas/assistant-world-authority.js";
+import type { AgentRoleRef, PreparedAgentRoleTurn } from "./agent-role.js";
+import { isAgentNativeCapability } from "./agent-role.js";
 
 /** Agent 会话 API 的固定同源前缀（宿主拥有）。 */
 export const AGENT_CONVERSATION_BASE_PATH = "/api/agent-conversations" as const;
@@ -132,7 +134,7 @@ export type AgentEntryReference = {
  * 与目标、模型一起纳入请求幂等指纹：同一 requestId 换连接/配置/凭据版本 MUST 拒绝，
  * 不切换凭据、不重新推理。原生会话 id 是执行索引，不能跨连接或 owner 复用。
  *
- * 既有历史行没有这些字段时映射为该 owner 的兼容默认连接（既有 ChatGPT），不改变其归属。
+ * 没有连接身份的历史行不会自动绑定或发起新执行。
  */
 export type AgentConnectionBinding = {
   connectionId: string;
@@ -175,10 +177,18 @@ export type AgentTargetSnapshot = {
    */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
-  /** 冻结的来源连接 id（未显式选择时为兼容默认连接，由宿主补齐）。 */
+  /** 冻结的显式来源连接 id。 */
   connectionId?: string;
   /** 领域并发 precondition（模型内容哈希 / 片场 snapshotHash，按模式）。 */
   expectedContentHash?: string;
+  /**
+   * 受理时冻结的角色身份（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 旧回合缺省即 legacy：不补造角色指纹，查询/取消/回执恢复仍按原身份。
+   */
+  role?: AgentRoleRef;
+  /** 受理时冻结的准备内容摘要（与角色修订、真实工具集合共同用于原生上下文隔离）。 */
+  rolePreparedHash?: string;
 };
 
 /** 生成面板/详情提交的 entry intent（首轮与详情后续消息共用）。 */
@@ -198,8 +208,14 @@ export type AgentEntryIntent = {
   /** 冻结的账户模型 id（来自真实目录）；缺失时由 adapter 按当前目录处理或拒绝。 */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
-  /** 显式选定的来源连接；缺失时宿主解析该 owner 的兼容默认连接（既有历史/兼容请求）。 */
+  /** 显式选定的来源连接；新请求缺失时拒绝。 */
   connectionId?: string;
+  /**
+   * 显式选定的完整角色 id（`<extensionId>/<roleId>`）。
+   *
+   * 业务入口必须提交明确角色；核心不按 mode 猜角色，也不接受把连接 id 当角色。
+   */
+  roleId?: string;
   expectedContentHash?: string;
   prompt: string;
   /** 显式引用（不从节点版本伪造历史）。 */
@@ -223,6 +239,11 @@ export type AgentAdapterCapabilities = {
   targets: readonly AgentTargetMode[];
   tools: boolean;
   models: "remote" | "none";
+  /**
+   * 通道真实支持的内建执行能力（change: 2026-11-07-add-pluggable-agent-roles）。
+   * 角色声明与本集合求交；缺省表示不支持任何内建能力（不从旧回合继承）。
+   */
+  nativeCapabilities?: readonly import("./agent-role.js").AgentNativeCapability[];
 };
 
 /** adapter 授权状态（复用 provider 自身边界；绝不携带 token）。 */
@@ -259,7 +280,7 @@ export type ConversationSummary = {
   conversationId: string;
   canvasId: string;
   adapterId: string;
-  /** 当前会话冻结的来源连接 id（旧数据映射兼容默认连接）。 */
+  /** 当前会话冻结的来源连接 id；不自动绑定默认连接。 */
   connectionId?: string;
   title: string;
   status: ConversationStatus;
@@ -316,6 +337,8 @@ export type ConversationTurn = {
   receipt?: unknown;
   /** 该回合冻结的连接身份（旧数据缺省；用于「修改连接后用原 requestId 重试」拒绝）。 */
   connection?: AgentConnectionBinding;
+  /** 该回合冻结的角色身份；旧回合缺省即 legacy，不补造。 */
+  role?: AgentRoleRef;
   error?: { code: string; message: string };
   createdAt: string;
   updatedAt: string;
@@ -425,6 +448,13 @@ export type AgentAdapterRunOutcome = {
 export type AgentAdapterRunInput = {
   /** Trusted host-only input; never decoded from a browser entry intent. */
   candidate?: { images: readonly AgentImageInput[]; outputSchema: Record<string, unknown> };
+  /**
+   * 宿主准备好的角色回合（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 通道只消费它：不得再按业务 mode 构造角色提示词或选择业务工具。缺失表示旧回合/旧路径，
+   * 新目标回合不会以空 prepared 执行（宿主在受理时已拒绝）。
+   */
+  prepared?: PreparedAgentRoleTurn;
   owner: string;
   canvasId: string;
   conversationId: string;
@@ -450,6 +480,8 @@ export type AgentImageInput = { bytes: Uint8Array; contentType: string };
 export type AgentConversationAdapter = {
   /** adapter 稳定 id（registry key）。 */
   id: string;
+  /** 声明后只能经该 daemon executor 执行；宿主不提供进程内执行回退。 */
+  runtimeExecutor?: string;
   capabilities(): AgentAdapterCapabilities;
   /** 授权状态（真实 provider 状态；不携带 token）。 */
   authorization(input: { owner: string }): Promise<AgentAdapterAuthState>;
@@ -536,6 +568,7 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
     const candidate = value.candidateGeneration;
     if (!isJsonObject(candidate) || !isBoolean(candidate.imageInput) || !Number.isSafeInteger(candidate.maxImages) || (candidate.maxImages as number) < 1) return false;
   }
+  if (value.nativeCapabilities !== undefined && (!Array.isArray(value.nativeCapabilities) || !value.nativeCapabilities.every(isAgentNativeCapability))) return false;
   return value.targets.every(isAgentTargetMode);
 }
 
@@ -559,7 +592,15 @@ export const AGENT_CONVERSATION_ERROR_CODES = [
   "connection-unavailable",
   "capability-unsupported",
   "budget-exceeded",
-  "storage-failed"
+  "storage-failed",
+  // 角色（change: 2026-11-07-add-pluggable-agent-roles）
+  "role-not-found",
+  "role-unavailable",
+  "role-version-conflict",
+  "role-input-invalid",
+  "role-context-invalid",
+  "role-requirement-unsatisfied",
+  "role-prepare-failed"
 ] as const;
 export type AgentConversationErrorCode = (typeof AGENT_CONVERSATION_ERROR_CODES)[number];
 

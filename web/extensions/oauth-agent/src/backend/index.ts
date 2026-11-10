@@ -54,10 +54,47 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
       // 请求作用域（并发安全）：原始 HTTP 是并发的，宿主注入的 principal 只对当前请求有效；
       // 用 AsyncLocalStorage 而非模块级可变变量，避免 await 间串号（生产 owner 解析依赖它）。
       const requestContext = new AsyncLocalStorage<ApplicationExtensionRequestContext>();
+      // 宿主角色准备：业务入口只提交 roleId/input；真实上下文由本扩展的 authoring 端口读取，
+      // 浏览器不能伪造 prepared turn。
+      const roleFacade = host.services.agentRoles;
+      const prepareGenerationRole = roleFacade
+        ? async (input: { ownerId: string; request: import("@woohaa3/contracts").ChatGptGenerateRequest }) => {
+            const read = await canvasPorts.readNode({ ownerId: input.ownerId, canvasId: input.request.canvasId, nodeId: input.request.nodeId });
+            if (!read.ok) return { ok: false as const, code: read.code, message: read.message };
+            const roleId = input.request.roleId;
+            const prepared = roleFacade.prepare({
+              roleId,
+              input: { prompt: input.request.prompt, action: input.request.expectedContentHash ? "modify" : "generate", mode: input.request.mode },
+              context: {
+                canvasId: input.request.canvasId,
+                nodeId: input.request.nodeId,
+                mode: input.request.mode,
+                nodeType: read.nodeType,
+                title: read.title,
+                prompt: read.prompt,
+                ...(read.source !== undefined ? { source: read.source } : {}),
+                ...(read.modelContentVersion ? { modelContentVersion: read.modelContentVersion } : {}),
+              },
+              target: {
+                canvasId: input.request.canvasId,
+                nodeId: input.request.nodeId,
+                mode: input.request.mode,
+                ...(input.request.selectedCameraId ? { cameraId: input.request.selectedCameraId } : {}),
+                ...(input.request.expectedContentHash ? { expectedContentHash: input.request.expectedContentHash } : {})
+              },
+              requestId: input.request.requestId,
+              ...(input.request.expectedContentHash ? { expectedContentHash: input.request.expectedContentHash } : {}),
+              channel: { toolCalling: true, imageInput: false, structuredOutput: "schema-enforced", nativeCapabilities: [] }
+            });
+            return prepared.ok ? { ok: true as const, prepared: prepared.turn } : { ok: false as const, code: prepared.code, message: prepared.message };
+          }
+        : undefined;
       const service = createChatGptService({
+        executor: host.services.executor,
         canvasPorts,
+        ...(prepareGenerationRole ? { prepareGenerationRole } : {}),
         // 部署可信认证状态：true 时 owner 只取 principal.subject；本地开发 false 时回退 HttpOnly 会话。
-        authConfigured: options.authConfigured ?? false,
+        authConfigured: options.authConfigured ?? host.host === "application",
         // 生产可信用户来自宿主注入的 principal.subject（按请求作用域读取，不跨请求泄漏）。
         resolvePrincipalSubject: () => requestContext.getStore()?.principal?.subject ?? null,
         // 工具授权门（任务 3.6）：工具模式回合签发受控 grant，工具入口据此强制校验。
@@ -211,15 +248,6 @@ export function createChatGptAuthoringPorts(host: ApplicationBackendHost): ChatG
       });
       return result;
     },
-    mutateCamerasBatch: async (input) => {
-      return authoring!.authoring.mutateCamerasBatch({
-        delegation: delegateFor(input.ownerId),
-        operationId: input.requestId,
-        canvasId: input.canvasId,
-        nodeId: input.nodeId,
-        mutations: input.mutations
-      });
-    }
   };
 }
 

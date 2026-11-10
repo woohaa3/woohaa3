@@ -156,6 +156,7 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
       ...(surface?.webServer ? { webServer: surface.webServer } : {}),
       ...(surface?.capabilities ? { capabilities: surface.capabilities } : {}),
       ...(surface?.mediaFormats ? { mediaFormats: surface.mediaFormats } : {}),
+      ...(surface?.agentRoles ? { agentRoles: surface.agentRoles } : {}),
       ...(surface?.services ? { services: surface.services } : {}),
       ...(surface?.diagnostics ? { diagnostics: surface.diagnostics } : {}),
       deployment: { basePath: applicationHost()?.basePath ?? "" }

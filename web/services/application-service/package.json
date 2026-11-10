@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Woohaa3 Application Service — 站点同源入口 + 公共 Context + 可信插件后端宿主 + 站点插件控制面。通过受认证网络协议调用 Canvas/Task/Media。",
+  "description": "Woohaa3 Application Service \u2014 \u7ad9\u70b9\u540c\u6e90\u5165\u53e3 + \u516c\u5171 Context + \u53ef\u4fe1\u63d2\u4ef6\u540e\u7aef\u5bbf\u4e3b + \u7ad9\u70b9\u63d2\u4ef6\u63a7\u5236\u9762\u3002\u901a\u8fc7\u53d7\u8ba4\u8bc1\u7f51\u7edc\u534f\u8bae\u8c03\u7528 Canvas/Task/Media\u3002",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./src/index.ts",
@@ -27,7 +27,8 @@
   },
   "dependencies": {
     "@woohaa3/contracts": "workspace:*",
-    "mongodb": "^6.12.0"
+    "mongodb": "^6.12.0",
+    "woohaa3-executor": "workspace:*"
   },
   "devDependencies": {
     "@woohaa3/extension-sample-site": "workspace:*",

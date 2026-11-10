@@ -7,8 +7,6 @@
  * `ModelMcpService` 一致，便于统一后端进程内直接注入。
  */
 import type {
-  ModelCamera,
-  ModelCameraMutation,
   ModelContentVersion
 } from "@woohaa3/contracts";
 
@@ -25,7 +23,6 @@ export type CanvasNodeReadResult =
       /** model3d 模型内容版本（含 contentHash）。 */
       modelContentVersion?: ModelContentVersion;
       snapshotHash?: string;
-      cameras: ModelCamera[];
     }
   | { ok: false; code: string; message: string };
 
@@ -53,17 +50,7 @@ export type CanvasSubmitModelInput = {
   expectedModelContentHash?: string;
 };
 
-/** 批量受限镜头变更（整批原子）。 */
-export type CanvasMutateCamerasBatchInput = {
-  ownerId: CanvasOwner;
-  canvasId: string;
-  nodeId: string;
-  requestId: string;
-  mutations: readonly ModelCameraMutation[];
-};
-
 export type ChatGptCanvasPorts = {
   readNode: (input: { ownerId: CanvasOwner; canvasId: string; nodeId: string }) => Promise<CanvasNodeReadResult>;
   submitModel: (input: CanvasSubmitModelInput) => Promise<CanvasWriteOutcome>;
-  mutateCamerasBatch: (input: CanvasMutateCamerasBatchInput) => Promise<CanvasWriteOutcome>;
 };

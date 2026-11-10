@@ -36,10 +36,9 @@ import { decodeGroundAabb } from "./creation-scope-codec.js";
 
 export const ASSISTANT_WORLD_AUTHORITY_VERSION = "assistant-world-authority-v1" as const;
 
-/** Selectable authoring scopes. A 2D group is organizational only. */
+/** Selectable authoring scopes. */
 export type AssistantWorldScopeSelection =
   | { kind: "scene-area"; areaId: WorldId }
-  | { kind: "workflow-group-2d"; groupId: WorldId }
   | { kind: "world-camera"; cameraId: WorldId };
 
 export type AssistantWorldScopeKind = AssistantWorldScopeSelection["kind"];
@@ -93,13 +92,9 @@ export const ASSISTANT_WORLD_CAMERA_TOOLS = [
   ASSISTANT_WORLD_TOOL.completeCamera
 ] as const;
 
-/**
- * Actual tool catalog for a selected scope. A 2D group cannot widen world write
- * eligibility by listing its member cards.
- */
+/** Actual tool catalog for a selected scope. */
 export function assistantWorldToolsForScope(scope: AssistantWorldScopeSelection): readonly AssistantWorldToolName[] {
-  if (scope.kind === "world-camera") return ASSISTANT_WORLD_CAMERA_TOOLS;
-  return scope.kind === "workflow-group-2d" ? ASSISTANT_WORLD_READ_TOOLS : ASSISTANT_WORLD_TOOLS;
+  return scope.kind === "world-camera" ? ASSISTANT_WORLD_CAMERA_TOOLS : ASSISTANT_WORLD_TOOLS;
 }
 
 /** Per-source capability declaration consumed by the assistant directory. */
@@ -116,7 +111,7 @@ export const ASSISTANT_WORLD_CAPABILITY_ID = "assistant.world-authoring" as cons
 export function assistantWorldSourceCapability(
   input: { targets?: readonly AssistantWorldScopeKind[]; tools?: readonly AssistantWorldToolName[] } = {}
 ): AssistantWorldSourceCapability {
-  const targets = input.targets ?? ["scene-area", "workflow-group-2d", "world-camera"];
+  const targets = input.targets ?? ["scene-area", "world-camera"];
   const tools = input.tools ?? (targets.includes("scene-area") ? ASSISTANT_WORLD_TOOLS : targets.includes("world-camera") ? ASSISTANT_WORLD_CAMERA_TOOLS : ASSISTANT_WORLD_READ_TOOLS);
   return {
     version: ASSISTANT_WORLD_AUTHORITY_VERSION,
@@ -371,9 +366,6 @@ export function decodeAssistantWorldScope(value: unknown): { ok: true; value: As
   if (!isJsonObject(value)) return { ok: false, code: "invalid-data", message: "范围必须是对象" };
   if (value.kind === "scene-area" && isBoundedId(value.areaId) && Object.keys(value).length === 2) {
     return { ok: true, value: { kind: "scene-area", areaId: value.areaId } };
-  }
-  if (value.kind === "workflow-group-2d" && isBoundedId(value.groupId) && Object.keys(value).length === 2) {
-    return { ok: true, value: { kind: "workflow-group-2d", groupId: value.groupId } };
   }
   if (value.kind === "world-camera" && isBoundedId(value.cameraId) && Object.keys(value).length === 2) {
     return { ok: true, value: { kind: "world-camera", cameraId: value.cameraId } };

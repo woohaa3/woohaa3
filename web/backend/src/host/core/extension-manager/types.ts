@@ -35,7 +35,7 @@ export type PreflightResult = {
   engines?: ExtensionEngines;
   /** 声明了 backend / hostPlugin / metadata / publicRoutes：提交后需要生效。 */
   requiresRestart?: boolean;
-  /** 后端是否能在运行期换版：纯 hostPlugin 为 true；站点 backend 工厂为 false（需重启）。 */
+  /** 后端是否能在运行期换版：独立 hostPlugin 或 backend + site；混合形态需重启。 */
   hotSwappable?: boolean;
   /** 扩展声明的依赖（extensionId → semver range）；缺省无依赖。 */
   dependencies?: Readonly<Record<string, string>>;
@@ -105,5 +105,5 @@ export type ExtensionPackageToolkit = {
    * 运行期从受管版本目录加载真实扩展层插件（热切换）：读声明、校验信任边界与模块存在性、
    * `import()` 该版本目录的入口并调用 `hostPlugin` 工厂。不同版本目录是不同 URL，不命中 ESM 缓存。
    */
-  loadRuntimePlugin?(input: { dir: string; extensionId: string; version: string }): Promise<{ plugin: AnyExtensionPlugin; descriptor: unknown }>;
+  loadRuntimePlugin?(input: { dir: string; extensionId: string; version: string }): Promise<{ plugin?: AnyExtensionPlugin; definition?: import("@woohaa3/contracts").ApplicationBackendExtensionDefinition; descriptor: unknown }>;
 };

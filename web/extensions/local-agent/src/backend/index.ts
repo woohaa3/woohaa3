@@ -132,7 +132,6 @@ export function createLocalAgentExtension(
       const executables = createRuntimeExecutableResolver({ local: localExecutableFor, getManager: () => deployment.codexBin ? undefined : getRuntimeComponentManager() });
       const executableFor = executables.executableFor;
       const processManager = createProcessManager({
-        acquireExecutable: executables.acquire,
         workDirRoot:
           deployment.workDir ?? path.join(os.tmpdir(), "woohaa3-local-agent"),
         portRange: deployment.portRange,
@@ -218,7 +217,13 @@ export function createLocalAgentExtension(
         const instance = createLocalAgentConversationAdapter(adapter, runtimeOptions);
         host.registerCapability({
           id: agentConversationAdapterCapabilityId(adapter.adapterId),
-          value: instance,
+          value: {
+            ...instance,
+            runtimeExecutor: "local-agent",
+            run: async () => ({ status: "failed", error: { code: "runtime-required", message: "本机 Agent 必须经独立执行器调用" } }),
+            cancel: undefined,
+            query: undefined
+          },
         });
       }
 
@@ -261,10 +266,9 @@ export function createLocalAgentExtension(
 
       return {
         dispose: async () => {
-          // Supervisor 模式下 backend reload 只断开 client，CLI 进程由稳定宿主持有；
-          // 没有 Supervisor 时保留旧的进程内回收语义。
+          // backend reload 只断开维护客户端；CLI 生命周期归独立执行器。
           admitted = false;
-          if (!env.WOOHAA3_AGENT_RUNTIME_SOCKET) await processManager.stopAll();
+          await processManager.stopAll();
           host.logger({ event: "local-agent-disposed" });
         },
       };

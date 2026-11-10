@@ -6,7 +6,7 @@
  * 也不 import 任何其它服务的实现（design D3）。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH, type ModelMcpHttpHandler, type ModelMcpHttpOptions, type ModelMcpDiscoveryResult } from "./model-mcp/mcp-http.js";
+import { createModelMcpHttpHandler, listModelMcpToolNames, MODEL_MCP_HTTP_PATH, type ModelMcpHttpHandler, type ModelMcpHttpOptions, type ModelMcpDiscoveryResult } from "./model-mcp/mcp-http.js";
 import { createCanvasMcpClient, type CanvasMcpClient } from "./downstream/canvas-client.js";
 import { createAgentCanvasClient, type AgentCanvasClient } from "./downstream/agent-canvas-client.js";
 import type { SkillStepClient } from "./downstream/skill-step-client.js";
@@ -92,6 +92,8 @@ export type McpService = {
    * ready 只表示服务可达且注册了工具，不代表任何 owner 已有写授权。
    */
   discoverTools: () => Promise<ModelMcpDiscoveryResult | null>;
+  /** 当前实际注册的 MCP 工具名（角色工具求交用；不签发授权）。 */
+  toolCatalog: () => readonly string[];
   close: () => Promise<void>;
   canvasClient: CanvasMcpClient | null;
 };
@@ -128,10 +130,8 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
   const agentProfile = resolveMcpAgentProfile(env, developmentPrincipalId);
   // change: 2026-10-22-remove-agent-execution-limits，任务 3.4：这里的进程内固定窗口限流
   // （read 120 / write 30 / run 60 每分钟）已删除；合法 Agent 工作不再因调用频率被应用拒绝。
-  const modelMcpHandler: ModelMcpHttpHandler | null =
-    modelMcpEnabled && canvasClient
-      ? createModelMcpHttpHandler({
-          service: canvasClient,
+  const modelMcpOptions: ModelMcpHttpOptions = {
+          service: canvasClient!,
           registerTools: options.registerTools,
           extensionTools: options.extensionTools,
           ...(options.toolGrant ? { toolGrant: options.toolGrant } : {}),
@@ -161,8 +161,16 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
                 }
               }
             : {})
-        })
-      : null;
+  };
+  const modelMcpHandler: ModelMcpHttpHandler | null =
+    modelMcpEnabled && canvasClient ? createModelMcpHttpHandler(modelMcpOptions) : null;
+  // 角色工具目录：与真实注册同路径，首次读取后缓存（注册无 I/O）。
+  let toolCatalogCache: readonly string[] | null = null;
+  const toolCatalog = (): readonly string[] => {
+    if (toolCatalogCache) return toolCatalogCache;
+    toolCatalogCache = modelMcpHandler ? listModelMcpToolNames(modelMcpOptions) : [];
+    return toolCatalogCache;
+  };
 
   const handle: McpService["handle"] = async (req, res) => {
     if (modelMcpHandler && (await modelMcpHandler.handle(req, res))) return true;
@@ -172,6 +180,7 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
   return {
     handle,
     canvasClient,
+    toolCatalog,
     readiness: async () => {
       if (!agentProfile.ok) return { ready: false, reason: agentProfile.reason };
       if (!canvasClient) return { ready: false, reason: "未配置 Canvas 内部协议地址（WOOHAA3_CANVAS_SERVICE_URL）" };

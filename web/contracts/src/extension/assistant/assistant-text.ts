@@ -11,6 +11,7 @@ import type { AssistantExecutionRef } from "./assistant-execution.js";
 import type { CanvasTaskInput, StoredAsset } from "../../index.js";
 
 export type AssistantTextRequest = {
+  roleId: string;
   requestId: string;
   canvasId: string;
   nodeId: string;
@@ -89,6 +90,7 @@ export function decodeAssistantTextRequest(
     Object.keys(value).some(
       (k) =>
         ![
+          "roleId",
           "requestId",
           "canvasId",
           "nodeId",
@@ -111,6 +113,7 @@ export function decodeAssistantTextRequest(
   const decoded = decodeAcceptTurnRequest({
     requestId: value.requestId,
     entry: {
+      roleId: value.roleId,
       action: "generate",
       mode: "text",
       canvasId: value.canvasId,

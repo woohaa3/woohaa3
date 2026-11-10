@@ -1,3 +1,4 @@
+import { AGENT_ROLE_BINDINGS } from "../../services/agent-role-bindings.js";
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantComposer, AssistantConnectionSelector, AssistantModelSelector, AssistantToolbar } from "@woohaa3/ui/assistant";
@@ -8,7 +9,6 @@ import { createHighEntropyId, IMAGE_DIRECTOR_SCENE_DEFAULT_PROMPT, type AgentCon
 import { definePlugin } from "../../plugin.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
-import { DirectorSceneDeliveries } from "./scene-deliveries.js";
 import { beginDirectorSceneSelection, type DirectorSceneSelectionIntent } from "./scene-selection.js";
 import { readAssistantPreference, rememberAssistantPreference } from "../../services/assistant-execution/selection.js";
 import type { AgentConversationServiceHandle } from "../../services/agent-conversation-service.js";
@@ -55,7 +55,7 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
   const model = models.find(item => item.id === draft.model);
   const modelCapabilities = connection?.models.find(item => item.id === draft.model)?.capabilities;
   const candidateCapability = modelCapabilities?.textDelivery ?? connection?.capabilities.textDelivery;
-  const selectionInvalid = !connection?.ready || !candidateCapability?.imageInput || candidateCapability.maxImages < 1 || !model || (!!draft.variant && !model.reasoningEfforts?.includes(draft.variant as AgentReasoningEffort));
+  const selectionInvalid = !connection?.ready || !connection.capabilities.tools || !connection.capabilities.targets?.includes("world") || !candidateCapability?.imageInput || candidateCapability.maxImages < 1 || !model || (!!draft.variant && !model.reasoningEfforts?.includes(draft.variant as AgentReasoningEffort));
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
   const asset = canvas?.assets.find(item => item.id === canvas.nodeData[nodeId]?.outputAssetId);
   const thumbnail = resolveCanonicalMediaUrl(asset, canvasId);
@@ -65,7 +65,7 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
     selectionIntent.current = beginSelection?.() ?? null;
     requestId.current ??= createHighEntropyId("image-director");
     try {
-      const result = await service.submitImageDirectorScene({ canvasId, adapterId: connection.adapterId, connectionId: connection.connectionId, requestId: requestId.current, entry: { action: "discuss", canvasId, nodeId, connectionId: connection.connectionId, model: model.id, ...(draft.variant ? { reasoningEffort: draft.variant as AgentReasoningEffort } : {}), prompt: draft.prompt } });
+      const result = await service.submitImageDirectorScene({ canvasId, adapterId: connection.adapterId, connectionId: connection.connectionId, requestId: requestId.current, entry: { action: "generate", roleId: AGENT_ROLE_BINDINGS.sceneDirector, canvasId, nodeId, connectionId: connection.connectionId, model: model.id, ...(draft.variant ? { reasoningEffort: draft.variant as AgentReasoningEffort } : {}), prompt: draft.prompt } });
       if (result.ok) {
         rememberAssistantPreference(scope, { sourceId: connection.adapterId, connectionId: connection.connectionId, model: model.id, reasoningEffort: draft.variant as AgentReasoningEffort | "" });
         if (live.current) {
@@ -100,7 +100,7 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
     <div className="image-director-settings">
     <AssistantComposer className="image-director-prompt" rows={6} disabled={busy} value={draft.prompt} placeholder="描述希望生成的场景，或修改默认提示词。" onChange={prompt => update({ prompt })} onSubmit={() => void submit()} />
     <AssistantToolbar disabled={busy} refreshing={refreshing} onRefresh={() => void refresh()} onManage={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: { canvasId } })} submit={start}
-      assistant={<AssistantConnectionSelector disabled={busy} empty={!connections.length} model={draft.connectionId} options={connections.map(item => ({ value: item.connectionId, label: item.name, disabled: !item.ready || !item.capabilities.textDelivery?.imageInput }))} open={open === "connection"} onOpenChange={value => setOpen(value ? "connection" : null)} onChange={value => update({ connectionId: value, model: "", variant: "" })} />}
+      assistant={<AssistantConnectionSelector disabled={busy} empty={!connections.length} model={draft.connectionId} options={connections.map(item => ({ value: item.connectionId, label: item.name, disabled: !item.ready || !item.capabilities.tools || !item.capabilities.targets?.includes("world") || !item.capabilities.textDelivery?.imageInput }))} open={open === "connection"} onOpenChange={value => setOpen(value ? "connection" : null)} onChange={value => update({ connectionId: value, model: "", variant: "" })} />}
       parameters={<AssistantModelSelector disabled={busy} model={draft.model} options={models.map(item => { const capability = connection?.models.find(value => value.id === item.id)?.capabilities?.textDelivery ?? connection?.capabilities.textDelivery; return { value: item.id, label: item.label, disabled: !capability?.imageInput }; })} open={open === "model"} onOpenChange={value => setOpen(value ? "model" : null)} onChange={value => update({ model: value, variant: "" })} variant={{ value: draft.variant, options: [{ value: "", label: "默认" }, ...(model?.reasoningEfforts ?? []).map(value => ({ value, label: value }))], onChange: value => update({ variant: value }) }} />}
     />
     <p className="image-director-hint">Enter 生成，Shift+Enter 换行</p>
@@ -131,7 +131,7 @@ export function imageDirectorSceneExtension(options: { canvasId?: string } = {})
       useSyncExternalStore(conversation?.subscribe ?? (() => () => {}), conversation?.getSnapshot ?? (() => null), conversation?.getSnapshot ?? (() => null));
       const scope = conversation?.getDataScopeId?.() ?? "page";
       useEffect(() => { const listener = () => setCurrent(target); listeners.add(listener); return () => { listeners.delete(listener); }; }, []);
-      return <><DirectorSceneDeliveries ctx={ctx} canvasId={options.canvasId} />{current && <ImageDirectorPanel key={`${scope}:${current.canvasId}:${current.nodeId}`} ctx={ctx} {...current} visible beginSelection={beginSelection} onClose={() => { target = null; notify(); }} />}</>;
+      return <>{current && <ImageDirectorPanel key={`${scope}:${current.canvasId}:${current.nodeId}`} ctx={ctx} {...current} visible beginSelection={beginSelection} onClose={() => { target = null; notify(); }} />}</>;
     }
     function FocusAction({ nodeId }: { nodeId: string }) { return imageReady(nodeId) ? <button type="button" title="生成模型与导演区" onClick={() => openTarget(nodeId)}><SparklesIcon /></button> : null; }
     const removeAction = ctx.slots.register("canvas.node-action", { id: IMAGE_DIRECTOR_PLUGIN_ID, owner: IMAGE_DIRECTOR_PLUGIN_ID, order: 20, describe: ({ nodeId, writable }) => imageReady(nodeId) ? { label: "转 3D", icon: "box", enabled: writable } : null, activate: ({ nodeId }) => openTarget(nodeId) });

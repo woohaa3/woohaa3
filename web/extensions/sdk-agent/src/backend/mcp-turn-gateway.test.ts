@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import { createMcpTurnGateway } from "./mcp-turn-gateway.js";
+import { buildTestPreparedTurn } from "@woohaa3/test-fixtures-agent-role-turns";
 
 async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void) {
   const received: Array<{ method: string; params?: any; authorization?: string }> = [];
@@ -23,7 +24,8 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
   const controller = new AbortController(); let valid = true;
   const emit = vi.fn();
   const input = { owner: "owner", requestId: "request", canvasId: "canvas", conversationId: "conversation", turnId: "turn", history: [], signal: controller.signal, emit,
-    intent: { action: "modify", canvasId: "canvas", nodeId: "node", mode: "model3d", prompt: "update", expectedContentHash: "hash" } } as AgentAdapterRunInput;
+    intent: { action: "modify", canvasId: "canvas", nodeId: "node", mode: "model3d", prompt: "update", expectedContentHash: "hash" },
+    prepared: buildTestPreparedTurn({ requestId: "request", target: { canvasId: "canvas", nodeId: "node", mode: "model3d" }, prompt: "update", tools: ["get_model_node", "submit_model_script"] }) } as AgentAdapterRunInput;
   const validateTarget = vi.fn(async () => validate);
   const gateway = await createMcpTurnGateway({ input, upstream: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp`, grant: "real-grant", valid: () => valid, validateTarget });
   const call = async (name: string, args: Record<string, unknown> = {}, id = 1, token = gateway.token) => {

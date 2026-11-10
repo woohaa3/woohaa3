@@ -18,7 +18,7 @@ import { createAgentSupervisorHost } from "./agent-runtime-supervisor-host.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-const readState = runtimeDir => JSON.parse(fs.readFileSync(path.join(runtimeDir, "supervisor.json"), "utf8"));
+const readState = runtimeDir => JSON.parse(fs.readFileSync(path.join(runtimeDir, "executor.json"), "utf8"));
 
 test("Supervisor 进程被清理后宿主自动重启并保持端点可用", async () => {
 	const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa3-supervisor-host-"));
@@ -92,7 +92,7 @@ test("long checkout stdio endpoint supports a real Supervisor echo round trip", 
  const host=createAgentSupervisorHost({root,runtimeDir});let socket;
  try {
   const config=await host.ensure();
-  const entry=await supervisorRpc(config,"ensure",{adapterId:"echo",owner:"test",connectionId:"socket",kind:"stdio",command:process.execPath,args:["-e","process.stdin.on('data',b=>process.stdout.write(b))"],cwd:root});
+  const entry=await supervisorRpc(config,"proc.ensure",{adapterId:"echo",owner:"test",connectionId:"socket",kind:"stdio",command:process.execPath,args:["-e","process.stdin.on('data',b=>process.stdout.write(b))"],cwd:root});
   assert.ok(Buffer.byteLength(entry.stdioPath)<104);
   await new Promise((resolve,reject)=>{
    const timer=setTimeout(()=>{socket?.destroy();reject(new Error("stdio echo timed out"));},3000);

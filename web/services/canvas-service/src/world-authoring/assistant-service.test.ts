@@ -185,41 +185,6 @@ function harness(overrides: {
 }
 
 describe("assistant world authority", () => {
-  it("issues a host-owned context and reports the scope without world writes for a 2D group", async () => {
-    const groupScope: WorldScopeVersion = { scope: { kind: "workflow-group-2d", groupId: "group-1" }, scopeVersion: "g-1" };
-    const group = contextFor(groupScope, []);
-    const { service } = harness({ context: group });
-    const issued = await service.issue({
-      canvasId: "canvas-1",
-      requestId: "req-1",
-      runId: "run-1",
-      epoch: 0,
-      executionId: "exec-1",
-      scope: { kind: "workflow-group-2d", groupId: "group-1" }
-    });
-    expect(issued.ok).toBe(true);
-    if (!issued.ok) return;
-    expect(issued.completionId).toBeTruthy();
-    const viewed = await service.read({ canvasId: "canvas-1", contextId: issued.context.contextId });
-    expect(viewed.ok && viewed.view.worldWritable).toBe(false);
-    const wrote = await service.write({
-      contextId: issued.context.contextId,
-      operation: {
-        kind: "set-model-transform",
-        operationId: "move-1",
-        instanceId: "instance-1",
-        expectedVersion: "iv-1",
-        transform: {
-          version: "shared-world-v1",
-          position: { u: 2, v: 2, h: 0 },
-          rotation: [0, 0, 0, 1],
-          scale: 1
-        }
-      }
-    });
-    expect(wrote).toMatchObject({ ok: false, code: "capability-unsupported" });
-  });
-
   it("rejects stale versions and writes the camera only through the issued context", async () => {
     const { service, saved, completed } = harness();
     const issued = await service.issue({
@@ -943,7 +908,7 @@ it("explains a move rejected by the spatial authority with actual and authorized
   const version = worldObjectVersion(canvas,identity)!;
   const {service} = harness({canvas,context:contextFor(scope,[{...identity,version}]),
     commitFailure:{ok:false,code:"spatial-rejected",spatialReason:"outside-scope",message:"空间写入资格无效"}});
-  const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:scope.scope});
+  const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:{kind:"scene-area",areaId:scope.scope.kind === "scene-area" ? scope.scope.areaId : "area-1"}});
   if(!issued.ok) throw Error(issued.message);
   const result = await service.write({contextId:issued.context.contextId,operation:{kind:"set-model-transform",operationId:"move-outside",
     instanceId:identity.instanceId,expectedVersion:version,transform:{version:"shared-world-v1",position:{u:1000,v:1000,h:0},rotation:[0,0,0,1],scale:1}}});

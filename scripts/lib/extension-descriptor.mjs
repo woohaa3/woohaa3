@@ -12,7 +12,7 @@ import path from "node:path";
 import { EXTENSION_DESCRIPTOR_NAME, ExtensionScanError } from "./extension-scan.mjs";
 
 export const EXTENSION_DESCRIPTOR_SCHEMA_VERSION = 1;
-export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "content", "icon", "required"];
+export const EXTENSION_DESCRIPTOR_TOP_LEVEL_KEYS = ["schemaVersion", "extensionId", "version", "engines", "migrate", "site", "backend", "executors", "bootstrap", "metadata", "publicRoutes", "hostPlugin", "canvasContent", "content", "icon", "required"];
 export const EXTENSION_CAPABILITY_KINDS = ["capability", "handler"];
 export const EXTENSION_CAPABILITY_AUTH = ["public", "authenticated"];
 export const EXTENSION_ROUTE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -310,6 +310,21 @@ export function validateExtensionDescriptor(value) {
       if (site.dependencies !== undefined && (!Array.isArray(site.dependencies) || !site.dependencies.every(isNonEmptyString))) {
         errors.push("site.dependencies 必须是字符串数组");
       }
+    }
+  }
+
+  if (value.executors !== undefined) {
+    const ids = new Set();
+    if (!value.backend || value.hostPlugin) errors.push("executors requires a backend activation owner, without hostPlugin");
+    if (!value.site) errors.push("executors requires site activation metadata");
+    if (!Array.isArray(value.executors) || !value.executors.length) errors.push("executors must be a non-empty array");
+    else for (const entry of value.executors) {
+      if (!isPlainObject(entry)) { errors.push("executor must be an object"); continue; }
+      for (const key of unknownKeys(entry, ["id", "module", "export"])) errors.push(`executor unknown field: ${key}`);
+      if (!isNonEmptyString(entry.id) || !/^[a-z][a-z0-9-]*$/.test(entry.id) || ids.has(entry.id)) errors.push("executor id must be unique and kebab-case");
+      ids.add(entry.id);
+      if (!isNonEmptyString(entry.module) || !PACKAGE_SUBPATH.test(entry.module) || entry.module.split("/").includes("..")) errors.push("executor module must be a package subpath");
+      if (!isNonEmptyString(entry.export) || !IDENTIFIER.test(entry.export)) errors.push("executor export must be an identifier");
     }
   }
 

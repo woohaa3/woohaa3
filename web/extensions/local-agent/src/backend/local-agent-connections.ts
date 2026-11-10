@@ -13,7 +13,7 @@ import { nativeContextFor, nativeContextKey } from "@woohaa3/agent-connections";
  * - 缺 CLI/版本不支持 → `runtime-missing`/`version-unsupported`，不影响基础健康。
  */
 import {
-  clearGeneratedImages,
+  AGENT_READ_ONLY_TOOLS,
   type AgentAdapterAuthState,
   type AgentAdapterRunInput,
   type AgentAdapterRunOutcome,
@@ -25,13 +25,11 @@ import {
   type AgentConversationAdapter,
   type ApplicationToolDelegationFacade
 } from "@woohaa3/contracts";
-import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, createTurnOutcomeJournal, preflightInput, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
+import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, preflightInput, preparedPromptText, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
 import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, localAgentConnectionName, type LocalAgentAdapterDescriptor } from "../shared.js";
 import { generatedImageImportFailure } from "./generated-image-import.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { LocalAgentTransport } from "./transports/transport.js";
-import { buildTargetPrompt } from "./target-prompt.js";
-import { localAgentToolsForMode } from "./tool-scope.js";
 
 export type LocalAgentRuntimeOptions = {
   service: ConnectionService;
@@ -46,6 +44,7 @@ export type LocalAgentRuntimeOptions = {
   argsFor: (adapterId: string) => readonly string[];
   tools?: ApplicationToolDelegationFacade;
   logger?: (event: Record<string, unknown>) => void;
+  onGeneratedImage?: (image: { savedPath: string; codexHome: string }) => void;
   /**
    * 组内回合发送前，按用户原文点名的图片标题读出字节。
    * 失败或没有命中时返回空，回合照常进行。
@@ -60,7 +59,7 @@ export type LocalAgentRuntimeOptions = {
 
 /** 本机来源能力：需要工具的执行由宿主 grant 门禁；讨论只读。 */
 function capabilitiesFor(): AgentConnectionCapabilities {
-  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
+  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true, targets: ["model3d", "world", "canvas-group"] };
 }
 
 /** 原生线程不可恢复时，仍把宿主账本中的合法历史交给续聊回合。 */
@@ -148,7 +147,6 @@ export function createLocalAgentDescriptors(): Record<string, ConnectionDescript
 
 export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDescriptor, options: LocalAgentRuntimeOptions): AgentConversationAdapter {
   // 本进程内已落定终态（供 query 核对；不缓存隐式推理）。
-  const journal = createTurnOutcomeJournal();
   const authorization = async (input: { owner: string }): Promise<AgentAdapterAuthState> => {
     const connections = await options.service.list(input.owner);
     const mine = connections.filter((record) => record.adapterId === adapter.adapterId);
@@ -241,17 +239,23 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     }
 
     const discussion = input.intent.action === "discuss";
+    // 通道只消费宿主准备好的角色回合；新回合没有准备身份时在发送前拒绝。
+    const prepared = input.prepared;
+    if (!prepared) {
+      return { status: "failed", error: { code: "role-not-found", message: "本回合没有宿主准备的角色请求，拒绝从用户文字推断角色" } };
+    }
+    const toolNames = prepared.tools;
     // 发送前能力预检：本机来源不声明图片/结构化结果，显式引用在发送前拒绝。
     const preflight = preflightInput({
       capabilities: capabilitiesFor(),
-      wantTools: !discussion,
+      wantTools: toolNames.length > 0,
       imageCount: input.intent.references?.filter((reference) => reference.kind === "asset").length ?? 0,
       wantStructuredResult: false
     });
     if (!preflight.ok) return { status: "failed", error: { code: preflight.code, message: preflight.message } };
     // 目标回合必须拿到真实工具面与受控 MCP 入口；缺失时在启动进程/推理前失败，
     // 不能把“模型看不到工具”伪装成一次成功但未修改的回复。
-    if (!discussion) {
+    if (toolNames.length > 0) {
       if (!options.tools) {
         return { status: "failed", error: { code: "capability-unsupported", message: "宿主未配置工具委托，不能执行目标动作" } };
       }
@@ -260,10 +264,9 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       }
     }
     if (input.intent.reasoningEffort && !adapter.supportsReasoningEffort) return { status: "failed", error: { code: "capability-unsupported", message: "此本机工具未开放思考强度配置，请使用默认设置" } };
-    const toolNames = discussion ? [] : localAgentToolsForMode(input.intent.mode ?? "model3d", input.intent.worldScope);
     const toolGrant = await issueToolGrant(options.tools, input, toolNames);
     const toolToken = toolGrant.token;
-    if (!discussion && !toolToken) {
+    if (toolNames.length > 0 && !toolToken) {
       return { status: "failed", error: { code: "capability-unsupported", message: `本轮未取得画布工具授权：${"message" in toolGrant ? toolGrant.message : "授权不可用"}` } };
     }
     const observation = createTurnObserver();
@@ -271,11 +274,11 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     let successfulWrite = false;
     let imageImported = false;
     let toolFailure: string | undefined;
-    clearGeneratedImages(input.requestId);
-    const readTools = new Set(["get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras", "get_canvas_capabilities", "get_canvas_graph", "get_canvas_changes", "get_canvas_script_api", "validate_canvas_script", "validate_canvas_plan", "get_canvas_run", "get_node_output", "wait_for_skill_step", "get_latest_skill_step_output", "get_world_context"]);
+    const readTools = new Set(AGENT_READ_ONLY_TOOLS);
 
     // 工具面变化必须切换原生会话：OpenCode/App Server 的 MCP 工具目录在会话内是冻结的，
     // 重用旧会话会让新授权的工具（例如导演区动画）永远不可见。
+    // 原生上下文始终包含冻结的角色、修订与准备摘要。
     const context = nativeContextFor(input, `${adapter.adapterId}:1:${[...toolNames].sort().join(",")}`);
     const resourceKey = nativeContextKey(input.owner, connectionId, context);
     try {
@@ -299,9 +302,8 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
           options.logger?.({ event: "reference-image-resolve-failed", message: error instanceof Error ? error.message : String(error) });
           return undefined;
         });
-      const promptBody = discussion
-        ? (binding ? input.intent.prompt : buildDiscussionPrompt(input.history, input.intent.prompt))
-        : buildDiscussionPrompt(binding ? [] : input.history, buildTargetPrompt(input.intent, input.requestId));
+      const roleText = preparedPromptText(prepared);
+      const promptBody = buildDiscussionPrompt(binding ? [] : input.history, roleText);
       const result = await transport.run({
         configDir: handle.configDir,
         workDir: handle.workDir,
@@ -312,15 +314,26 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         prompt: mentioned ? `${promptBody}\n\n${mentioned.note}` : promptBody,
         ...(input.candidate
-          ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema }
+          ? {
+              images: input.candidate.images,
+              // 候选输出契约来自角色定义；通道不使用另一份业务 schema。
+              outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : undefined
+            }
+          : input.images?.length ? { images: input.images }
           : mentioned ? { images: mentioned.images } : {}),
         allowedTools: toolNames,
+        nativeCapabilities: prepared.nativeCapabilities,
+        ...(options.onGeneratedImage ? { onGeneratedImage: options.onGeneratedImage } : {}),
         toolToken,
-        mcpEndpoint: !discussion && toolToken && options.mcpEndpoint ? options.mcpEndpoint : null,
+        mcpEndpoint: toolNames.length > 0 && toolToken && options.mcpEndpoint ? options.mcpEndpoint : null,
         turnRequestId: input.requestId,
         resumeNativeId: binding?.nativeId ?? null,
         signal: input.signal,
         onEvent: async (event) => {
+          // MCP 客户端在做资源能力探测（resources/list、resources/templates/list）时
+          // 也会以工具事件形态上报；它们不是角色工具，也不应污染本回合的失败状态。
+          if (event.type === "tool-started" && ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].includes(event.tool)) return;
+          if (event.type === "tool-completed" && ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].includes(event.tool)) return;
           if (event.type === "tool-started") {
             // 工具事件是观察，不是授权计数：MCP 入口仍然逐次校验范围与撤销状态。
             observation.noteToolCall();
@@ -366,20 +379,22 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         if (!current || current.configRevision !== record.configRevision || current.credentialEpoch !== record.credentialEpoch || (options.admission && !options.admission())) return { status: "failed", error: { code: "connection-unavailable", message: "助手连接已变更，结果未采用" } };
         if (toolFailure) return { status: "failed", error: { code: "capability-unsupported", message: "素材生成不允许调用工具" } };
       }
-      if (result.nativeId && !input.candidate) {
+      if (result.nativeId && input.candidate === undefined) {
         await options.service.setNativeBinding({ owner: input.owner, connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, updatedAt: new Date().toISOString() } });
+      }
+      if ((result.generatedImagePaths?.length ?? 0) > 0 && !prepared.nativeCapabilities.includes("generate-image")) {
+        return { status: "failed", error: { code: "capability-unsupported", message: "本角色没有开启内建生图，拒绝采用生成的图片" } };
       }
       if (!discussion) {
         const imageFailure = generatedImageImportFailure(result.generatedImagePaths?.length ?? 0, imageImported);
         if (imageFailure) return { status: "failed", error: imageFailure };
       }
-      if (!discussion && !successfulWrite) return { status: "failed", error: { code: "canvas-not-modified", message: toolFailure ?? "推理结束，但没有成功的画布写入回执" } };
+      if (!discussion && toolNames.length > 0 && !successfulWrite) return { status: "failed", error: { code: "canvas-not-modified", message: toolFailure ?? "推理结束，但没有成功的画布写入回执" } };
       return result.outcome;
     } catch (error) {
       // 停用/回收时进程不可用：明确失败，不假装成功。
       return { status: "failed", error: { code: "transport-unavailable", message: error instanceof Error ? error.message : "本机来源运行失败" } };
     } finally {
-      clearGeneratedImages(input.requestId);
       if (input.candidate) await options.processManager.stop({ adapterId: adapter.adapterId, owner: input.owner, connectionId: resourceKey });
     }
   };
@@ -387,29 +402,15 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
   const run = async (input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome> => {
     let outcome;
     try { outcome = await runInner(input); } finally { options.tools?.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" }); }
-    // 记录落定终态供重启/断线核对（不重跑推理；design D6）。
-    journal.set(input.requestId, outcome);
     return outcome;
   };
 
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ ...ADAPTER_CAPS, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES }),
+    capabilities: () => ({ ...ADAPTER_CAPS, nativeCapabilities: adapter.adapterId === "codex-appserver" ? ["generate-image"] : [], textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES }),
     authorization,
     models,
-    run,
-    cancel: async ({ owner, requestId, candidateContext }) => {
-      if (!candidateContext) return;
-      const input = { owner, requestId, canvasId: candidateContext.canvasId, conversationId: candidateContext.conversationId, connection: candidateContext.connection, intent: candidateContext.intent } as AgentAdapterRunInput;
-      const context = nativeContextFor(input, `${adapter.adapterId}:1:`);
-      const identity = { adapterId: adapter.adapterId, owner, connectionId: nativeContextKey(owner, candidateContext.connection.connectionId, context) };
-      const known = options.processManager.get(identity);
-      await options.processManager.stop(identity);
-      if (!known) throw new Error("无法确认本机候选执行已停止");
-    },
-    // 重启/断线后核对：只回答本进程内已落定终态；无记录返回 null（宿主保留既有回执，
-    // 不重跑推理；design D6）。
-    query: async (input: { owner: string; requestId: string }) => journal.get(input.requestId)
+    run
   };
 }
 

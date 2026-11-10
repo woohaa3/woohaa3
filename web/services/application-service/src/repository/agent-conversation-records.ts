@@ -63,6 +63,14 @@ export type ConversationTurnRecord = {
    * 旧数据为 null（按当前全部历史读取）。
    */
   historySequence: number | null;
+  /**
+   * 受理时冻结的角色身份与准备内容（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 旧数据为 null：按 legacy 事实读取，不补造角色指纹、不重新准备。
+   */
+  roleRefJson: string | null;
+  preparedJson: string | null;
+  roleInputDigest: string | null;
   assistantText: string | null;
   runId: string | null;
   taskId: string | null;
@@ -142,6 +150,9 @@ export type TurnRow = {
   connection_credential_epoch: number | null;
   /** 受理时冻结的历史基准（change: 2026-10-22-remove-agent-execution-limits，任务 3.1）。 */
   history_sequence: number | null;
+  role_ref_json?: string | null;
+  prepared_json?: string | null;
+  role_input_digest?: string | null;
   assistant_text: string | null;
   run_id: string | null;
   task_id: string | null;
@@ -228,6 +239,9 @@ export function turnFromRow(row: TurnRow): ConversationTurnRecord {
     connectionConfigRevision: row.connection_config_revision ?? null,
     connectionCredentialEpoch: row.connection_credential_epoch ?? null,
     historySequence: row.history_sequence ?? null,
+    roleRefJson: row.role_ref_json ?? null,
+    preparedJson: row.prepared_json ?? null,
+    roleInputDigest: row.role_input_digest ?? null,
     assistantText: row.assistant_text,
     runId: row.run_id,
     taskId: row.task_id,

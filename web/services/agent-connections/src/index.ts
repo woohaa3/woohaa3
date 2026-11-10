@@ -16,6 +16,4 @@ export * from "./redact.js";
 export * from "./adapter-support.js";
 export * from "./native-context.js";
 export * from "./model-transport.js";
-export * from "./target-tools.js";
-export * from "./target-prompt.js";
 export * from "./candidate-generation.js";

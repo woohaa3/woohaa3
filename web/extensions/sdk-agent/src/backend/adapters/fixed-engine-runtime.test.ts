@@ -10,6 +10,7 @@ import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import { createFixedEngineRuntime } from "../fixed-engine-runtime.js";
 import { buildAgentSdkRestrictions } from "./agent-sdk-adapter.js";
 import type { AgentEngineId, AgentApiType } from "@woohaa3/contracts";
+import { buildTestPreparedTurn } from "@woohaa3/test-fixtures-agent-role-turns";
 
 // Poison inherited provider selection and credentials; explicit connection wiring must win.
 beforeAll(() => {
@@ -91,7 +92,7 @@ describe("锁定框架经真实运行时访问可控上游（无真实 Key/计�
       res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
     });
     await new Promise<void>((resolve) => mcp.listen(0, "127.0.0.1", resolve));
-    const gateway = withTools ? await createMcpTurnGateway({ input: { requestId: "req", canvasId: "canvas", intent: { mode: "model3d", nodeId: "node" }, signal: AbortSignal.timeout(40000), emit: () => undefined } as unknown as AgentAdapterRunInput, upstream: `http://127.0.0.1:${(mcp.address() as AddressInfo).port}`, grant: "grant", valid: () => true, validateTarget: async () => true }) : null;
+    const gateway = withTools ? await createMcpTurnGateway({ input: { requestId: "req", canvasId: "canvas", intent: { mode: "model3d", nodeId: "node" }, prepared: buildTestPreparedTurn({ requestId: "req", target: { canvasId: "canvas", nodeId: "node", mode: "model3d" }, prompt: "edit", tools: ["get_model_node", "submit_model_script"] }), signal: AbortSignal.timeout(40000), emit: () => undefined } as unknown as AgentAdapterRunInput, upstream: `http://127.0.0.1:${(mcp.address() as AddressInfo).port}`, grant: "grant", valid: () => true, validateTarget: async () => true }) : null;
     try {
       const runtime = createFixedEngineRuntime({ configDir: path.join(root, "config"), workspaceDir: path.join(root, "work") });
       const transport = await runtime.resolve(engine);

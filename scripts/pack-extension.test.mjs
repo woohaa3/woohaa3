@@ -141,3 +141,32 @@ test("受管预检不通过时不出包（例如声明 bootstrap）", async (t) 
   await assert.rejects(() => packExtension({ dir, out, repoRoot: REPO_ROOT }), (error) => /受管预检未通过/.test(error.message) && error.issues?.some((issue) => issue.code === "MARKETPLACE_FORBIDDEN_DECLARATION"));
   assert.equal(fs.existsSync(out), false);
 });
+
+test("executor extension: pack → preflight → runtime backend/module discovery", async (t) => {
+  const dir = tmp(t);
+  const descriptor = { schemaVersion: 1, extensionId: "external-agent", site: {
+    name: "External Agent", description: "Custom execution transport", version: "1.0.0",
+    configSchema: { schemaId: "external-agent", schemaVersion: 1 }, capabilities: [{ id: "agent-connection-provider:external-agent", kind: "capability", description: "External agent" }], defaultEnabled: true
+  }, backend: { module: "./backend", factory: "createBackend" },
+  executors: [{ id: "external-agent", module: "./executor", export: "createExecutor" }],
+  publicRoutes: [{ publicPath: "/api/external-agent", route: "external-agent", methods: ["POST"] }] };
+  fs.writeFileSync(path.join(dir, "extension.json"), JSON.stringify(descriptor));
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "@woohaa3/extension-external-agent", version: "1.0.0", type: "module", exports: {
+    "./backend": { types: "./backend.ts" }, "./executor": { types: "./executor.ts" }
+  } }));
+  fs.writeFileSync(path.join(dir, "backend.ts"), `export function createBackend() { return { extensionId: "external-agent", activate(host) { if (!host.services.executor) throw new Error("Executor unavailable"); } }; }`);
+  fs.writeFileSync(path.join(dir, "executor.ts"), `export function createExecutor() { let nativeAvailable = true; try { require("bufferutil"); } catch { nativeAvailable = false; } return { id: "external-agent", kind: "agent", async run(input) { return { status: "succeeded", result: { hash: input.prepared.preparedHash, nativeAvailable } }; } }; }`);
+  const packed = await packExtension({ dir, out: path.join(tmp(t), "agent.wxt"), repoRoot: REPO_ROOT });
+  const unpacked = tmp(t); unpackExtensionPackage({ packagePath: packed.outFile, destDir: unpacked });
+  const checked = await preflightDirectory(unpacked, { managed: true });
+  assert.equal(checked.ok, true, JSON.stringify(checked.errors));
+  assert.equal(checked.hotSwappable, true);
+  const { loadRuntimePlugin } = await import("./lib/extension-host-managed.mjs");
+  const loaded = await loadRuntimePlugin({ dir: unpacked, extensionId: "external-agent", version: "1.0.0" });
+  assert.equal(loaded.definition.extensionId, "external-agent");
+  assert.equal(loaded.definition.executors[0].module, path.join(unpacked, "backend-dist", "entry.mjs"));
+  assert.deepEqual(loaded.definition.publicRoutes, [{ extensionId: "external-agent", publicPath: "/api/external-agent", route: "external-agent", methods: ["POST"] }]);
+  const module = await import(pathToFileURL(loaded.definition.executors[0].module).href);
+  assert.equal(module.createExecutor().id, "external-agent");
+  assert.deepEqual(await module.createExecutor().run({ prepared: { preparedHash: "hash" } }), { status: "succeeded", result: { hash: "hash", nativeAvailable: false } });
+});

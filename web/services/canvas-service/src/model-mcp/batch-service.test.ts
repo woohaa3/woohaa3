@@ -67,18 +67,6 @@ async function fixture(
       nodeId: node.nodeId,
       source: 'scene.box({id:"body",size:[2,3,1],color});',
       expectedModelContentHash: node.modelContentVersion!.contentHash,
-      expectedCamerasHash: node.camerasHash,
-      cameras: [
-        {
-          id: "top",
-          name: "俯视",
-          order: 0,
-          azimuth: 0,
-          elevation: Math.PI / 2,
-          distance: 100,
-          aspect: "1:1",
-        },
-      ],
     })),
   };
   return { room, service, request, history, read };
@@ -90,7 +78,7 @@ function exported(room: CanvasRoom) {
 }
 
 describe("batch model authoring", () => {
-  it("reads one snapshot without source by default; preflight and a single commit save independent scripts and cameras", async () => {
+  it("reads one snapshot without source by default; preflight and a single commit save independent scripts", async () => {
     const { room, service, request, history, read } = await fixture();
     expect(read.nodes.every((node) => !("source" in node))).toBe(true);
     const before = exported(room);
@@ -112,13 +100,11 @@ describe("batch model authoring", () => {
     expect(saved.nodes).toEqual(validation.nodes);
     expect(saved.nodes[0]).toMatchObject({
       validation: "passed",
-      cameraCount: 1,
       geometry: { min: [-1, -1.5, -0.5], max: [1, 1.5, 0.5] },
     });
     for (const item of request.items)
       expect(exported(room).nodeData[item.nodeId]).toMatchObject({
         modelScript: request.commonSource + "\n" + item.source,
-        modelCameras: item.cameras,
       });
     expect(history).toHaveBeenCalledTimes(2);
     const full = await service.getModelNodes({
@@ -151,36 +137,6 @@ describe("batch model authoring", () => {
       ],
     });
     expect(exported(room)).toEqual(before);
-  });
-  it("rejects a stale camera or model without writing any other item", async () => {
-    const { room, service, request } = await fixture();
-    const before = exported(room);
-    const staleCamera = structuredClone(request);
-    staleCamera.items[1].expectedCamerasHash = "stale";
-    expect(await service.submitScripts(staleCamera, context)).toMatchObject({
-      ok: false,
-      code: "stale-cameras",
-      errors: [{ index: 1, nodeId: "b" }],
-    });
-    request.items[1].expectedModelContentHash = "stale";
-    expect(await service.submitScripts(request, context)).toMatchObject({
-      ok: false,
-      code: "stale-source",
-    });
-    expect(exported(room)).toEqual(before);
-  });
-  it("preserves omitted cameras and rejects replacement without a camera precondition", async () => {
-    const { service, request } = await fixture();
-    delete request.items[0].expectedCamerasHash;
-    expect(await service.submitScripts(request, context)).toMatchObject({
-      ok: false,
-      code: "malformed-request",
-    });
-    delete request.items[0].cameras;
-    expect(await service.submitScripts(request, context)).toMatchObject({
-      ok: true,
-      nodes: [{ cameraCount: 0 }, { cameraCount: 1 }],
-    });
   });
   it("handles concurrent identical retries once and rejects changed content under the same request ID", async () => {
     const { room, service, request, history } = await fixture();

@@ -4,7 +4,7 @@
  *  change: remove-canvas-groups-and-film-set —— 片场节点与动画节点契约一并删除）。
  *
  * 节点保存**完整本地 ModelDefinition**，不通过来源节点 ID 取得运行数据。为与仓库既有
- * 约定一致（`modelScript` / `modelCameras` 等均为 flat nodeData 字段），这里也使用 flat 字段，
+ * 约定一致（`modelScript` 等均为 flat nodeData 字段），这里也使用 flat 字段，
  * 再由本模块的 decoder 组装成结构化 `Model3DNodeData`。
  *
  * `origin` 仅为可选来源说明，不参与加载或运行（design「创建和导入是复制快照」）。

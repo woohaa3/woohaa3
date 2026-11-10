@@ -53,6 +53,7 @@ export function rewriteDescriptorForPackage(descriptor, { version, engines, hasB
   next.engines = next.engines ?? engines;
   if (hasBackend) {
     for (const field of ["backend", "hostPlugin", "metadata"]) if (next[field]) next[field].module = BACKEND_ENTRY_SUBPATH;
+    for (const entry of next.executors ?? []) entry.module = BACKEND_ENTRY_SUBPATH;
     for (const route of next.publicRoutes ?? []) if (route.publicPathExport) route.module = BACKEND_ENTRY_SUBPATH;
   }
   return next;

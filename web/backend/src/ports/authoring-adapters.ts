@@ -132,7 +132,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
         })),
         ...(node.modelContentVersion ? { modelContentVersion: node.modelContentVersion } : {}),
         ...(node.snapshotHash ? { snapshotHash: node.snapshotHash } : {}),
-        cameras: node.cameras
       } as ApplicationAuthoringNodeRead;
     },
     async submitModel(input): Promise<ApplicationAuthoringWriteOutcome> {
@@ -148,19 +147,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
       });
       if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message };
       return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.idempotent, noop: outcome.idempotent };
-    },
-    async mutateCamerasBatch(input): Promise<ApplicationAuthoringWriteOutcome> {
-      delegateOrThrow(input.delegation, log);
-      const modelMcp = deps.canvas.mcpServices().modelMcp;
-      if (!modelMcp?.mutateCamerasBatch) return { ok: false, code: "unavailable", message: "镜头端口当前不可用" };
-      const outcome = await modelMcp.mutateCamerasBatch({
-        canvasId: input.canvasId,
-        nodeId: input.nodeId,
-        requestId: input.operationId,
-        mutations: input.mutations
-      });
-      if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message, ...(outcome.failedIndex !== undefined ? { failedIndex: outcome.failedIndex } : {}) };
-      return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.duplicate, noop: outcome.noop };
     },
     async receipt(input) {
       delegateOrThrow(input.delegation, log);

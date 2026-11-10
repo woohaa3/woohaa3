@@ -349,8 +349,8 @@ it("samples the published timeline with its origin and reports data-only evidenc
  expect((await callTool(base,"get_world_model_rig",{instanceId:"foreign"},issued.token)).result?.isError).toBe(true);
 });
 
-it("rejects rig and scene sample tools when camera or 2D grants omit them", async () => {
-  for (const scope of [{kind:"world-camera",cameraId:"camera"},{kind:"workflow-group-2d",groupId:"group"}] as const) {
+it("rejects rig and scene sample tools when camera grants omit them", async () => {
+  for (const scope of [{kind:"world-camera",cameraId:"camera"}] as const) {
     const issued = grant();
     issued.world!.scope = {scope,scopeVersion:"scope-1"};
     issued.tools = [...assistantWorldToolsForScope(scope)];

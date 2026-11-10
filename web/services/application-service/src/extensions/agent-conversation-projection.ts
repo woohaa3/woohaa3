@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import type {
   AgentConnectionBinding,
   AgentEntryIntent,
+  AgentRoleRef,
   AgentTargetSnapshot,
   ConversationEventType,
   ConversationMessage,
@@ -50,6 +51,11 @@ export function toSummary(binding: ConversationAdapterBinding): ConversationSumm
   };
 }
 
+function turnRoleBinding(record: ConversationTurnRecord): AgentRoleRef | undefined {
+  if (!record.roleRefJson) return undefined;
+  try { return JSON.parse(record.roleRefJson) as AgentRoleRef; } catch { return undefined; }
+}
+
 function turnConnectionBinding(record: ConversationTurnRecord): ConversationTurn["connection"] | undefined {
   if (!record.connectionId || !record.connectionAdapterId) return undefined;
   return {
@@ -86,6 +92,7 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
     ...(record.taskId !== null ? { taskId: record.taskId } : {}),
     ...(record.receiptJson !== null ? { receipt: JSON.parse(record.receiptJson) } : {}),
     ...(connection ? { connection } : {}),
+    ...(turnRoleBinding(record) ? { role: turnRoleBinding(record)! } : {}),
     ...(record.errorCode !== null ? { error: { code: record.errorCode, message: record.errorMessage ?? "" } }
       : legacyUnconfirmed ? { error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } } : {}),
     createdAt: record.createdAt,
@@ -294,6 +301,7 @@ export function hashIntent(entry: AgentEntryIntent, connection?: AgentConnection
     connectionAdapterId: typeof binding === "string" ? null : binding?.adapterId ?? null,
     connectionConfigRevision: typeof binding === "string" ? null : binding?.configRevision ?? null,
     connectionCredentialEpoch: typeof binding === "string" ? null : binding?.credentialEpoch ?? null,
+    roleId: entry.roleId ?? null,
     expectedContentHash: entry.expectedContentHash ?? null,
     prompt: entry.prompt,
     references: (entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
@@ -317,6 +325,7 @@ export function entryFromTurn(record: ConversationTurnRecord): AgentEntryIntent 
     ...(target.clipId !== undefined ? { clipId: target.clipId } : {}),
     ...(target.itemId !== undefined ? { itemId: target.itemId } : {}),
     ...(target.expectedContentHash !== undefined ? { expectedContentHash: target.expectedContentHash } : {}),
+    ...(target.role ? { roleId: target.role.namespacedId } : {}),
     prompt: ""
   };
 }

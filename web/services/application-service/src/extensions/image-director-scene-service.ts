@@ -1,54 +1,68 @@
 import { createHash } from "node:crypto";
-import { decodeImageDirectorSceneCandidate, decodeImageDirectorSceneRequest, imageDirectorSceneCandidateSchema, imageDirectorSceneModelGuide, stableStringify, type AgentConnectionBinding, type AgentEntryIntent, type AgentAdapterRunOutcome, type ImageDirectorScenePort, type ImageDirectorSceneRequest } from "@woohaa3/contracts";
+import { decodeImageDirectorSceneRequest, stableStringify, type AgentAdapterRunOutcome, type AgentConnectionBinding, type AgentEntryIntent, type ImageDirectorScenePort, type ImageDirectorSceneRequest } from "@woohaa3/contracts";
 import type { AgentConversationService, AcceptTurnResult } from "./agent-conversation-service.js";
 import type { AgentConnectionRegistry } from "./agent-connection-registry.js";
 import type { AgentAdapterRegistry } from "./agent-adapter-registry.js";
 import type { ImageDirectorSceneRecord, ImageDirectorSceneStore } from "../repository/image-director-scene-store.js";
 
-const MAX_CANDIDATE_ATTEMPTS = 3;
-
 const digest = (value: unknown) => createHash("sha256").update(stableStringify(value)).digest("hex");
 const delivery = (record: ImageDirectorSceneRecord) => ({ purpose: "image-director-scene" as const, domainRequestId: record.request.requestId, attemptId: "1", ...(record.reservation ? { nodeId: record.reservation.nodeId } : {}) });
+const finalizeCommand = (record: ImageDirectorSceneRecord) => `image-director-finalize:${digest([record.owner, record.canvasId, record.request.requestId])}`;
 
+/**
+ * 图片 → 导演区：先由画布服务预留一个空导演区，再由 scene-director 用世界工具创建模型/镜头。
+ * 不再生成整场景 JSON 候选，也不在宿主做模型/镜头放置。
+ */
 export class ImageDirectorSceneService {
   private readonly pending = new Map<string, Promise<AcceptTurnResult>>();
-  private readonly retries = new Set<string>();
   private readonly active = new Set<string>();
-  constructor(private readonly deps: { store: ImageDirectorSceneStore; canvas: ImageDirectorScenePort; conversations: AgentConversationService; connections: AgentConnectionRegistry; registry: AgentAdapterRegistry }) {}
+  constructor(private readonly deps: { store: ImageDirectorSceneStore; canvas: ImageDirectorScenePort; conversations: AgentConversationService; connections: AgentConnectionRegistry; registry: AgentAdapterRegistry; agentRoles?: import("../agent-roles/registry.js").AgentRoleRegistry }) {}
+
+  private prepareRoleTurn(record: ImageDirectorSceneRecord): import("@woohaa3/contracts").PreparedAgentRoleTurn {
+    const registry = this.deps.agentRoles;
+    const roleId = record.entry?.roleId;
+    if (!registry) throw Object.assign(new Error("宿主未启用 Agent 角色注册表"), { code: "role-unavailable" });
+    if (!roleId) throw Object.assign(new Error("图片场景请求没有选择角色"), { code: "role-not-found" });
+    if (!record.reservation) throw Object.assign(new Error("导演区尚未预留"), { code: "source-unavailable" });
+    const result = registry.prepare({
+      roleId,
+      input: { prompt: record.request.instructions, action: "generate" },
+      context: { imageReconstruction: { sourceNodeId: record.source.sourceNodeId, width: record.source.width, height: record.source.height } },
+      target: { canvasId: record.canvasId, nodeId: record.reservation.nodeId, mode: "world", worldScope: { kind: "scene-area", areaId: record.reservation.areaId } },
+      requestId: record.request.requestId,
+      channel: { toolCalling: true, imageInput: true, structuredOutput: "none", nativeCapabilities: [] }
+    });
+    if (!result.ok) throw Object.assign(new Error(result.message), { code: result.code });
+    const recorded = this.deps.conversations.recordPrepared({ owner: record.owner, requestId: record.request.requestId, prepared: result.turn });
+    if (!recorded.ok) throw Object.assign(new Error(recorded.error.message), { code: recorded.error.code });
+    return result.turn;
+  }
 
   query(owner: string, canvasId: string, requestId: string) {
     const record = this.deps.store.get(owner, canvasId, requestId);
-    return record ? { requestId, stage: record.stage, parentTurnId: record.parentTurnId, conversationId: record.conversationId, input: record.request, source: record.source, reservation: record.reservation, receipt: record.receipt, revision: record.revision, error: record.error, canRetryPlacement: record.stage === "failed" && !!record.candidate && (!record.placement || record.placement.state === "rejected"), canRetrySave: record.stage === "failed" && record.placement?.state === "not-committed" } : null;
+    return record ? { requestId, stage: record.stage, parentTurnId: record.parentTurnId, conversationId: record.conversationId, input: record.request, source: record.source, reservation: record.reservation, receipt: record.receipt, revision: record.revision, error: record.error } : null;
   }
 
   async reconcile(owner: string, canvasId: string, requestId: string) {
     const record = this.deps.store.get(owner, canvasId, requestId);
     if (!record) return null;
     const key = JSON.stringify([owner, canvasId, requestId]);
-    if (!this.active.has(key) && ["preparing", "generating", "repairing", "validating", "placing", "saving"].includes(record.stage)) {
+    if (!this.active.has(key) && ["preparing", "generating", "finalizing"].includes(record.stage)) {
       this.deps.conversations.cancelTurn({ owner, requestId });
       let stopError = "";
       if (record.activeAttemptId && record.connection) {
         const resolved = this.deps.registry.resolve(record.connection.adapterId);
         if (!resolved.ok || !resolved.handle.adapter.cancel) stopError = "无法确认关联助手执行已停止";
         else try {
-          if (!record.entry) throw new Error("missing candidate context");
           const childId = `${requestId}:${record.activeAttemptId}`;
-          await resolved.handle.adapter.cancel({ owner, requestId: childId, candidateContext: { canvasId, conversationId: childId, connection: record.connection, intent: { ...record.entry, action: "discuss" } } });
+          await resolved.handle.adapter.cancel({ owner, requestId: childId, candidateContext: { canvasId, conversationId: childId, connection: record.connection, intent: record.entry ? { ...record.entry, action: "generate" } : { action: "generate", canvasId, prompt: record.request.instructions } } });
         } catch { stopError = "无法确认关联助手执行已停止"; }
       }
       record.stage = "failed";
       record.error = stopError || "执行中断，原结果尚未确认";
-      if (record.placement?.state === "pending") record.placement.state = "unknown";
       this.deps.store.save(record);
     }
-    if (!record.placement) {
-      if (record.stage === "failed" && record.reservation) {
-        try { await this.deps.canvas.settleReservation({ owner, canvasId, reservation: record.reservation, status: "failed" }); } catch { /* Retain the failure and retry settlement on the next query. */ }
-      }
-      return this.query(owner, canvasId, requestId);
-    }
-    const result = await this.deps.canvas.lookup({ owner, canvasId, commandId: record.placement.commandId });
+    const result = await this.deps.canvas.lookup({ owner, canvasId, commandId: finalizeCommand(record) });
     if (result.ok) {
       record.receipt = result.receipt;
       record.revision = result.revision;
@@ -56,93 +70,24 @@ export class ImageDirectorSceneService {
       delete record.error;
       this.deps.store.save(record);
       this.deps.conversations.reconcileDeliveryTurn({ owner, canvasId, requestId, delivery: delivery(record), outcome: { status: "succeeded", receipt: result.receipt } });
-    } else if (result.code === "receipt-not-found" && record.stage === "failed" && record.placement.state === "unknown") {
-      record.placement.state = "not-committed";
-      this.deps.store.save(record);
-    }
-    if (!result.ok && result.code === "receipt-not-found" && record.stage === "failed" && record.reservation) {
+    } else if (record.stage === "failed" && record.reservation) {
       try { await this.deps.canvas.settleReservation({ owner, canvasId, reservation: record.reservation, status: "failed" }); } catch { /* Retry on the next query. */ }
     }
     return this.query(owner, canvasId, requestId);
-  }
-
-  async retryPlacement(owner: string, canvasId: string, requestId: string) {
-    const key = JSON.stringify([owner, canvasId, requestId]);
-    if (this.retries.has(key)) throw new Error("放置重试正在进行");
-    this.retries.add(key);
-    try { return await this.retryPlacementOnce(owner, canvasId, requestId); }
-    finally { this.retries.delete(key); }
-  }
-
-  async retrySave(owner: string, canvasId: string, requestId: string) {
-    const key = JSON.stringify([owner, canvasId, requestId]);
-    if (this.retries.has(key)) throw new Error("保存重试正在进行");
-    this.retries.add(key);
-    try {
-      const record = this.deps.store.get(owner, canvasId, requestId);
-      if (!record?.candidate || !record.placement || record.stage !== "failed" || record.placement.state !== "not-committed") throw new Error("原提交结果尚未确认");
-      if (!record.connection || !record.entry) throw new Error("助手连接身份不可用");
-      await this.adapter(owner, record.connection, record.entry);
-      const known = await this.deps.canvas.lookup({ owner, canvasId, commandId: record.placement.commandId });
-      if (known.ok) return this.reconcile(owner, canvasId, requestId);
-      if (known.code !== "receipt-not-found") throw new Error("原提交结果无法确认");
-      const placement = record.placement.plan as { delta: import("@woohaa3/contracts").GroundPoint; bounds: import("@woohaa3/contracts").GroundAabb };
-      record.placement.state = "pending"; record.stage = "saving"; this.deps.store.save(record);
-      try {
-        const result = await this.deps.canvas.commit({ owner, canvasId, operationId: digest([owner, canvasId, requestId]), commandId: record.placement.commandId, source: record.source, candidate: record.candidate, reservation: record.reservation, ...placement });
-        if (!result.ok) { record.placement.state = result.code === "placement-conflict" ? "rejected" : "unknown"; record.stage = "failed"; record.error = result.message; this.deps.store.save(record); return this.reconcile(owner, canvasId, requestId); }
-        record.receipt = result.receipt; record.revision = result.revision; record.stage = "delivered"; delete record.error; this.deps.store.save(record);
-        this.deps.conversations.reconcileDeliveryTurn({ owner, canvasId, requestId, delivery: delivery(record), outcome: { status: "succeeded", receipt: result.receipt } });
-        return this.query(owner, canvasId, requestId);
-      } catch (error) { record.placement.state = "unknown"; record.stage = "failed"; record.error = error instanceof Error ? error.message : "保存结果未确认"; this.deps.store.save(record); return this.reconcile(owner, canvasId, requestId); }
-    } finally { this.retries.delete(key); }
-  }
-
-  private async retryPlacementOnce(owner: string, canvasId: string, requestId: string) {
-    const record = this.deps.store.get(owner, canvasId, requestId);
-    if (!record?.candidate || record.stage !== "failed" || (record.placement && record.placement.state !== "rejected")) throw new Error("原提交尚未确认拒绝，不能重新放置");
-    if (!record.connection || !record.entry) throw new Error("助手连接身份不可用");
-    await this.adapter(owner, record.connection, record.entry);
-    if (record.placement) {
-      const known = await this.deps.canvas.lookup({ owner, canvasId, commandId: record.placement.commandId });
-      if (known.ok) return this.reconcile(owner, canvasId, requestId);
-      if (known.code !== "receipt-not-found") throw new Error("原提交结果无法确认");
-      (record.placementHistory ??= []).push(record.placement);
-    }
-    const placement = await this.deps.canvas.plan({ owner, canvasId, source: record.source, candidate: record.candidate, reservation: record.reservation });
-    const attemptId = String(Number(record.placement?.attemptId ?? "0") + 1);
-    const commandId = `image-director:${digest([owner, canvasId, requestId, `placement-${attemptId}`])}`;
-    record.placement = { attemptId, commandId, plan: placement, state: "pending" };
-    record.stage = "saving";
-    this.deps.store.save(record);
-    try {
-      const result = await this.deps.canvas.commit({ owner, canvasId, operationId: digest([owner, canvasId, requestId]), commandId, source: record.source, candidate: record.candidate, reservation: record.reservation, ...placement });
-      if (!result.ok) {
-        record.placement.state = result.code === "placement-conflict" ? "rejected" : "unknown";
-        record.stage = "failed"; record.error = result.message; this.deps.store.save(record);
-        return this.query(owner, canvasId, requestId);
-      }
-      record.receipt = result.receipt; record.revision = result.revision; record.stage = "delivered"; delete record.error; this.deps.store.save(record);
-      this.deps.conversations.reconcileDeliveryTurn({ owner, canvasId, requestId, delivery: delivery(record), outcome: { status: "succeeded", receipt: result.receipt } });
-      return this.query(owner, canvasId, requestId);
-    } catch (error) {
-      record.placement.state = "unknown"; record.stage = "failed"; record.error = error instanceof Error ? error.message : "保存结果未确认"; this.deps.store.save(record);
-      return this.reconcile(owner, canvasId, requestId);
-    }
   }
 
   private async adapter(owner: string, connection: AgentConnectionBinding, entry: AgentEntryIntent) {
     const view = await this.deps.connections.getConnection({ owner, connectionId: connection.connectionId });
     if (!view || (!view.ready && view.authMode !== "local-login") || view.adapterId !== connection.adapterId || view.configRevision !== connection.configRevision || view.credentialEpoch !== connection.credentialEpoch) throw new Error("助手连接已失效");
     const resolved = this.deps.registry.resolve(connection.adapterId);
-    if (!resolved.ok || !resolved.handle.capabilities.candidateGeneration?.imageInput || resolved.handle.capabilities.candidateGeneration.maxImages < 1) throw new Error("助手不支持图片候选");
+    if (!resolved.ok || !resolved.handle.capabilities.tools || !resolved.handle.capabilities.targets.includes("world")) throw new Error("助手不支持导演区工具执行");
     const catalog = await this.deps.conversations.catalog({ owner, adapterId: connection.adapterId });
     if (!catalog.ok) throw new Error(catalog.error.message);
     const model = (view.models.length ? view.models : catalog.models).find(item => item.id === entry.model);
     if (!model || view.modelsError || catalog.error || (entry.reasoningEffort && !model.reasoningEfforts?.includes(entry.reasoningEffort))) throw new Error("助手模型或 Variant 已失效");
     const capabilities = "capabilities" in model ? model.capabilities : undefined;
-    const candidateCapability = capabilities?.textDelivery ?? view.capabilities.textDelivery;
-    if (!candidateCapability?.imageInput || candidateCapability.maxImages < 1) throw new Error("所选模型不支持图片结构化候选");
+    const imageCapability = capabilities?.textDelivery ?? view.capabilities.textDelivery;
+    if (!imageCapability?.imageInput || imageCapability.maxImages < 1) throw new Error("所选模型不支持参考图片");
     return resolved.handle.adapter;
   }
 
@@ -169,13 +114,20 @@ export class ImageDirectorSceneService {
     await this.adapter(input.owner, input.connection, input.entry);
     if (!record) {
       const prepared = await this.deps.canvas.prepare({ owner: input.owner, canvasId: input.canvasId, sourceNodeId: input.request.sourceNodeId });
-      record = this.deps.store.insert({ owner: input.owner, canvasId: input.canvasId, request: input.request, inputHash, source: prepared.source, imageBase64: Buffer.from(prepared.bytes).toString("base64"), connectionVersion: digest(input.connection), connection: input.connection, conversationId: input.conversationId, entry: input.entry, stage: "preparing", attempts: [] }).record;
+      record = this.deps.store.insert({ owner: input.owner, canvasId: input.canvasId, request: input.request, inputHash, source: prepared.source, imageBase64: Buffer.from(prepared.bytes).toString("base64"), beforeNodeIds: prepared.nodeIds, connectionVersion: digest(input.connection), connection: input.connection, conversationId: input.conversationId, entry: input.entry, stage: "preparing" }).record;
     }
     if (!record.reservation) {
       record.reservation = await this.deps.canvas.reserve({ owner: input.owner, canvasId: input.canvasId, operationId: digest([input.owner, input.canvasId, input.request.requestId]), requestId: input.request.requestId, source: record.source });
       this.deps.store.save(record);
     }
-    const accepted = this.deps.conversations.acceptDeliveryTurn({ owner: input.owner, conversationId: input.conversationId, requestId: input.request.requestId, entry: { ...input.entry, nodeId: record.reservation.nodeId, action: "discuss" }, connection: input.connection, delivery: delivery(record) });
+    const accepted = this.deps.conversations.acceptDeliveryTurn({
+      owner: input.owner,
+      conversationId: input.conversationId,
+      requestId: input.request.requestId,
+      entry: { ...input.entry, nodeId: record.reservation.nodeId, mode: "world", worldScope: { kind: "scene-area", areaId: record.reservation.areaId }, action: "generate" },
+      connection: input.connection,
+      delivery: delivery(record)
+    });
     if (!accepted.ok) {
       record.stage = "failed"; record.error = accepted.error.message; this.deps.store.save(record);
       try { await this.deps.canvas.settleReservation({ owner: input.owner, canvasId: input.canvasId, reservation: record.reservation, status: "failed" }); } catch { /* Preserve the acceptance error. */ }
@@ -194,67 +146,52 @@ export class ImageDirectorSceneService {
 
   private async execute(record: ImageDirectorSceneRecord, context: Parameters<Parameters<AgentConversationService["dispatchDeliveryTurn"]>[1]>[0]): Promise<AgentAdapterRunOutcome> {
     try {
-      if (!record.entry || !record.connection || !record.conversationId || !record.parentTurnId) throw new Error("执行身份不完整");
-      let feedback = "";
-      while (!context.signal.aborted) {
-        const adapter = await this.adapter(record.owner, record.connection, record.entry);
-        const attemptId = String(record.attempts.length + 1);
-        record.stage = feedback ? "repairing" : "generating";
-        record.activeAttemptId = attemptId;
-        this.deps.store.save(record);
-        const outcome = await adapter.run({ owner: record.owner, canvasId: record.canvasId, connection: record.connection, conversationId: `${record.request.requestId}:${attemptId}`, turnId: record.parentTurnId, requestId: `${record.request.requestId}:${attemptId}`, intent: { ...record.entry, action: "discuss", prompt: `${record.request.instructions}\n只创建静态几何，不使用动画。模型脚本使用 Y-up 米制；世界变换及相机使用 u/v/h 米制和单位四元数。镜头应覆盖全部主要模型。\n${imageDirectorSceneModelGuide()}\nReturn only JSON matching this scene candidate schema (the model API above describes models[].script only): ${JSON.stringify(imageDirectorSceneCandidateSchema)}\n${feedback}` }, history: context.history, candidate: { images: [{ bytes: Buffer.from(record.imageBase64, "base64"), contentType: record.source.mimeType }], outputSchema: imageDirectorSceneCandidateSchema }, signal: context.signal, emit: context.emit });
-        if (context.signal.aborted || outcome.status === "cancelled") throw new Error("已停止");
-        if (outcome.status !== "succeeded") throw new Error(outcome.error?.message ?? "助手执行失败");
-        delete record.activeAttemptId;
-        let parsed: unknown;
-        try { parsed = JSON.parse(/^```(?:json)?\s*([\s\S]*?)\s*```$/.exec((outcome.assistantText ?? "").trim())?.[1] ?? outcome.assistantText ?? ""); } catch { parsed = null; }
-        const decoded = decodeImageDirectorSceneCandidate(parsed, { width: record.source.width, height: record.source.height });
-        record.stage = "validating";
-        const valid = await this.deps.canvas.validate({ owner: record.owner, canvasId: record.canvasId, candidate: parsed, source: record.source, signal: context.signal });
-        if (!decoded.ok || !valid.ok) {
-          feedback = `Previous candidate: ${JSON.stringify(parsed)}\nDiagnostic: ${!valid.ok ? valid.diagnostic : "invalid candidate"}. Repair it.`;
-          record.attempts.push({ id: attemptId, diagnostic: !valid.ok ? valid.diagnostic : "invalid candidate", raw: parsed, ...(decoded.ok ? { candidate: decoded.value } : {}) });
-          this.deps.store.save(record);
-          if (record.attempts.length >= MAX_CANDIDATE_ATTEMPTS) throw new Error(`候选格式或内容连续 ${MAX_CANDIDATE_ATTEMPTS} 次未通过校验：${record.attempts.at(-1)?.diagnostic}`);
-          continue;
-        }
-        record.attempts.push({ id: attemptId, candidate: decoded.value });
-        record.candidate = decoded.value;
-        record.stage = "placing";
-        this.deps.store.save(record);
-        const placement = await this.deps.canvas.plan({ owner: record.owner, canvasId: record.canvasId, source: record.source, candidate: decoded.value, reservation: record.reservation, signal: context.signal });
-        const commandId = `image-director:${digest([record.owner, record.canvasId, record.request.requestId, "placement-1"])}`;
-        record.placement = { attemptId: "1", commandId, plan: placement, state: "pending" };
-        record.stage = "saving";
-        this.deps.store.save(record);
-        const result = await this.deps.canvas.commit({ owner: record.owner, canvasId: record.canvasId, operationId: digest([record.owner, record.canvasId, record.request.requestId]), commandId, source: record.source, candidate: decoded.value, reservation: record.reservation, ...placement, signal: context.signal });
-        if (!result.ok) { record.placement.state = result.code === "placement-conflict" ? "rejected" : "unknown"; this.deps.store.save(record); throw new Error(result.message); }
-        record.receipt = result.receipt;
-        record.revision = result.revision;
+      if (!record.entry || !record.connection || !record.conversationId || !record.parentTurnId || !record.reservation) throw new Error("执行身份不完整");
+      const adapter = await this.adapter(record.owner, record.connection, record.entry);
+      const roleTurn = this.prepareRoleTurn(record);
+      record.stage = "generating";
+      record.activeAttemptId = "1";
+      this.deps.store.save(record);
+      const outcome = await adapter.run({
+        owner: record.owner,
+        canvasId: record.canvasId,
+        connection: record.connection,
+        conversationId: record.conversationId,
+        turnId: record.parentTurnId,
+        requestId: `${record.request.requestId}:1`,
+        prepared: roleTurn,
+        intent: { ...record.entry, action: "generate", nodeId: record.reservation.nodeId, mode: "world", worldScope: { kind: "scene-area", areaId: record.reservation.areaId }, prompt: record.request.instructions },
+        history: context.history,
+        images: [{ bytes: Buffer.from(record.imageBase64, "base64"), contentType: record.source.mimeType }],
+        signal: context.signal,
+        emit: context.emit
+      });
+      if (context.signal.aborted || outcome.status === "cancelled") throw new Error("已停止");
+      if (outcome.status !== "succeeded") throw new Error(outcome.error?.message ?? "助手执行失败");
+      delete record.activeAttemptId;
+      record.stage = "finalizing";
+      this.deps.store.save(record);
+      const result = await this.deps.canvas.finalize({ owner: record.owner, canvasId: record.canvasId, operationId: digest([record.owner, record.canvasId, record.request.requestId]), commandId: finalizeCommand(record), reservation: record.reservation, source: record.source, beforeNodeIds: record.beforeNodeIds });
+      if (!result.ok) throw new Error(result.message);
+      record.receipt = result.receipt;
+      record.revision = result.revision;
+      record.stage = "delivered";
+      this.deps.store.save(record);
+      return { status: "succeeded", receipt: { commandId: finalizeCommand(record) } };
+    } catch (error) {
+      delete record.activeAttemptId;
+      const known = record.reservation ? await this.deps.canvas.lookup({ owner: record.owner, canvasId: record.canvasId, commandId: finalizeCommand(record) }).catch(() => null) : null;
+      if (known?.ok) {
+        record.receipt = known.receipt;
+        record.revision = known.revision;
         record.stage = "delivered";
         this.deps.store.save(record);
-        return { status: "succeeded", receipt: result.receipt };
-      }
-      throw new Error("已停止");
-    } catch (error) {
-      if (record.placement) {
-        if (record.placement.state === "pending") record.placement.state = "unknown";
-        try {
-          const known = await this.deps.canvas.lookup({ owner: record.owner, canvasId: record.canvasId, commandId: record.placement.commandId });
-          if (known.ok) {
-            record.receipt = known.receipt;
-            record.revision = known.revision;
-            record.stage = "delivered";
-            this.deps.store.save(record);
-            return { status: "succeeded", receipt: known.receipt };
-          }
-          if (known.code === "receipt-not-found" && record.placement.state === "unknown") record.placement.state = "not-committed";
-        } catch { /* Preserve the original command identity for later reconciliation. */ }
+        return { status: "succeeded", receipt: { commandId: finalizeCommand(record) } };
       }
       record.stage = context.signal.aborted ? "cancelled" : "failed";
       record.error = error instanceof Error ? error.message : "执行失败";
       this.deps.store.save(record);
-      if (record.reservation && record.placement?.state !== "unknown") {
+      if (record.reservation) {
         try { await this.deps.canvas.settleReservation({ owner: record.owner, canvasId: record.canvasId, reservation: record.reservation, status: context.signal.aborted ? "cancelled" : "failed" }); } catch { /* Preserve the original failure for reconciliation. */ }
       }
       return { status: context.signal.aborted ? "cancelled" : "failed", error: { code: context.signal.aborted ? "cancelled" : "image-director-failed", message: record.error } };

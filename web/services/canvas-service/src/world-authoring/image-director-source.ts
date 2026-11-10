@@ -3,7 +3,7 @@ import { readWorldCaptureImageDimensions, type FrozenImageDirectorSource } from 
 import type { CanvasMediaClient } from "../clients/media-client.js";
 import type { CanvasRoom } from "../sync/room.js";
 
-export async function prepareImageDirectorSource(input: { owner: string; canvasId: string; sourceNodeId: string }, deps: { authorize(owner: string, canvasId: string, permission: "read" | "write"): Promise<boolean>; resolveRoom(canvasId: string): Promise<CanvasRoom | null>; media: CanvasMediaClient }): Promise<{ source: FrozenImageDirectorSource; bytes: Uint8Array }> {
+export async function prepareImageDirectorSource(input: { owner: string; canvasId: string; sourceNodeId: string }, deps: { authorize(owner: string, canvasId: string, permission: "read" | "write"): Promise<boolean>; resolveRoom(canvasId: string): Promise<CanvasRoom | null>; media: CanvasMediaClient }): Promise<{ source: FrozenImageDirectorSource; bytes: Uint8Array; nodeIds: string[] }> {
   if (!await deps.authorize(input.owner, input.canvasId, "write") || !await deps.authorize(input.owner, input.canvasId, "read")) throw new Error("当前用户无画布读写权限");
   const room = await deps.resolveRoom(input.canvasId);
   const snapshot = room?.exportCanvas();
@@ -23,5 +23,5 @@ export async function prepareImageDirectorSource(input: { owner: string; canvasI
   const checksum = createHash("sha256").update(image.bytes).digest("hex");
   const expectedChecksum = asset.metadata?.checksum ?? verified.metadata?.checksum;
   if (!dimensions || (typeof declaredType === "string" && declaredType.split(";")[0]!.trim().toLowerCase() !== mimeType) || (typeof expectedChecksum === "string" && expectedChecksum !== checksum) || (typeof asset.metadata?.size === "number" && asset.metadata.size !== image.bytes.length)) throw new Error("来源图片字节校验失败");
-  return { source: { sourceNodeId: input.sourceNodeId, assetId: asset.id, contentVersion: checksum, checksum, mimeType, ...dimensions }, bytes: image.bytes };
+  return { source: { sourceNodeId: input.sourceNodeId, assetId: asset.id, contentVersion: checksum, checksum, mimeType, ...dimensions }, bytes: image.bytes, nodeIds: canvas.document.nodes.map(node => node.id) };
 }

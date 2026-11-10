@@ -42,7 +42,8 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 
 | 字段 | 作用 |
 | --- | --- |
-| `backend` | 站点插件宿主的后端定义工厂（宿主核心站点插件走静态可信清单时才需要）。声明的导出必须真的存在，否则 `pnpm extensions:check` 失败 |
+| `backend` | Application 后端定义工厂；与 `site` 配合由控制面激活。声明的导出必须存在，否则预检失败 |
+| `executors` | 独立 daemon 执行模块 `{id,module,export}`；须有 `backend` 与 `site`，不可混用 `hostPlugin` |
 | `hostPlugin` | 插件树扩展层的 Cordis 插件：`provider`（向 `ctx.generation` 注册）或 `storage`（向 `ctx.storage` 注册）；声明模块、工厂、顺序与是否可选 |
 | `canvasContent` | 画布内容端口：工厂返回 `CanvasContentRuntime`（可选分组 `frames` 预览/历史帧、`conversion` 转换服务构造、`mcp` 扩展 MCP 能力面），宿主装配 canvas-service 时注入；canvas-service 不 import 扩展实现。与 `hostPlugin` 不同，它不参与插件树 |
 | `metadata` | 设置面元数据导出（`/api/settings` 的插件卡片用它） |
@@ -80,6 +81,62 @@ DashScope 的 `/api/v1/models` 与 OpenAI 兼容 `/compatible-mode/v1/models` �
 `modelTypes: ["image"]`，文生图与参考图编辑共用一个同步接口，参考图直接放进
 `input.messages[].content[].image`（要公网 URL，所以没有 `uploadReference`），`status` 只能抛错
 （没有可查询的远端任务），模型定义声明 `cancel: "local"`。
+
+## 独立 executor 扩展
+
+模型提供商扩展负责两部分：宿主 backend 提供登录/连接配置、模型目录和 `AgentConversationAdapter`；executor 模块提供实际推理。SDK、OAuth 与 App Server 都使用这个拆分，角色仍由独立 AgentRole 贡献，executor 只消费准备好的回合。
+
+在 `extension.json` 中保留完整 `site` 元数据，并声明：
+
+```json
+{
+  "backend": { "module": "./backend", "factory": "createBackend" },
+  "executors": [
+    { "id": "vendor-agent", "module": "./executor", "export": "createExecutor" }
+  ]
+}
+```
+
+`module` 必须是包内相对子路径，并通过 `package.json.exports` 指向对应产物。同包各模块的具名导出不能重名（单文件产物会拒绝冲突）。独立构建应生成 executor 入口；`build:backend` / `pack:extension` 会把声明的工厂一起导出到 `backend-dist/entry.mjs`，`.wxt` 安装预检会核对导出。工厂应无启动副作用，资源在回合内创建并在 `finally` 释放：
+
+```ts
+import type { Executor } from "woohaa3-executor/protocol";
+
+export function createExecutor(): Executor {
+  return {
+    id: "vendor-agent",
+    kind: "agent",
+    async run(turn, context) {
+      if (!turn.prepared || !context.host) throw new Error("Missing prepared turn or host lease");
+      const credential = await context.host.call<string>("vendor.access-token");
+      // 用该凭据调用提供商 SDK / App Server，传入 context.signal；
+      // context.emit(type, payload) 只发布可持久化的公开进度，禁止发送凭据。
+      return { status: "succeeded", result: { message: "completed" } };
+    }
+  };
+}
+```
+
+示例中的 SDK 调用需由扩展实现。宿主 backend 在 `activate(host)` 中取 `host.services.executor`；缺失时拒绝执行。可信 adapter 的 `run(input)` 调用：
+
+```ts
+return executor.run({
+  executor: "vendor-agent", owner: input.owner, requestId: input.requestId,
+  prepared: input.prepared, payload: { model: input.intent.model },
+  signal: input.signal,
+  hostCall: async method => {
+    if (method !== "vendor.access-token") throw new Error("Unknown host method");
+    return readCredentialForTrustedOwner(input.owner);
+  },
+  onEvent: event => publishPublicProgress(event)
+});
+```
+
+这里的凭据读取和进度发布由扩展自己的宿主适配层实现。owner、连接版本、授权目标与工具集合必须来自可信宿主回合；`hostCall` 对每个方法单独校验，不接受 daemon 参数替换身份或扩大权限。凭据只经该临时端口读取，不能塞进 `payload`、事件或结果。`query/cancel` 使用相同 executor、owner、requestId；取消会撤销端口权限并等执行清理完成。
+
+激活时自动注册模块，调用前确认 daemon 已装配；daemon 重启后的新请求会重新注册，旧回合保持中断记录。释放 activation 时拒绝新请求、取消和排空在途执行、撤销回合端口、注销模块；升级按独立 activation 身份与制品摘要加载。站点控制面若因已有领域工作而处于 draining，会先保留该 activation 供收尾。没有 daemon 或模块加载失败直接报错，没有宿主执行回退。
+
+凭据存储、工具授权、Canvas 提交和会话账本留在宿主；推理、流、取消和执行 journal 在 daemon。模块运行可信 Node 代码，独立进程不提供代码沙箱。现有实现见 `sdk-agent/src/backend/{execution-client,executor}.ts`、`oauth-agent/src/backend/{execution-client,executor}.ts` 和 `local-agent/src/backend/executor.ts`。
 
 ## 前端入口与 metadata
 
@@ -233,15 +290,13 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 | 受管扩展可以 | 受管扩展不可以（预检拒绝） |
 | --- | --- |
 | `server-active` / `browser-local` 前端入口：安装后已打开页面**不刷新**即可装配 | `always` / `required` activation |
-| 后端 `hostPlugin.kind = provider`：在**独立子进程**（Extension Host）里运行；首次安装、升级、回滚都不重启宿主（升级为蓝绿切换） | `bootstrap` 槽位、`canvasContent`、市场来源（`marketplace-source`）——只允许内置根 |
-| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）与 `permissions`（**强制**：出网只到 `network` 白名单，存储只到 `storageNamespaces`，公开路由要 `publicRoutes`） | `hostPlugin.kind = storage`（存储后端必须进程内）、包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
-| 用 `ctx.log`、自身配置段、`ctx.generation`、`ctx.gateway.route`（限 `/api/extensions/<id>/` 与刷新路由）、health | `migrate`（本期不支持数据迁移）、`workspace:` 依赖；documents / canvas / MCP / marketplace 等其它 ctx 面（访问即 `permission-denied`） |
+| 后端 `hostPlugin` 或带 `site` 的 `backend`：在宿主内加载；独立形态可热装配，executor 在 daemon 加载 | `bootstrap` 槽位、`canvasContent`、市场来源（`marketplace-source`）——只允许内置根 |
+| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）；公开路径用 `publicRoutes` 声明 | `hostPlugin.kind = storage`（存储后端必须进程内）、包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
+| 使用所装配的公共宿主端口、配置与路由；权限由宿主端口执行 | `migrate`（本期不支持数据迁移）、未内联的 `workspace:` 运行时依赖 |
 
 升级保留上一版本：新版本有观察期，期间激活失败或健康持续失败会**自动回滚**；也可在卡片上手动回滚。卸载先经站点控制面停用并等在途工作收尾，再删指针；勾选「同时清除数据」会删除该扩展的 documents。
 
-**进程隔离**（change: 2026-10-21-isolate-extension-host-process，细节见 [extensions.md 的「Extension Host 子进程」](../../docs/code-map/extensions.md#extension-host-子进程)）：每个受管后端扩展一个子进程，堆上限缺省 256 MiB，只拿到最小环境变量（不含宿主凭据），配置按段经 RPC 下发。子进程崩溃只撤销它自己的 Provider 与路由（路由回 503，在途调用 `extension-crashed`），然后退避重启；5 分钟内崩溃 3 次进入 `quarantined`，需升级版本或在卡片上「解除隔离」。本机 `extensions.host.isolation = false` 可关闭隔离退回进程内 + 受控重启，只用于降级排障。
-
-**剩余风险**：子进程隔离**不是 OS 级沙箱**——它与宿主同一操作系统用户，文件系统访问不受限；出网守卫在 JS 层，原生模块与 `process.binding` 可绕过（因此预检拒绝 `.node`）。只安装来自可信签名者的包。另外后端单文件内联了一份 contracts，且跨进程传递的对象都是序列化副本，**不要**用 `instanceof` 判断宿主类，改用错误码。
+受管 backend 和 hostPlugin 均在宿主进程动态 import；旧 Extension Host 子进程隔离已取消，`permissions` 声明也已移除并会被校验拒绝。executor 模块另在 daemon 加载，两种模块都拥有当前操作系统用户的 Node 权限；只装配可信代码。后端单文件内联 contracts，跨 daemon 对象经过序列化，错误匹配使用错误码。
 
 ### 经 woohaa-server 市场分发
 

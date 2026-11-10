@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSISTANT_WORLD_CAMERA_TOOLS,
   ASSISTANT_WORLD_TOOL,
   assistantWorldSourceCapability,
   assistantWorldToolsForScope,
@@ -21,20 +22,16 @@ describe("assistant world scope", () => {
       ok: true,
       value: { kind: "scene-area", areaId: "area-1" }
     });
-    expect(decodeAssistantWorldScope({ kind: "workflow-group-2d", groupId: "group-1" })).toEqual({
-      ok: true,
-      value: { kind: "workflow-group-2d", groupId: "group-1" }
-    });
     expect(decodeAssistantWorldScope({ kind: "scene-area", areaId: "area-1", groupId: "extra" }).ok).toBe(false);
-    expect(decodeAssistantWorldScope({ kind: "workflow-group-2d", groupId: "" }).ok).toBe(false);
+    expect(decodeAssistantWorldScope({ kind: "workflow-group-2d", groupId: "g" }).ok).toBe(false);
   });
 
-  it("never grants world writes to a 2D group", () => {
-    expect(assistantWorldToolsForScope({ kind: "workflow-group-2d", groupId: "g" })).toEqual([ASSISTANT_WORLD_TOOL.readContext]);
+  it("grants the scene-area and camera tool surfaces", () => {
     expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" })).toContain(ASSISTANT_WORLD_TOOL.setCamera);
-    const capability = assistantWorldSourceCapability({ targets: ["workflow-group-2d"] });
-    expect(capability.tools).toEqual([ASSISTANT_WORLD_TOOL.readContext]);
-    expect(capability.completion).toBe(false);
+    expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" })).toEqual([...ASSISTANT_WORLD_CAMERA_TOOLS]);
+    const capability = assistantWorldSourceCapability({ targets: ["world-camera"] });
+    expect(capability.tools).toEqual([...ASSISTANT_WORLD_CAMERA_TOOLS]);
+    expect(capability.completion).toBe(true);
   });
 });
 
@@ -153,6 +150,5 @@ it("grants rig reads and scene samples only to a director area", () => {
   for (const name of ["get_world_model_rig", "sample_scene_animation"]) {
     expect(assistantWorldToolsForScope({kind:"scene-area",areaId:"a"})).toContain(name);
     expect(assistantWorldToolsForScope({kind:"world-camera",cameraId:"c"})).not.toContain(name);
-    expect(assistantWorldToolsForScope({kind:"workflow-group-2d",groupId:"g"})).not.toContain(name);
   }
 });

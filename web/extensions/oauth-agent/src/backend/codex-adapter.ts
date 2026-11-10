@@ -57,6 +57,8 @@ export type CodexAdapter = {
 };
 
 export type CodexRunInput = {
+  requestId?: string;
+  prepared?: import("@woohaa3/contracts").PreparedAgentRoleTurn;
   ownerId: string;
   model: string;
   reasoningEffort?: ChatGptReasoningEffort;

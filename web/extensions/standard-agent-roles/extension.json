@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "standard-agent-roles",
+  "site": {
+    "name": "标准 Agent 角色",
+    "description": "提供模型作者、导演区作者、镜头构图、节点组搭建、文本作者、图片场景重建与讨论角色。角色只声明职责、输入输出与工具边界，不拥有执行通道或权限。",
+    "version": "0.1.0",
+    "configSchema": {
+      "schemaId": "standard-agent-roles-config",
+      "schemaVersion": 1
+    },
+    "capabilities": [
+      {
+        "id": "standard-agent-roles.catalog",
+        "kind": "capability",
+        "description": "标准业务 Agent 角色实现（模型、导演区、镜头、节点组、文本、图片场景与讨论）"
+      }
+    ],
+    "defaultEnabled": true,
+    "order": 55
+  },
+  "backend": {
+    "module": "./backend",
+    "factory": "createStandardAgentRolesExtension",
+    "optionsType": "StandardAgentRolesExtensionOptions",
+    "order": 55
+  }
+}

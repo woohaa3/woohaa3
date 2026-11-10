@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
-import { createEndpointPolicy, localAgentToolsForMode } from "@woohaa3/agent-connections";
+import { createEndpointPolicy } from "@woohaa3/agent-connections";
 import type { ModelToolDefinition } from "./protocol/model-turn.js";
 
 type Json = Record<string, any>;
@@ -20,8 +20,10 @@ export async function createMcpTurnGateway(options: {
 }) {
   const checked = createEndpointPolicy({ allowedHosts: ["127.0.0.1", "localhost", "::1", "[::1]"], allowHttp: true }).check(options.upstream);
   if (!checked.ok) throw new Error("MCP endpoint must be host loopback");
+  // 通道只暴露宿主已准备并求交的工具集；不再按业务 mode 选择工具。
+  const allowed = options.input.prepared?.tools ?? [];
+  // 世界工具使用宿主签发的 scope 身份，nodeId 不是模型操作目标；这是目标语义，不是角色模板。
   const world = options.input.intent.mode === "world";
-  const allowed = localAgentToolsForMode(options.input.intent.mode, options.input.intent.worldScope);
   let sequence = 0;
   let closed = false;
   let firstWrite = true;

@@ -183,6 +183,17 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
         const plane = application()?.service.plugins();
         const gate = application()?.siteGate;
         const metadata = siteMetadataOf(extensionId, directory, loaded.descriptor);
+        if (loaded.definition) {
+          if (!metadata || !plane) throw new Error("Backend extensions require site metadata and an application control plane");
+          const outcome = await plane.addExtension({ metadata: metadata as never, definition: loaded.definition });
+          if (!outcome.ok) throw Object.assign(new Error(outcome.message), { code: outcome.code });
+          if (outcome.status?.actualState === "failed") {
+            await plane.removeExtension(extensionId);
+            throw new Error(`扩展 ${extensionId} 激活失败`);
+          }
+          return;
+        }
+        if (!loaded.plugin) throw new Error("Extension has no backend contribution");
         let definition = null as ReturnType<NonNullable<typeof gate>["add"]> | null;
         if (metadata && plane && gate) {
           definition = gate.add(extensionId);
