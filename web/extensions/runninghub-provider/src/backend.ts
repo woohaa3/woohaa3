@@ -38,6 +38,8 @@ import {
 } from "./llm-catalog.js";
 import { createRunningHubTemporaryExposer } from "./temporary-hosting.js";
 import { registerRunningHubRefreshRoute, type ModelRefreshResult } from "./refresh-route.js";
+import { fetchRunningHubBalance } from "./backend/balance.js";
+import { registerRunningHubBalanceRoute } from "./backend/balance-route.js";
 
 export { DEFAULT_RUNNINGHUB_API_BASE, DEFAULT_LLM_BASE_URL };
 
@@ -218,6 +220,14 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
       };
       ctx.effect(() => ctx.generation.register(registration));
       registerRunningHubRefreshRoute(ctx, { path: RUNNINGHUB_REFRESH_PATH, refresh });
+      registerRunningHubBalanceRoute(ctx, {
+        read: () =>
+          fetchRunningHubBalance({
+            apiKey: (config.apiKey ?? "").trim(),
+            ...(deps.apiBaseURL ? { apiBaseURL: deps.apiBaseURL } : {}),
+            ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
+          })
+      });
       // 临时图床：同一份 Key，独立于媒体/文字调用证据；未配置时不进入候选。
       ctx.effect(() => ctx.exposer.register(createRunningHubTemporaryExposer({
         storage: ctx.storage,

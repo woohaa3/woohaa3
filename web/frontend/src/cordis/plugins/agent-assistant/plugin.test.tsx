@@ -24,6 +24,18 @@ it("provider-login 贡献同时出现在模型提供商列表，配置直接打�
   expect(f.el.textContent).toContain("微信扫码登录");
 });
 
+it("未配置的 provider-login 不占用模型提供商列表，但仍可从添加连接进入登录", async () => {
+  const f = await render([], false, undefined, { canvasId: "canvas", nodeId: "node" }, {}, undefined, true, false, false);
+  await f.click("模型提供商");
+  const list = f.el.querySelector('[data-ai-page="sources"] .agent-assistant__list');
+  expect(list?.textContent ?? "").not.toContain("Demo 微信登录");
+  expect(f.el.textContent).toContain("添加你的第一个模型提供商");
+
+  await f.click("添加连接");
+  const drawer = f.el.querySelector(".agent-assistant__drawer-layer:not([hidden])")!;
+  expect([...drawer.querySelectorAll(".agent-assistant__method strong")].map(item => item.textContent)).toContain("Demo 微信登录");
+});
+
 it("provider-login 贡献作为独立供应商方法出现，并在选中后渲染其面板", async () => {
   const f = await render([], false, undefined, { kind: "generation", page: "add" }, {}, undefined, true);
   const methods = [...f.el.querySelectorAll(".agent-assistant__method")].map(item => item.querySelector("strong")?.textContent);

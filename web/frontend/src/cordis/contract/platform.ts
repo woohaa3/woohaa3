@@ -616,6 +616,17 @@ export type SlotContributionMap = {
     setupOrder?: number;
     /** Provider id this login method belongs to; provider-balance rows are matched by it. */
     providerId?: string;
+    /**
+     * Optional configured-state store for provider-login methods.
+     *
+     * When present, the method appears in the main provider list only while
+     * `getSnapshot()` is true; it remains available from the add-connection
+     * flow so an anonymous user can still start login/authorization.
+     */
+    configured?: {
+      getSnapshot: () => boolean;
+      subscribe: (listener: () => void) => () => void;
+    };
     render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }>;
   };
   /**

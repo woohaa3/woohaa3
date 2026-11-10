@@ -185,6 +185,10 @@ type ConfigurationContribution = {
   modelTypes?: readonly string[];
   setupOrder?: number;
   providerId?: string;
+  configured?: {
+    getSnapshot: () => boolean;
+    subscribe: (listener: () => void) => () => void;
+  };
   render: ComponentType<{ connectionId?: string; onSaved?: (connectionId: string) => void }>;
 };
 type ProviderTemplate = { id: string; label: string; providerId: string; description: string; icon?: string; website?: string; setupOrder?: number; usesApiKey: boolean; modelTypes: readonly string[] };
@@ -352,9 +356,28 @@ function ServiceSources({ service, connections, contributions, payload, settings
   const settings = useSyncExternalStore(settingsStore?.subscribe ?? (() => () => {}), settingsStore?.getState ?? (() => null));
   const modelsService = useOptionalService("generationModelsStatus");
   const modelState = useSyncExternalStore(modelsService?.subscribe ?? (() => () => {}), modelsService?.getSnapshot ?? (() => null));
-  const loginProviderMethods = contributions
-    .filter(entry => entry.kind === "provider-login")
-    .map(entry => ({ id: `login-provider:${entry.id}`, entry }));
+  const loginContributions = contributions.filter(entry => entry.kind === "provider-login");
+  const loginContributionIds = loginContributions.map(entry => entry.id).join("|");
+  const [configuredLoginIds, setConfiguredLoginIds] = useState<ReadonlySet<string>>(
+    () => new Set(loginContributions.filter(entry => entry.configured?.getSnapshot() ?? true).map(entry => entry.id))
+  );
+  useEffect(() => {
+    const update = () =>
+      setConfiguredLoginIds(
+        new Set(loginContributions.filter(entry => entry.configured?.getSnapshot() ?? true).map(entry => entry.id))
+      );
+    update();
+    const unsubscribes = loginContributions.flatMap(entry =>
+      entry.configured ? [entry.configured.subscribe(update)] : []
+    );
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+    // 只按贡献身份重订阅；slot 每次 list() 都会返回新数组，不能直接依赖数组。
+  }, [loginContributionIds]);
+  const loginProviderMethods = loginContributions.map(entry => ({ id: `login-provider:${entry.id}`, entry }));
+  // 账号登录入口在「模型提供商」列表只代表已经可用的来源；未登录时仍可从“添加连接”进入登录流程。
+  const configuredLoginProviderMethods = loginProviderMethods.filter(method => configuredLoginIds.has(method.entry.id));
   const balanceContributions = useSlot("agent-assistant.provider-balance");
   const providerGroups: ProviderTemplate[] = settings?.status === "ready" ? providerConfigGroups(settings.snapshot).flatMap(group => group.providerId ? [{
     id: group.id, label: group.label, providerId: group.providerId, description: group.description, icon: group.icon, website: group.website, setupOrder: group.setupOrder,
@@ -399,8 +422,8 @@ function ServiceSources({ service, connections, contributions, payload, settings
     <div className="agent-assistant__page-heading"><h2>模型提供商</h2><Button tone="primary" onClick={showAdd}>添加连接</Button></div>
     {loading ? <p>正在读取模型提供商…</p> : null}
     {directoryError ? <SettingsFeedback tone="danger">{directoryError} <Button size="sm" onClick={onSaved}>重新读取</Button></SettingsFeedback> : null}
-    {!loading && !directoryError && !sources.length && !loginProviderMethods.length ? <div className="agent-assistant__empty agent-assistant__empty--service"><h3>添加你的第一个模型提供商</h3><p>添加 API、中转站或账号授权，用于助手与生成。</p><Button size="lg" tone="primary" onClick={showAdd}>添加第一个模型提供商</Button></div> : null}
-    {sources.length || loginProviderMethods.length ? <ul className="agent-assistant__list agent-assistant__source-list">{loginProviderMethods.map(method => (
+    {!loading && !directoryError && !sources.length && !configuredLoginProviderMethods.length ? <div className="agent-assistant__empty agent-assistant__empty--service"><h3>添加你的第一个模型提供商</h3><p>添加 API、中转站或账号授权，用于助手与生成。</p><Button size="lg" tone="primary" onClick={showAdd}>添加第一个模型提供商</Button></div> : null}
+    {sources.length || configuredLoginProviderMethods.length ? <ul className="agent-assistant__list agent-assistant__source-list">{configuredLoginProviderMethods.map(method => (
       <li key={method.id}><div className="agent-assistant__identity"><strong><span className="agent-assistant__provider-mark"><PluginIconMark icon={method.entry.icon} size={22} /></span>{method.entry.label}</strong></div><div className="agent-assistant__meta"><ProviderBalanceSlot providerId={method.entry.providerId} contributions={balanceContributions} /><span className="agent-assistant__state" data-tone="neutral">账号登录</span></div><div className="agent-assistant__actions"><Button size="sm" tone="ghost" onClick={() => { setInitialMethod(method.id); setSelected(null); setAdding(true); setAddVisited(true); }}>配置</Button></div></li>
     ))}{sources.map(source => {
       const connection = connections.find(item => source.bindings.some(binding => binding.consumerId === item.connectionId));

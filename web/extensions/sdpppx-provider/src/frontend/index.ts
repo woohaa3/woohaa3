@@ -51,6 +51,8 @@ export function sdpppxProviderExtension(): ReturnType<typeof defineExtensionPlug
   return defineExtensionPlugin<ExtensionContext>(
     (ctx) => {
       const service = createSdpppxAccountService(ctx.applicationRemote.transport);
+      // 供应商列表在未登录时不显示入口；启动时静默恢复一次会话，已登录用户无需先点开添加流程。
+      void service.refresh();
 
       const openLogin = (): void => {
         ctx.dialogs.open({ dialogId: SDPPPX_LOGIN_DIALOG_ID, payload: {} });
@@ -87,6 +89,10 @@ export function sdpppxProviderExtension(): ReturnType<typeof defineExtensionPlug
         modelTypes: ["image", "video"],
         setupOrder: 60,
         providerId: "sdpppx",
+        configured: {
+          getSnapshot: () => service.getSnapshot().status === "authenticated",
+          subscribe: service.subscribe
+        },
         render: createSdpppxProviderLoginRenderer(service, openLogin, openAccount)
       });
       ctx.effect(() => () => removeProviderLogin(), "sdpppx-provider-login");
