@@ -37,37 +37,24 @@ The standalone packaging paths support Apple Silicon macOS and Windows x64. They
 
 ## macOS signing and notarization
 
-A Developer ID signature alone still leaves Gatekeeper blocking the first launch of a downloaded build, so distribution outside the App Store needs both signing and notarization:
+Signing and notarization are **not** part of this repository. This client builds artifacts; whether
+they are signed with a Developer ID, notarized, and accepted by Gatekeeper is decided and verified by
+the publisher's packaging scripts in the internal parent repository
+(`scripts/ci/release-macos.sh`). Keeping it out of the public client avoids shipping distribution
+credentials and certificate policy in the open repository.
 
-```sh
-APPLE_SIGNING_IDENTITY=<40-hex SHA-1 fingerprint> \
-APPLE_API_KEY=<key id> \
-APPLE_API_ISSUER=<issuer id> \
-APPLE_API_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_<key id>.p8 \
-pnpm desktop:bundle --build-frontend --bundles app,dmg
-```
+The build exposes two hooks instead of implementing signing:
 
-- `APPLE_SIGNING_IDENTITY` accepts a certificate name or its 40-character SHA-1 fingerprint. Reissued certificates keep the same name, so a name can match several keychain entries and `codesign` reports `ambiguous`; a fingerprint never does. Omitting the variable (or setting `-`) produces an ad-hoc signature. `scripts/build-desktop.mjs` reads it from the environment, so editing `bundle.macOS.signingIdentity` in `tauri.conf.json` is not enough.
-- Notarization uses `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH`, or `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` with an app-specific password. Supplying a partial pair fails before compilation.
-- Native modules inside `desktop-host.tar.gz` (currently dsh's `node-addon-require-builtin`) sit outside the bundle, so tauri never signs them. The build signs them with the same identity **before** archiving, which is why the archive hash in `desktop-runtime.json` is computed afterwards. Without that, a Developer ID `woohaa-node` cannot load them ("mapping process and mapped file have different Team IDs") and notarization rejects unsigned nested binaries.
-- `desktop/entitlements.plist` carries `com.apple.security.cs.disable-library-validation` as well as `allow-jit`: ad-hoc builds cannot sign the extracted addon at all, and the host must still load it there.
-- Tauri notarizes and staples the app before building the DMG. The packaging script separately submits each DMG with `notarytool submit --wait`, requires `Accepted`, then staples and validates it **before** computing manifest hashes or copying bundles. A rejected submission reports Apple's notarization log and stops the build.
-- The build verifies the result instead of trusting the bundler log: `codesign --verify --deep --strict`, a `Developer ID Application` authority plus `TeamIdentifier`, and `stapler validate` for **each** app and DMG. `spctl --assess` is diagnostic (app: `exec`; DMG: `open`), since local policy/cache can affect its result. An unnotarized build records the gap in `manifest.json` notes rather than claiming success.
+| Hook | Runs | Argument |
+| --- | --- | --- |
+| `WOOHAA_DESKTOP_HOST_PREPARE_COMMAND` | before `desktop-host.tar.gz` is created | resource root |
+| `WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND` | after bundling, before hashes and `--copy` | bundle root, release id, bundle kinds |
 
-CI uses `scripts/ci/release-macos.sh` in the parent repository. The Developer ID certificate+key (`developer-id.p12` plus `developer-id.p12.password`), the Apple ID (`apple-id`) and its app-specific password (`apple-app-password`) ship in `scripts/ci/signing/`, so a CI run needs no injected secrets; the script loads them at startup and exports `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID` itself. That directory lives in the internal parent repository — never in this public submodule, where `.gitignore` blocks `*.p12` and `*.p8`. Individual developer accounts often have no App Store Connect "Team Keys" page, which is why notarization uses an Apple ID app-specific password rather than an API key. After building, the script re-checks the app, DMG and nested modules; a missing ticket or invalid signature stops the build before upload.
-
-Update builds require an explicit HTTPS `WOOHAA_DESKTOP_UPDATE_ENDPOINT`, matching `WOOHAA_DESKTOP_UPDATE_PUBLIC_KEY` and updater signing key. `pnpm desktop:release --build-frontend` reads the private key from `WOOHAA_DESKTOP_SIGNING_KEY` or `~/.config/woohaa-release/updater.key`, with the public key in the adjacent `.pub` file. Supply an endpoint such as `https://updates.example.com/macos-arm64/latest.json`. Upload versioned artifacts first and the index last; keep signing keys outside the repository and upload directory.
-
-`build-profile.json` already pins an updater public key, so packaging always marks the bundle as an updater artifact and `tauri build` fails with `A public key has been found, but no private key` unless `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) is set. Create the pair once and keep it out of Git:
-
-```sh
-mkdir -p ~/.config/woohaa-release && chmod 700 ~/.config/woohaa-release
-npx tauri signer generate --write-keys ~/.config/woohaa-release/updater.key
-```
-
-The printed public key replaces `desktop.update.publicKeys[0]` in `build-profile.json`; losing the private key permanently breaks the update path for already-installed clients, because the installed app only trusts the pinned public key.
-
-A configured application checks updates before starting the data-writing host. Failed checks allow the installed version to run; a discovered update must finish downloading, validating and installing before entering the application. Download or installation failure offers retry or exit.
+- **Host hook.** Native modules inside `desktop-host.tar.gz` (currently dsh's `node-addon-require-builtin`) sit outside the bundle, so tauri never signs them. The publisher signs them here, *before* archiving, because the archive hash written to `desktop-runtime.json` is computed right after. Without that, a Developer ID `woohaa-node` cannot load them ("mapping process and mapped file have different Team IDs").
+- **Artifact hook.** Notarization and stapling change artifact bytes, so they must finish before `manifest.json` hashes are computed and before `--copy` snapshots the bundles.
+- `APPLE_SIGNING_IDENTITY` (and the notary environment variables) are passed through to tauri unchanged; omitting the identity produces an ad-hoc build. `scripts/build-desktop.mjs` never inspects certificates.
+- `desktop/entitlements.plist` carries `com.apple.security.cs.disable-library-validation` as well as `allow-jit`: an ad-hoc build cannot sign the extracted addon, and the host must still load it. This is an app capability, so it stays here.
+- `manifest.json` records which hooks ran (`hostPackage.hostPrepareCommand`) and states plainly that signing and Gatekeeper conclusions live in the publisher's release record, rather than claiming an outcome this repository did not verify.
 
 ## Data and verification
 

@@ -8,12 +8,12 @@
  *   pnpm desktop:bundle --bundles app --debug --dry-run
  *   pnpm desktop:icons                        # 由 desktop/icons/source.png 重建图标集
  *
- * macOS 签名/公证：
- * - `APPLE_SIGNING_IDENTITY` 给 40 位 SHA-1 指纹（同名证书会歧义）即用 Developer ID 签名；
- *   不给或给 `-` 是 ad-hoc。
- * - App 公证由 tauri 驱动，DMG 随后独立提交 `notarytool` 并装订，需要 `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH`
- *   或 `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID`。
- * - 宿主动作树里的 Mach-O 在 bundle 之外，由本脚本在打归档前用同一身份签掉。
+ * macOS 签名与公证**不在本仓库**：本脚本只负责构建，产物是否需要 Developer ID 签名、
+ * 如何公证、Gatekeeper 是否放行，都由发行方（私有仓的发布脚本）决定并校验。
+ * 发行方需要介入时用这两个口子，公开仓不感知证书细节：
+ * - `APPLE_SIGNING_IDENTITY` 透传给 tauri（缺省 `-`，即 ad-hoc）。
+ * - `WOOHAA_DESKTOP_HOST_PREPARE_COMMAND` 在打 `desktop-host.tar.gz` **之前**执行，参数是
+ *   资源根目录；`desktop-host.tar.gz` 里的原生模块不在 bundle 签名范围内，需要在此时签掉。
  *
  * 边界（不夸大）：
  * - Windows 仍不产出 Authenticode、Linux 仍不产出 apt/rpm 仓库。更新源由 build profile 决定。
@@ -54,16 +54,6 @@ import {
   validateIconSource
 } from "./lib/desktop-release.mjs";
 import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
-import { notarizeMacDiskImages } from "./lib/macos-notarization.mjs";
-import {
-  ADHOC_IDENTITY,
-  describeMacSigning,
-  findMachOFiles,
-  notarizationCredentials,
-  notarizationGap,
-  parseCodeSigningIdentities,
-  resolveMacSigning
-} from "./lib/macos-signing.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -98,13 +88,12 @@ const usage = `Tauri 桌面发行打包
   --dry-run            只打印将执行的步骤与配置，不写盘、不编译
   --help               显示帮助
 
-macOS 签名与公证（环境变量）：
-  APPLE_SIGNING_IDENTITY            40 位 SHA-1 指纹或证书名；缺省为 ad-hoc
-  APPLE_API_KEY /
-  APPLE_API_ISSUER /
-  APPLE_API_KEY_PATH                App Store Connect API Key（推荐）
-  APPLE_ID / APPLE_PASSWORD /
-  APPLE_TEAM_ID                     Apple ID + App 专用密码
+macOS 签名与公证（由发行方脚本负责，本仓库只透传）：
+  APPLE_SIGNING_IDENTITY              透传给 tauri；缺省为 ad-hoc（-）
+  APPLE_API_KEY / APPLE_API_ISSUER /
+  APPLE_API_KEY_PATH                  或 APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+                                      tauri 据此对 .app 做公证
+  WOOHAA_DESKTOP_HOST_PREPARE_COMMAND 打宿主归档前执行，参数为资源根目录
 `;
 
 function fail(message) {
@@ -133,17 +122,6 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: root, env: childEnv(env), stdio: "inherit", ...rest });
   if (result.error) throw new Error(`无法启动 ${command}：${result.error.message}`);
   if (result.status !== 0) throw new Error(`${command} 退出码 ${result.status ?? "null"}`);
-}
-
-/**
- * 只需要输出的探测命令；非零退出时返回 null。
- *
- * 合并 stderr：`codesign -dvv`、`spctl`、`stapler` 都把结果写进 stderr。
- */
-function capture(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: root, env: childEnv(options.env), encoding: "utf8" });
-  if (result.error || result.status !== 0) return null;
-  return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
 function runManager(args) {
@@ -227,93 +205,23 @@ function buildNativeTools() {
 }
 
 /**
- * 解析本次 macOS 签名与公证。
+ * 归档前的可选外部钩子。
  *
- * 只在真正构建前判定：证书缺失、同名证书歧义、公证凭据半套都在这里立刻失败，
- * 而不是等到 tauri 打完 300 MiB 才报 ambiguous。
+ * 打包流程本身不含签名判断：发行方（私有仓的发布脚本）若需要给 `desktop-host.tar.gz`
+ * 里的原生模块签名，就在 `WOOHAA_DESKTOP_HOST_PREPARE_COMMAND` 里给一条命令，
+ * 本脚本在**创建归档之前**执行它并把资源根目录作为唯一参数传进去。
+ *
+ * 必须是「先签再归档」：归档哈希随后写入 `desktop-runtime.json`，归档生成后再改动树
+ * 会让运行时的 SHA256 校验失败。未配置时不做任何事，公开仓因此保持自足。
  */
-function macSigning({ env = process.env } = {}) {
-  if (process.platform !== "darwin") return null;
-  const requested = env.APPLE_SIGNING_IDENTITY ?? ADHOC_IDENTITY;
-  const notarization = requested === ADHOC_IDENTITY ? null : notarizationCredentials(env);
-  const identitiesOutput = capture("security", ["find-identity", "-v", "-p", "codesigning"]) ?? "";
-  return resolveMacSigning({ identity: requested, notarization, identities: parseCodeSigningIdentities(identitiesOutput) });
-}
-
-/**
- * 签宿主动作树里的 Mach-O。
- *
- * `desktop-host.tar.gz` 里的原生模块（当前是 dsh 的 `node-addon-require-builtin`）在 bundle 之外，
- * tauri 的签名走不到；未签的 ad-hoc 模块会被签好的 `woohaa-node` 以
- * 「mapping process and mapped file have different Team IDs」拒绝加载。所以要在打归档**之前**
- * 用同一身份签掉，否则归档哈希也会白算。
- *
- * ad-hoc 构建下不签：ad-hoc 主程序本来就加载不了任何带团队标识的模块，签名反而更糟。
- */
-function signHostBinaries(resourceRoot, signing) {
-  if (!signing || signing.adhoc) return [];
-  const binaries = findMachOFiles(resourceRoot);
-  for (const binary of binaries) {
-    run("/usr/bin/codesign", ["--force", "--timestamp", "--options", "runtime", "--sign", signing.identity, binary]);
-  }
-  console.log(`[desktop] 已用 ${signing.fingerprint} 签 ${binaries.length} 个宿主原生模块`);
-  return binaries;
-}
-
-/**
- * 构建后核对签名结果，而不是只信任打包日志。
- *
- * 三件事：产物确实带 Developer ID 与团队标识、公证票据已装订、Gatekeeper 实际放行。
- * `spctl` 是唯一能证明「用户双击能开」的检查；没有公证它必然 rejected，所以只在公证过的
- * 情况下降级为失败——未公证时把结论留在 manifest 的 notes 里，不假装通过。
- */
-function verifyMacSignature({ artifacts, signing }) {
-  const app = artifacts.find(artifact => artifact.path.endsWith(".app"));
-  const dmg = artifacts.find(artifact => artifact.path.endsWith(".dmg"));
-  if (!signing || signing.adhoc) {
-    console.log("[desktop] macOS 签名：ad-hoc，不检查 Developer ID 与公证");
-    return;
-  }
-  if (!app && !dmg) {
-    console.log("[desktop] 本次未产出 .app/.dmg（--no-bundle），跳过签名与公证核对");
-    return;
-  }
-  if (!app) {
-    console.log("[desktop] 未产出 .app，跳过 Developer ID 核对（只产出了 DMG）");
-  } else {
-    const details = capture("/usr/bin/codesign", ["-dvv", app.path]) ?? "";
-    if (!/^Authority=Developer ID Application: /m.test(details)) {
-      throw new Error(`产物没有 Developer ID 签名：${relative(app.path)}\n${details.split("\n").slice(0, 8).join("\n")}`);
-    }
-    if (!/^TeamIdentifier=\S+/m.test(details)) throw new Error(`产物缺少 TeamIdentifier：${relative(app.path)}`);
-  }
-
-  // Tauri 公证并装订 App；随后生成的 DMG 由 notarizeMacDiskImages 独立公证。
-  // 每个分发目标都必须有票据，不能用 App 的票据代替 DMG 的票据。
-  //
-  // 判据是 `stapler validate`（读包内票据，不看缓存），**不是** `spctl`：spctl 查本机
-  // Gatekeeper 缓存，CI 机器评估过同一路径的旧 ad-hoc 包后会持续返回 rejected，
-  // 曾把已经 Accepted 并装订好的产物误判成失败。spctl 只作诊断输出。
-  const targets = [app, dmg].filter(Boolean);
-  const stapled = targets.filter(target => capture("/usr/bin/xcrun", ["stapler", "validate", target.path]) !== null);
-  for (const target of targets) {
-    const assessment = capture("/usr/bin/spctl", target.path.endsWith(".dmg")
-      ? ["--assess", "--type", "open", "--context", "context:primary-signature", "-vv", target.path]
-      : ["--assess", "--type", "exec", "-vv", target.path]);
-    if (!assessment) console.log(`[desktop] spctl 未放行 ${target.name}（缓存可能过期；以已装订票据为准）`);
-  }
-  if (signing.notarization) {
-    const missing = targets.filter(target => !stapled.includes(target));
-    if (missing.length > 0) {
-      throw new Error(
-        `已公证的产物没有装订票据：${missing.map(target => relative(target.path)).join(" / ")}；` +
-          "确认公证返回 Accepted 且 stapler staple 成功。"
-      );
-    }
-    console.log(`[desktop] 公证核对：票据已装订 ${stapled.map(target => target.name).join(" / ")}`);
-    return;
-  }
-  console.log(`[desktop] 公证核对：未公证（票据 ${stapled.length}/${targets.length}），首次打开会被拦截`);
+function runHostPrepareCommand(resourceRoot) {
+  const command = process.env.WOOHAA_DESKTOP_HOST_PREPARE_COMMAND?.trim();
+  if (!command) return null;
+  console.log(`[desktop] 执行归档前钩子：${command}`);
+  const result = spawnSync(command, [resourceRoot], { cwd: root, env: childEnv(), stdio: "inherit" });
+  if (result.error) throw new Error(`归档前钩子启动失败：${result.error.message}`);
+  if (result.status !== 0) throw new Error(`归档前钩子退出码 ${result.status ?? "null"}`);
+  return command;
 }
 
 function frontendBuildSteps(standalone) {
@@ -386,9 +294,6 @@ async function runBuild(options) {
     const trustConfig = resolveDesktopTrustConfig({ env: process.env, build: resolvedReleaseId, allowUnmanaged: buildProfile.resolved.allowUnmanagedExtensionTrust });
     console.log(`[desktop] extension trust: ${trustConfig ? "v2 pinned root" : "v1 compatibility (explicit build profile or environment)"}`);
   }
-  // 签名/公证在编译之前判定：证书歧义与凭据半套不该等到 tauri 打完包才报。
-  const signing = options.dryRun ? null : macSigning();
-  if (signing) console.log(describeMacSigning(signing));
   const defines = buildDefines(buildProfile.resolved);
   if (defines && !process.env.WOOHAA3_DEFINES?.trim()) {
     process.env.WOOHAA3_DEFINES = JSON.stringify(defines);
@@ -430,13 +335,14 @@ async function runBuild(options) {
     override.build = { ...override.build, frontendDist: process.env.WOOHAA_DESKTOP_PROJECT_DIR ? startupFrontend : tauriFrontendDist(startupFrontend, desktopDir) };
     override.plugins = standalone.plugins;
     // 必须先签再打归档：未签的原生模块会让签好的 woohaa-node 加载失败，而归档哈希是在打包时定死的。
-    const signedNested = signHostBinaries(prepared.resourceRoot, signing);
+    // 先跑外部钩子再打归档：签名等改动必须落在归档里，归档哈希随后才写入 runtime 配置。
+    const prepareCommand = runHostPrepareCommand(prepared.resourceRoot);
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
     fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
     fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(endpoint ? { updater: { endpoint, publicKey } } : {}) }));
     override.bundle = { ...override.bundle, ...standalone.bundle, resources: { ...override.bundle?.resources, ...standalone.bundle.resources, [runtimeFile]: "desktop-runtime.json", [hostArchive.path]: "desktop-host.tar.gz", [path.join(root, "bevy/assets/")]: "native-assets/" } };
-    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured", ...(signing && !signing.adhoc ? { signedNestedBinaries: signedNested.length } : {}) };
+    hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured", ...(prepareCommand ? { hostPrepareCommand: prepareCommand } : {}) };
   }
   let nativeComposition = null;
   if (process.env.WOOHAA_DESKTOP_COMPOSITION_IDENTITY) {
@@ -456,7 +362,8 @@ async function runBuild(options) {
     console.log(`  前端 dist：${relative(frontendDist)}`);
     console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
     console.log(`  默认值资源：${relative(defaultsPath)}`);
-    console.log(`  macOS 签名：${process.env.APPLE_SIGNING_IDENTITY ? "APPLE_SIGNING_IDENTITY 已设置" : "ad-hoc（APPLE_SIGNING_IDENTITY 未设置）"}`);
+    console.log(`  APPLE_SIGNING_IDENTITY：${process.env.APPLE_SIGNING_IDENTITY ? "已设置（透传 tauri）" : "未设置（ad-hoc）"}`);
+    console.log(`  归档前钩子：${process.env.WOOHAA_DESKTOP_HOST_PREPARE_COMMAND?.trim() || "（未配置）"}`);
     console.log(`  ${JSON.stringify(buildDefaultsDocument({ uiUrl: options.uiUrl }), null, 2).split("\n").join("\n  ")}`);
     console.log(`  manifest：${relative(outDirPath(resolved))}/manifest.json`);
     console.log(`  $ ${formatCommand(process.execPath, [cli.entry, ...args])}   (cwd=${relative(desktopDir)})`);
@@ -492,10 +399,9 @@ async function runBuild(options) {
       const bundledNode = path.join(app.path, "Contents/MacOS/woohaa-node");
       if (fs.existsSync(bundledNode)) run(bundledNode, ["--input-type=module", "-e", "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(':memory:'); db.close(); console.log('bundled Node',process.versions.node)"]);
     }
-    // stapling mutates the DMG: finish it before hashing or copying any artifact.
-    notarizeMacDiskImages({ artifacts: collected, signing });
-    verifyMacSignature({ artifacts: collected, signing });
   }
+  // 公证/装订会改字节，必须在哈希与复制之前完成。
+  runArtifactFinalizeCommand({ bundleRoot: path.join(desktopDir, "target"), releaseId: resolved.resolvedReleaseId, artifacts: collected });
   const artifacts = [];
   for (const artifact of collected) {
     const { sha256, bytes } = await hashPath(artifact.path);
@@ -547,12 +453,10 @@ async function runBuild(options) {
     target: options.target,
     debug: options.debug,
     notes: [
+      // 本仓库不判断发行签名：签名、公证与 Gatekeeper 结论由发行方的打包脚本负责，并写入
+      // 它自己的发布记录。这里只声明「本次构建本身做了什么」。
       platform === "darwin"
-        ? signing && !signing.adhoc
-          ? signing.notarization
-            ? `Developer ID 已签名并公证（${signing.name}）。`
-            : `Developer ID 已签名但未公证（${signing.name}）；${notarizationGap(signing)}`
-          : "ad-hoc 签名；没有 Developer ID 与公证，首次打开会被 Gatekeeper 拦截。"
+        ? "macOS 签名/公证由发行方脚本负责；本构建不判断产物是否已被 Developer ID 签名或公证。"
         : "未签名：没有 Authenticode（Windows）或 apt/rpm 仓库与签名（Linux）。",
       "未启用 gpu-debug：发行构建不携带 Bevy pass 资源名。",
       hostPackage ? "本机宿主已装配；真实启动验收记录独立保存。" : "显式外部 UI 调试模式：本机宿主未装配。"
@@ -574,6 +478,26 @@ async function runBuild(options) {
 function relative(target) {
   const value = path.relative(root, target);
   return value.startsWith("..") ? target : value;
+}
+
+/**
+ * 产物就绪、尚未哈希时的可选外部钩子。
+ *
+ * 公证和装订会改动产物字节，必须在 sha256 与 `--copy` 之前完成，否则 manifest 里记录的
+ * 哈希和上传的包对不上。发行方用 `WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND` 接管，
+ * 参数依次是 bundle 根目录、releaseId。
+ *
+ * 未配置时不做任何事：公开仓的普通构建不需要公证。
+ */
+function runArtifactFinalizeCommand({ bundleRoot, releaseId, artifacts }) {
+  const command = process.env.WOOHAA_DESKTOP_ARTIFACT_FINALIZE_COMMAND?.trim();
+  if (!command) return null;
+  const kinds = [...new Set(artifacts.map(artifact => artifact.kind))].join(",");
+  console.log(`[desktop] 执行产物收尾钩子：${command}`);
+  const result = spawnSync(command, [bundleRoot, releaseId, kinds], { cwd: root, env: childEnv(), stdio: "inherit" });
+  if (result.error) throw new Error(`产物收尾钩子启动失败：${result.error.message}`);
+  if (result.status !== 0) throw new Error(`产物收尾钩子退出码 ${result.status ?? "null"}`);
+  return command;
 }
 
 async function main() {
