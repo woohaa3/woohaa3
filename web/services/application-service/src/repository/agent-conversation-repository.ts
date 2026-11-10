@@ -88,6 +88,8 @@ export type AgentConversationStore = {
    */
   recordTurnAuthority(authority: TurnAuthorityRecord): boolean;
   getTurnAuthority(turnId: string): TurnAuthorityRecord | undefined;
+  /** 执行器派生 turnId 与会话账本 turnId 不同时，按 (owner, requestId) 读同一份授权。 */
+  getTurnAuthorityByRequest(owner: string, requestId: string): TurnAuthorityRecord | undefined;
   revokeTurnAuthority(turnId: string, now: string): void;
   /** 记录该回合并发通道实际声明的 host-call 方法（只增不减，便于接管校验）。 */
   recordTurnAuthorityHostMethods(turnId: string, methods: readonly string[]): void;
@@ -545,6 +547,11 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
 
   getTurnAuthority(turnId: string): TurnAuthorityRecord | undefined {
     const row = this.db.prepare("SELECT * FROM agent_conversation_turn_authority WHERE turn_id = ?").get(turnId) as TurnAuthorityRow | undefined;
+    return row ? decodeTurnAuthority(row) : undefined;
+  }
+
+  getTurnAuthorityByRequest(owner: string, requestId: string): TurnAuthorityRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM agent_conversation_turn_authority WHERE owner = ? AND request_id = ? ORDER BY created_at DESC LIMIT 1").get(owner, requestId) as TurnAuthorityRow | undefined;
     return row ? decodeTurnAuthority(row) : undefined;
   }
 

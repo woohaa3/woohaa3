@@ -75,6 +75,7 @@ it("reveals a large anchor arriving during locate, then yields to user navigatio
     node = {...node,top:200};
     frame(); frame();
     expect(panViewportTo).toHaveBeenCalledOnce();
+    expect((panViewportTo.mock.calls[0] as unknown[])[1]).toEqual({durationMs:240});
     expect(dock.style.visibility).toBe("visible");
     expect(Number.parseFloat(dock.style.maxHeight)).toBeGreaterThanOrEqual(360);
     // A later locate frame may replace its preview; the dock still reserves room.
@@ -84,6 +85,64 @@ it("reveals a large anchor arriving during locate, then yields to user navigatio
     node = {...node,top:200}; frame();
     expect(panViewportTo).toHaveBeenCalledTimes(2);
     expect(dock.style.visibility).toBe("hidden");
+  } finally {
+    await act(async () => root.unmount());
+    document.body.innerHTML = ""; vi.restoreAllMocks(); vi.unstubAllGlobals();
+  }
+});
+
+it("超大锚点关闭避让时贴底显示，不移动画布", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  document.body.innerHTML = '<div class="app"><canvas id="bevy-canvas"></canvas><main></main></div>';
+  vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => { fn(0); return 1; });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({left:0,top:0,width:1280,height:800} as DOMRect);
+  let frame = () => {};
+  const node = {left:200,top:600,width:1800,height:1100};
+  const panViewportTo = vi.fn();
+  const runtime = {
+    nodeScreenRect: () => node,
+    controller: () => ({viewport: () => ({x:0,y:0,zoom:1}),panViewportTo}),
+    subscribeViewport: () => () => {},
+    subscribeFrame: (fn: () => void) => { frame = fn; return () => {}; }
+  };
+  const root = createRoot(document.querySelector("main")!);
+  try {
+    await act(async () => root.render(createElement(ExecutionPanelSurface, {nodeId:"area",presentation:"compact",runtime:runtime as never,revealAnchor:false,children:"composer"})));
+    const dock = document.querySelector<HTMLElement>(".node-execution-dock")!;
+    frame(); frame();
+    expect(panViewportTo).not.toHaveBeenCalled();
+    expect(dock.style.visibility).toBe("visible");
+    expect(dock.dataset.placement).toBe("edge");
+  } finally {
+    await act(async () => root.unmount());
+    document.body.innerHTML = ""; vi.restoreAllMocks(); vi.unstubAllGlobals();
+  }
+});
+
+it("补间进行中不逐帧重置平移目标", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  document.body.innerHTML = '<div class="app"><canvas id="bevy-canvas"></canvas><main></main></div>';
+  vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => { fn(0); return 1; });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({left:0,top:0,width:1280,height:800} as DOMRect);
+  let frame = () => {};
+  // 视口与锚点都不动：模拟过渡已经开始但尚未推进的若干帧。
+  const node = {left:200,top:600,width:600,height:300};
+  const panViewportTo = vi.fn();
+  const runtime = {
+    nodeScreenRect: () => node,
+    controller: () => ({viewport: () => ({x:0,y:0,zoom:1}),panViewportTo}),
+    subscribeViewport: () => () => {},
+    subscribeFrame: (fn: () => void) => { frame = fn; return () => {}; }
+  };
+  const root = createRoot(document.querySelector("main")!);
+  try {
+    await act(async () => root.render(createElement(ExecutionPanelSurface, {nodeId:"area",presentation:"compact",runtime:runtime as never,children:"composer"})));
+    frame(); frame(); frame();
+    expect(panViewportTo).toHaveBeenCalledOnce();
   } finally {
     await act(async () => root.unmount());
     document.body.innerHTML = ""; vi.restoreAllMocks(); vi.unstubAllGlobals();

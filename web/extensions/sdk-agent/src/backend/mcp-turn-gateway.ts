@@ -13,6 +13,37 @@ function decode(text: string): Json {
   throw new Error("MCP protocol mismatch");
 }
 
+/** 工具过程投影是有界摘要：只保留可行动原因，不搬运完整上游 payload。 */
+const DETAIL_LIMIT = 400;
+const bounded = (value: string | undefined): string | undefined => {
+  const text = value?.replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  return text.length > DETAIL_LIMIT ? `${text.slice(0, DETAIL_LIMIT)}…` : text;
+};
+
+/** MCP 工具失败的真实原因：优先结构化回执的 code/message，其次可读文本。 */
+function resultFailureDetail(result: Json | undefined): string | undefined {
+  const structured = result?.structuredContent as Json | undefined;
+  const message = typeof structured?.message === "string" ? structured.message : undefined;
+  if (message) return bounded(typeof structured?.code === "string" ? `[${structured.code}] ${message}` : message);
+  const content = result?.content;
+  if (Array.isArray(content)) {
+    const text = (content as Json[]).filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text as string).join("\n");
+    return bounded(text);
+  }
+  return undefined;
+}
+
+function rpcErrorDetail(error: Json | undefined): string | undefined {
+  const message = typeof error?.message === "string" ? error.message : undefined;
+  if (!message) return undefined;
+  const code = typeof error?.code === "number" || typeof error?.code === "string" ? String(error.code) : undefined;
+  return bounded(code ? `[${code}] ${message}` : message);
+}
+
+/** 已转成 JSON-RPC 错误的工具拒绝：保留具体原因，外层不再用固定文案覆盖。 */
+class ToolCallRejected extends Error {}
+
 export async function createMcpTurnGateway(options: {
   input: AgentAdapterRunInput; upstream: string; grant: string;
   valid: () => boolean | Promise<boolean>;
@@ -28,9 +59,20 @@ export async function createMcpTurnGateway(options: {
   let closed = false;
   let firstWrite = true;
   const calls = new Set<string>();
+  // 每个 callId 只结算一次：重试/重复请求不产生第二条完成回执。
+  const settled = new Set<string>();
   const pending = new Set<Promise<unknown>>();
   const completed = new Map<string, { identity: string; outcome: Promise<Json> }>();
   const receipts: Array<{ canvasId: string; nodeId?: string; commandId: string; revision?: number }> = [];
+  // 模型是否真的尝试过写入：用于把「只读没写」和「写了但没成功」分开归因。
+  let attemptedWrites = 0;
+  /** 网关真实收到的工具名（含被拒绝的）；用来判断模型声明的调用有没有送达。 */
+  const receivedTools = new Set<string>();
+  const settle = (call: { tool: string; callId: string }, ok: boolean, summary?: string): void => {
+    if (settled.has(call.callId)) return;
+    settled.add(call.callId);
+    options.input.emit({ type: "tool-completed", ...call, ok, ...(summary ? { summary } : {}) });
+  };
   const upstreamCall = async (method: string, params?: unknown) => {
     // 在途工具工作不设应用固定时长；已受理的写入必须排空并登记权威回执，因此这里不把本回合
     // 的取消信号直接绑到单次请求上（取消后由 drain/close 收敛回执，见下面 tools/call 分支）。
@@ -71,70 +113,97 @@ export async function createMcpTurnGateway(options: {
       else if (message.method === "ping") result = {};
       else if (message.method === "tools/list") result = { tools: registered };
       else if (message.method === "tools/call") {
-        const name = message.params?.name;
-        if (!tools.some((tool) => tool.name === name)) throw new Error("tool-not-allowed");
-        const args: Json = { ...(message.params.arguments ?? {}) };
-        const target = options.input.intent;
-        if (args.canvasId !== undefined && args.canvasId !== options.input.canvasId) throw new Error("target-mismatch");
-        const schema = tools.find((tool) => tool.name === name)?.parameters;
-        const properties = schema?.properties as Record<string, unknown> | undefined;
-        if (properties?.canvasId) args.canvasId = options.input.canvasId;
-        // World tools operate inside a host-issued scope; the scope/card node id is
-        // not the model operation target, so it must not be injected as nodeId.
-        if (!world && target.nodeId) {
-          if (args.nodeId !== undefined && args.nodeId !== target.nodeId) throw new Error("target-mismatch");
-          if (properties?.nodeId) args.nodeId = target.nodeId;
-        }
-        if (!world) {
-          for (const field of ["cameraId"] as const) {
-            if (target[field] && args[field] !== undefined && args[field] !== target[field]) throw new Error("target-mismatch");
-            if (target[field] && properties?.[field]) args[field] = target[field];
-          }
-        }
-        const write = !name.startsWith("get_");
-        if (write && firstWrite) {
-          if (options.validateTarget && !(await options.validateTarget())) throw new Error("target-precondition-failed");
-          firstWrite = false;
-        }
-        if (name === "submit_model_scripts") {
-          if (!Array.isArray(args.items) || args.items.some((item: Json) => item.nodeId !== target.nodeId)) throw new Error("target-mismatch");
-          for (const item of args.items) if (target.expectedContentHash) item.expectedModelContentHash = target.expectedContentHash;
-        }
-        if (name === "submit_model_script" && target.expectedContentHash) args.expectedModelContentHash = target.expectedContentHash;
-        // Each SDK call gets a stable operation identity; transport retries cannot create another write.
+        const name = typeof message.params?.name === "string" ? message.params.name : "tool";
         const callId = String(message.id);
-        if (properties?.requestId) args.requestId = `${options.input.requestId}:${callId}`;
         const call = { tool: name, callId };
+        receivedTools.add(name);
         if (!calls.has(callId)) { calls.add(callId); options.input.emit({ type: "tool-started", ...call }); }
-        const identity = JSON.stringify({ name, args });
-        if (closed || options.input.signal.aborted || !(await options.valid())) throw new Error("grant-revoked");
-        const previous = completed.get(callId);
-        if (previous && previous.identity !== identity) throw new Error("call-id-conflict");
-        // change: 2026-10-22-remove-agent-execution-limits —— 这里原本按 completed.size 达 24
-        // 拒绝新 callId。调用次数不是权限：继续用稳定 callId 做幂等去重与回执收敛即可。
-        const operation = previous?.outcome ?? upstreamCall("tools/call", { name, arguments: args }).then((outcome) => {
-          if (outcome.error) throw new Error("tool-upstream-rejected");
-          const evidence = outcome.result?.structuredContent;
-          const ok = outcome.result?.isError !== true && evidence?.ok !== false;
-          options.input.emit({ type: "tool-completed", ...call, ok });
-          if (write && ok && evidence?.ok === true && typeof evidence.commandId === "string" && evidence.canvasId === options.input.canvasId && !receipts.some((receipt) => receipt.commandId === evidence.commandId)) {
-            receipts.push({ canvasId: evidence.canvasId, ...(typeof evidence.nodeId === "string" ? { nodeId: evidence.nodeId } : {}), commandId: evidence.commandId, ...(typeof evidence.revision === "number" ? { revision: evidence.revision } : {}) });
+        // 每个被拒分支都把真实原因写进完成回执，再以 JSON-RPC 错误返回给模型：
+        // 用户看得到失败原因，模型也能据此修正，而不是只收到一句通用拒绝。
+        const reject = (reason: string, detail: string): never => {
+          const text = `[${reason}] ${detail}`;
+          settle(call, false, bounded(text));
+          throw new ToolCallRejected(text);
+        };
+        try {
+          if (!tools.some((tool) => tool.name === name)) reject("tool-not-allowed", "本轮没有向助手开放这个工具");
+          const args: Json = { ...(message.params.arguments ?? {}) };
+          const target = options.input.intent;
+          if (args.canvasId !== undefined && args.canvasId !== options.input.canvasId) reject("target-mismatch", "工具参数指定的画布与本轮画布不一致");
+          const schema = tools.find((tool) => tool.name === name)?.parameters;
+          const properties = schema?.properties as Record<string, unknown> | undefined;
+          if (properties?.canvasId) args.canvasId = options.input.canvasId;
+          // World tools operate inside a host-issued scope; the scope/card node id is
+          // not the model operation target, so it must not be injected as nodeId.
+          if (!world && target.nodeId) {
+            if (args.nodeId !== undefined && args.nodeId !== target.nodeId) reject("target-mismatch", "工具参数指定的节点与本轮固定目标不一致");
+            if (properties?.nodeId) args.nodeId = target.nodeId;
           }
-          return outcome;
-        });
-        if (!previous) {
-          completed.set(callId, { identity, outcome: operation });
-          pending.add(operation);
-          void operation.finally(() => pending.delete(operation)).catch(() => undefined);
+          if (!world) {
+            for (const field of ["cameraId"] as const) {
+              if (target[field] && args[field] !== undefined && args[field] !== target[field]) reject("target-mismatch", "工具参数指定的镜头与本轮固定目标不一致");
+              if (target[field] && properties?.[field]) args[field] = target[field];
+            }
+          }
+          const write = !name.startsWith("get_");
+          if (write) attemptedWrites++;
+          if (write && firstWrite) {
+            if (options.validateTarget && !(await options.validateTarget())) reject("target-precondition-failed", "目标内容已变化，本轮写入前提不成立");
+            firstWrite = false;
+          }
+          if (name === "submit_model_scripts") {
+            if (!Array.isArray(args.items) || args.items.some((item: Json) => item.nodeId !== target.nodeId)) reject("target-mismatch", "提交项与本轮固定模型目标不一致");
+            for (const item of args.items) if (target.expectedContentHash) item.expectedModelContentHash = target.expectedContentHash;
+          }
+          if (name === "submit_model_script" && target.expectedContentHash) args.expectedModelContentHash = target.expectedContentHash;
+          // Each SDK call gets a stable operation identity; transport retries cannot create another write.
+          if (properties?.requestId) args.requestId = `${options.input.requestId}:${callId}`;
+          const identity = JSON.stringify({ name, args });
+          if (closed || options.input.signal.aborted || !(await options.valid())) reject("grant-revoked", "本轮授权已失效或已停止");
+          const previous = completed.get(callId);
+          if (previous && previous.identity !== identity) reject("call-id-conflict", "同一调用 id 使用了不同参数");
+          // change: 2026-10-22-remove-agent-execution-limits —— 这里原本按 completed.size 达 24
+          // 拒绝新 callId。调用次数不是权限：继续用稳定 callId 做幂等去重与回执收敛即可。
+          const operation = previous?.outcome ?? upstreamCall("tools/call", { name, arguments: args }).then((outcome) => {
+            if (outcome.error) {
+              // 上游以 JSON-RPC 错误拒绝：保留原因，不缓存成没有详情的异常。
+              settle(call, false, rpcErrorDetail(outcome.error) ?? "[upstream-rejected] 上游工具拒绝本次调用");
+              return outcome;
+            }
+            const evidence = outcome.result?.structuredContent;
+            const ok = outcome.result?.isError !== true && evidence?.ok !== false;
+            settle(call, ok, ok ? undefined : resultFailureDetail(outcome.result) ?? "工具执行失败，宿主没有返回原因");
+            if (write && ok && evidence?.ok === true && typeof evidence.commandId === "string" && evidence.canvasId === options.input.canvasId && !receipts.some((receipt) => receipt.commandId === evidence.commandId)) {
+              receipts.push({ canvasId: evidence.canvasId, ...(typeof evidence.nodeId === "string" ? { nodeId: evidence.nodeId } : {}), commandId: evidence.commandId, ...(typeof evidence.revision === "number" ? { revision: evidence.revision } : {}) });
+            }
+            return outcome;
+          });
+          if (!previous) {
+            completed.set(callId, { identity, outcome: operation });
+            pending.add(operation);
+            void operation.finally(() => pending.delete(operation)).catch(() => undefined);
+          }
+          const outcome = await operation;
+          if (outcome.error) throw new ToolCallRejected(rpcErrorDetail(outcome.error) ?? "[upstream-rejected] 上游工具拒绝本次调用");
+          result = outcome.result;
+        } catch (error) {
+          if (!(error instanceof ToolCallRejected)) settle(call, false, bounded(`[invalid-request] ${error instanceof Error ? error.message : "工具调用未完成"}`));
+          throw error;
         }
-        result = (await operation).result;
       } else throw new Error("method-not-allowed");
       send({ jsonrpc: "2.0", id, result });
-    } catch { send({ jsonrpc: "2.0", id, error: { code: -32602, message: "本轮工具请求被拒绝或未能核对" } }); }
+    } catch (error) {
+      const message = error instanceof ToolCallRejected ? error.message : `[invalid-request] ${error instanceof Error ? error.message : "工具请求无效"}`;
+      send({ jsonrpc: "2.0", id, error: { code: -32602, message: bounded(message) ?? "工具请求被拒绝" } });
+    }
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   return {
     tools, token, receipts,
+    /** 本轮模型发起过的写工具调用次数（含被拒绝的）。 */
+    get attemptedWrites() { return attemptedWrites; },
+    /** 网关真实收到的工具名；模型声明了却没出现在这里的调用没有送达执行端。 */
+    get receivedTools() { return [...receivedTools]; },
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`,
     drain: async () => { await Promise.allSettled([...pending]); },
     close: async () => {

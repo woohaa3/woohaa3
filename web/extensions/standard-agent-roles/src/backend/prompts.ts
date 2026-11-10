@@ -25,7 +25,8 @@ export const TOOL_COMMON_RULES = [
   "你正在通过 Woohaa3 Model Canvas 的受控 MCP 工具编辑画布，不要要求用户上传图片或模型文件。",
   "宿主已在本轮会话配置远程 MCP 连接和授权；直接调用提供的画布工具，无须安装 MCP 或改写本机配置。",
   "目标节点已经存在于画布中；必须先读取权威内容，再按用户请求做最小必要修改。",
-  "只有工具返回成功后才能说“已修改”；工具失败或被拒绝时必须如实说明，不能假装完成。"
+  "只有工具返回成功后才能说“已修改”；工具失败或被拒绝时必须如实说明，不能假装完成。",
+  "工具回执为 output-truncated 表示你的单次输出写满长度上限、写入没有完成：必须缩小单次生成的内容后重试，不要原样重发。"
 ] as const;
 
 export const MODEL_AUTHOR_FLOW = [
@@ -38,6 +39,8 @@ export const MODEL_AUTHOR_FLOW = [
 export const SCENE_DIRECTOR_FLOW = [
   "这是导演区/2D 组的共享世界创作目标。宿主已经签发本轮真实范围、版本、可写模型/镜头与只读参考；你不能自行声明或扩大范围。",
   "先调用 get_world_context 读取本轮上下文。只修改 writable 中的对象；read-only、部分包含、unknown 或区外对象只能参考，不能写入。",
+  "读取工具只是准备阶段，不是完成结果。只要本轮用户要求生成、创建或修改场景，就必须在读取后继续调用至少一个写工具（create_world_model、replace_world_model_content、move_world_model、create_world_camera、set_world_camera 或 set_scene_animation_script）；不要在读取后只发说明文字并结束。",
+  "新建导演区默认 4×4 米（以地面中心为原点，u/v 各 ±2 米）。大场景放不下时先用 resize_scene_area 显式扩区（expectedScopeVersion 来自 get_world_context.sceneArea.scopeVersion），扩区后重新 get_world_context 取得新 bounds 与版本，再创建/移动模型与镜头；不要靠挪动对象或猜测范围绕过。",
   "导演区 get_world_context.sceneModels 返回各模型的世界变换（含朝向）与 localBounds（本地包围盒），bounds 是导演区地面范围；用这些真实空间数据推导倒下支点、尺寸和镜头取景，不要猜测。",
   "导演区 get_world_context.sceneArea 同时返回 animationOrigin 与当前发布的完整动画脚本（animationScript 为 null 表示尚无动画）。位置轨道是相对 animationOrigin 的偏移，不是世界坐标。返修动画时先读取脚本并保留未要求修改的轨道；set_scene_animation_script 会替换整份脚本。旧宿主未返回 sceneArea 时不能猜测原动画或直接覆盖，应如实说明无法完成局部返修。写入后再次 get_world_context 核对发布结果。",
   "创建新模型用 create_world_model，替换内容用 replace_world_model_content，移动/改高度用 move_world_model，新建镜头用 create_world_camera，修改镜头用 set_world_camera。为导演区制作模型与镜头联合动画用 set_scene_animation_script：脚本通过注入的 motion 对象声明 motion.instance.tween(instanceId, { property: position|rotation|scale, startTime, endTime, from, to, easing }) 与 motion.camera.tween({ cameraId, property: position|rotation|zoom, startTime, endTime, from, to, easing })；目标必须是本轮可写的导演区内部部件，position 为相对 sceneArea.animationOrigin 的 [du,dv,h]（u/v 偏移，h 为绝对高度），rotation 为角度制 [x,y,z]，h 轴朝上，zoom>1 更广。脚本编译一次后按时间确定性求值，播放不写规范文档。",
@@ -45,6 +48,7 @@ export const SCENE_DIRECTOR_FLOW = [
   "需要扩大或缩小导演区范围时用 resize_scene_area：bounds 是世界 u/v 矩形，expectedScopeVersion 来自 get_world_context.sceneArea.scopeVersion。只有用户明确要求改范围时才用，不能拿它绕开对象写权限；范围缩小后落在外面的对象会变成只读。",
   "写 modelScript 前必须先调用 get_model_api 获取当前 woohaa-model-js-v2 的 scene.* API；脚本必须使用 scene.box/scene.cylinder 等 scene 接口，不要使用 THREE、export default 或浏览器模块写法。",
   "create_world_model 的 transform.position 使用世界 u/v 坐标，必须落在 get_world_context.bounds 内；新模型节点身份由宿主生成，不要传 nodeId。",
+  "单次 create_world_model 的脚本不要一次写完一整座建筑：按台基、主体、屋顶、门窗、陈设等构件拆成多个模型分别创建，单个脚本保持在易读规模；这样也便于之后单独返修某个构件。",
   "所有写入必须携带从 get_world_context 读取到的真实版本；工具拒绝时如实说明，不要改用别的对象或伪造版本。",
   "镜头修改是否留档由宿主在本轮成功结束后按真实写入与版本确认一次，模型自报或取景刷新都不是完成证据；complete_world_camera 只用于按宿主已签发的完成身份重试确认，宿主尚未确认时会返回未核实。",
   "本轮是导演区：只有完整包含且未被其他运行占用的对象可写。"

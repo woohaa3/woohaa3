@@ -86,3 +86,5 @@ export function toolResultFailed(value: unknown): boolean {
   const result = value as Record<string, unknown>;
   return result.isError === true || result.ok === false || toolResultFailed(result.structuredContent) || toolResultFailed(result.content) || (result.type === "text" && toolResultFailed(result.text));
 }
+
+export { toolResultDetail } from "../protocol/tool-detail.js";

@@ -132,6 +132,34 @@ describe("Host bridge turn leases across host restarts (task 2.3)", () => {
     expect(response).toMatchObject({ ok: true, result: { from: "adopted", method: "connection.get" } });
   });
 
+  it("执行器派生 turnId 按 requestId 解析到账本授权，并按规范 turnId 接管", async () => {
+    const { create } = await bridgeFixture();
+    const first = await create();
+    // 会话账本里的 turnId 与执行器派生的 lease turnId 不同，但 requestId 相同。
+    authorities.set("turn-real", authority({ turnId: "turn-real", requestId: "req-1" }));
+    const lease = first.bridge.registerCall(async () => ({ from: "first-host" }), {
+      turnId: "5f1c9d-executor-derived", requestId: "req-1", owner: "alice", methods: ["connection.get"], exp: 0
+    });
+    await first.bridge.close();
+
+    const second = await create();
+    cleanups.push(() => second.bridge.close());
+    second.bridge.setTurnAuthorityByRequest((owner, requestId) =>
+      owner === "alice" && requestId === "req-1" ? authorities.get("turn-real") ?? null : null);
+    const adopted: string[] = [];
+    second.bridge.setAdoptionHandler(async (turnId) => {
+      adopted.push(turnId);
+      second.bridge.registerCall(async () => ({ from: "adopted" }), {
+        turnId, requestId: "req-1", owner: "alice", methods: ["connection.get"], exp: 0
+      });
+      return true;
+    });
+    const response = await call(second.socketPath, { token: "boot-token", workspaceKey: "ws", method: "extension.call", params: { leaseId: lease.leaseId, method: "connection.get", params: {} } });
+    expect(response).toMatchObject({ ok: true, result: { from: "adopted" } });
+    // 接管按会话账本的 turnId 进行，而不是执行器派生键。
+    expect(adopted).toEqual(["turn-real"]);
+  });
+
   it("rejects forged, expired, revoked and wrong-owner leases before side effects", async () => {
     const { create } = await bridgeFixture();
     const { bridge, socketPath } = await create();

@@ -146,10 +146,13 @@ export type InteractionCore = {
   /**
    * 模型网格命中（change: play-model-animations-on-hover）。
    * `point` 为 canvas 内 CSS 坐标；返回命中的模型节点 identity 或 `null`。
+   * `tolerance` 为可选的像素级裙边：只有真的点在（或紧贴）露出表面时才算命中，
+   * 包围盒内的空白仍然返回 `null`。
    */
   queryModelPick: (
     point: Point,
-    surface: { width: number; height: number }
+    surface: { width: number; height: number },
+    options?: { tolerance?: number }
   ) => InteractionQuery<{ nodeId: string } | null>;
   setSelection: (nodeIds: string[]) => void;
   submit: (commands: ReturnType<typeof planMoveNodes>) => void | Promise<"committed" | "rejected" | "unavailable">;

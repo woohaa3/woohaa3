@@ -70,6 +70,13 @@ export type AgentRuntimeBridge = {
   registerCall(handler: (method: string, params: unknown) => Promise<unknown>, claims?: Omit<HostLeaseClaims, "v">): { leaseId: string; release(): void };
   /** 持久 turn authority 的读取端口（新宿主导入应用库）。 */
   setTurnAuthority(reader: ((turnId: string) => BridgeTurnAuthority | null) | null): void;
+  /**
+   * 按 (owner, requestId) 读取同一份持久授权。
+   *
+   * 执行器侧的 turnId 是它自己派生的稳定键（`sha256(extensionId, executor, owner, requestId)`），
+   * 与会话账本的 `turn-…` 不是同一个 id；lease 里两种身份都在，用 requestId 回退到同一份授权。
+   */
+  setTurnAuthorityByRequest(reader: ((owner: string, requestId: string) => BridgeTurnAuthority | null) | null): void;
   /** 新宿主接管：按 turnId 重建处理器；成功后才能继续服务旧 lease。 */
   setAdoptionHandler(handler: ((turnId: string) => Promise<boolean>) | null): void;
   /** 记录通道声明的方法白名单（写入持久回合授权）。 */
@@ -156,6 +163,7 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
   writeBridgeIdentity(runtimeDir, identity);
   const bridgeToken = identity.token;
   let authorityFor: ((turnId: string) => BridgeTurnAuthority | null) | null = null;
+  let authorityByRequest: ((owner: string, requestId: string) => BridgeTurnAuthority | null) | null = null;
   let onAdopt: ((turnId: string) => Promise<boolean>) | null = null;
   let leaseRecorder: ((turnId: string, methods: readonly string[]) => void) | null = null;
 
@@ -163,13 +171,19 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
     try { fs.unlinkSync(options.socketPath); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
 
+  /** lease 上的回合身份可能是执行器派生键；两种身份都能解析到同一份持久授权。 */
+  const authorityOf = (claims: HostLeaseClaims): BridgeTurnAuthority | null =>
+    authorityFor?.(claims.turnId) ?? authorityByRequest?.(claims.owner, claims.requestId) ?? null;
+  /** 会话账本里的规范 turnId（接管与授权记账都用它）。 */
+  const canonicalTurnId = (claims: HostLeaseClaims): string => authorityOf(claims)?.turnId ?? claims.turnId;
+
   /** 签名/过期/authority 校验；返回可继续调用的方法白名单。 */
   const authorizeLease = (token: string, method: string): HostLeaseClaims => {
     const verified = verifyHostLease(identity.key, token, now());
     if (!verified.ok) throw new Error(`Executor host lease rejected (${verified.reason})`);
     const claims = verified.claims;
-    const authority = authorityFor?.(claims.turnId) ?? null;
-    if (authorityFor && !authority) throw new Error("Executor host lease has no persisted turn authority");
+    const authority = authorityOf(claims);
+    if ((authorityFor || authorityByRequest) && !authority) throw new Error("Executor host lease has no persisted turn authority");
     if (authority) {
       if (authority.owner !== claims.owner || authority.requestId !== claims.requestId) throw new Error("Executor host lease owner mismatch");
       if (authority.revokedAt) throw new Error("Executor turn authority is revoked");
@@ -197,10 +211,11 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
           return handler(method, params.params);
         }
         const claims = authorizeLease(leaseId, method);
-        if (!authorityFor) throw new Error("Executor host lease is unavailable");
+        if (!authorityFor && !authorityByRequest) throw new Error("Executor host lease is unavailable");
         if (!onAdopt) throw new Error("Executor host lease is unavailable");
-        const adopted = await onAdopt(claims.turnId);
-        const rebuilt = byTurn.get(claims.turnId);
+        const turnId = canonicalTurnId(claims);
+        const adopted = await onAdopt(turnId);
+        const rebuilt = byTurn.get(turnId);
         if (!adopted || !rebuilt) throw new Error("Executor host lease could not be re-established");
         return rebuilt(method, params.params);
       }
@@ -255,9 +270,11 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
     registerCall(handler, claims) {
       const leaseId = claims ? hostLeaseToken(identity.key, { v: 1, ...claims }) : randomUUID();
       calls.set(leaseId, handler);
-      if (claims?.turnId) {
-        byTurn.set(claims.turnId, handler);
-        if (claims.methods.length > 0) leaseRecorder?.(claims.turnId, claims.methods);
+      // 授权与接管都按会话账本的规范 turnId 记账，而不是执行器派生键。
+      const turnId = claims ? canonicalTurnId({ v: 1, ...claims }) : undefined;
+      if (turnId) {
+        byTurn.set(turnId, handler);
+        if (claims!.methods.length > 0) leaseRecorder?.(turnId, claims!.methods);
       }
       let released = false;
       return {
@@ -266,11 +283,12 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
           if (released) return;
           released = true;
           calls.delete(leaseId);
-          if (claims?.turnId && byTurn.get(claims.turnId) === handler) byTurn.delete(claims.turnId);
+          if (turnId && byTurn.get(turnId) === handler) byTurn.delete(turnId);
         }
       };
     },
     setTurnAuthority(reader) { authorityFor = reader; },
+    setTurnAuthorityByRequest(reader) { authorityByRequest = reader; },
     setAdoptionHandler(handler) { onAdopt = handler; },
     setLeaseRecorder(recorder) { leaseRecorder = recorder; },
     close: async () => {

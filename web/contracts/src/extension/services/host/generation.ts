@@ -88,9 +88,10 @@ export type GenerationProvider = {
     create(input: { secret: string; endpoint: string; validate: () => Promise<void>; fetch?: typeof globalThis.fetch }): GenerationProviderHandle;
   };
   /**
-   * 语言模型逐模型能力证据（讨论/工具/图片输入/流式）。
+   * 语言模型逐模型能力证据（图片输入/流式）。
    *
-   * 缺省或某个模型没有证据时，消费者 MUST 按不支持处理；不得从提供商品牌或媒体模型推测。
+   * 文本模型统一视为支持工具调用；`tools` 仅保留为目录展示信息，不再作为 Agent 工具回合门槛。
+   * 缺省或某个模型没有图片输入证据时，消费者 MUST 按不支持处理；不得从提供商品牌或媒体模型推测。
    */
   languageCapabilities?: (providerModelId: string) =>
     | { tools?: boolean; imageInput?: boolean; streaming?: boolean }

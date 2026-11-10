@@ -124,12 +124,11 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
       const oauthSnapshot = async (owner: string) => {
         const connections = await connectionProvider.listConnections({ owner });
         return connections.map(connection => ({ legacyId: connection.connectionId, scope: "personal" as const, kind: "oauth" as const,
-          name: connection.name, endpoints: [], capabilities: (observedModels.get(owner)?.epoch === connection.credentialEpoch ? observedModels.get(owner)!.models : []).flatMap(model => [
-            { purpose: "discussion" as const, protocol: "provider:chatgpt-oauth" as const, modelId: model.id, imageInput: false, evidence: "adapter" as const },
-            ...(connection.capabilities.tools ? [{ purpose: "target-execution" as const, protocol: "provider:chatgpt-oauth" as const, modelId: model.id, imageInput: false, evidence: "adapter" as const }] : []),
-          ]),
+          name: connection.name, endpoints: [], capabilities: (observedModels.get(owner)?.epoch === connection.credentialEpoch ? observedModels.get(owner)!.models : []).map(model => (
+            { purpose: "text" as const, protocol: "provider:chatgpt-oauth" as const, modelId: model.id, imageInput: false, evidence: "adapter" as const }
+          )),
           bindings: [{ bindingId: `oauth:${connection.connectionId}`, extensionId: OAUTH_AGENT_PLUGIN_ID, consumer: "oauth" as const,
-            consumerId: connection.connectionId, purposes: ["discussion" as const, "target-execution" as const], modelKeys: (observedModels.get(owner)?.epoch === connection.credentialEpoch ? observedModels.get(owner)!.models : []).map(model => model.id) }],
+            consumerId: connection.connectionId, purposes: ["text" as const], modelKeys: (observedModels.get(owner)?.epoch === connection.credentialEpoch ? observedModels.get(owner)!.models : []).map(model => model.id) }],
           enabled: connection.status.credential.state === "ready", removed: false, locked: false,
           credentialConfigured: connection.credentialConfigured ?? false, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch }));
       };

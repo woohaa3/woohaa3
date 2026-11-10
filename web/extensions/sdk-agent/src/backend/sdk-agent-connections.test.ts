@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import type { ConnectionMetadataRecord, ConnectionService } from "@woohaa3/agent-connections";
 import { findSdkAgentAdapter } from "../shared.js";
-import { createSdkAgentConversationAdapter, sdkReasoningEfforts } from "./sdk-agent-connections.js";
+import { capabilitiesFor, createSdkAgentConversationAdapter, sdkReasoningEfforts, unwrittenError } from "./sdk-agent-connections.js";
 import type { AgentSdkTransport } from "./adapters/agent-sdk-adapter.js";
 import { buildTestPreparedTurn, toolsForTestIntent } from "@woohaa3/test-fixtures-agent-role-turns";
 
@@ -94,14 +94,6 @@ describe("固定 SDK 连接执行前门禁", () => {
     expect(await f.create().run(f.input())).toMatchObject({ status: "failed", error: { code: "migration-required" } });
     expect(f.run).not.toHaveBeenCalled();
   });
-  it("目录明确不支持工具的模型只可讨论，目标请求不发送", async () => {
-    const f = fixture();
-    f.record.modelCapabilities = { fixture: { tools: false } };
-    const input = f.input(); input.intent.action = "modify"; input.intent.nodeId = "node";
-    expect(await f.create().run(input)).toMatchObject({ error: { code: "capability-unsupported" } });
-    expect(f.run).not.toHaveBeenCalled();
-    expect(await f.create().run(f.input())).toMatchObject({ status: "succeeded" });
-  });
   it("不符合部署策略的自定义地址在启动 SDK 前拒绝，原值保持", async () => {
     const f = fixture(); f.record.baseUrl = "https://legacy.example/v1";
     const before = structuredClone(f.record);
@@ -182,4 +174,22 @@ it.each(["outside-scope", "spatial-rejected", "write-forbidden", "version-confli
   expect(outcome).toMatchObject({ status: "failed", error: { code, message: expect.stringContaining("对象 model-a 超出范围") } });
   expect(JSON.stringify(outcome)).not.toMatch(/real-key-never-given-to-sdk|private.invalid|token=secret/);
   expect(f.run).not.toHaveBeenCalled();
+});
+
+describe("没有写入时按真实结束原因归因", () => {
+  it("输出额度写满报 output-truncated，而不是未确认写入", () => {
+    expect(unwrittenError("length")).toEqual({ code: "output-truncated", message: expect.stringContaining("长度上限") });
+    expect(unwrittenError("content_filter")).toMatchObject({ code: "content-filtered" });
+  });
+
+  it("正常结束或未知原因仍交给未确认写入兜底", () => {
+    expect(unwrittenError("stop")).toBeUndefined();
+    expect(unwrittenError("tool_calls")).toBeUndefined();
+    expect(unwrittenError("unknown")).toBeUndefined();
+  });
+});
+
+it("compat-chat 不宣称可恢复 native session", () => {
+  expect(capabilitiesFor(findSdkAgentAdapter("compat-chat")!)).toMatchObject({ resume: false });
+  expect(capabilitiesFor(findSdkAgentAdapter("openai-responses")!)).toMatchObject({ resume: true });
 });

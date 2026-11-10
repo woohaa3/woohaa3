@@ -513,7 +513,7 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
   const port = registry.forExtension("demo");
   port.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
-  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
   const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"] } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
   try {
     const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
@@ -541,16 +541,16 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
 });
 
 
-it("auto-projects a declared provider assistant as a discussion binding without wrapping ordinary text generation", async () => {
+it("auto-projects a declared provider assistant as a text binding without wrapping ordinary text generation", async () => {
   const { createServiceConnectionRegistry } = await import("../service-connections/registry.js");
   const { createSqliteExtensionDocumentStore } = await import("../repository/extension-document-store.js");
   const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
   const registry = createServiceConnectionRegistry({ documents: store.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
   const actor = { owner: "user-a", administrator: false, canUseSite: true };
   registry.forExtension("demo").registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
-  registry.forExtension("sdk-agent").registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  registry.forExtension("sdk-agent").registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
-  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
   const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
   try {
     const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
@@ -560,7 +560,7 @@ it("auto-projects a declared provider assistant as a discussion binding without 
     const connection = ((await first.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
     expect(connection.bindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ bindingId: "provider:demo", consumer: "provider", purposes: ["text"] }),
-      expect.objectContaining({ bindingId: "provider-assistant:demo", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion", "target-execution"], modelKeys: ["model"] }),
+      expect.objectContaining({ bindingId: "provider-assistant:demo", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"], modelKeys: ["model"] }),
     ]));
     // Repeating the same operation does not add a binding or advance the published revision.
     const second = await post({ ...connection, providerId: "demo", modelId: "model" });

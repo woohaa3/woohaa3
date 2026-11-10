@@ -1,7 +1,7 @@
 /** OpenCode 2.x /api API; MCP runtime config belongs to a dedicated location. */
 import { setTimeout as delay } from "node:timers/promises";
 import { isAgentReasoningEffort, type AgentModelView, type AgentReasoningEffort } from "@woohaa3/contracts";
-import { canvasToolName, loopbackHttp, toolResultFailed } from "./loopback-http.js";
+import { canvasToolName, loopbackHttp, toolResultDetail, toolResultFailed } from "./loopback-http.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportModelInput, LocalAgentTransportResult } from "./transport.js";
 
 /**
@@ -190,7 +190,12 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
               const status = part.state?.status;
               const partId = part.id ?? `${message.id}:tool:${index}`;
               if (!toolStates.has(partId)) input.onEvent({ type: "tool-started", tool: name, callId: part.id });
-              if (toolStates.get(partId) !== status && (status === "completed" || status === "error")) input.onEvent({ type: "tool-completed", tool: name, callId: part.id, ok: status === "completed" && !toolResultFailed(part.state?.content), ...(part.state?.error?.message ? { summary: part.state.error.message } : {}) });
+              if (toolStates.get(partId) !== status && (status === "completed" || status === "error")) {
+                const failed = status !== "completed" || toolResultFailed(part.state?.content);
+                // 失败时保留真实原因（结构化 code/message 或工具输出文本），不退回通用占位。
+                const detail = failed ? toolResultDetail(part.state?.content) ?? part.state?.error?.message : undefined;
+                input.onEvent({ type: "tool-completed", tool: name, callId: part.id, ok: !failed, ...(detail ? { summary: detail } : {}) });
+              }
               toolStates.set(partId, status ?? "unknown");
             }
           }

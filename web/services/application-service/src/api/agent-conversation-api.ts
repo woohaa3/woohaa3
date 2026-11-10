@@ -195,7 +195,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const provider = deps.serviceConnectionProviders?.().find(provider => provider.providerId === input.providerId && provider.serviceConnectionFactory);
         const model = provider?.models.find(model => model.providerModelId === input.modelId && model.modelType === "language");
         const endpoint = source.endpoints.find(endpoint => provider?.serviceConnectionFactory?.protocols.includes(endpoint.protocol));
-        if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "discussion")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
+        if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "text")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
         const connection = await deps.serviceConnections!.bind(actor, source.serviceConnectionId, { bindingId: `provider:${provider.providerId}`,
           extensionId: provider.extensionId, consumer: "provider", consumerId: provider.providerId, purposes: ["text"], modelKeys: [...new Set([...(source.bindings.find(binding => binding.bindingId === `provider:${provider.providerId}`)?.modelKeys ?? []), `${provider.providerId}:${model.providerModelId}`])] }, source,
           normalizeCapabilities([...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
@@ -217,8 +217,8 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const expected = { configRevision: input.configRevision as number, credentialEpoch: input.credentialEpoch as number };
         const bindingId = `shared-sdk:${source.serviceConnectionId}`;
         const connection = input.enabled ? await deps.serviceConnections!.bind(actor, source.serviceConnectionId, {
-          bindingId, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"],
-          modelKeys: source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === "chat-completions").map(capability => capability.modelId),
+          bindingId, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"],
+          modelKeys: source.capabilities.filter(capability => capability.purpose === "text" && capability.protocol === "chat-completions").map(capability => capability.modelId),
         }, expected) : await deps.serviceConnections!.unbind(actor, source.serviceConnectionId, bindingId, expected);
         sendJson(res, 200, { connection }); return true;
       }
@@ -614,21 +614,20 @@ async function ensureProviderAssistantBinding(
   const protocol = provider.serviceConnectionFactory?.assistantProtocol;
   if (!protocol || !deps.serviceConnections) return connection;
   const modelKeys = provider.models.filter(model => model.modelType === "language" && connection.capabilities.some(capability =>
-    capability.purpose === "discussion" && capability.protocol === protocol && capability.modelId === model.providerModelId)).map(model => model.providerModelId);
+    capability.purpose === "text" && capability.protocol === protocol && capability.modelId === model.providerModelId)).map(model => model.providerModelId);
   if (!modelKeys.length) return connection;
-  const assistantCapabilities = modelKeys.flatMap(modelId => [
-    { purpose: "discussion" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
-    { purpose: "target-execution" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
-  ]);
+  const assistantCapabilities = modelKeys.map(modelId => (
+    { purpose: "text" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const }
+  ));
   const capabilities = normalizeCapabilities([
     ...connection.capabilities.filter(capability => !(capability.protocol === protocol && modelKeys.includes(capability.modelId)
-      && (capability.purpose === "discussion" || capability.purpose === "target-execution"))),
+      && capability.purpose === "text")),
     ...assistantCapabilities,
   ]);
   try {
     return await deps.serviceConnections.bind(actor, connection.serviceConnectionId, {
       bindingId: `provider-assistant:${provider.providerId}`, extensionId: "sdk-agent", consumer: "agent",
-      consumerId: `shared:${protocol}`, purposes: ["discussion", "target-execution"], modelKeys,
+      consumerId: `shared:${protocol}`, purposes: ["text"], modelKeys,
     }, connection, capabilities);
   } catch { return connection; }
 }

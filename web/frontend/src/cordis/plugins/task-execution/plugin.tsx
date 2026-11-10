@@ -292,7 +292,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           const area = node ? decodeSceneAreaData(canvas?.nodeData[route.nodeId]?.sceneArea) : undefined;
           if (!node || !area || !area.ok) return null;
           return (
-            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
+            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime} revealAnchor={false}>
               <AuthoringGenerateHost
                 canvasId={canvasId}
                 nodeId={route.nodeId}

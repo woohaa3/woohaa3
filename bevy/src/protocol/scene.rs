@@ -111,7 +111,7 @@ pub(crate) struct GraphNode {
     pub(crate) media_loading: bool,
     #[serde(default)]
     pub(crate) texture: bool,
-    /// 是否绘制右下角 resize 抓手（仅单选节点，change: add-node-resize）。
+    /// 是否绘制四角 resize 抓手（仅单选节点，change: add-node-resize）。
     #[serde(default)]
     pub(crate) resizable: bool,
     /// 上传中的幽灵节点：只渲染、不可交互（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。

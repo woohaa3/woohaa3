@@ -5,7 +5,7 @@ import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import { createMcpTurnGateway } from "./mcp-turn-gateway.js";
 import { buildTestPreparedTurn } from "@woohaa3/test-fixtures-agent-role-turns";
 
-async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void) {
+async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: () => void, respond?: (message: Record<string, any>) => Record<string, unknown> | undefined) {
   const received: Array<{ method: string; params?: any; authorization?: string }> = [];
   const upstream = createServer(async (req, res) => {
     let text = ""; for await (const chunk of req) text += chunk;
@@ -18,7 +18,7 @@ async function fixture(validate = true, writeBarrier?: Promise<void>, onWrite?: 
     ] } : { content: [{ type: "text", text: "done" }], structuredContent: { ok: true, commandId: "cmd-1", canvasId: "canvas", nodeId: "node", revision: 2 } };
     if (message.method === "tools/call") { onWrite?.(); await writeBarrier; }
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...(respond?.(message) ?? { result }) }));
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   const controller = new AbortController(); let valid = true;
@@ -103,6 +103,55 @@ describe("每轮 MCP 授权与权威回执", () => {
       expect(f.received.filter((item) => item.method === "tools/call")).toHaveLength(40);
       // 相同 callId + 不同参数仍然冲突。
       expect((await f.call("submit_model_script", {}, 1)).body).toHaveProperty("error");
+    } finally { await f.close(); }
+  });
+
+  it("工具失败回执保留宿主 code/message，不再显示通用占位", async () => {
+    const f = await fixture(true, undefined, undefined, (message) => message.method === "tools/call"
+      ? {
+          result: {
+            content: [{ type: "text", text: "[not-ready] 模型 m1 的动画部件无法编译" }],
+            structuredContent: { ok: false, code: "not-ready", message: "模型 m1 的动画部件无法编译" },
+            isError: true
+          }
+        }
+      : undefined);
+    try {
+      expect((await f.call("submit_model_script", { script: "model" })).body).toHaveProperty("result");
+      expect(f.emit).toHaveBeenCalledWith(expect.objectContaining({
+        type: "tool-completed",
+        tool: "submit_model_script",
+        ok: false,
+        summary: "[not-ready] 模型 m1 的动画部件无法编译"
+      }));
+    } finally { await f.close(); }
+  });
+
+  it("拒绝分支把真实原因写进完成回执，也带回 JSON-RPC 错误", async () => {
+    const f = await fixture();
+    try {
+      const denied = await f.call("shell");
+      expect(denied.body.error.message).toContain("tool-not-allowed");
+      expect(f.emit).toHaveBeenCalledWith(expect.objectContaining({ type: "tool-completed", tool: "shell", ok: false, summary: expect.stringContaining("tool-not-allowed") }));
+
+      const mismatched = await f.call("submit_model_script", { nodeId: "other" }, 2);
+      expect(mismatched.body.error.message).toContain("target-mismatch");
+      expect(f.emit).toHaveBeenCalledWith(expect.objectContaining({ type: "tool-completed", tool: "submit_model_script", ok: false, summary: expect.stringContaining("target-mismatch") }));
+    } finally { await f.close(); }
+  });
+
+  it("上游 JSON-RPC 拒绝保留原始原因且只结算一次", async () => {
+    const f = await fixture(true, undefined, undefined, (message) => message.method === "tools/call"
+      ? { error: { code: -32000, message: "画布写入被宿主拒绝" } }
+      : undefined);
+    try {
+      const first = await f.call("submit_model_script", { script: "model" }, 7);
+      expect(first.body.error.message).toContain("画布写入被宿主拒绝");
+      const retried = await f.call("submit_model_script", { script: "model" }, 7);
+      expect(retried.body.error.message).toContain("画布写入被宿主拒绝");
+      const completions = f.emit.mock.calls.filter(([event]) => event.type === "tool-completed" && event.tool === "submit_model_script");
+      expect(completions).toHaveLength(1);
+      expect(completions[0]![0]).toMatchObject({ ok: false, summary: "[-32000] 画布写入被宿主拒绝" });
     } finally { await f.close(); }
   });
 

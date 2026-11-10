@@ -62,7 +62,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
             if (!source) throw new Error("SDK source unavailable");
             return options.serviceConnections.resolve(input.owner, { ...source,
               bindingId: source.bindings.find(binding => binding.extensionId === "sdk-agent" && (binding.consumerId === connection.connectionId || record.serviceConnectionId && binding.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`))?.bindingId ?? "",
-              purpose: input.intent.action === "discuss" ? "discussion" : "target-execution", protocol: sdkSourceProtocol(record.adapterId), modelId: model, endpoint: record.baseUrl ?? adapter.officialBaseUrl });
+              purpose: "text", protocol: sdkSourceProtocol(record.adapterId), modelId: model, endpoint: record.baseUrl ?? adapter.officialBaseUrl });
           }
           case "connection.probe": return options.service.setRuntimeProbe?.(input.owner, connection.connectionId, String(args[0]), args[1] as never);
           case "connection.native.get": return options.service.resolveNativeBinding({ ...identity, context: nativeContext });

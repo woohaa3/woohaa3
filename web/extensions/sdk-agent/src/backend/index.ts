@@ -90,7 +90,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         ...(host.services.secrets ? { secrets: host.services.secrets } : {})
       });
 
-      const releaseConsumer = host.services.serviceConnections?.registerConsumer({ protocols: ["responses", "messages", "chat-completions", "gemini"], purposes: ["discussion", "target-execution"] });
+      const releaseConsumer = host.services.serviceConnections?.registerConsumer({ protocols: ["responses", "messages", "chat-completions", "gemini"], purposes: ["text"] });
       const releaseSource = host.services.serviceConnections?.registerSource(createSdkServiceSource(service));
       const executionService = host.services.serviceConnections ? withServiceSources(service, host.services.serviceConnections) : service;
 

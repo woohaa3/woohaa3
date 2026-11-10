@@ -84,24 +84,31 @@ export function clampNodeSize(value: number, minimum: number): number {
   return Math.max(minimum, value);
 }
 
-/**
- * 右下角 resize 抓手命中区域（世界坐标），change: add-node-resize。
- *
- * 与 Bevy 绘制共用 `RESIZE_HANDLE_SIZE`：抓手贴住节点右下角内缘，
- * 命中判定用同一矩形，保证「画在哪、点在哪」一致（design D1/Risk）。
- */
+export type ResizeHandle = "nw" | "ne" | "sw" | "se";
+
+/** 四角 resize 抓手命中区域（世界坐标）。 */
+export function bevyResizeHandleRects(node: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Record<ResizeHandle, { x: number; y: number; width: number; height: number }> {
+  return {
+    nw: { x: node.x, y: node.y, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE },
+    ne: { x: node.x + node.width - RESIZE_HANDLE_SIZE, y: node.y, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE },
+    sw: { x: node.x, y: node.y + node.height - RESIZE_HANDLE_SIZE, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE },
+    se: { x: node.x + node.width - RESIZE_HANDLE_SIZE, y: node.y + node.height - RESIZE_HANDLE_SIZE, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE }
+  };
+}
+
+/** 兼容旧测试/调用方：返回右下角抓手。 */
 export function bevyResizeHandleRect(node: {
   x: number;
   y: number;
   width: number;
   height: number;
 }): { x: number; y: number; width: number; height: number } {
-  return {
-    x: node.x + node.width - RESIZE_HANDLE_SIZE,
-    y: node.y + node.height - RESIZE_HANDLE_SIZE,
-    width: RESIZE_HANDLE_SIZE,
-    height: RESIZE_HANDLE_SIZE
-  };
+  return bevyResizeHandleRects(node).se;
 }
 
 /** 节点右上角历史动作的边框尺寸（世界坐标）。 */

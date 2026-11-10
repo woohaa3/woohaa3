@@ -155,6 +155,8 @@ export function encodeModelPickRequest(input: {
   y: number;
   width: number;
   height: number;
+  /** 可选像素裙边（Rust 只在紧贴真实露出表面时命中）。 */
+  tolerance?: number;
 }): string {
   return JSON.stringify(input);
 }

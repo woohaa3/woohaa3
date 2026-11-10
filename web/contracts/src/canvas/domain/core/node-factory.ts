@@ -25,7 +25,7 @@ export const MIN_NODE_WIDTH = 180;
 export const MIN_NODE_HEIGHT = 64;
 
 /**
- * 右下角 resize 抓手边长（世界坐标，change: add-node-resize）。
+ * 四角 resize 抓手边长（世界坐标，change: add-node-resize）。
  *
  * 命中区域与 Bevy 绘制（`bevy/src/canvas2d/layout.rs` 的 `RESIZE_HANDLE_SIZE`）共用同一数值：
  * 跨 WASM 边界无法直接 import，因此两侧都必须引用本常量定义的数值，并由

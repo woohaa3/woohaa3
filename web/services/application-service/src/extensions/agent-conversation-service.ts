@@ -308,6 +308,8 @@ export type AgentConversationService = {
   adoptTurn(turnId: string): Promise<boolean>;
   /** 持久回合授权（桥按 turnId 校验 lease；不暴露给浏览器）。 */
   turnAuthority(turnId: string): TurnAuthorityRecord | undefined;
+  /** 执行器派生 turnId 与账本 turnId 不同时，按 (owner, requestId) 回到同一份授权。 */
+  turnAuthorityByRequest(owner: string, requestId: string): TurnAuthorityRecord | undefined;
   /** 记录通道实际声明的 host-call 方法；只增不减，不扩大工具/凭据范围。 */
   recordHostMethods(turnId: string, methods: readonly string[]): void;
   deleteAll(input: { owner: string; canvasId: string }): void;
@@ -1342,6 +1344,10 @@ export function createAgentConversationService(options: AgentConversationService
 
     turnAuthority(turnId) {
       return store.getTurnAuthority(turnId);
+    },
+
+    turnAuthorityByRequest(owner, requestId) {
+      return store.getTurnAuthorityByRequest(owner, requestId);
     },
 
     recordHostMethods(turnId, methods) {

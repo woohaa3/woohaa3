@@ -12,6 +12,7 @@
  * 真实进程与账号登录未在本环境采集，标注「待人工验证」。
  */
 import { isAgentReasoningEffort, type AgentModelView, type AgentConversationAdapterEvent, type AgentAdapterRunOutcome } from "@woohaa3/contracts";
+import { toolResultDetail } from "./tool-detail.js";
 
 export type JsonRpcRequest = { jsonrpc: "2.0"; id: number; method: string; params?: unknown };
 export type JsonRpcNotification = { jsonrpc: "2.0"; method: string; params?: unknown };
@@ -371,7 +372,8 @@ export function createCodexAppServerDecoder(): {
             const callId = typeof item.id === "string" ? item.id : typeof item.call_id === "string" ? item.call_id : undefined;
             const result = (item.result ?? {}) as Record<string, unknown>;
             const ok = item.status !== "failed" && item.status !== "error" && result.isError !== true;
-            events.push({ type: "tool-completed", tool, ok, summary: ok ? "完成" : "失败", ...(callId ? { callId } : {}) });
+            // 失败时带真实原因（结构化 code/message 或工具输出文本），不写成无信息量的“失败”。
+            events.push({ type: "tool-completed", tool, ok, summary: ok ? "完成" : toolResultDetail(result) ?? "失败", ...(callId ? { callId } : {}) });
           }
         } else if (type === "custom_tool_call" || type === "customToolCall") {
           // 当前 Codex 在 code-mode 下把 MCP 工具包在 `exec` 脚本里调用，例如

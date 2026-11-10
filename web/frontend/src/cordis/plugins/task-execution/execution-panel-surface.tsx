@@ -14,11 +14,14 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { AuthoringGeneratePlaceholder } from "../../host.js";
 import type { CanvasRuntimeService } from "../../contracts.js";
-import { layoutNodePanel, usableCanvasArea, type AnchoredPanel } from "./node-anchor-layout.js";
+import { layoutNodePanel, usableCanvasArea, PANEL_COMPOSER_RESERVE_HEIGHT, type AnchoredPanel } from "./node-anchor-layout.js";
 import { belowPanelRevealOffset } from "./dock-reveal.js";
 import { FullscreenPanelHost } from "./execution-panel/fullscreen-panel-host.js";
 import { panelKindForNodeType } from "./node-panel-registry.js";
 import type { ExecutionPanelPresentation } from "../../navigation/contracts.js";
+
+/** 为面板避让平移画布时的补间时长；避免选中锚点瞬间视口硬跳。 */
+const PANEL_REVEAL_TWEEN_MS = 240;
 
 /**
  * route presentation → 真实呈现表面。
@@ -38,20 +41,25 @@ export type ExecutionPanelSurfaceProps = {
   nodeId: string;
   presentation: ExecutionPanelPresentation;
   runtime?: CanvasRuntimeService;
+  /**
+   * 锚点下方放不下完整编辑器时，是否平移画布腾出空间。
+   * 导演区这类超大锚点关闭：画布保持不动，面板改为贴可用区域底边。
+   */
+  revealAnchor?: boolean;
   children: ReactNode;
 };
 
 /** 唯一表面：compact 节点锚定宿主 / expanded 全屏宿主（非 Dialog）。 */
-export function ExecutionPanelSurface({ nodeId, presentation, runtime, children }: ExecutionPanelSurfaceProps) {
+export function ExecutionPanelSurface({ nodeId, presentation, runtime, revealAnchor = true, children }: ExecutionPanelSurfaceProps) {
   if (presentation === "expanded") {
     return <FullscreenPanelHost ariaLabel="节点执行面板（展开）">{children}</FullscreenPanelHost>;
   }
   return (
-    <AnchoredDock nodeId={nodeId} runtime={runtime}>{children}</AnchoredDock>
+    <AnchoredDock nodeId={nodeId} runtime={runtime} revealAnchor={revealAnchor}>{children}</AnchoredDock>
   );
 }
 
-function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?: CanvasRuntimeService; children: ReactNode }) {
+function AnchoredDock({ nodeId, runtime, revealAnchor, children }: { nodeId: string; runtime?: CanvasRuntimeService; revealAnchor: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const lastPlacement = useRef<AnchoredPanel["placement"] | undefined>(undefined);
   useEffect(() => {
@@ -59,6 +67,7 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
     const occlusionSelector = ".model-editor-dock[data-inspector], .focus-workspace__panel, .canvas-control-panel";
     let frame = 0;
     let userControlled = false;
+    let revealTargetY: number | null = null;
     const takeControl = (event: Event) => {
       if (event.target instanceof Node && ref.current?.contains(event.target)) return;
       if (event instanceof WheelEvent || event instanceof PointerEvent && event.button !== 0
@@ -80,24 +89,33 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
       }
       const bounds = areaElement.getBoundingClientRect();
       const area = usableCanvasArea({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, fixtureArea ? [] : visibleOcclusions());
+      const nodeRect = { ...node, right: node.left + node.width, bottom: node.top + node.height };
+      const areaRect = { ...area, right: area.left + area.width, bottom: area.top + area.height };
+      const revealOffset = belowPanelRevealOffset(nodeRect, areaRect, PANEL_COMPOSER_RESERVE_HEIGHT);
+      // 导演区等超大锚点不再为了给编辑器腾空间而平移画布：下方放不下就贴底停靠。
+      const dockToEdge = !revealAnchor && revealOffset > 1;
       // Locate may bring an initially offscreen anchor into view over several frames.
       // Keep reserving room during programmatic movement; a navigation gesture yields
       // control for the rest of this panel's lifetime.
-      if (!userControlled && !fixtureArea) {
-        const offset = belowPanelRevealOffset(
-          { ...node, right: node.left + node.width, bottom: node.top + node.height },
-          { ...area, right: area.left + area.width, bottom: area.top + area.height },
-          360
-        );
+      if (revealAnchor && !userControlled && !fixtureArea) {
         const controller = runtime.controller();
-        if (offset > 1 && controller) {
+        if (revealOffset > 1 && controller) {
           const viewport = controller.viewport();
-          controller.panViewportTo({ ...viewport, y: viewport.y - offset }, { durationMs: 0 });
+          const targetY = viewport.y - revealOffset;
+          // 目标只由锚点与可用区域决定；逐帧重复发起会不断重置补间，这里去重。
+          if (revealTargetY === null || Math.abs(targetY - revealTargetY) > 1) {
+            revealTargetY = targetY;
+            controller.panViewportTo({ ...viewport, y: targetY }, { durationMs: PANEL_REVEAL_TWEEN_MS });
+          }
+        } else {
+          revealTargetY = null;
         }
+      } else {
+        revealTargetY = null;
       }
       // 节点面板统一优先落在锚点下方：3D 模型/镜头不再翻到模型上方遮挡对象，2D 节点也不随
       // 视口在「上/下/贴边」之间跳。下方确实放不下时依次退到侧面、再退到视口边缘。
-      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, "below");
+      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, dockToEdge ? "dock" : "below");
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");
@@ -153,7 +171,7 @@ function AnchoredDock({ nodeId, runtime, children }: { nodeId: string; runtime?:
     navigationSurface?.addEventListener("keydown", takeControl, true);
     refresh();
     return () => { cancelAnimationFrame(frame); unsubscribeViewport(); unsubscribeScene?.(); unsubscribeFrame?.(); observer.disconnect(); mutations?.disconnect(); window.removeEventListener("resize", refresh); navigationSurface?.removeEventListener("wheel", takeControl, true); navigationSurface?.removeEventListener("pointerdown", takeControl, true); navigationSurface?.removeEventListener("keydown", takeControl, true); };
-  }, [runtime, nodeId]);
+  }, [runtime, nodeId, revealAnchor]);
   return <div ref={ref} className="node-execution-dock" data-node-id={nodeId} data-presentation="compact" style={runtime ? { visibility: "hidden" } : undefined}>{children}</div>;
 }
 
@@ -166,6 +184,7 @@ export type ExecutionPanelPendingProps = {
   nodeId: string;
   presentation: ExecutionPanelPresentation;
   runtime?: CanvasRuntimeService;
+  revealAnchor?: boolean;
 };
 
 /**
@@ -174,9 +193,9 @@ export type ExecutionPanelPendingProps = {
  * 用于 panel definition 自己不渲染外壳的场景（`node-execution`）；已经在外壳里的 definition
  * 应改用 {@link ExecutionPanelSkeleton}，避免出现嵌套 dock。
  */
-export function ExecutionPanelPending({ nodeId, presentation, runtime }: ExecutionPanelPendingProps) {
+export function ExecutionPanelPending({ nodeId, presentation, runtime, revealAnchor }: ExecutionPanelPendingProps) {
   return (
-    <ExecutionPanelSurface nodeId={nodeId} presentation={presentation} runtime={runtime}>
+    <ExecutionPanelSurface nodeId={nodeId} presentation={presentation} runtime={runtime} revealAnchor={revealAnchor}>
       <AuthoringGeneratePlaceholder />
     </ExecutionPanelSurface>
   );

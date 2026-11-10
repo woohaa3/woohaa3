@@ -32,9 +32,32 @@ import type { Gesture } from "./interaction-types.js";
 import { createWheelEntryHandler } from "./input/wheel-entry.js";
 import { createPerfInputRecorder, type PerfMoment } from "./input/perf-interaction.js";
 import { telemetryNow } from "../../services/telemetry-primitives.js";
-import { sceneAreaCursorTargets, sceneAreaEdgeCursor, workflowGroupCursor, workflowGroupInteraction, resizeCursorForEdge } from "./scene-area-cursor.js";
+import { sceneAreaCursorTargets, sceneAreaEdgeCursor, workflowGroupCursor, workflowGroupInteraction, resizeCursorForEdge, type FrameEdge } from "./scene-area-cursor.js";
 /** 右键位移阈值：小于它视为短点击（开菜单），达到则进入平移并抑制菜单。 */
 const RIGHT_CLICK_PAN_THRESHOLD_PX = 10;
+
+/**
+ * 世界模型点选的像素裙边：细长/带孔模型从表面空隙穿过时仍可选中，
+ * 但指针必须紧贴真实露出表面——包围盒空域不算命中。
+ */
+const WORLD_MODEL_PICK_TOLERANCE_PX = 4;
+
+/** 指针位移小于它仍算一次点击（不产生框选）。 */
+const CLICK_SLOP_PX = 5;
+
+const resizeHandleEdge = (handle?: string): FrameEdge => {
+  switch (handle) {
+    case "nw": return { x: -1, y: -1 };
+    case "ne": return { x: 1, y: -1 };
+    case "sw": return { x: -1, y: 1 };
+    default: return { x: 1, y: 1 };
+  }
+};
+
+const resizeHandleCursor = (handle?: string): string => {
+  const edge = resizeHandleEdge(handle);
+  return edge.x === edge.y ? "nwse-resize" : "nesw-resize";
+};
 
 export function create2dInputFamily(core: InteractionCore) {
   const { options, canvas, writable, state, model, setSelection, submit, schedule } = core;
@@ -77,6 +100,7 @@ export function create2dInputFamily(core: InteractionCore) {
     if (groupCursor) return setCursor(groupCursor);
     if (hit?.kind === "node" && areas.some(area => area.nodeId === hit.nodeId)) return setCursor("grab");
     // Visible content and controls occlude the ground scopes.
+    if (hit?.kind === "resize") return setCursor(resizeHandleCursor(hit.handle));
     if (hit?.kind === "edge" || hit?.kind === "edge-delete" || hit?.kind === "port") return setCursor("pointer");
     if (hit) return setCursor("");
     if (areas.length === 0) return setCursor("");
@@ -322,22 +346,15 @@ export function create2dInputFamily(core: InteractionCore) {
       modalActive: core.modalActive(),
       gestureActive: state.gesture.kind !== "none"
     }) && !isRight) {
-      const pick = core.queryModelPick({ x: event.clientX, y: event.clientY }, core.surfaceSize());
-      // 细长/带孔模型（如自行车）可能从模型表面的空隙穿过；点拾取未命中时，
-      // 用指针周围极小的 AABB 框选补一次，避免“选中了却拖不动”。
-      let pickedNodeId = pick.ok && pick.value ? pick.value.nodeId : null;
-      if (!pickedNodeId) {
-        const fallback = core.queryModelMarquee({
-          x: event.clientX - 2,
-          y: event.clientY - 2,
-          width: 4,
-          height: 4
-        });
-        if (fallback.ok) {
-          const candidates = fallback.value.filter(id => pickedWorldTarget(pressedCanvas, id));
-          if (candidates.length === 1) pickedNodeId = candidates[0]!;
-        }
-      }
+      // 细长/带孔模型（如自行车、宫殿柱廊）会从表面空隙穿过；点拾取未命中时给 4 像素
+      // 裙边再问一次最近露出表面。**不**用 AABB 框选兜底：大模型的包围盒常盖住导演区
+      // 之外的空白，会让点在区外的空白也选中区内的模型。
+      const pick = core.queryModelPick(
+        { x: event.clientX, y: event.clientY },
+        core.surfaceSize(),
+        { tolerance: WORLD_MODEL_PICK_TOLERANCE_PX }
+      );
+      const pickedNodeId = pick.ok && pick.value ? pick.value.nodeId : null;
       const pickedTarget = pickedWorldTarget(pressedCanvas, pickedNodeId);
       if (pickedTarget && pickedNodeId) {
         const plan = resolvePressSelection({
@@ -497,8 +514,14 @@ export function create2dInputFamily(core: InteractionCore) {
           start: world,
           originWidth: startSize.width,
           originHeight: startSize.height,
-          moved: false
+          originPosition: renderNode
+            ? { x: renderNode.x, y: renderNode.y }
+            : entry.position,
+          moved: false,
+          edge: resizeHandleEdge(hit.handle),
+          cursor: resizeHandleCursor(hit.handle)
         };
+        setCursor(resizeHandleCursor(hit.handle));
         canvas.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         return;
@@ -854,7 +877,7 @@ export function create2dInputFamily(core: InteractionCore) {
     } else if (state.gesture.kind === "marquee") {
       const click = groundClick;
       groundClick = null;
-      if (click && click.pointerId === event.pointerId && Math.hypot(event.clientX - click.x, event.clientY - click.y) < 5) {
+      if (click && click.pointerId === event.pointerId && Math.hypot(event.clientX - click.x, event.clientY - click.y) < CLICK_SLOP_PX) {
         const next = (click.candidates.indexOf(state.selected.length === 1 ? state.selected[0]! : "") + 1) % click.candidates.length;
         setSelection([click.candidates[next]!]);
       } else {
@@ -865,17 +888,25 @@ export function create2dInputFamily(core: InteractionCore) {
           width: world.x - gesture.start.x,
           height: world.y - gesture.start.y
         });
-        // 世界模型没有内容卡片，2D 框选拿不到它们；用同一屏幕矩形补一次模型 AABB 框选。
-        const modelResult = core.queryModelMarquee({
-          x: gesture.startClient.x,
-          y: gesture.startClient.y,
-          width: event.clientX - gesture.startClient.x,
-          height: event.clientY - gesture.startClient.y
-        });
-        if (marqueeResult.ok || modelResult.ok) {
+        // 世界模型没有内容卡片，2D 框选拿不到它们；真正拖出选择框时才按同一屏幕矩形补一次
+        // 模型 AABB 框选。单击（含手抖几像素）不查：零尺寸框会命中大模型的投影包围盒，
+        // 等于在导演区外的空白处点中了区内的模型。
+        const dragged = Math.hypot(
+          event.clientX - gesture.startClient.x,
+          event.clientY - gesture.startClient.y
+        ) >= CLICK_SLOP_PX;
+        const modelResult = dragged
+          ? core.queryModelMarquee({
+              x: gesture.startClient.x,
+              y: gesture.startClient.y,
+              width: event.clientX - gesture.startClient.x,
+              height: event.clientY - gesture.startClient.y
+            })
+          : null;
+        if (marqueeResult.ok || modelResult?.ok) {
           setSelection(mergeMarqueeSelection(
             marqueeResult.ok ? marqueeResult.value : [],
-            modelResult.ok ? modelResult.value : []
+            modelResult?.ok ? modelResult.value : []
           ));
         }
       }

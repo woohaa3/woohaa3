@@ -130,7 +130,6 @@ export async function configureModelService(
     ...new Set((input.models ?? []).map((id) => id.trim()).filter(Boolean)),
   ];
   let modelsError: string | undefined;
-  const modelCapabilities: Record<string, { tools?: boolean }> = {};
   if (models.length === 0) {
     const credential = await service.readCredential<{ secret: string }>({
       owner,
@@ -166,11 +165,6 @@ export async function configureModelService(
       });
       const directory = result.ok ? (apiType === "gemini" ? result.value?.models : result.value?.data) : undefined;
       if (Array.isArray(directory)) {
-        for (const item of directory) {
-          if (!item || typeof item !== "object" || !("id" in item) || typeof item.id !== "string" || !("capabilities" in item)) continue;
-          const capabilities = item.capabilities;
-          if (capabilities && typeof capabilities === "object" && "tools" in capabilities && typeof capabilities.tools === "boolean") modelCapabilities[item.id] = { tools: capabilities.tools };
-        }
         models = [
           ...new Set(
             directory.flatMap((item) =>
@@ -207,7 +201,7 @@ export async function configureModelService(
       "version-conflict",
       "读取模型期间设置已变化，请重新读取后再保存。",
     );
-  const updated = await service.update(owner, connectionId, { models, modelCapabilities }, configured ?? undefined);
+  const updated = await service.update(owner, connectionId, { models }, configured ?? undefined);
   if (!updated.ok) return fail(updated.error.code === "version-conflict" ? 409 : 500, updated.error.code, updated.error.message);
   return {
     status: 200,

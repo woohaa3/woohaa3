@@ -8,21 +8,21 @@ const alice = { owner: "alice", administrator: false, canUseSite: true };
 const bob = { ...alice, owner: "bob" };
 const admin = { ...alice, owner: "admin", administrator: true };
 const input: ServiceConnectionSave = { operationId: "create", expectedRevision: 0, expectedCredentialEpoch: 0, name: "Relay", endpoints: [{ protocol: "responses", baseUrl: "https://relay.example/v1" }], secret: "private-key" };
-const binding: ServiceConsumerBinding = { bindingId: "sdk:1", extensionId: "sdk", consumer: "agent", consumerId: "conn-1", purposes: ["discussion"], modelKeys: ["model-1"] };
+const binding: ServiceConsumerBinding = { bindingId: "sdk:1", extensionId: "sdk", consumer: "agent", consumerId: "conn-1", purposes: ["text"], modelKeys: ["model-1"] };
 function fixture() {
   const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
   const documents = store.forExtension("sources")!;
   const secrets = createInMemorySecretStore();
   const read = vi.spyOn(secrets, "read");
-  const options = { documents, secrets, checkEndpoint: (url: string) => url === "https://relay.example/v1", validateBinding: (candidate: ServiceConsumerBinding) => candidate.extensionId === "sdk" && candidate.purposes.every(purpose => purpose === "discussion") };
+  const options = { documents, secrets, checkEndpoint: (url: string) => url === "https://relay.example/v1", validateBinding: (candidate: ServiceConsumerBinding) => candidate.extensionId === "sdk" && candidate.purposes.every(purpose => purpose === "text") };
   const registry = createServiceConnectionRegistry(options);
   return { registry, options, documents, secrets, read, close: () => store.close() };
 }
 async function usable(f: ReturnType<typeof fixture>) {
   let connection = (await f.registry.save(alice, input)).connection;
-  connection = await f.registry.publishCapabilities(alice, connection.serviceConnectionId, connection, [{ purpose: "discussion", protocol: "responses", modelId: "model-1", imageInput: false, evidence: "adapter" }]);
+  connection = await f.registry.publishCapabilities(alice, connection.serviceConnectionId, connection, [{ purpose: "text", protocol: "responses", modelId: "model-1", imageInput: false, evidence: "adapter" }]);
   connection = await f.registry.bind(alice, connection.serviceConnectionId, binding, connection);
-  return { ...connection, bindingId: binding.bindingId, purpose: "discussion" as const, protocol: "responses", endpoint: input.endpoints[0].baseUrl, modelId: "model-1" };
+  return { ...connection, bindingId: binding.bindingId, purpose: "text" as const, protocol: "responses", endpoint: input.endpoints[0].baseUrl, modelId: "model-1" };
 }
 describe("service source authority", () => {
   it("isolates owners and scopes and never returns credentials or internal references", async () => {
@@ -107,7 +107,7 @@ describe("registered source adapters", () => {
     let epoch = 1;
     const get = async (owner: string, id: string) => secrets.has(`${owner}:${id}`) ? {
       legacyId: id, scope: "personal" as const, kind: "api" as const, name: id,
-      endpoints: input.endpoints, capabilities: [{ purpose: "discussion" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+      endpoints: input.endpoints, capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
       bindings: [{ ...binding, consumerId: id, bindingId: id }], enabled: true, removed: false, locked: false,
       credentialConfigured: true, configRevision: 1, credentialEpoch: epoch,
     } : null;
@@ -121,7 +121,7 @@ describe("registered source adapters", () => {
       expect(sources).toHaveLength(2);
       expect(await port.list("bob")).toEqual([]);
       expect(readSecret).not.toHaveBeenCalled();
-      const call = { ...sources[0], bindingId: "a", purpose: "discussion" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
+      const call = { ...sources[0], bindingId: "a", purpose: "text" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
       expect(await port.resolve("alice", call)).toMatchObject({ secret: "first" });
       epoch++;
       readSecret.mockClear();
@@ -141,7 +141,7 @@ describe("registered source adapters", () => {
     let name = "source-a";
     const snapshot = () => ({
       legacyId: "a", scope: "personal" as const, kind: "api" as const, name, endpoints: input.endpoints,
-      capabilities: [{ purpose: "discussion" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+      capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
       bindings: [{ ...binding, bindingId: "a", consumerId: "a" }],
       enabled, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
     });
@@ -171,9 +171,9 @@ it("adds a protocol without copying credentials, invalidates every use on disabl
   try {
     let source = (await f.registry.save(alice, input)).connection;
     const port = f.registry.forExtension("sdk-agent");
-    port.registerConsumer({ protocols: ["responses"], purposes: ["discussion"] });
+    port.registerConsumer({ protocols: ["responses"], purposes: ["text"] });
     source = await f.registry.addProtocol(alice, source.serviceConnectionId, source, input.endpoints[0], ["model-1"]);
-    const call = { ...source, bindingId: `protocol:${source.serviceConnectionId}:responses`, purpose: "discussion" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
+    const call = { ...source, bindingId: `protocol:${source.serviceConnectionId}:responses`, purpose: "text" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
     f.read.mockClear();
     expect(await port.resolve("alice", call)).toMatchObject({ secret: "private-key" });
     await expect(port.resolve("alice", { ...call, purpose: "image" })).rejects.toMatchObject({ code: "forbidden" });

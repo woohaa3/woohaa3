@@ -16,6 +16,7 @@
  */
 import type { AgentConversationAdapterEvent, AgentAdapterRunOutcome } from "@woohaa3/contracts";
 import { coerceSseEvents, createSseParser } from "./sse.js";
+import { toolResultDetail } from "./tool-detail.js";
 
 export const OPENCODE_SUPPORTED_MAJOR = 2;
 
@@ -147,7 +148,8 @@ export function createOpenCodeEventDecoder(): {
             const status = typeof part.state === "string" ? part.state : "";
             if (status === "running" || status === "pending") emitted.push({ type: "tool-started", tool: part.tool });
             else if (status === "completed" || status === "error") {
-              emitted.push({ type: "tool-completed", tool: part.tool, ok: status === "completed" });
+              const detail = status === "error" ? toolResultDetail(part.error ?? part) : undefined;
+              emitted.push({ type: "tool-completed", tool: part.tool, ok: status === "completed", ...(detail ? { summary: detail } : {}) });
             }
           }
           return emitted;

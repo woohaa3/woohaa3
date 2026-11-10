@@ -53,11 +53,13 @@ describe("地址与 Key 一步设置", () => {
       normalizeModelBaseUrl("https://api.example/v1?key=secret"),
     ).toThrow();
   });
-  it("仅保留目录明确提供的模型工具能力，未知能力不伪造成已授权", async () => {
+  it("保存目录模型，不再写入逐模型工具证据（所有文本模型都按支持工具处理）", async () => {
     const { service, fetchImpl, deployment, input } = fixture();
-    fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "discussion-only", capabilities: { tools: false } }, { id: "unknown" }] })));
+    fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "catalog-model", capabilities: { tools: false } }, { id: "unknown" }] })));
     expect((await configureModelService(service, deployment, "u1", input)).status).toBe(200);
-    expect((await service.list("u1"))[0]?.modelCapabilities).toEqual({ "discussion-only": { tools: false } });
+    const [record] = await service.list("u1");
+    expect(record?.models).toEqual(["catalog-model", "unknown"]);
+    expect(Object.hasOwn(record!, "modelCapabilities")).toBe(false);
   });
   it("一次保存 Key 并 GET 模型，不生成、不回读秘密，重复保存复用服务", async () => {
     const { service, fetchImpl, deployment, input } = fixture();

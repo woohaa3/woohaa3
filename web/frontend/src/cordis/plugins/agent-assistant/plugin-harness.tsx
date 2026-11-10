@@ -37,7 +37,7 @@ export async function render(connections: AgentConnectionView[] = [], configure 
   const listConnections = vi.fn(async () => ({ ok: true as const, value: connections }));
   const sourceViews = connections.filter(item => item.authMode !== "local-login").map(item => ({
     serviceConnectionId: `source:${item.connectionId}`, scope: "personal", kind: item.authMode === "oauth" ? "oauth" : "api", name: item.name,
-    bindings: [{ bindingId: item.connectionId, extensionId: item.extensionId, consumer: item.authMode === "oauth" ? "oauth" : "agent", consumerId: item.connectionId, purposes: ["discussion"], modelKeys: [] }],
+    bindings: [{ bindingId: item.connectionId, extensionId: item.extensionId, consumer: item.authMode === "oauth" ? "oauth" : "agent", consumerId: item.connectionId, purposes: ["text"], modelKeys: [] }],
     endpoints: [], capabilities: [], enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
   })) as ServiceConnectionView[];
   const service = { listConnections, listServiceConnections: vi.fn(async () => ({ ok: true as const, value: sourceViews })), listConversations: vi.fn(async () => ({ ok: true as const, value: [] })), ...overrides } as unknown as AgentConversationService;
@@ -63,8 +63,8 @@ export const oauth = { ...api, connectionId: "oauth", extensionId: "oauth-agent"
 export const declaredSite = (overrides: Partial<ServiceConnectionView> = {}): ServiceConnectionView => ({
   serviceConnectionId: "site-provider", scope: "site", kind: "api", name: "声明提供商",
   endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }],
-  capabilities: [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }],
-  bindings: [{ bindingId: "provider-assistant:demo", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"], modelKeys: ["model"] }],
+  capabilities: [{ purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }],
+  bindings: [{ bindingId: "provider-assistant:demo", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"], modelKeys: ["model"] }],
   enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
   ...overrides,
 });

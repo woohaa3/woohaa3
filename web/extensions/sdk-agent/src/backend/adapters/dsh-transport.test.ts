@@ -5,7 +5,7 @@
  * 补丁生成（隔离面）与事件投影（工具名去掉 MCP 前缀、去重、不读推理）两处易回归点。
  */
 import { describe, expect, it, vi } from "vitest";
-import { buildDshPatch, DSH_DISABLED_PLUGINS, projectDshEvents } from "./dsh-transport.js";
+import { buildDshPatch, DSH_DEFAULT_MAX_OUTPUT_TOKENS, DSH_DISABLED_PLUGINS, projectDshEvents, readDshMaxOutputTokens } from "./dsh-transport.js";
 
 describe("dsh profile 补丁", () => {
   it("模型只走给定 baseURL 与短期凭据变量，不启用官方账号插件", () => {
@@ -24,6 +24,22 @@ describe("dsh profile 补丁", () => {
     expect(patch).toContain('"controlled-model"');
     // 真实 API Key 不进入配置文件（只写变量名）。
     expect(patch).not.toMatch(/sk-|Bearer /);
+  });
+
+  it("显式声明输出预算，并允许按部署调整", () => {
+    const patch = buildDshPatch({ modelBaseUrl: "http://127.0.0.1:1/v1", model: "m", apiKeyEnv: "K", mcp: null });
+    // dsh 缺省 32768；导演区一次性长脚本会写满额度并被静默截断。
+    expect(patch).toContain(`            maxTokens: ${DSH_DEFAULT_MAX_OUTPUT_TOKENS}`);
+    expect(DSH_DEFAULT_MAX_OUTPUT_TOKENS).toBeGreaterThan(32768);
+    const custom = buildDshPatch({ modelBaseUrl: "http://127.0.0.1:1/v1", model: "m", apiKeyEnv: "K", maxTokens: 12000, mcp: null });
+    expect(custom).toContain("            maxTokens: 12000");
+  });
+
+  it("只有正安全整数才覆盖输出预算", () => {
+    const read = (value?: string) => readDshMaxOutputTokens((value === undefined ? {} : { WOOHAA3_SDK_AGENT_MAX_OUTPUT_TOKENS: value }) as NodeJS.ProcessEnv);
+    expect(read()).toBe(DSH_DEFAULT_MAX_OUTPUT_TOKENS);
+    expect(read("48000")).toBe(48000);
+    for (const invalid of ["", "0", "-1", "many", "1.5"]) expect(read(invalid)).toBe(DSH_DEFAULT_MAX_OUTPUT_TOKENS);
   });
 
   it("关闭全部内建工具与 plan-mode，讨论回合不挂 MCP", () => {
@@ -84,6 +100,36 @@ describe("dsh 事件投影", () => {
     expect(emitted.filter((event) => (event as { type: string }).type === "tool-call")).toHaveLength(1);
   });
 
+  it("记录每条助手消息的块类型与模型级终止原因", () => {
+    const projected = projectDshEvents([
+      {
+        type: "assistant/message",
+        data: {
+          message: { content: [{ type: "text", text: "ok" }, { type: "tool-call", id: "c1", name: "mcp__woohaa__create_world_model", arguments: "{}" }] },
+          stream: [{ time: 1, chunk: { type: "text-delta", text: "ok" } }, { time: 2, chunk: { type: "finish", reason: { kind: "max-tokens" } } }]
+        }
+      }
+    ] as Event[], "woohaa", () => undefined);
+    expect(projected.assistantMessages).toEqual([{ blocks: ["text", "tool-call:mcp__woohaa__create_world_model"], finish: "max-tokens" }]);
+  });
+
+  it("透出 turn/end 的结束原因（输出额度写满不是错误）", () => {
+    const projected = projectDshEvents(
+      [
+        assistant("我先读一下"),
+        { type: "turn/end", data: { turn: 1, reason: { kind: "max-tokens" } } }
+      ] as Event[],
+      "woohaa",
+      () => undefined
+    );
+    expect(projected.turnEnd).toBe("max-tokens");
+  });
+
+  it("没有 turn/end 事件时不伪造结束原因", () => {
+    expect(projectDshEvents([assistant("done")], "woohaa", () => undefined).turnEnd).toBeUndefined();
+    expect(projectDshEvents([{ type: "turn/end", data: { reason: { kind: "blocked" } } }] as Event[], "woohaa", () => undefined).turnEnd).toBe("blocked");
+  });
+
   it("非本网关的工具名保持原样（不伪造命名空间）", () => {
     const result = projectDshEvents(
       [toolCall("call_9", "mcp__other__do_thing")],
@@ -103,7 +149,7 @@ describe("dsh 事件投影", () => {
       null,
       emit
     );
-    expect(result).toEqual({ assistantText: "", toolCalls: [] });
+    expect(result).toEqual({ assistantText: "", toolCalls: [], assistantMessages: [] });
     expect(emit).not.toHaveBeenCalled();
   });
 

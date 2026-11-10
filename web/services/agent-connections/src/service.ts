@@ -31,7 +31,6 @@ export type ConnectionConfigInput = {
   authMode: AgentConnectionAuthMode;
   baseUrl?: string;
   models?: readonly string[];
-  modelCapabilities?: ConnectionMetadataRecord["modelCapabilities"];
 };
 
 export type ConnectionServiceError = {
@@ -204,7 +203,6 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
         ...(patch.authMode !== undefined ? { authMode: patch.authMode } : {}),
         ...(patch.baseUrl !== undefined ? { baseUrl: patch.baseUrl } : {}),
         ...(patch.models !== undefined ? { models: [...patch.models] } : {}),
-        ...(patch.modelCapabilities !== undefined ? { modelCapabilities: patch.modelCapabilities } : patch.baseUrl !== undefined ? { modelCapabilities: undefined } : {}),
         // 配置变化推进 revision；切换接入方式使原生会话绑定失效（design D4）。
         configRevision: found.record.configRevision + 1,
         ...(patch.adapterId !== undefined || patch.authMode !== undefined || patch.baseUrl !== undefined ? { native: undefined, nativeBindings: undefined, lastStatus: undefined } : {}),
@@ -253,7 +251,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
         configRevision: (found?.record.configRevision ?? 0) + 1,
         credentialEpoch: (found?.record.credentialEpoch ?? 0) + (secret ? 1 : 0),
         ...(secret ? { credentialKeys: { ...found?.record.credentialKeys, "model-api-key": operation.credentialKey } } : {}),
-        native: undefined, nativeBindings: undefined, modelCapabilities: undefined, lastStatus: undefined,
+        native: undefined, nativeBindings: undefined, lastStatus: undefined,
         createdAt: found?.record.createdAt ?? timestamp, updatedAt: timestamp,
       };
       const published = await documents.batch([
@@ -297,7 +295,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       if (!written.ok) return { ok: false, error: { code: written.code === "storage-failed" ? "storage-failed" : "epoch-invalid", message: written.message } };
       // 推进连接级 epoch，使旧原生会话/迟到结果失效。
       const nextEpoch = found.record.credentialEpoch + 1;
-      const next: ConnectionMetadataRecord = { ...found.record, credentialKeys: { ...found.record.credentialKeys, [input.purpose]: purposeKey }, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, modelCapabilities: undefined, updatedAt: now() };
+      const next: ConnectionMetadataRecord = { ...found.record, credentialKeys: { ...found.record.credentialKeys, [input.purpose]: purposeKey }, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, updatedAt: now() };
       const stored = await writeRecord(next, found.revision);
       if (!stored.ok) {
         // 元数据写入失败：清除刚写入的凭据，保持「未生效」而不是半状态。
@@ -312,7 +310,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
       if (found.record.credentialKeys?.[input.purpose] === null) return { ok: true, value: { credentialEpoch: found.record.credentialEpoch } };
       const nextEpoch = found.record.credentialEpoch + 1;
-      const next: ConnectionMetadataRecord = { ...found.record, credentialKeys: { ...found.record.credentialKeys, [input.purpose]: null }, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, modelCapabilities: undefined, updatedAt: now() };
+      const next: ConnectionMetadataRecord = { ...found.record, credentialKeys: { ...found.record.credentialKeys, [input.purpose]: null }, credentialEpoch: nextEpoch, native: undefined, nativeBindings: undefined, lastStatus: undefined, updatedAt: now() };
       const stored = await writeRecord(next, found.revision);
       if (!stored.ok) return stored;
       // Publish revocation before clearing storage; a failed CAS cannot destroy the active Key.

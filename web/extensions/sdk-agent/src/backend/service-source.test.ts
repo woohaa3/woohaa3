@@ -13,12 +13,11 @@ function declaredSource(legacyId: string, scope: "site" | "personal", overrides:
     legacyId, scope, kind: "api", name: `Relay ${legacyId}`,
     endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }],
     capabilities: [
-      { purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" },
-      { purpose: "target-execution", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" },
+      { purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" },
     ],
     bindings: [
       { bindingId: `provider:${legacyId}`, extensionId: "demo", consumer: "provider", consumerId: legacyId, purposes: ["text"], modelKeys: [`${legacyId}:model`] },
-      { bindingId: `provider-assistant:${legacyId}`, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion", "target-execution"], modelKeys: ["model"] },
+      { bindingId: `provider-assistant:${legacyId}`, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"], modelKeys: ["model"] },
     ],
     enabled: true, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
     ...overrides,
@@ -30,7 +29,7 @@ it("projects declared provider sources from both scopes into stable Agent connec
   const raw = createConnectionService({ documents: documents.forExtension("sdk")!, secrets: createInMemorySecretStore() });
   const registry = createServiceConnectionRegistry({ documents: documents.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
   const sdk = registry.forExtension("sdk-agent");
-  sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   let site = declaredSource("demo", "site");
   let personal = declaredSource("me", "personal");
   const siteAdapter = { id: "demo-site", scope: "site" as const, get: async () => site, list: async () => [site] };
@@ -44,8 +43,6 @@ it("projects declared provider sources from both scopes into stable Agent connec
   expect(new Set(first.map(record => record.serviceConnectionId)).size).toBe(2);
   expect(first.map(record => record.name).sort()).toEqual(["Relay demo", "Relay me"]);
   expect(first.every(record => record.models?.includes("model"))).toBe(true);
-  // Provider-declared assistant connections carry per-model evidence; this fixture proves tools.
-  expect(first.every(record => record.modelCapabilities?.model?.tools === true)).toBe(true);
   const revisions = first.map(record => record.connectionId + ":" + record.configRevision).sort();
   const again = await bridged.list("alice");
   expect(again.map(record => record.connectionId + ":" + record.configRevision).sort()).toEqual(revisions);
@@ -90,7 +87,7 @@ it("does not project self-filled API sources without a provider assistant declar
   const raw = createConnectionService({ documents: documents.forExtension("sdk")!, secrets: createInMemorySecretStore() });
   const registry = createServiceConnectionRegistry({ documents: documents.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
   const sdk = registry.forExtension("sdk-agent");
-  sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   const source = declaredSource("manual", "personal", {
     bindings: [{ bindingId: "protocol:manual:chat-completions", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: [], modelKeys: [] }],
   });
@@ -108,7 +105,7 @@ it("bridges the original authority, isolates owners and freezes Agent/Provider v
   const registry = createServiceConnectionRegistry({ documents: documents.forExtension("sources")!, secrets, checkEndpoint: () => true, validateBinding: () => false });
   const sdk = registry.forExtension("sdk-agent");
   const release = sdk.registerSource(createSdkServiceSource(raw));
-  const stopConsumer = sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  const stopConsumer = sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   const write = vi.spyOn(secrets, "write");
   const [source] = await sdk.list("alice");
   expect(await sdk.list("bob")).toEqual([]);
@@ -131,6 +128,6 @@ it("bridges the original authority, isolates owners and freezes Agent/Provider v
   const current = (await sdk.get("alice", source.serviceConnectionId))!;
   release(); stopConsumer();
   expect(await provider.resolve("alice", { ...call, ...current })).toMatchObject({ secret: "new-key" });
-  await expect(sdk.resolve("alice", { ...call, ...current, purpose: "discussion", bindingId: `sdk:${configured.value.connectionId}` })).rejects.toMatchObject({ code: "forbidden" });
+  await expect(sdk.resolve("alice", { ...call, ...current, purpose: "image", bindingId: `sdk:${configured.value.connectionId}` })).rejects.toMatchObject({ code: "forbidden" });
   expect(JSON.stringify(await provider.list("alice"))).not.toMatch(/original-key|new-key|credentialKey/);
 });

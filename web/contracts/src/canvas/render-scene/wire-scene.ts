@@ -157,7 +157,7 @@ export type BevyRenderNode = {
   mediaLoading?: boolean;
   /** 是否有可显示纹理（图片/视频封面）。 */
   texture: boolean;
-  /** 是否绘制右下角 resize 抓手（仅单选节点，change: add-node-resize）。 */
+  /** 是否绘制四角 resize 抓手（仅单选节点，change: add-node-resize）。 */
   resizable: boolean;
   /**
    * 是否上传中的幽灵节点（只渲染、不可交互；change: add-paste-import-workflows）。

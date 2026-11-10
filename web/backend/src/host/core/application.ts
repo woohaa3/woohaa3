@@ -243,22 +243,25 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // 跨宿主重启授权（任务 2.3/3.2）：桥按持久回合授权校验 lease，并按需重建接管处理器。
       // 通过 ctx.get("application") 延迟读取，避免装配顺序耦合。
       const conversations = () => ctx.get("application")?.service.agentConversations();
-      bridge.setTurnAuthority((turnId) => {
-        const authority = conversations()?.turnAuthority(turnId);
-        if (!authority) return null;
-        return {
-          turnId: authority.turnId,
-          requestId: authority.requestId,
-          owner: authority.owner,
-          canvasId: authority.canvasId,
-          hostMethods: authority.hostMethods,
-          toolScope: authority.toolScope,
-          configRevision: authority.configRevision,
-          credentialEpoch: authority.credentialEpoch,
-          expiresAt: authority.expiresAt,
-          revokedAt: authority.revokedAt
-        };
-      });
+      const bridgeAuthority = (authority: {
+        turnId: string; requestId: string; owner: string; canvasId: string; hostMethods: readonly string[];
+        toolScope?: readonly string[]; configRevision?: number | null; credentialEpoch?: number | null;
+        expiresAt?: number | null; revokedAt?: string | null;
+      } | null | undefined) => authority ? {
+        turnId: authority.turnId,
+        requestId: authority.requestId,
+        owner: authority.owner,
+        canvasId: authority.canvasId,
+        hostMethods: authority.hostMethods,
+        toolScope: authority.toolScope,
+        configRevision: authority.configRevision,
+        credentialEpoch: authority.credentialEpoch,
+        expiresAt: authority.expiresAt,
+        revokedAt: authority.revokedAt
+      } : null;
+      bridge.setTurnAuthority((turnId) => bridgeAuthority(conversations()?.turnAuthority(turnId)));
+      // 执行器派生 turnId 与会话账本 turnId 不同：lease 里两种身份都在，按 requestId 回到同一份授权。
+      bridge.setTurnAuthorityByRequest((owner, requestId) => bridgeAuthority(conversations()?.turnAuthorityByRequest(owner, requestId)));
       bridge.setAdoptionHandler(async (turnId) => (await conversations()?.adoptTurn(turnId)) ?? false);
       bridge.setLeaseRecorder((turnId, methods) => conversations()?.recordHostMethods(turnId, methods));
       agentRuntime = {

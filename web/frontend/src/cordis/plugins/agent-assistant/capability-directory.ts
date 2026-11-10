@@ -9,7 +9,7 @@ export type CapabilitySupplier = {
 };
 
 const matches = (purpose: ServiceConnectionPurpose, kind: ActiveCapability) => kind === "agent"
-  ? purpose === "discussion" || purpose === "target-execution" || purpose === "candidate"
+  ? purpose === "text"
   : purpose === kind;
 
 /** Count service identities, never models or consumer bindings. */

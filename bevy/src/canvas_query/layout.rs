@@ -483,8 +483,8 @@ pub(crate) fn resize_rect(x: f32, y: f32, width: f32, height: f32) -> (f32, f32,
     )
 }
 
-/// 组容器四角 resize 命中矩形，顺序 `nw, ne, sw, se`；每个以矩形角点为**中心**，
-/// 与绘制的圆形抓手同心，因此抓手半透明的外侧也能点中（抓取半径不受圆角裁切影响）。
+/// 普通卡片四角 resize 命中矩形，顺序 `nw, ne, sw, se`；抓手位于卡片内侧，
+/// 这样空间索引仍能以卡片本体 AABB 覆盖所有命中区域。
 pub(crate) fn resize_corner_rects(
     x: f32,
     y: f32,
@@ -492,12 +492,11 @@ pub(crate) fn resize_corner_rects(
     height: f32,
 ) -> [(f32, f32, f32, f32); 4] {
     let size = RESIZE_HANDLE_SIZE;
-    let half = size / 2.;
     [
-        (x - half, y - half, size, size),
-        (x + width - half, y - half, size, size),
-        (x - half, y + height - half, size, size),
-        (x + width - half, y + height - half, size, size),
+        (x, y, size, size),
+        (x + width - size, y, size, size),
+        (x, y + height - size, size, size),
+        (x + width - size, y + height - size, size, size),
     ]
 }
 

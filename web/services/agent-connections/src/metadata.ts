@@ -42,8 +42,6 @@ export type ConnectionMetadataRecord = {
   baseUrl?: string;
   /** 显式模型（无目录时手填；不冒充账号已授权）。 */
   models?: string[];
-  /** Explicit model capability evidence from the configured upstream directory. */
-  modelCapabilities?: Record<string, { tools?: boolean }>;
   /** 原生会话/线程索引：按 connectionId + epoch 归属。 */
   native?: ConnectionNativeBinding;
   /** Versioned host-conversation/target bindings; legacy native is never a fallback. */

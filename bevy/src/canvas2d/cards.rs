@@ -259,17 +259,35 @@ pub(super) fn draw(
     labels
 }
 
-/// 右下角矩形 resize 抓手；交互复用同一 `canvas_query::grip::ResizeGrip`。
+/// 四角 L 形 resize 抓手；交互复用同一 `canvas_query::grip::ResizeGrip` 命中区域。
 pub(super) fn draw_resize_grip(
     geometry: &mut Geometry,
     theme: &ThemeResource,
     node: &GraphNode,
     z: f32,
 ) {
-    let grip =
-        crate::canvas_query::grip::ResizeGrip::for_bounds(node.x, node.y, node.width, node.height);
+    let grips = crate::canvas_query::grip::ResizeGrip::all_for_bounds(
+        node.x, node.y, node.width, node.height,
+    );
     let color = theme.token_u32("canvasResizeHandle");
-    geometry.rounded_rect(grip.x, grip.y, grip.width, grip.height, 2.0, z, color);
+    for grip in grips {
+        let (sx, sy) = match grip.handle {
+            "nw" => (1.0, 1.0),
+            "ne" => (-1.0, 1.0),
+            "sw" => (1.0, -1.0),
+            _ => (-1.0, -1.0),
+        };
+        let corner = match grip.handle {
+            "nw" => Vec2::new(node.x, node.y),
+            "ne" => Vec2::new(node.x + node.width, node.y),
+            "sw" => Vec2::new(node.x, node.y + node.height),
+            _ => Vec2::new(node.x + node.width, node.y + node.height),
+        };
+        let inset = Vec2::new(sx * 3.0, sy * 3.0);
+        let start = corner + inset;
+        geometry.line(start, start + Vec2::X * sx * 10.0, 3.0, z, color);
+        geometry.line(start, start + Vec2::Y * sy * 10.0, 3.0, z, color);
+    }
 }
 
 #[cfg(test)]

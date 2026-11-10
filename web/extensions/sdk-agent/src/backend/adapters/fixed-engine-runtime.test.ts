@@ -187,4 +187,26 @@ describe("锁定框架经真实运行时访问可控上游（无真实 Key/计�
     }
   }, 40000);
 
+  it("dsh 输出额度写满时透出 length，而不是伪装成正常结束", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "woohaa-dsh-truncated-"));
+    const server = createServer(async (req, res) => {
+      for await (const _chunk of req) { /* consume */ }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ id: "chat_len", object: "chat.completion.chunk", model: "controlled-model", choices: [{ index: 0, delta: { role: "assistant", content: "我先读一下上下文" }, finish_reason: null }] })}\n\n` +
+        `data: ${JSON.stringify({ id: "chat_len", object: "chat.completion.chunk", model: "controlled-model", choices: [{ index: 0, delta: {}, finish_reason: "length" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\ndata: [DONE]\n\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const relay = await createModelTransport({ apiType: "chat-completions", apiKey: "truncated-key", upstream: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, policy: createEndpointPolicy({ allowedHosts: ["127.0.0.1"], allowHttp: true }), valid: () => true });
+    try {
+      const transport = await createFixedEngineRuntime({ configDir: path.join(root, "config"), workspaceDir: path.join(root, "work") }).resolve("dsh-agent-sdk");
+      const result = await transport.run({ kind: "dsh-agent-sdk", apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey: "truncated-context", model: "controlled-model", prompt: "生成一座宫殿", imagePaths: [], restrictions: buildAgentSdkRestrictions({ kind: "dsh-agent-sdk", workspaceDir: root, allowedTools: [] }), mcp: null, signal: AbortSignal.timeout(30000), onEvent: () => undefined, onNativeId: () => undefined });
+      // 宿主据此报 output-truncated，而不是「作品更新未确认」。
+      expect(result).toMatchObject({ ok: true, finishReason: "length" });
+    } finally {
+      await relay.close();
+      server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 40000);
+
 });

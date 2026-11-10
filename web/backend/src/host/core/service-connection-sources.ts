@@ -87,26 +87,17 @@ export function createSiteProviderSource(options: {
     const assistantProtocol = factory?.assistantProtocol;
     // 助手模型必须与任务目录同一判据：站点策略里没启用的模型不进助手下拉。
     const assistantModels = assistantProtocol ? enabledAssistantModels(provider, options.policy?.()) : [];
-    // Per-model evidence only: a provider that cannot prove tools for a model must not project
-    // target execution. Catalog absence of evidence is treated as unsupported.
-    const assistantCapabilities: ServiceConnectionCapability[] = assistantModels.flatMap(model => {
+    // 所有文本模型都支持工具调用：assistant 协议下的语言模型统一投影为 text 能力；
+    // vision 证据仍用于图片输入。
+    const assistantCapabilities: ServiceConnectionCapability[] = assistantModels.map(model => {
       const evidence = provider?.languageCapabilities?.(model.providerModelId);
-      const discussion: ServiceConnectionCapability = {
-        purpose: "discussion", protocol: assistantProtocol!, modelId: model.providerModelId,
+      return {
+        purpose: "text", protocol: assistantProtocol!, modelId: model.providerModelId,
         imageInput: evidence?.imageInput === true, evidence: "adapter"
       };
-      return [
-        discussion,
-        ...(evidence?.tools === true ? [{ purpose: "target-execution" as const, protocol: assistantProtocol!, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const }] : [])
-      ];
     });
-    // A trusted assistant protocol is executable Agent evidence for discussion (and, per model,
-    // target execution). The stable binding lets the SDK Agent bridge project this source without
-    // an explicit admin opt-in.
-    const assistantPurposes: ServiceConnectionPurpose[] = [
-      "discussion",
-      ...(assistantCapabilities.some(capability => capability.purpose === "target-execution") ? ["target-execution" as const] : [])
-    ];
+    // 带可信 assistant 协议的来源可直接被 SDK Agent 桥接投影，无需管理员逐模型开启。
+    const assistantPurposes: ServiceConnectionPurpose[] = ["text"];
     const assistantBinding = assistantProtocol && assistantModels.length ? {
       bindingId: `provider-assistant:${options.providerId}`, extensionId: "sdk-agent", consumer: "agent" as const,
       consumerId: `shared:${assistantProtocol}`, purposes: assistantPurposes,

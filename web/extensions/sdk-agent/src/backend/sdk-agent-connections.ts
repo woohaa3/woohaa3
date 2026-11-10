@@ -45,8 +45,25 @@ export function sdkReasoningEfforts(adapterId: string, model: string): readonly 
   return [];
 }
 
+/**
+ * 没有写入回执时，把「模型输出被截断/中止」归因成可证明的失败。
+ *
+ * 这类结束在运行时协议里不是错误（dsh 的 `turn/end: max-tokens`），但也不会有完整写入；
+ * 不单独识别就只能落到「作品更新未确认」，用户看不到真实原因。
+ */
+export function unwrittenError(finishReason: import("./protocol/model-turn.js").ModelTurnOutcome["finishReason"]): { code: string; message: string } | undefined {
+  if (finishReason === "length") return { code: "output-truncated", message: "模型输出达到长度上限被截断，本轮没有完成写入；请拆分需求或减少单次生成的模型数量后重试" };
+  if (finishReason === "content_filter") return { code: "content-filtered", message: "模型输出被安全策略中止，本轮没有完成写入；请调整描述后重试" };
+  return undefined;
+}
+
 export function capabilitiesFor(_adapter: SdkAgentAdapterDescriptor): AgentConnectionCapabilities {
-  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true, targets: ["model3d", "world", "canvas-group"] };
+  const engine = sdkEngineForAdapter(_adapter.adapterId)?.engine;
+  // DeepSeek Harness runs in a disposable per-turn home/work directory. It returns a
+  // session id for diagnostics, but that id cannot be resumed after the directory is
+  // removed, so advertising native resume would make target retries silently lose
+  // their durable conversation history.
+  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: engine !== "dsh-agent-sdk", targets: ["model3d", "world", "canvas-group"] };
 }
 
 export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, "allowedHosts" | "allowHttp">): Record<string, ConnectionDescriptor> {
@@ -65,7 +82,7 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
           targetExecution: record.lastStatus?.tools ?? unknown
         }
       };
-      const models: AgentConnectionModel[] = (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id), source: "user-provided", accountAuthorized: false, ...(record.modelCapabilities?.[id] ? { capabilities: record.modelCapabilities[id] } : {}) }));
+      const models: AgentConnectionModel[] = (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id), source: "user-provided", accountAuthorized: false }));
       // A saved Key on an allowed endpoint makes the HTTP transport attemptable. This is not a model
       // probe: modelAccess stays unknown, and an explicit failed/unavailable evidence is preserved.
       const transport = record.lastStatus?.transport;
@@ -110,7 +127,6 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     const prepared = input.prepared;
     if (!prepared) return fail("role-not-found", "本回合没有宿主准备的角色请求");
     const toolNames = input.intent.action === "discuss" ? [] : prepared.tools;
-    if (input.intent.action !== "discuss" && record.modelCapabilities?.[model]?.tools === false) return fail("capability-unsupported", "当前模型明确不支持工具，仅可用于讨论；请选择支持目标工具的模型");
     const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: toolNames.length > 0, imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
     if (!preflight.ok) return fail(preflight.code, preflight.message);
     const source = options.serviceConnections ? await sdkSourceFor(options.serviceConnections, input.owner, record.connectionId, options.service) : null;
@@ -118,7 +134,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     let credential: { secret: string } | null;
     try {
       credential = source && options.serviceConnections ? await options.serviceConnections.resolve(input.owner, {
-        ...source, bindingId: source.bindings.find(binding => binding.extensionId === "sdk-agent" && (binding.consumerId === record.connectionId || record.serviceConnectionId && binding.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`))?.bindingId ?? "", purpose: input.intent.action === "discuss" ? "discussion" : "target-execution",
+        ...source, bindingId: source.bindings.find(binding => binding.extensionId === "sdk-agent" && (binding.consumerId === record.connectionId || record.serviceConnectionId && binding.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`))?.bindingId ?? "", purpose: "text",
         protocol: sdkSourceProtocol(record.adapterId), modelId: model, endpoint: baseUrl,
       }) : await options.service.readCredential<{ secret: string }>({ owner: input.owner, connectionId: record.connectionId, purpose: "model-api-key" });
     } catch { return fail("version-conflict", "模型提供商或用途已失效，请重新读取"); }
@@ -190,14 +206,16 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         }
       }
       stage = "execution";
-      const native = input.candidate ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId: record.connectionId, context });
+      const native = input.candidate || engine.engine === "dsh-agent-sdk" ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId: record.connectionId, context });
       const sdk = createAgentSdkAdapter({ kind: engine.engine, apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey,
         configDir: options.agentSdkDirs?.configDir ?? "", workspaceDir: options.agentSdkDirs?.workspaceDir ?? "", transport,
         probeRuntime: async () => ({ ok: true }) });
       // Legal host history is replayable when an engine cannot resume or the process restarted.
       const history = (native && input.intent.action !== "discuss" ? [] : input.history).map((message) => `${message.role}: ${message.content}`).join("\n");
       const prompt = (history ? `会话历史：\n${history}\n\n` : "") + preparedPromptText(prepared);
-      const result = await sdk.run({ model, prompt, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
+      // 模型自己声明过的工具调用：与网关实际收到的写入次数对比，能区分「模型没写」和「调用没送达」。
+      const suggestedTools: string[] = [];
+      const result = await sdk.run({ model, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
         ...(input.candidate
           ? { images: input.candidate.images, outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : input.candidate.outputSchema }
           : input.images?.length ? { images: input.images }
@@ -217,11 +235,35 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const receipt = { kind: "canvas-commands", commands: receipts };
       if (!result.ok) return { status: receipts.length ? "partial" : result.code === "cancelled" ? "cancelled" : "failed", error: { code: result.code, message: result.message }, ...(receipts.length ? { receipt } : {}) };
       if (input.candidate && !await valid()) return controller.signal.aborted ? { status: "cancelled" } : fail("version-conflict", "助手连接已变更，结果未采用");
-      if (result.nativeId && !input.candidate && await valid()) await options.service.setNativeBinding({ owner: input.owner, connectionId: record.connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, conversationId: input.conversationId, updatedAt: new Date().toISOString() } });
       await options.service.setStatus({ owner: input.owner, connectionId: record.connectionId, patch: { transport: { state: "ready", checkedAt: new Date().toISOString() }, modelAccess: { state: "ready", checkedAt: new Date().toISOString() }, ...(receipts.length ? { tools: { state: "ready" as const, checkedAt: new Date().toISOString() } } : {}) } });
-      if (input.intent.action === "discuss") return { status: "succeeded", assistantText: result.outcome.assistantText };
-      return receipts.length ? { status: "succeeded", assistantText: result.outcome.assistantText, receipt } :
-        { status: "failed", assistantText: result.outcome.assistantText, error: { code: "write-unconfirmed", message: "回复完成，作品更新未确认；请核对原请求" } };
+      const rememberNative = async () => {
+        // A native id is useful only after a successful discussion or a target turn
+        // with a proven write receipt. Never bind a read-only/failed target turn:
+        // retrying it in the same native thread is a common source of repeated
+        // "read context, then stop" responses.
+        if (!result.nativeId || input.candidate || engine.engine === "dsh-agent-sdk" || !await valid()) return;
+        await options.service.setNativeBinding({ owner: input.owner, connectionId: record.connectionId, context, native: { nativeId: result.nativeId, credentialEpoch: record.credentialEpoch, conversationId: input.conversationId, updatedAt: new Date().toISOString() } });
+      };
+      if (input.intent.action === "discuss") {
+        await rememberNative();
+        return { status: "succeeded", assistantText: result.outcome.assistantText };
+      }
+      // 先按真实结束原因归因：被截断的输出不会有完整写入，不能报成「未确认」。
+      const attemptedWrites = gateway?.attemptedWrites ?? 0;
+      // 只有「模型声明过、网关却从未收到」的调用才算丢失；读工具成功送达不算。
+      const delivered = new Set(gateway?.receivedTools ?? []);
+      const lostTools = [...new Set(suggestedTools)].filter((name) => !delivered.has(name));
+      if (!receipts.length) options.logger?.({ event: "sdk-agent-turn-unwritten", connectionId: record.connectionId, action: input.intent.action, model, finishReason: result.outcome.finishReason, suggestedTools: [...new Set(suggestedTools)], deliveredTools: [...delivered], lostTools, attemptedWrites });
+      const unwritten = unwrittenError(result.outcome.finishReason);
+      if (unwritten) return { status: receipts.length ? "partial" : "failed", assistantText: result.outcome.assistantText, ...(receipts.length ? { receipt } : {}), error: unwritten };
+      if (receipts.length) {
+        await rememberNative();
+        return { status: "succeeded", assistantText: result.outcome.assistantText, receipt };
+      }
+      // 没有回执时按真实动作分类：模型自己发过调用却没送达网关，是运行时丢调用，不是「未确认」。
+      if (attemptedWrites > 0) return { status: "failed", assistantText: result.outcome.assistantText, error: { code: "write-rejected", message: "本轮写入没有成功（被拒绝或未完成）；请核对失败原因后重试" } };
+      if (lostTools.length > 0) return { status: "failed", assistantText: result.outcome.assistantText, error: { code: "tool-call-lost", message: `模型生成的工具调用（${lostTools.join("、")}）没有送达执行端，本轮未提交写入；请重试` } };
+      return { status: "failed", assistantText: result.outcome.assistantText, error: { code: "no-write-attempted", message: "模型只读取了上下文，没有提交任何写入；请重试，或把需求拆成更小的步骤" } };
     } catch (error) {
       await gateway?.drain();
       const receipts = gateway?.receipts ?? [];

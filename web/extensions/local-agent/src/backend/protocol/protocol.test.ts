@@ -104,6 +104,24 @@ describe("Codex App Server stdio JSON-RPC（任务 4.1/4.2）", () => {
     expect(decoder.threadId()).toBe("th_1");
   });
 
+  it("失败工具项保留真实原因（结构化 code/message），不用无信息量的“失败”", () => {
+    const decoder = createCodexAppServerDecoder();
+    decoder.onMessage({ method: "item/started", params: { item: { type: "mcpToolCall", name: "get_world_model_rig", id: "c9" } } });
+    const failed = decoder.onMessage({
+      method: "item/completed",
+      params: {
+        item: {
+          type: "mcpToolCall",
+          name: "get_world_model_rig",
+          id: "c9",
+          status: "failed",
+          result: { isError: true, structuredContent: { ok: false, code: "not-ready", message: "模型 m1 的动画部件无法编译" } }
+        }
+      }
+    });
+    expect(failed).toEqual([{ type: "tool-completed", tool: "get_world_model_rig", ok: false, summary: "[not-ready] 模型 m1 的动画部件无法编译", callId: "c9" }]);
+  });
+
   it("streams only public summaries, coalesces deltas and flushes the final section", () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(20_000);
     try {

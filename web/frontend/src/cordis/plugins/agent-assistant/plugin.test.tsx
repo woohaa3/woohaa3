@@ -310,8 +310,8 @@ it("工具栏单例打开且不读取模型，dispose 撤销事件、槽位和 D
   expect(dialogs.top()).toBeNull();
 });
 it("unified directory keeps source identity, readonly shared views and original personal form after Provider binding", async () => {
-  const source = { serviceConnectionId: "source", scope: "personal", kind: "api", name: "Unified relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], capabilities: [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }], bindings: [
-    { bindingId: "sdk:c1", extensionId: "sdk-agent", consumer: "agent", consumerId: "c1", purposes: ["discussion"], modelKeys: ["model"] },
+  const source = { serviceConnectionId: "source", scope: "personal", kind: "api", name: "Unified relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], capabilities: [{ purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }], bindings: [
+    { bindingId: "sdk:c1", extensionId: "sdk-agent", consumer: "agent", consumerId: "c1", purposes: ["text"], modelKeys: ["model"] },
     { bindingId: "provider:demo", extensionId: "demo", consumer: "provider", consumerId: "demo", purposes: ["text"], modelKeys: ["demo:model"] },
   ], enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1 } as import("@woohaa3/contracts").ServiceConnectionView;
   const shared = { ...source, serviceConnectionId: "shared", scope: "site" as const, name: "Shared relay", managedByAdministrator: true, endpoints: [], bindings: [] };
@@ -494,8 +494,8 @@ it("无显式定位的旧连接入口也尊重用户先行选择", async () => {
 it("能力按来源身份计数，跨能力共享提供商，详情直接打开原配置", async () => {
   const source: ServiceConnectionView = {
     serviceConnectionId: "multi", scope: "personal", kind: "api", name: "多能力来源", endpoints: [],
-    capabilities: ["discussion", "image", "image", "video"].map((purpose, index) => ({ purpose, protocol: "chat-completions", modelId: `model-${index}`, imageInput: false, evidence: "adapter" })) as ServiceConnectionView["capabilities"],
-    bindings: [{ bindingId: "agent", extensionId: "sdk-agent", consumer: "agent", consumerId: api.connectionId, purposes: ["discussion"], modelKeys: [] }],
+    capabilities: ["text", "image", "image", "video"].map((purpose, index) => ({ purpose, protocol: "chat-completions", modelId: `model-${index}`, imageInput: false, evidence: "adapter" })) as ServiceConnectionView["capabilities"],
+    bindings: [{ bindingId: "agent", extensionId: "sdk-agent", consumer: "agent", consumerId: api.connectionId, purposes: ["text"], modelKeys: [] }],
     enabled: true, removed: false, credentialConfigured: true, locked: false, managedByAdministrator: false, configRevision: 1, credentialEpoch: 1,
   };
   const unconfigured = { ...source, serviceConnectionId: "draft", name: "未授权来源", credentialConfigured: false, bindings: [] };
@@ -542,14 +542,14 @@ it("从图片能力添加时仅列出图片提供商，普通添加保留所有�
   expect([...drawer().querySelectorAll(".agent-assistant__method strong")].map(item => item.textContent)).toEqual(["我有 API Key", "我有 ChatGPT 账号", "图片提供商", "音频提供商"]);
 });
 
-it("提供商声明的共享讨论用途始终开放，不提供关闭入口", async () => {
+it("提供商声明的共享助手用途始终开放，不提供关闭入口", async () => {
   const f = await render([], true, undefined, {}, {
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [declaredSite()], duplicates: [], providers: [] } }),
   });
   await f.click("模型提供商"); await f.click("配置");
   const page = f.el.querySelector('[data-ai-page="sources"]')!;
-  expect(page.textContent).not.toContain("关闭共享讨论用途");
-  expect(page.textContent).not.toContain("开放共享讨论用途");
+  expect(page.textContent).not.toContain("关闭共享助手用途");
+  expect(page.textContent).not.toContain("开放共享助手用途");
 });
 
 it("已停用的来源可显式移除，移除动作带冻结版本", async () => {
@@ -566,14 +566,14 @@ it("已停用的来源可显式移除，移除动作带冻结版本", async () =
   expect(manage).toHaveBeenCalledWith({ action: "remove", serviceConnectionId: "site-provider", configRevision: 1, credentialEpoch: 1 });
 });
 
-it("无提供商声明的自填来源仍需显式开放共享讨论用途", async () => {
+it("无提供商声明的自填来源仍需显式开放共享助手用途", async () => {
   const selfFilled = declaredSite({ serviceConnectionId: "site-manual", name: "自填来源", bindings: [] });
   const f = await render([], true, undefined, {}, {
     serviceConnectionDirectory: async () => ({ ok: true, value: { connections: [selfFilled], duplicates: [], providers: [] } }),
     manageServiceConnection: vi.fn(async () => ({ ok: true as const, value: selfFilled })),
   });
   await f.click("模型提供商"); await f.click("配置");
-  expect(f.el.querySelector('[data-ai-page="sources"]')?.textContent).toContain("开放共享讨论用途");
+  expect(f.el.querySelector('[data-ai-page="sources"]')?.textContent).toContain("开放共享助手用途");
 });
 
 it("Agent 详情在有目标时显式使用提供商并返回原节点", async () => {

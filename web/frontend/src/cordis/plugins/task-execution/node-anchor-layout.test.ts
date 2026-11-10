@@ -93,4 +93,15 @@ describe("严格下方（below 策略）", () => {
     const area = { left: 0, top: 0, width: 1440, height: 900 };
     expect(layoutNodePanel(badge, area, { width: 760, height: 320 }, undefined, "below")).toBeNull();
   });
+
+  it("贴底停靠保留面板自然高度，锚点下缘越过底边也不隐藏", () => {
+    const badge = { left: 400, top: 600, width: 880, height: 640 };
+    const area = { left: 0, top: 0, width: 1440, height: 900 };
+    const panel = layoutNodePanel(badge, area, { width: 760, height: 320 }, undefined, "dock")!;
+    expect(panel.placement).toBe("edge");
+    expect(panel.maxHeight).toBe(320);
+    expect(panel.top + panel.maxHeight).toBeCloseTo(area.top + area.height - 12, 5);
+    // 锚点整体越过底边仍算部分可见，面板贴底而不是消失。
+    expect(layoutNodePanel({ left: 400, top: 850, width: 200, height: 400 }, area, { width: 760, height: 320 }, undefined, "dock")).not.toBeNull();
+  });
 });

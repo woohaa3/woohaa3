@@ -90,6 +90,22 @@ describe("standard-agent-roles", () => {
     expect(prepared.messages[0]!.content).toContain("参考图片");
   });
 
+  it("导演区与镜头角色都说明默认 4×4 范围与三类世界失败", () => {
+    const director = sceneDirectorRole.definition.instructions;
+    expect(director).toContain("默认 4×4 米");
+    expect(director).toContain("读取工具只是准备阶段，不是完成结果");
+    expect(director).toContain("至少一个写工具");
+    expect(director).toContain("resize_scene_area");
+    expect(director).toContain("重新 get_world_context");
+    for (const term of ["outside-scope", "version-conflict", "version-unknown", "不要伪造版本"]) {
+      expect(director, term).toContain(term);
+    }
+    const composer = STANDARD_AGENT_ROLES.find((role) => role.definition.id === "camera-composer")!;
+    for (const term of ["outside-scope", "version-conflict", "version-unknown", "不要编造"]) {
+      expect(composer.definition.instructions, term).toContain(term);
+    }
+  });
+
   it("文本角色把领域提供的上下文写进消息，输出候选 schema", () => {
     const prepared = textAuthorRole.prepare({
       input: { prompt: "写一段介绍", action: "generate" },

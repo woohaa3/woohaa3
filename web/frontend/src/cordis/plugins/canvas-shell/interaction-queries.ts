@@ -29,11 +29,13 @@ export type InteractionQueries = {
    *
    * 模型动画门禁以 `hover.nodeId` 为触发，因此悬停模型本体（而非只悬停卡片）时也要建立
    * 节点 hover（change: play-model-animations-on-hover）。`point` 为 canvas 内 CSS 坐标，
-   * `surface` 为 CSS 尺寸（与 Rust `pick_nearest` 同一映射）。
+   * `surface` 为 CSS 尺寸（与 Rust `pick_nearest` 同一映射）。`options.tolerance` 是可选的
+   * 像素裙边：Rust 只在指针紧贴真实露出表面时命中，不会把包围盒空域当成模型。
    */
   queryModelPick(
     point: Point,
-    surface: { width: number; height: number }
+    surface: { width: number; height: number },
+    options?: { tolerance?: number }
   ): InteractionQuery<{ nodeId: string } | null>;
   /** gizmo 命中与轴拖动约束（相机/bounds/gizmo 事实源）。 */
   queryGizmo: GizmoQuery;
@@ -94,7 +96,7 @@ export function createInteractionQueries(deps: {
       if (!runtime?.queryDropTarget || generation === null) return { ok: false, reason: "unavailable" };
       return runtime.queryDropTarget({ generation, x: point.x, y: point.y, excludedIds }) as InteractionQuery<string | null>;
     },
-    queryModelPick(point, surface) {
+    queryModelPick(point, surface, options) {
       const runtime = deps.getRuntime();
       ensurePublished();
       const generation = generationOf(runtime);
@@ -104,7 +106,8 @@ export function createInteractionQueries(deps: {
         x: point.x,
         y: point.y,
         width: surface.width,
-        height: surface.height
+        height: surface.height,
+        ...(options?.tolerance !== undefined ? { tolerance: options.tolerance } : {})
       });
       if (!result.ok) return result;
       return { ok: true, generation: result.generation, value: result.value ? { nodeId: result.value.nodeId } : null };

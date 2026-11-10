@@ -159,6 +159,60 @@ fn pick_query_respects_generation_and_emptiness() {
 }
 
 #[test]
+fn pixel_tolerance_hits_near_surface_but_not_empty_aabb_space() {
+    // 两个远处小三角面共用一个很大的包围盒：盒心是空域，旧 AABB 兜底会在这里误选模型。
+    let view = crate::isometric_grid::IsometricGridView::default();
+    let corner = |x: f32, z: f32, dx: f32, dz: f32| SurfaceTriangle {
+        vertices: [[x, 0., z], [x + dx, 0., z], [x, 0., z + dz]],
+        cull_back: false,
+    };
+    // 共享世界候选由 `refresh_shared_models` 单独发布，与 CANDIDATES 合并后参与查询。
+    replace_shared_models(vec![ModelCandidate {
+        node_id: "palace".into(),
+        shared_world: true,
+        empty_marker: false,
+        min: [-300., 0., -300.],
+        max: [300., 0., 300.],
+        triangles: Some(std::sync::Arc::new(vec![
+            corner(-300., -300., 20., 20.),
+            corner(280., 280., 20., 20.),
+        ])),
+    }]);
+    accept_models(
+        Vec::new(),
+        9,
+        ModelPickCamera {
+            viewport: origin_view(),
+            surface: [1000.0, 800.0],
+            ordinary: true,
+            focus: None,
+        },
+    );
+    let query = |point: bevy::prelude::Vec2, tolerance: Option<f32>| {
+        let mut request = serde_json::json!({
+            "generation": 9, "x": point.x, "y": point.y, "width": 1000, "height": 800
+        });
+        if let Some(tolerance) = tolerance {
+            request["tolerance"] = serde_json::json!(tolerance);
+        }
+        serde_json::from_str::<serde_json::Value>(&pick_query_json(&request.to_string())).unwrap()["nodeId"].clone()
+    };
+    // 包围盒中心的空域：精确点选与 4 像素裙边都不命中。
+    let empty = crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::ZERO, &view);
+    assert!(query(empty, None).is_null());
+    assert!(query(empty, Some(4.0)).is_null());
+    // 三角面外沿 3 像素：精确射线穿过空隙，4 像素裙边命中真实表面，1 像素裙边不命中。
+    let screen = |x: f32, z: f32| crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::new(x, 0., z), &view);
+    let (a, b, c) = (screen(-300., -300.), screen(-280., -300.), screen(-300., -280.));
+    let centroid = (a + b + c) / 3.0;
+    let edge_midpoint = (a + b) / 2.0;
+    let outside = edge_midpoint + (edge_midpoint - centroid).normalize() * 3.0;
+    assert!(query(outside, None).is_null());
+    assert!(query(outside, Some(1.0)).is_null());
+    assert_eq!(query(outside, Some(4.0)), serde_json::json!("palace"));
+}
+
+#[test]
 fn marquee_selects_world_models_by_projected_aabb() {
     let view = crate::isometric_grid::IsometricGridView::default();
     let center = crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::ZERO, &view);

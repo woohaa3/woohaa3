@@ -17,6 +17,7 @@
  * 我们关闭 runtime 并以 `cancelled` 结束，绝不把已流出的部分文本当成成功。
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -107,6 +108,21 @@ function dshNativeModulesPath(entry: string): string | undefined {
 export const dshRuntimePath = dshRuntimeEntry;
 
 /**
+ * 单轮模型输出预算。
+ *
+ * dsh 的缺省输出额度是 32768。导演区「一次生成整座建筑」这类长脚本很容易写满额度：截断后
+ * 工具调用不完整，回合却按正常结束处理，宿主只能报成未确认写入。这里显式声明更大的预算，
+ * 并允许部署用 `WOOHAA3_SDK_AGENT_MAX_OUTPUT_TOKENS` 调整（代理或模型真实上限更小时调回）。
+ */
+export const DSH_DEFAULT_MAX_OUTPUT_TOKENS = 65536;
+
+export function readDshMaxOutputTokens(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.WOOHAA3_SDK_AGENT_MAX_OUTPUT_TOKENS ?? "").trim();
+  const parsed = Number(raw);
+  return raw !== "" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DSH_DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+/**
  * 本轮 profile 补丁。
  *
  * 只复用 base 已挂载的 `llm-pi-ai` 适配器（再插一个实例会让 route 注册冲突），
@@ -116,6 +132,7 @@ export function buildDshPatch(input: {
   modelBaseUrl: string;
   model: string;
   apiKeyEnv: string;
+  maxTokens?: number;
   mcp: { name: string; url: string; bearerToken: string } | null;
 }): string {
   const lines = [
@@ -130,7 +147,8 @@ export function buildDshPatch(input: {
     `          - id: ${JSON.stringify(input.model)}`,
     `            name: ${JSON.stringify(input.model)}`,
     "            input: [text, image]",
-    "            contextWindow: 128000"
+    "            contextWindow: 128000",
+    `            maxTokens: ${input.maxTokens ?? DSH_DEFAULT_MAX_OUTPUT_TOKENS}`
   ];
   for (const id of DSH_DISABLED_PLUGINS) lines.push(`- id: ${id}`, "  disabled: true");
   if (input.mcp) {
@@ -175,6 +193,34 @@ function assistantTextOf(data: Record<string, unknown> | undefined): string {
 }
 
 /**
+ * 一条助手消息的块类型与终止原因。
+ *
+ * `stream` 是这条消息的完整分片快照，末尾的 `finish` 分片带模型级终止原因。输出额度写满时
+ * dsh 会把 tool-call 块整个丢弃，只剩「正常结束」——所以必须从原始原因才能判断是不是截断。
+ */
+function assistantBlocksOf(data: Record<string, unknown> | undefined): { blocks: string[]; finish?: string } {
+  const message = data?.message as Record<string, unknown> | undefined;
+  const content = Array.isArray(message?.content) ? message.content : [];
+  const blocks = content.map((block) => {
+    if (typeof block !== "object" || block === null) return "unknown";
+    const record = block as Record<string, unknown>;
+    const type = typeof record.type === "string" ? record.type : "unknown";
+    return type === "tool-call" && typeof record.name === "string" ? `${type}:${record.name}` : type;
+  });
+  const stream = data?.stream;
+  let finish: string | undefined;
+  if (Array.isArray(stream)) {
+    for (let index = stream.length - 1; index >= 0; index--) {
+      const chunk = (stream[index] as { chunk?: { type?: unknown; reason?: { kind?: unknown } } } | undefined)?.chunk;
+      if (chunk?.type !== "finish") continue;
+      finish = typeof chunk.reason?.kind === "string" ? chunk.reason.kind : "unknown";
+      break;
+    }
+  }
+  return { blocks, ...(finish !== undefined ? { finish } : {}) };
+}
+
+/**
  * 把 dsh 的会话事件投影为宿主事件。
  *
  * `tool/call` 的 `name` 是 `mcp__<server>__<tool>`；宿主只认原始工具名。同一 callId 只投影一次
@@ -188,16 +234,31 @@ export function projectDshEvents(
       | { type: "text-delta"; text: string; delivery?: "append" | "replace"; streamId?: string }
       | { type: "tool-call"; call: ModelToolCall }
   ) => void
-): { assistantText: string; toolCalls: ModelToolCall[] } {
+): {
+  assistantText: string;
+  toolCalls: ModelToolCall[];
+  /**
+   * `turn/end` 的结束原因（`completed` / `max-tokens` / `blocked` / `error` / `aborted`）。
+   *
+   * dsh 把「输出额度写满」当成正常结束而不是错误；不透出这个原因，宿主就只能把这类
+   * 回合归为「未确认写入」，用户看不到真实原因。
+   */
+  turnEnd?: string;
+  /** 每条助手消息的块类型与模型级终止原因（诊断与截断归因用）。 */
+  assistantMessages: Array<{ blocks: string[]; finish?: string }>;
+} {
   let assistantText = "";
   const toolCalls: ModelToolCall[] = [];
   const seen = new Set<string>();
+  let turnEnd: string | undefined;
+  const assistantMessages: Array<{ blocks: string[]; finish?: string }> = [];
   // 无稳定 message id 时，每个完整 `assistant/message` 各成一条消息。
   let messageSequence = 0;
   const strip = (name: string): string =>
     mcpName && name.startsWith(`mcp__${mcpName}__`) ? name.slice(`mcp__${mcpName}__`.length) : name;
   for (const event of events) {
     if (event.type === "assistant/message") {
+      assistantMessages.push(assistantBlocksOf(event.data));
       const text = assistantTextOf(event.data);
       // `assistant/message` 是**完整**消息（可多次出现）：replace 收敛到对应逻辑消息。
       if (text !== "") {
@@ -231,6 +292,11 @@ export function projectDshEvents(
       }
       continue;
     }
+    if (event.type === "turn/end") {
+      const reason = event.data?.reason as Record<string, unknown> | undefined;
+      if (typeof reason?.kind === "string") turnEnd = reason.kind;
+      continue;
+    }
     if (event.type !== "tool/call") continue;
     const callId = typeof event.data?.callId === "string" ? event.data.callId : "";
     const raw = typeof event.data?.name === "string" ? event.data.name : "";
@@ -244,7 +310,7 @@ export function projectDshEvents(
     toolCalls.push(call);
     emit({ type: "tool-call", call });
   }
-  return { assistantText, toolCalls };
+  return { assistantText, toolCalls, assistantMessages, ...(turnEnd !== undefined ? { turnEnd } : {}) };
 }
 
 type DshHarness = import("@deepseek-ai/dsh-sdk-client").DeepSeekHarness;
@@ -285,6 +351,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           modelBaseUrl: input.modelBaseUrl,
           model: input.model,
           apiKeyEnv: credentialEnv,
+          maxTokens: readDshMaxOutputTokens(),
           mcp: input.mcp
         }), { mode: 0o600 });
 
@@ -318,11 +385,32 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           // `finalResponse` 只是区间内最后一条助手文本，不与 prompt 因果绑定：
           // 只在事件投影为空时回落到它。
           const assistantText = projected.assistantText !== "" ? projected.assistantText : result.finalResponse;
+          const modelFinish = projected.assistantMessages.at(-1)?.finish;
+          // 结构性诊断：dsh 对「写满额度」「工具调用块被丢弃」都只记一条 turn/end，宿主无法区分。
+          // 执行器进程的 stdout/stderr 被 supervisor 丢弃，所以只读回合把块类型与终止原因落到本地文件。
+          if (projected.toolCalls.every((call) => call.name.startsWith("get_"))) {
+            void writeFile(path.join(os.tmpdir(), "woohaa-dsh-last-turn.json"), JSON.stringify({
+              at: new Date().toISOString(),
+              model: input.model,
+              turnEnd: projected.turnEnd ?? null,
+              modelFinish: modelFinish ?? null,
+              calls: projected.toolCalls.map((call) => call.name),
+              messages: projected.assistantMessages,
+              assistantTextLength: assistantText.length
+            }, null, 1), { mode: 0o600 }).catch(() => undefined);
+          }
+          // dsh 只有「正常结束」才会 resolve；`blocked`/`error` 不是模型完成，必须如实报错。
+          if (projected.turnEnd === "blocked") return { ok: false, code: "turn-blocked", message: "回合被运行时阻塞，未执行写入；请重试" };
+          if (projected.turnEnd === "error") return { ok: false, code: "execution-failed", message: "模型回合以错误结束，未提交写入；请重试" };
+          // 模型自称以工具调用结束，却没有留下任何完整调用：分片被丢弃，本轮不可能写入。
+          if (projected.toolCalls.length === 0 && modelFinish === "tool-calls")
+            return { ok: false, code: "tool-call-incomplete", message: "模型生成的工具调用不完整，本轮未提交写入；请拆分需求后重试" };
           return {
             ok: true,
             assistantText,
             toolCalls: projected.toolCalls,
-            finishReason: "stop",
+            // `max-tokens` 表示输出额度写满：末尾的工具调用通常已被截断，交给宿主按截断归因。
+            finishReason: projected.turnEnd === "max-tokens" || modelFinish === "max-tokens" ? "length" : "stop",
             ...(result.sessionId ? { nativeId: result.sessionId } : {})
           };
         } finally {

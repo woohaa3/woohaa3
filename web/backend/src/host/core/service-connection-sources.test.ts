@@ -52,6 +52,8 @@ it("excludes models the site policy does not enable from the assistant directory
 });
 
 it("turns a declared assistant protocol into a discussion Agent binding only with language models", async () => {
+
+it("turns a declared assistant protocol into a text Agent binding only with language models", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-source-"));
   const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
   const fields = { apiKey: { kind: "string", secret: true, reload: "hot", label: "Key", description: "Key" } } as const;
@@ -65,24 +67,23 @@ it("turns a declared assistant protocol into a discussion Agent binding only wit
   try {
     const declared = (await make([{ providerModelId: "model", modelType: "language" }], "chat-completions").get("admin", "demo"))!;
     expect(declared.bindings.map(binding => binding.bindingId)).toEqual(["provider:demo", "provider-assistant:demo"]);
-    expect(declared.bindings[1]).toMatchObject({ extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion", "target-execution"], modelKeys: ["model"] });
-    expect(declared.capabilities).toContainEqual(expect.objectContaining({ purpose: "discussion", protocol: "chat-completions", modelId: "model" }));
-    expect(declared.capabilities).toContainEqual(expect.objectContaining({ purpose: "target-execution", protocol: "chat-completions", modelId: "model" }));
+    expect(declared.bindings[1]).toMatchObject({ extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"], modelKeys: ["model"] });
+    expect(declared.capabilities).toContainEqual(expect.objectContaining({ purpose: "text", protocol: "chat-completions", modelId: "model" }));
 
     const undeclared = (await make([{ providerModelId: "model", modelType: "language" }]).get("admin", "demo"))!;
     expect(undeclared.bindings.map(binding => binding.bindingId)).toEqual(["provider:demo"]);
-    expect(undeclared.capabilities.some(capability => capability.purpose === "discussion")).toBe(false);
+    expect(undeclared.capabilities.some(capability => capability.purpose === "text" && capability.protocol === "chat-completions")).toBe(false);
 
     const mediaOnly = (await make([{ providerModelId: "image-model", modelType: "image" }], "chat-completions").get("admin", "demo"))!;
     expect(mediaOnly.bindings.map(binding => binding.bindingId)).toEqual(["provider:demo"]);
-    expect(mediaOnly.capabilities.some(capability => capability.purpose === "discussion")).toBe(false);
+    expect(mediaOnly.capabilities.some(capability => capability.purpose === "text")).toBe(false);
   } finally {
     settings.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
 
-it("contributes per-protocol fixed endpoints and per-model tool evidence", async () => {
+it("contributes per-protocol fixed endpoints and text capabilities for every language model", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-endpoints-"));
   const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
   const fields = {
@@ -110,9 +111,9 @@ it("contributes per-protocol fixed endpoints and per-model tool evidence", async
     const first = (await adapter.get("admin", "demo"))!;
     // Provider 只贡献文字协议：固定端点来自 endpoints，而不是媒体 baseUrl。
     expect(first.endpoints).toEqual([{ protocol: "chat-completions", baseUrl: "https://text.example/v1" }]);
-    expect(first.capabilities).toContainEqual(expect.objectContaining({ purpose: "target-execution", modelId: "llm/tools" }));
-    expect(first.capabilities).not.toContainEqual(expect.objectContaining({ purpose: "target-execution", modelId: "llm/chat-only" }));
-    expect(first.capabilities).toContainEqual(expect.objectContaining({ purpose: "discussion", modelId: "llm/tools", imageInput: true }));
+    expect(first.capabilities).toContainEqual(expect.objectContaining({ purpose: "text", protocol: "chat-completions", modelId: "llm/tools", imageInput: true }));
+    expect(first.capabilities).toContainEqual(expect.objectContaining({ purpose: "text", protocol: "chat-completions", modelId: "llm/chat-only", imageInput: false }));
+    expect(first.capabilities.some(capability => String(capability.purpose) === "target-execution")).toBe(false);
 
     catalogRevision = 2;
     const second = (await adapter.get("admin", "demo"))!;
@@ -140,7 +141,7 @@ it("projects a declared site provider source into a usable Agent connection thro
     const registry = createServiceConnectionRegistry({ documents: documents.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
     const sdk = registry.forExtension("sdk-agent");
     sdk.registerSource(createSdkServiceSource(raw));
-    sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+    sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
     registry.forExtension("demo").registerSource(createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider: () => provider }));
     const bridged = withServiceSources(raw, sdk);
     const list = await bridged.list("alice");
@@ -148,9 +149,9 @@ it("projects a declared site provider source into a usable Agent connection thro
     expect(list[0]).toMatchObject({ name: "Demo", models: ["model"] });
     expect(list[0]!.serviceConnectionId).toBeTruthy();
     expect(await bridged.credentialConfigured({ owner: "alice", connectionId: list[0]!.connectionId, purpose: "model-api-key" })).toBe(true);
-    // Target execution is a granted purpose, not just discussion.
+    // 文本能力即 Agent 能力，工具调用不再需要额外的用途证据。
     const source = (await sdk.get("alice", list[0]!.serviceConnectionId!))!;
-    expect(await sdk.resolve("alice", { ...source, bindingId: "provider-assistant:demo", purpose: "target-execution", protocol: "chat-completions", modelId: "model", endpoint: "https://relay.example/v1" })).toMatchObject({ secret: "demo-key" });
+    expect(await sdk.resolve("alice", { ...source, bindingId: "provider-assistant:demo", purpose: "text", protocol: "chat-completions", modelId: "model", endpoint: "https://relay.example/v1" })).toMatchObject({ secret: "demo-key" });
     // A second read reuses the same stable auto connection.
     expect((await bridged.list("alice")).map(record => record.connectionId)).toEqual([list[0]!.connectionId]);
   } finally {
@@ -182,9 +183,9 @@ it("projects one settings authority, rotates all bindings, preserves advanced fi
     expect(refreshed.configRevision).toBe(first.configRevision);
     expect(refreshed.bindings.filter(binding => binding.bindingId === "provider-assistant:demo")).toHaveLength(1);
     const sdk = registry.forExtension("sdk-agent");
-    sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion"] });
-    const bound = await registry.bind(actor, first.serviceConnectionId, { bindingId: "shared", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"], modelKeys: ["model"] }, first);
-    const call = { ...bound, bindingId: "shared", purpose: "discussion" as const, protocol: "chat-completions", modelId: "model", endpoint: "https://relay.example/v1" };
+    sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
+    const bound = await registry.bind(actor, first.serviceConnectionId, { bindingId: "shared", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"], modelKeys: ["model"] }, first);
+    const call = { ...bound, bindingId: "shared", purpose: "text" as const, protocol: "chat-completions", modelId: "model", endpoint: "https://relay.example/v1" };
     expect(await sdk.resolve("alice", call)).toMatchObject({ secret: "first-key" });
     await settings.update({ "providers.demo.apiKey": "second-key" });
     await expect(sdk.resolve("alice", call)).rejects.toMatchObject({ code: "stale" });
