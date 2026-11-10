@@ -52,6 +52,25 @@ export type NodeHistoryExtensionOptions = {
   renderModelThumbnail?: ModelThumbnailRenderer;
 };
 
+/**
+ * 是否真的处在**该节点的图片聚焦工作区**里。
+ *
+ * `resolveImagePreviewOwner` 会回落到宿主默认查看器（image-viewer），单看 `isActive()`
+ * 无法区分「PhotoCraft 聚焦编辑」与「画布内联圆点」：两者都可能有一个活跃的预览 owner。
+ * 因此这里同时要求 owner 报出的节点就是本次恢复的节点——与同文件判定「当前首项草稿态」
+ * 用的是同一口径（`isActive() && nodeId() === nodeId`）。
+ *
+ * 只有成立时，恢复后的「清 override + 回到 direct + 选中当前首项」才有意义；
+ * 画布内联圆点要求「点哪个就是哪个」，不能被这套收尾打回。
+ */
+function isImageFocusOwnerActive(
+  ctx: Pick<import("@deepseek-ai/cordis").Context, "get">,
+  nodeId: string
+): boolean {
+  const owner = resolveImagePreviewOwner(ctx);
+  return owner?.isActive?.() === true && owner?.nodeId?.() === nodeId;
+}
+
 export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}): Plugin.Function<void> {
   return definePlugin(
     (ctx: Context) => {
@@ -456,11 +475,18 @@ export function nodeHistoryExtension(options: NodeHistoryExtensionOptions = {}):
         // canonical 的重开由 imageEdit.refreshFromCanonical 在同一工作区完成。
         // 注意在 `previousApplyingEntryId` 归零后再发 select，否则重入订阅会把同一次回执
         // 再判成一次成功恢复。
+        //
+        // **只在 PhotoCraft 聚焦工作区里做这套收尾**：那段语义是「恢复后回到编辑现场」，
+        // 前提是确实有一个正在编辑的图片工作区。画布内联圆点（change: 圆点直接切换版本）
+        // 用的是同一个 apply 入口，但它的语义是「点哪个就是哪个」——此时再 select(CURRENT)
+        // 会把你刚选中的版本打回当前版本，构成 apply ↔ revert 反复（2026-11-10 现场：
+        // 命令表里同一节点每 0.7–1.2 秒交替一次，圆点切过去但图停在加载中，强刷才恢复）。
         if (
           state.kind === "image" &&
           previousApplyingEntryId !== null &&
           state.applyingEntryId === null &&
-          state.applyError === null
+          state.applyError === null &&
+          isImageFocusOwnerActive(ctx, state.nodeId)
         ) revertImageSuccess = true;
         previousApplyingEntryId = state.applyingEntryId;
         if (revertImageSuccess) {
