@@ -13,9 +13,9 @@
  */
 import {
   clampCameraElevation,
-  DEFAULT_MODEL_CAMERA_ASPECT,
-  type ModelCameraAspect
-} from "./model-cameras.js";
+  DEFAULT_CAMERA_ASPECT,
+  type CameraAspect
+} from "./camera-aspect.js";
 import {
   isMotionEasing,
   modelMotionProperty,
@@ -406,10 +406,10 @@ export function easingProgress(easing: MotionEasing, t: number): number {
 }
 
 /** 初始镜头画幅读取（与模型镜头集合同一套受支持值）。 */
-export function readInitialCameraAspect(value: unknown): ModelCameraAspect {
+export function readInitialCameraAspect(value: unknown): CameraAspect {
   return typeof value === "string" && value.includes(":")
-    ? (value as ModelCameraAspect)
-    : DEFAULT_MODEL_CAMERA_ASPECT;
+    ? (value as CameraAspect)
+    : DEFAULT_CAMERA_ASPECT;
 }
 
 function cloneCamera(camera: InitialCameraState): InitialCameraState {

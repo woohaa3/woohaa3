@@ -25,7 +25,6 @@ export type CanvasCommandRejectionCode =
   /** 节点内容违反自包含 3D/复合资产写入约束。 */
   | "invalid-self-contained-node"
   | "invalid-video-edit-intent"
-  | "invalid-model-cameras"
   | "invalid-image-edit"
   | "missing-edge-id"
   /** 已存在骨架的模型不允许通过命令移除骨架。 */

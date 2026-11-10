@@ -170,6 +170,13 @@ export type ApplicationBackendHost = {
    */
   /** Register a custom media validator; activation cleanup always releases its registration. */
   registerMediaFormat?: (format: MediaFormatValidator) => void;
+  /**
+   * 注册一个 Agent 角色实现（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 归属由宿主按本次 activation 的 extensionId 记账，插件不能自报其他扩展身份；停用/回滚时
+   * 宿主自动注销，重复完整角色 id 会让本次激活失败并回滚。
+   */
+  registerAgentRole?: (implementation: import("../assistant/agent-role.js").AgentRoleImplementation) => () => void;
   registerStorage?: (backend: StorageBackend) => void;
   /**
    * 注销一个存储后端（按 `backendId`）。
@@ -269,6 +276,9 @@ export type ApplicationExtensionMcpTool = {
 /** 后端插件定义（构建时静态登记；宿主 activation 前解析依赖）。 */
 export type ApplicationBackendExtensionDefinition = {
   extensionId: string;
+  /** Trusted module paths resolved from extension.json by the extension loader. */
+  executors?: readonly import("../services/host/executor.js").ExtensionExecutorModule[];
+  publicRoutes?: readonly import("./http.js").ApplicationExtensionPublicRouteMapping[];
   mcpTools?: readonly ApplicationExtensionMcpTool[];
   /** 必需依赖的 capability/service id；缺失时不得产生部分可用贡献。 */
   requiredDependencies?: readonly string[];

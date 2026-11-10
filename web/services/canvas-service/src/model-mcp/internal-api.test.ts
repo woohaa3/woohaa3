@@ -7,7 +7,7 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModelMcpInternalHandler, type ModelMcpInternalService } from "./internal-api.js";
-import type { ApplyCommandsInput, ApplyCommandsOutcome, MutateCamerasInput, MutateCamerasOutcome } from "./service.js";
+import type { ApplyCommandsInput, ApplyCommandsOutcome } from "./service.js";
 import type { ModelBatchContext } from "./batch-service.js";
 import type { CanvasCommand, GetModelNodesInput, ModelNodesOutcome, ModelScriptBatchOutcome, ModelScriptBatchRequest } from "@woohaa3/contracts";
 
@@ -213,59 +213,6 @@ describe("Canvas 内部 MCP 协议", () => {
     expect(captured[1]).toMatchObject({ includeStatistics: true });
   });
 
-  it("mutateCameras 透传单条变更并默认使用配置画布", async () => {
-    const captured: MutateCamerasInput[] = [];
-    const { base } = await start({
-      mutateCameras: async (input: MutateCamerasInput): Promise<MutateCamerasOutcome> => {
-        captured.push(input);
-        return { ok: true, canvasId: input.canvasId, nodeId: input.nodeId, commandId: "cmd", duplicate: false, noop: false, cameras: [] };
-      }
-    } as unknown as ModelMcpInternalService);
-    const result = await post(
-      base,
-      "/internal/v1/model-mcp/cameras/mutate",
-      { canvasId: DEFAULT_CANVAS, nodeId: "m1", requestId: "r1", mutation: { kind: "create", azimuth: 0, distance: 3 } },
-      AUTH
-    );
-    expect(result.status).toBe(200);
-    expect(captured[0]?.canvasId).toBe(DEFAULT_CANVAS);
-    expect(captured[0]?.mutation).toEqual({ kind: "create", azimuth: 0, distance: 3 });
-  });
-
-  it("mutateCameras 非法请求体返回 malformed-request 且不触达 service", async () => {
-    let called = false;
-    const { base } = await start({
-      mutateCameras: async () => {
-        called = true;
-        return { ok: false, code: "x", message: "x" };
-      }
-    } as unknown as ModelMcpInternalService);
-    const result = await post(
-      base,
-      "/internal/v1/model-mcp/cameras/mutate",
-      { nodeId: "m1", requestId: "r1", mutation: { kind: "nope" } },
-      AUTH
-    );
-    expect(result.status).toBe(400);
-    expect(result.body.code).toBe("malformed-request");
-    expect(called).toBe(false);
-  });
-
-  it("mutateCameras 下游 unknown-camera 映射为 404", async () => {
-    const { base } = await start({
-      mutateCameras: async () => ({ ok: false, code: "unknown-camera", message: "没有该镜头" })
-    } as unknown as ModelMcpInternalService);
-    const result = await post(
-      base,
-      "/internal/v1/model-mcp/cameras/mutate",
-      { canvasId: DEFAULT_CANVAS, nodeId: "m1", requestId: "r1", mutation: { kind: "remove", id: "c9" } },
-      AUTH
-    );
-    expect(result.status).toBe(404);
-    expect(result.body.code).toBe("unknown-camera");
-  });
-
-  // 模型批量作者（model-script-batch）内部面：三条路径都走同一派生 actor 与稳定错误映射。
   it("批量模型读取：透传 canvasId/nodeIds，actor 不影响读取", async () => {
     const captured: GetModelNodesInput[] = [];
     const { base } = await start({

@@ -17,6 +17,34 @@ import { AssistantTextService } from "../../../services/application-service/src/
 import { AssistantTextStore } from "../../../services/application-service/src/repository/assistant-text-store.js";
 import { createAgentConversationService } from "../../../services/application-service/src/extensions/agent-conversation-service.js";
 import { createSqliteAgentConversationStore } from "../../../services/application-service/src/repository/agent-conversation-repository.js";
+import { createAgentRoleRegistry } from "../../../services/application-service/src/agent-roles/registry.js";
+import { assistantTextCandidateSchema } from "@woohaa3/contracts";
+
+/** 测试用文本角色：只消费宿主准备好的规范回合，schema 与领域解码一致。 */
+function textRoles() {
+  const registry = createAgentRoleRegistry({ availableTools: () => [] });
+  registry.register({
+    extensionId: "test",
+    artifactId: "test@1",
+    implementation: {
+      definition: {
+        id: "text-author",
+        revision: "1",
+        title: "文本作者",
+        specialty: "写正文",
+        instructions: "你是文本作者。",
+        inputSchema: { type: "object", additionalProperties: false, required: ["prompt", "action"], properties: { prompt: { type: "string", minLength: 1 }, action: { type: "string" }, mode: { type: "string" } } },
+        contextSchema: { type: "object" },
+        tools: { required: [], optional: [] },
+        nativeCapabilities: { required: [], optional: [] },
+        requirements: { imageInput: false, toolCalling: false, structuredOutput: "validated-json" },
+        output: { kind: "candidate", schema: assistantTextCandidateSchema }
+      },
+      prepare: ({ context }) => ({ messages: [{ role: "user", content: (context as { prompt?: string }).prompt ?? "write" }] })
+    }
+  });
+  return registry;
+}
 const cleanup: (() => void)[] = [];
 afterEach(() =>
   cleanup
@@ -129,10 +157,12 @@ async function fixture(run?: AgentConversationAdapter["run"]) {
     getConnection: vi.fn(async () => connection),
     listConnections: async () => [connection],
   };
+  const agentRoles = textRoles();
   let conversations = createAgentConversationService({
     store: ledger,
     registry,
     connections,
+    agentRoles,
   });
   const room = new CanvasRoom({
     canvasId: "cv",
@@ -169,6 +199,8 @@ async function fixture(run?: AgentConversationAdapter["run"]) {
     connections,
     registry,
     canvas: authority,
+    agentRoles,
+    roleId: "test/text-author",
   });
   const created = conversations.createConversation({
     owner: "owner",
@@ -184,6 +216,7 @@ async function fixture(run?: AgentConversationAdapter["run"]) {
     conversationId: created.conversation.conversationId,
     connection: binding,
     entry: {
+      roleId: "test/text-author",
       action: "generate" as const,
       mode: "text" as const,
       canvasId: "cv",
@@ -229,6 +262,8 @@ async function fixture(run?: AgentConversationAdapter["run"]) {
         connections,
         registry,
         canvas: authority,
+        agentRoles,
+        roleId: "test/text-author",
       });
     },
   };

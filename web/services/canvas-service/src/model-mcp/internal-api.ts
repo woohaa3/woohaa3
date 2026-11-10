@@ -19,8 +19,6 @@ import {
   decodeMcpListNodesRequest,
   decodeMcpModelScriptBatchRequest,
   decodeMcpModelStatisticsRequest,
-  decodeMcpMutateCamerasBatchRequest,
-  decodeMcpMutateCamerasRequest,
   decodeMcpRenderPreviewRequest,
   decodeMcpReportScriptRequest,
   decodeMcpSubmitScriptRequest,
@@ -37,10 +35,6 @@ import type {
   GetModelNodeInput,
   GetModelNodeOutcome,
   ListModelNodesOutcome,
-  MutateCamerasBatchInput,
-  MutateCamerasBatchOutcome,
-  MutateCamerasInput,
-  MutateCamerasOutcome,
   RenderPreviewInput,
   RenderPreviewOutcome,
   ReportScriptOutcome,
@@ -72,10 +66,6 @@ export type ModelMcpInternalService = {
   }) => Promise<ReportScriptOutcome>;
   renderPreview?: (input: RenderPreviewInput) => Promise<RenderPreviewOutcome>;
   applyCommands?: (input: ApplyCommandsInput) => Promise<ApplyCommandsOutcome>;
-  /** 单条镜头读改写；省略时 mutateCameras 路由返回 503。 */
-  mutateCameras?: (input: MutateCamerasInput) => Promise<MutateCamerasOutcome>;
-  /** 批量镜头读改写（整批原子）；省略时 mutateCamerasBatch 路由返回 503。 */
-  mutateCamerasBatch?: (input: MutateCamerasBatchInput) => Promise<MutateCamerasBatchOutcome>;
   /** 批量模型读取（model-script-batch）；省略时相应路由返回 503。 */
   getModelNodes?: (input: GetModelNodesInput) => Promise<ModelNodesOutcome>;
   /** 模型脚本批量只校验（model-script-batch）；省略时相应路由返回 503。 */
@@ -115,8 +105,6 @@ export function createModelMcpInternalHandler(
       && pathname !== MCP_INTERNAL_PATHS.reportScript
       && pathname !== MCP_INTERNAL_PATHS.renderPreview
       && pathname !== MCP_INTERNAL_PATHS.applyCommands
-      && pathname !== MCP_INTERNAL_PATHS.mutateCameras
-      && pathname !== MCP_INTERNAL_PATHS.mutateCamerasBatch
       && pathname !== MCP_INTERNAL_PATHS.getModelNodes
       && pathname !== MCP_INTERNAL_PATHS.validateModelScripts
       && pathname !== MCP_INTERNAL_PATHS.submitModelScripts
@@ -226,7 +214,6 @@ export function createModelMcpInternalHandler(
         ...(decoded.value.width !== undefined ? { width: decoded.value.width } : {}),
         ...(decoded.value.height !== undefined ? { height: decoded.value.height } : {}),
         ...(decoded.value.background !== undefined ? { background: decoded.value.background } : {}),
-        ...(decoded.value.cameraPreset !== undefined ? { cameraPreset: decoded.value.cameraPreset } : {}),
         ...(decoded.value.timeSeconds !== undefined ? { timeSeconds: decoded.value.timeSeconds } : {})
       });
       return sendOutcome(res, outcome, log);
@@ -250,34 +237,6 @@ export function createModelMcpInternalHandler(
       if (!batch) return unavailable(res, "批量模型脚本当前不可用");
       const context: ModelBatchContext = { principalId: MCP_INTERNAL_ACTOR_ID };
       const outcome = await batch(decoded.value, context);
-      return sendOutcome(res, outcome, log);
-    }
-
-    // mutateCameras（单条镜头读改写）
-    if (pathname === MCP_INTERNAL_PATHS.mutateCameras) {
-      const decoded = decodeMcpMutateCamerasRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.mutateCameras) return unavailable(res, "模型 MCP 当前不可用");
-      const outcome = await options.service.mutateCameras({
-        canvasId: decoded.value.canvasId,
-        nodeId: decoded.value.nodeId,
-        requestId: decoded.value.requestId,
-        mutation: decoded.value.mutation
-      });
-      return sendOutcome(res, outcome, log);
-    }
-
-    // mutateCamerasBatch（批量镜头读改写；整批原子）
-    if (pathname === MCP_INTERNAL_PATHS.mutateCamerasBatch) {
-      const decoded = decodeMcpMutateCamerasBatchRequest(body);
-      if (!decoded.ok) return badRequest(res, decoded.code, decoded.message);
-      if (!options.service?.mutateCamerasBatch) return unavailable(res, "模型 MCP 当前不可用");
-      const outcome = await options.service.mutateCamerasBatch({
-        canvasId: decoded.value.canvasId,
-        nodeId: decoded.value.nodeId,
-        requestId: decoded.value.requestId,
-        mutations: decoded.value.mutations
-      });
       return sendOutcome(res, outcome, log);
     }
 

@@ -36,7 +36,7 @@ const original: WorldAnimationScript = {
 const closers: Array<() => void> = [];
 afterEach(() => { for (const close of closers.splice(0)) close(); });
 
-async function fixture(options: { animationScript?: WorldAnimationScript | null; group?: boolean; readOnlyProp?: boolean; modelScript?: string; empty?: boolean; modelRig?: unknown } = {}) {
+async function fixture(options: { animationScript?: WorldAnimationScript | null; readOnlyProp?: boolean; modelScript?: string; empty?: boolean; modelRig?: unknown } = {}) {
   const animationScript = options.animationScript === undefined ? structuredClone(original) : options.animationScript;
   const canvas = createEmptyWoohaa3ServerCanvas(query.canvasId, NOW);
   canvas.document.nodes = [
@@ -61,17 +61,15 @@ async function fixture(options: { animationScript?: WorldAnimationScript | null;
   const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => NOW });
   await room.initialize({ canvas, roomEpoch: "epoch-1", createdAt: NOW });
   closers.push(() => room.dispose());
-  const selectedScope = options.group
-    ? { scope: { kind: "workflow-group-2d" as const, groupId: "group-1" }, scopeVersion: "group-scope-1" }
-    : scope;
+  const selectedScope = scope;
   const targets = ["actor", "prop"].map(instanceId => ({ kind: "instance" as const, instanceId, version: `version-${instanceId}` }));
-  const writable = options.group ? [] : targets.filter(target => !options.readOnlyProp || target.instanceId !== "prop");
+  const writable = targets.filter(target => !options.readOnlyProp || target.instanceId !== "prop");
   const context: WorldToolContext = {
     contextId: query.contextId, canvasId: canvas.id, runId: "run-1", epoch: 0, scope: selectedScope,
     writableTargets: writable.map(target => ({ target, lease: {
       canvasId: canvas.id, runId: "run-1", epoch: 0, target: { kind: "instance", instanceId: target.instanceId }
     } })),
-    readOnlyReferences: options.group ? targets : options.readOnlyProp ? [targets[1]!] : []
+    readOnlyReferences: options.readOnlyProp ? [targets[1]!] : []
   };
   let revoked = false;
   const service = createAssistantWorldService({
@@ -153,16 +151,6 @@ describe("current director animation in assistant context", () => {
     const { service, room } = await fixture({ animationScript: null });
     expect(await service.read(query)).toMatchObject({ ok: true, view: { sceneArea: { nodeId: "area-node", revision: 0, animationScript: null } } });
     expect(room.currentRevision).toBe(0);
-  });
-
-  it("never exposes director animation or bounds through a 2D group context", async () => {
-    const { service } = await fixture({ group: true });
-    const result = await service.read(query);
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error(result.message);
-    expect(result.view).not.toHaveProperty("sceneArea");
-    expect(result.view).not.toHaveProperty("bounds");
-    expect(result.view.worldWritable).toBe(false);
   });
 
   it("rejects a different canvas and an unissued context", async () => {

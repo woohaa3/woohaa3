@@ -27,6 +27,8 @@ export type PluginRegistrationSurface = {
   webServer?: import("@woohaa3/contracts").HostWebServerService;
   capabilities?: import("@woohaa3/contracts").HostCapabilityService;
   mediaFormats?: import("@woohaa3/contracts").HostMediaFormatService;
+  /** Agent 角色注册面（按实际装载 owner 记账；停用时由宿主自动注销）。 */
+  agentRoles?: import("@woohaa3/contracts").HostAgentRoleService;
   services?: ApplicationExtensionServices;
   diagnostics?: import("@woohaa3/contracts").ApplicationBackendDiagnostics;
   /** 撤销本次注册（幂等）；装载器在插件停用时调用。 */
@@ -79,6 +81,7 @@ export type ApplicationExtensionHostOptions = {
   deployment?: { basePath: string };
   configFacadeFor?: (extensionId: string) => ApplicationBackendConfigFacade;
   workFacadeFor?: (extensionId: string) => ApplicationBackendWorkFacade;
+  activateExecutors?: (definition: ApplicationBackendExtensionDefinition, version: number) => Promise<{ service: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade; dispose(): Promise<void> } | undefined>;
   servicesFor?: (extensionId: string, configVersion?: number) => ApplicationExtensionServices;
   /**
    * 只读诊断缓冲（可选）：宿主把已脱敏的服务端接入/同步事件投影给可信扩展。
@@ -137,6 +140,16 @@ export type ApplicationExtensionHostOptions = {
    * 缺失时插件得不到 `host.providers`（不伪造内存提供者）。
    */
   registerProviderFor?: (extensionId: string) => import("./provider-registry.js").ProviderRegistry | undefined;
+  /**
+   * Agent 角色注册面（change: 2026-11-07-add-pluggable-agent-roles）：与存储/生成同形，
+   * 宿主把登记转发给 core 的角色注册表。缺失时插件拿不到 `ctx.agentRoles`，必须记日志跳过。
+   */
+  registerAgentRoleFor?: (extensionId: string) => import("@woohaa3/contracts").HostAgentRoleService | undefined;
+  /**
+   * 扩展停用/回滚后的宿主钩子：角色与活动回合按角色身份精确收回。
+   * 须幂等；缺失时不影响其他注册的释放。
+   */
+  onExtensionReleased?: (extensionId: string) => void;
 };
 
 export const EMPTY_CONFIG_FACADE: ApplicationBackendConfigFacade = {

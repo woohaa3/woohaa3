@@ -15,6 +15,14 @@ import type {
   ExtensionDocumentStore
 } from "@woohaa3/contracts";
 import { createPromptSkillsExtension } from "./index.js";
+import { promptRewriterRole } from "./role.js";
+import {
+  agentRoleDescriptorDigest,
+  agentRoleTurnDigests,
+  composeAgentRoleMessages,
+  makeAgentRoleRef,
+  preparedTurnHash
+} from "@woohaa3/contracts";
 
 function fakeTasks(text = "雨夜霓虹街道，湿漉漉的柏油路。"): ApplicationExtensionTaskFacade & { submitted: unknown[] } {
   const submitted: unknown[] = [];
@@ -76,7 +84,34 @@ function harness(options: {
     host: { extensionId: "application" },
     config: { values: () => ({}), secretRefs: () => [], desiredEnabled: () => true },
     work: {},
-    services: { tasks: options.tasks ?? fakeTasks(), ...(options.documents ? { documents: options.documents } : {}) },
+    services: {
+      tasks: options.tasks ?? fakeTasks(),
+      ...(options.documents ? { documents: options.documents } : {}),
+      // 宿主角色准备面：单次改写只消费已准备的规范消息与角色版本。
+      agentRoles: {
+        prepare: ({ input, requestId }: { input: { skillId: string; prompt: string; taskKind: string }; requestId: string }) => {
+          const definition = promptRewriterRole.definition;
+          const messages = promptRewriterRole.prepare({ input, context: {}, target: {}, requestId, nativeCapabilities: [] }).messages;
+          const digests = agentRoleTurnDigests({ input, context: {} });
+          const base = {
+            schemaVersion: 1 as const,
+            roleRef: makeAgentRoleRef({ extensionId: "prompt-skills", roleId: definition.id, revision: definition.revision, descriptorDigest: agentRoleDescriptorDigest(definition), artifactId: "test@1" }),
+            messages: composeAgentRoleMessages(definition.instructions, messages),
+            tools: [],
+            nativeCapabilities: [],
+            output: definition.output,
+            inputDigest: digests.inputDigest,
+            contextDigest: digests.contextDigest,
+            attachmentDigests: [],
+            target: {}
+          };
+          return { ok: true as const, turn: { ...base, preparedHash: preparedTurnHash(base) } };
+        },
+        list: () => [],
+        availability: () => ({ available: true })
+      }
+    },
+    registerAgentRole: vi.fn(),
     registerCapability: vi.fn(),
     registerHandler: vi.fn(),
     registerHttpHandler: (input: ApplicationBackendHttpHandlerRegistration) => {

@@ -55,6 +55,9 @@ import { createExtensionTaskRecovery } from "./extensions/task-recovery.js";
 import { createSqliteAgentConversationStore } from "./repository/agent-conversation-repository.js";
 import { createAgentAdapterRegistry, type AgentAdapterRegistryHost } from "./extensions/agent-adapter-registry.js";
 import { createAgentConnectionRegistry, type AgentConnectionRegistry } from "./extensions/agent-connection-registry.js";
+import { createAgentRoleRegistry, type AgentRoleRegistry } from "./agent-roles/registry.js";
+import { createExtensionExecutorRuntime } from "./extensions/executor-runtime.js";
+import { createRuntimeConversationAdapter, type HostRuntimeOptions } from "./extensions/agent-runtime-adapter.js";
 import { createAgentConversationService, type AgentConversationService } from "./extensions/agent-conversation-service.js";
 import { createAgentConversationApiHandler, type AgentConversationApiHandler } from "./api/agent-conversation-api.js";
 import { createSkillMediaService, type SkillMediaCanvasPort, type SkillMediaAuthorizer } from "./skill-media/index.js";
@@ -70,6 +73,35 @@ export type ApplicationServiceOptions = {
   serviceConnectionSources?: Omit<ServiceConnectionRegistryOptions, "documents"> & { documents?: ServiceConnectionRegistryOptions["documents"] };
 
   mediaFormats?: import("@woohaa3/contracts").MediaFormatRegistry;
+  /**
+   * Agent 角色注册表（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 宿主装配根创建一次，交给 Application 与扩展作用域；独立组合可自行创建并通过同一契约注入。
+   */
+  agentRoles?: AgentRoleRegistry;
+  /**
+   * 权威角色上下文提供者：只由受信宿主按 owner/画布/目标准备领域上下文，浏览器不可达。
+   * 缺失时角色上下文为空对象（角色必须按空上下文仍可准备或明确失败）。
+   */
+  /**
+   * 业务入口的显式角色绑定（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 文本/图片交付由宿主领域入口执行，角色 id 由部署装配显式注入；核心不 import 角色插件。
+   */
+  roleBindings?: { textAuthor?: string };
+  /**
+   * 独立执行器（woohaa3-executor）接入：只对列出的 adapter 走 daemon turn.run，
+   * daemon 未配置或不可用时明确失败，不提供进程内执行回退。
+   */
+  agentRuntime?: HostRuntimeOptions;
+  roleContextFor?: (input: {
+    owner: string;
+    canvasId: string;
+    nodeId?: string;
+    action: string;
+    mode?: string;
+    roleId: string;
+  }) => Promise<unknown> | unknown;
   env?: Record<string, string | undefined>;
   storePath?: string;
   serviceToken?: string;
@@ -218,13 +250,6 @@ export type ApplicationServiceOptions = {
    * not-configured（不伪造 ready）。
    */
   mcpDiscovery?: () => Promise<import("@woohaa3/contracts").McpBuiltinDiscoveryView>;
-  /**
-   * 兼容默认连接解析（change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 2.2）。
-   *
-   * 旧 ChatGPT 历史/未显式选连接的请求映射为该 owner 的兼容默认连接；缺省不伪造连接身份
-   * （旧历史仍按 adapter 解析，可读）。
-   */
-  defaultConnectionFor?: (input: { owner: string; adapterId: string }) => Promise<import("@woohaa3/contracts").AgentConnectionView | null> | import("@woohaa3/contracts").AgentConnectionView | null;
   /** 稳定 Agent Supervisor 存在时，backend 重启后的暂时未知回合保持可恢复。 */
   preserveUnreconciledOnRestart?: boolean;
   /** Host-only hook called after a turn's durable terminal status is written. */
@@ -248,6 +273,8 @@ export type ApplicationService = {
   settled: () => Promise<void>;
   host: () => ApplicationExtensionHost;
   config: () => ApplicationServiceConfig;
+  /** Agent 角色注册表（change: 2026-11-07-add-pluggable-agent-roles）。 */
+  agentRoles: () => AgentRoleRegistry;
   /** 宿主 Agent 会话/回合服务（change: 2026-10-12-add-agent-conversation-panel）。 */
   agentConversations: () => AgentConversationService;
   assistantTextRuns: () => import("@woohaa3/contracts").AssistantTextRunGateway;
@@ -343,6 +370,14 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       return provider;
     });
 
+  // Agent 角色注册表：宿主创建一次，Application 与扩展作用域共用同一实例。
+  const agentRoles = options.agentRoles ?? createAgentRoleRegistry({ ...(options.logger ? { logger: options.logger } : {}) });
+  const extensionAgentRoles: import("@woohaa3/contracts").ApplicationExtensionAgentRoleFacade = {
+    prepare: (input) => agentRoles.prepare({ roleId: input.roleId, input: input.input, context: input.context, target: input.target, requestId: input.requestId, ...(input.expectedContentHash !== undefined ? { expectedContentHash: input.expectedContentHash } : {}), channel: input.channel, ...(input.requestedTools ? { requestedTools: input.requestedTools } : {}), ...(input.attachments ? { attachments: input.attachments } : {}) }),
+    list: () => agentRoles.list(),
+    availability: (namespacedId) => agentRoles.availability(namespacedId)
+  };
+
   // 公共 Context 的受限服务 facade：按插件 principal 裁剪；插件拿不到服务令牌。
   // 统一后端可注入进程内 facade（servicesFor）；缺省用网络客户端 facade（保持既有行为）。
   const baseServicesFor = options.servicesFor ?? ((extensionId: string, configVersion?: number): ApplicationExtensionServices => {
@@ -385,10 +420,17 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
 
   const servicesFor = (extensionId: string, configVersion?: number): ApplicationExtensionServices => {
     const services = baseServicesFor(extensionId, configVersion);
-    return { ...services, ...(serviceConnections ? { serviceConnections: serviceConnections.forExtension(extensionId) } : {}), assistants: createExtensionAssistants(extensionId, services, () => agentConversations) };
+    return {
+      ...services,
+      ...(serviceConnections ? { serviceConnections: serviceConnections.forExtension(extensionId) } : {}),
+      assistants: createExtensionAssistants(extensionId, services, () => agentConversations, () => agentRoles),
+      agentRoles: extensionAgentRoles
+    };
   };
 
+  const executorRuntime = createExtensionExecutorRuntime(options.agentRuntime);
   const extensionHost = options.host ?? createApplicationExtensionHost({
+    activateExecutors: executorRuntime.activate,
     logger: options.logger,
     hostIdentity: "application",
     deployment: { basePath: deploymentBasePath },
@@ -398,6 +440,9 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
     registerMediaFormatFor: () => options.mediaFormats ? format => options.mediaFormats!.register(format) : undefined,
     registerProviderFor: () => accessRuntime.enabled ? providers : undefined,
+    // Agent 角色：与存储/生成同形，登记直接进 core 的注册表；扩展停用/回滚时按扩展收回。
+    registerAgentRoleFor: (extensionId) => agentRoles.forExtension(extensionId, extensionConfigStore.get(extensionId)?.configVersion ?? 0),
+    onExtensionReleased: (extensionId) => agentRoles.disposeExtension(extensionId),
     // 生成 / 存储 / 遥测出口 / 市场来源：站点插件注册的直接进 core 的注册表（见 registration-seams.ts）。
     ...registrationHooksFor(options)
   });
@@ -427,20 +472,27 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     resolveCapabilityOwner: (id) => extensionHost.resolveCapabilityOwner(id),
     snapshot: () => extensionHost.snapshot()
   };
-  const agentAdapterRegistry = createAgentAdapterRegistry(assistantRegistryHost);
   // 来源连接发现注册表（change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 2.1）：
   // 连接来自已激活扩展的 owner-scoped provider；核心不 import 厂商实现。
   const agentConnections = createAgentConnectionRegistry(assistantRegistryHost);
+  const agentAdapterRegistry = createAgentAdapterRegistry(assistantRegistryHost, {
+    wrapAdapter: (handle) => handle.adapter.runtimeExecutor
+      ? createRuntimeConversationAdapter(handle.adapter, executorRuntime.optionsFor(handle.owner.extensionId, handle.owner.configVersion, handle.adapter.runtimeExecutor), agentConnections)
+      : handle.adapter
+  });
   const agentConversations = createAgentConversationService({
     store: conversationStore,
     registry: agentAdapterRegistry,
     connections: agentConnections,
+    agentRoles,
+    ...(options.roleContextFor ? { roleContextFor: options.roleContextFor } : {}),
     ...(options.preserveUnreconciledOnRestart ? { preserveUnreconciledOnRestart: true } : {}),
-    ...(options.defaultConnectionFor ? { defaultConnectionFor: options.defaultConnectionFor } : {}),
     ...(options.onTurnSettled ? { onTurnSettled: options.onTurnSettled } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => now().toISOString()
   });
+  // 角色停用/升级：只精确取消冻结该角色的活动回合（适配器在 abort 时撤销 grant）。
+  agentRoles.onUnregistered((ref) => agentConversations.onRoleRevoked(ref.namespacedId));
   const skillMedia = options.skillMedia && skillMediaStore
     ? createSkillMediaService({
         store: skillMediaStore,
@@ -470,9 +522,27 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
    * 不再支持插件自报的本地会话端口：认证只经 `authenticator` 一次解析，插件不能另建 owner。
    */
   const assistantTextStore = new AssistantTextStore(config.storePath);
-  const assistantText = new AssistantTextService({ store: assistantTextStore, conversations: agentConversations, connections: agentConnections, registry: agentAdapterRegistry, canvas: options.assistantText });
+  const assistantText = new AssistantTextService({
+    store: assistantTextStore,
+    conversations: agentConversations,
+    connections: agentConnections,
+    registry: agentAdapterRegistry,
+    canvas: options.assistantText,
+    agentRoles,
+    ...(options.roleBindings?.textAuthor ? { roleId: options.roleBindings.textAuthor } : {})
+  });
   const imageDirectorStore = new ImageDirectorSceneStore(config.storePath);
-  const imageDirectorScene = options.imageDirectorScene ? new ImageDirectorSceneService({ store: imageDirectorStore, conversations: agentConversations, connections: agentConnections, registry: agentAdapterRegistry, canvas: options.imageDirectorScene }) : undefined;
+  const imageDirectorScene = options.imageDirectorScene
+    ? new ImageDirectorSceneService({
+        store: imageDirectorStore,
+        conversations: agentConversations,
+        connections: agentConnections,
+        registry: agentAdapterRegistry,
+        canvas: options.imageDirectorScene,
+        agentRoles,
+
+      })
+    : undefined;
   const agentConversationApi: AgentConversationApiHandler = createAgentConversationApiHandler({
     serviceConnections,
     serviceConnectionProviders: options.serviceConnectionProviders,
@@ -508,7 +578,11 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     authenticator,
     accessRuntime,
     accessEnforcer,
-    ...(options.publicRoutes ? { publicRoutes: options.publicRoutes } : {}),
+    get publicRoutes() {
+      const current = extensionHost.declaredPublicRoutes?.() ?? [];
+      const ids = new Set(current.map(route => route.extensionId));
+      return [...(options.publicRoutes ?? []).filter(route => !ids.has(route.extensionId)), ...current];
+    },
     ...(options.extensionRelease ? { extensionRelease: options.extensionRelease } : {}),
     ...(options.alternateHandlerBasePaths ? { alternateBasePaths: options.alternateHandlerBasePaths } : {}),
     ...(config.serviceToken ? { serviceToken: config.serviceToken } : {}),
@@ -560,6 +634,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     host: () => extensionHost,
     config: () => config,
     agentConversations: () => agentConversations,
+    agentRoles: () => agentRoles,
     assistantTextRuns: () => assistantText.gateway(),
     agentConnections: () => agentConnections,
     serviceConnections: () => serviceConnections,

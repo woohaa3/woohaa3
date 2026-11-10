@@ -116,7 +116,6 @@
 .app[data-focus-panel="detail"] .model-editor-dock,
 .app[data-focus-panel="closed"] .model-editor-dock { display: none; }
 /* 详情占用侧栏时，随检查器一并隐藏其镜头取景预览（不叠在详情之上）。 */
-.app[data-focus-panel="detail"] .model-camera-preview { display: none; }
 .app[data-focus-panel="history"] .focus-workspace__panel { display: none; }
 /* 详情侧栏置于活动浮层之上（概览/聚焦通用：`task-activity` 浮层 z-index 32/33）。 */
 .app[data-focus-panel="detail"] .focus-workspace__panel { z-index: 40; }

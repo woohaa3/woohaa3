@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  decodeModelCameras,
   type ModelBatchFailure,
   type ModelScriptBatchRequest,
 } from "@woohaa3/contracts";
@@ -56,8 +55,6 @@ export function decodeModelBatch(
         "nodeId",
         "source",
         "expectedModelContentHash",
-        "cameras",
-        "expectedCamerasHash",
       ]) ||
       !id(item.nodeId) ||
       typeof item.source !== "string" ||
@@ -67,47 +64,9 @@ export function decodeModelBatch(
     if (seen.has(item.nodeId))
       return failure("malformed-request", `重复节点 ${item.nodeId}`);
     seen.add(item.nodeId);
-    for (const name of ["expectedModelContentHash", "expectedCamerasHash"])
+    for (const name of ["expectedModelContentHash"])
       if (item[name] !== undefined && !id(item[name]))
         return failure("malformed-request", `items[${index}].${name} 非法`);
-    if (item.cameras === undefined && item.expectedCamerasHash !== undefined)
-      return failure("malformed-request", "expectedCamerasHash 需要 cameras");
-    let cameras;
-    if (item.cameras !== undefined) {
-      if (!id(item.expectedCamerasHash))
-        return failure(
-          "malformed-request",
-          "替换镜头必须提供 get_model_nodes 返回的 expectedCamerasHash",
-        );
-      const decoded = decodeModelCameras(item.cameras);
-      if (!decoded.ok)
-        return failure(
-          "malformed-request",
-          `items[${index}].cameras: ${decoded.reason}`,
-        );
-      if (
-        !Array.isArray(item.cameras) ||
-        item.cameras.some(
-          (c) =>
-            !object(c) ||
-            !fields(c, [
-              "id",
-              "name",
-              "order",
-              "azimuth",
-              "elevation",
-              "distance",
-              "aspect",
-              "focusOffset",
-            ]) ||
-            (c.focusOffset !== undefined &&
-              (!object(c.focusOffset) ||
-                !fields(c.focusOffset, ["x", "y", "z"]))),
-        )
-      )
-        return failure("malformed-request", "镜头包含未知字段");
-      cameras = decoded.value;
-    }
     const source = common ? `${common}\n${item.source}` : item.source;
     sources.push(source);
     items.push({
@@ -115,9 +74,6 @@ export function decodeModelBatch(
       source: item.source,
       ...(item.expectedModelContentHash !== undefined
         ? { expectedModelContentHash: item.expectedModelContentHash as string }
-        : {}),
-      ...(cameras !== undefined
-        ? { cameras, expectedCamerasHash: item.expectedCamerasHash as string }
         : {}),
     });
   }

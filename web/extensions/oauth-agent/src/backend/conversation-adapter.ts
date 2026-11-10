@@ -13,6 +13,7 @@
  * - token 绝不进入宿主 DTO、事件、日志或浏览器；断开回收本 owner 在途工作。
  */
 import { CHATGPT_REASONING_EFFORTS, isChatGptReasoningEffort } from "@woohaa3/contracts";
+import { preparedPromptText } from "@woohaa3/agent-connections";
 import type {
   AgentAdapterAuthState,
   AgentAdapterCapabilities,
@@ -122,6 +123,9 @@ export function createChatGptConversationAdapter(
     const ownerId = ownerIdFor(input.owner);
     if (input.intent.reasoningEffort && !isChatGptReasoningEffort(input.intent.reasoningEffort)) return { status: "failed", error: { code: "capability-unsupported", message: "当前授权模型不支持此思考强度" } };
 
+    // 通道只消费宿主准备好的角色回合。
+    const prepared = input.prepared;
+    if (!prepared) return { status: "failed", error: { code: "role-not-found", message: "本回合没有宿主准备的角色请求" } };
     // 仅讨论：无工具面、无写能力；历史只当内容（design D2/D5）。
     if (input.intent.action === "discuss") {
       input.emit({ type: "stage", stage: "reasoning" });
@@ -129,11 +133,15 @@ export function createChatGptConversationAdapter(
       const abort = () => controller?.abort();
       if (controller) { input.signal.addEventListener("abort", abort, { once: true }); if (input.signal.aborted) abort(); }
       const operation = service.converse({
+        requestId: input.requestId,
+        prepared,
         ownerId,
         model: input.intent.model ?? "",
-        prompt: input.intent.prompt,
+        prompt: preparedPromptText(prepared),
         ...((input.candidate?.images ?? input.images)?.length ? { images: (input.candidate?.images ?? input.images)!.map((image, index) => ({ ...image, fileName: `image-${index}`, mimeType: image.contentType })) } : {}),
-        ...(input.candidate ? { outputSchema: input.candidate.outputSchema } : {}),
+        ...(input.candidate
+          ? { outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : input.candidate.outputSchema }
+          : {}),
         ...(isChatGptReasoningEffort(input.intent.reasoningEffort) ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         history: input.history.map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content })),
         signal: controller?.signal ?? input.signal,
@@ -152,11 +160,10 @@ export function createChatGptConversationAdapter(
     if (!service.generation) {
       return { status: "failed", error: { code: "capability-unsupported", message: "ChatGPT 生成未启用" } };
     }
-    if (input.intent.mode === "text") return { status: "failed", error: { code: "capability-unsupported", message: "此连接尚不支持文本交付" } };
-    if (input.intent.mode === "world") return { status: "failed", error: { code: "capability-unsupported", message: "此连接未声明世界场景写工具，不能执行导演区创作" } };
-    if (input.intent.mode === "canvas-group") return { status: "failed", error: { code: "capability-unsupported", message: "此连接未声明 2D 组画布工具，不能执行组创作" } };
-    const mode: ChatGptGenerationMode | null = input.intent.mode ?? (input.intent.nodeId ? "model3d" : null);
-    if (!mode) return { status: "failed", error: { code: "malformed-request", message: "缺少目标模式" } };
+    if (input.intent.mode !== undefined && input.intent.mode !== "model3d") {
+      return { status: "failed", error: { code: "capability-unsupported", message: "此连接只支持 3D 模型目标，不能执行文本、导演区或 2D 组创作" } };
+    }
+    const mode: ChatGptGenerationMode = "model3d";
     if (!input.intent.nodeId) return { status: "failed", error: { code: "malformed-request", message: "目标动作必须带 nodeId" } };
     if (!input.intent.model) return { status: "failed", error: { code: "malformed-request", message: "缺少账户模型，无法生成" } };
 
@@ -171,6 +178,8 @@ export function createChatGptConversationAdapter(
         mode,
         model: input.intent.model,
         prompt: input.intent.prompt,
+        prepared,
+        roleId: prepared.roleRef.namespacedId,
         ...(isChatGptReasoningEffort(input.intent.reasoningEffort) ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         ...(input.intent.expectedContentHash ? { expectedContentHash: input.intent.expectedContentHash } : {}),
         ...(input.intent.cameraId ? { selectedCameraId: input.intent.cameraId } : {}),

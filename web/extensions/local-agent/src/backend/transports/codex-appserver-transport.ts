@@ -12,7 +12,7 @@
  *
  * stdio 连接由调用方注入（`input.stdio`），测试用本地协议模拟；不启动真实进程。
  */
-import { recordGeneratedImage, type AgentConversationAdapterEvent, type AgentModelView } from "@woohaa3/contracts";
+import { type AgentConversationAdapterEvent, type AgentModelView } from "@woohaa3/contracts";
 import {
   request,
   initializeRequest,
@@ -174,10 +174,7 @@ function threadConfig(input: LocalAgentTransportInput): Record<string, unknown> 
     "features.skills": false,
     web_search: "disabled"
   };
-  // 讨论回合只读对话，不得产生画布外产物：显式关闭内建生图。
-  // 目标回合不设置该键，沿用 Codex 默认（开启），由 import_generated_image 回收产物。
-  // （change: 2026-11-03-add-codex-image-import，D3）
-  if (!input.mcpEndpoint) config["features.image_generation"] = false;
+  config["features.image_generation"] = input.nativeCapabilities?.includes("generate-image") === true;
   const mcpServers: Record<string, unknown> = {};
   // 复用现有 Codex home 时，全局 config.toml 的 MCP server 会与本次 thread config 合并。
   // 显式禁用继承项，避免模型绕过宿主 grant 直接调用用户的其他本机工具。
@@ -371,14 +368,14 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
           if (!nativeThread || threadId !== nativeThread) return;
           if (nativeTurn && typeof turnId === "string" && turnId !== nativeTurn) return;
           if (startingTurn && message.method === "turn/started" && typeof turnId === "string") nativeTurn = turnId;
-          // 内建生图产物：只记录 savedPath，不进事件流（change: 2026-11-03-add-codex-image-import）。
+          // 内建生图产物：只记录 savedPath，经产物回调写入 daemon journal，不进入模型可见消息（change: 2026-11-03-add-codex-image-import）。
           if (message.method === "item/completed") {
             const item = params.item as Record<string, unknown> | undefined;
             if (item?.type === "imageGeneration") {
               const savedPath = typeof item.savedPath === "string" ? item.savedPath.trim() : "";
               if (savedPath.length > 0) {
                 generatedImagePaths.push(savedPath);
-                if (input.turnRequestId) recordGeneratedImage(input.turnRequestId, savedPath, connectionCodexHome(input.configDir));
+                input.onGeneratedImage?.({ savedPath, codexHome: connectionCodexHome(input.configDir) });
               }
               else log({ event: "codex-image-saved-path-missing", generationId: item.id ?? null });
               return;

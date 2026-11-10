@@ -13,7 +13,6 @@ import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { registerAgentAuthoringTools } from "../agent-authoring/tools.js";
 import { registerModelTools } from "./model-tools.js";
-import { registerCameraTools } from "./camera-tools.js";
 import { normalizePath, toolError } from "./tool-results.js";
 import {
   MODEL_MCP_HTTP_PATH,
@@ -169,7 +168,6 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
 
   registerModelTools(reg, options);
   registerModelBatchTools(reg, options);
-  registerCameraTools(reg, options);
 
   const grant = bearerToken && options.toolGrant?.resolve ? options.toolGrant.resolve(bearerToken) : null;
   if (options.agentAuthoring) {
@@ -192,14 +190,6 @@ const GRANTED_TOOLS = new Set([
   "submit_model_scripts",
   "validate_model_scripts",
   "set_node_prompt",
-  "set_model_camera",
-  "create_model_camera",
-  "update_model_camera",
-  "delete_model_camera",
-  "rename_model_camera",
-  "reset_model_camera",
-  "mutate_model_cameras",
-  "mutate_model_cameras_batch",
   "create_world_model",
   "replace_world_model_content",
   "move_world_model",
@@ -209,3 +199,26 @@ const GRANTED_TOOLS = new Set([
   "resize_scene_area",
   "import_generated_image"
 ]);
+
+/**
+ * 真实注册目录：按当前装配把全部工具注册到一个只记录名字的 server 上
+ * （change: 2026-11-07-add-pluggable-agent-roles）。
+ *
+ * 角色工具声明必须与实际注册面求交；这里复用与请求同一条注册路径（含条件式 world/skill 工具），
+ * 不维护第二份手写清单。注册本身不产生 I/O，结果可由宿主缓存。
+ */
+export function listModelMcpToolNames(options: ModelMcpHttpOptions = {}): readonly string[] {
+  const names = new Set<string>();
+  const server = new McpServer({ name: "woohaa3-model-canvas", version: "1.0.0" });
+  server.registerTool = ((name: string) => {
+    names.add(name);
+    return undefined;
+  }) as unknown as typeof server.registerTool;
+  const reg: ToolRegistration = { server, grantedTools: GRANTED_TOOLS, grantDenied: () => null };
+  registerModelTools(reg, options);
+  registerModelBatchTools(reg, options);
+  if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
+  registerExtensionTools(server, options, { bearerToken: null, loopback: false });
+  options.registerTools?.(server, { bearerToken: null, grant: null });
+  return [...names].sort();
+}

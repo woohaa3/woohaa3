@@ -5,6 +5,7 @@
  * 同源路径 `/api/agent-conversations/*`，由 Application Service 承载：
  * ```
  * GET  /api/agent-conversations/catalog?adapterId=            账户目录/授权/能力（owner 隔离）
+ * GET  /api/agent-conversations/roles?adapterId=              角色目录与能力匹配（只读，不准备）
  * GET  /api/agent-conversations/mcp                            内置 MCP 真实发现 + 外部连接指引
  * POST /api/agent-conversations/conversations                创建会话
  * GET  /api/agent-conversations/conversations?canvasId=&limit= 列出会话
@@ -98,7 +99,14 @@ const STATUS_FOR: Record<AgentConversationServiceError["code"], number> = {
   "capability-unsupported": 400,
   "budget-exceeded": 429,
   "storage-failed": 500,
-  "active-turn": 409
+  "active-turn": 409,
+  "role-not-found": 400,
+  "role-unavailable": 409,
+  "role-version-conflict": 409,
+  "role-input-invalid": 400,
+  "role-context-invalid": 400,
+  "role-requirement-unsatisfied": 409,
+  "role-prepare-failed": 500
 };
 
 export function createAgentConversationApiHandler(deps: AgentConversationApiDependencies): AgentConversationApiHandler {
@@ -218,6 +226,16 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       if (suffix === "catalog" && method === "GET") {
         const adapterId = url.searchParams.get("adapterId") ?? undefined;
         const result = await deps.service.catalog({ owner, ...(adapterId ? { adapterId } : {}) });
+        if (!result.ok) return respondError(res, result.error);
+        sendJson(res, 200, result);
+        return true;
+      }
+
+      // GET /roles：只读角色目录与能力匹配投影（change: 2026-11-07-add-pluggable-agent-roles）。
+      // 只解析 adapter 能力并读注册表；不准备、不推理、不签发授权。
+      if (suffix === "roles" && method === "GET") {
+        const adapterId = url.searchParams.get("adapterId") ?? undefined;
+        const result = deps.service.listRoles({ owner, ...(adapterId ? { adapterId } : {}) });
         if (!result.ok) return respondError(res, result.error);
         sendJson(res, 200, result);
         return true;
@@ -429,7 +447,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const decoded = decodeAcceptTurnRequest(await readJson(req, maxBytes));
         if (!decoded.ok) return badRequest(res, decoded.message, decoded.code);
         const entry = decoded.value.entry;
-        if (!entry.nodeId || !entry.model || !entry.connectionId || entry.action !== "discuss" || entry.references?.length || entry.mode || entry.cameraId || entry.clipId || entry.itemId || entry.worldScope || entry.expectedContentHash) return badRequest(res, "图片场景请求无效");
+        if (!entry.nodeId || !entry.model || !entry.connectionId || !entry.roleId || entry.action !== "generate" || entry.references?.length || entry.mode || entry.cameraId || entry.clipId || entry.itemId || entry.worldScope || entry.expectedContentHash) return badRequest(res, "图片场景请求无效");
         const conversation = deps.service.readConversation({ owner, conversationId });
         if (!conversation.ok) return respondError(res, conversation.error);
         if (conversation.snapshot.conversation.canvasId !== entry.canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
@@ -452,17 +470,6 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         sendJson(res, 200, result);
         return true;
       }
-      if ((suffix === "image-director-scenes/retry-placement" || suffix === "image-director-scenes/retry-save") && method === "POST") {
-        const body = await readJson(req, maxBytes);
-        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "canvasId,requestId") return badRequest(res, "创建身份无效");
-        const { canvasId, requestId } = body as { canvasId?: unknown; requestId?: unknown };
-        if (typeof canvasId !== "string" || !canvasId || typeof requestId !== "string" || !requestId || !deps.imageDirectorScene) return badRequest(res, "创建身份无效");
-        const allowed = await authorizeCanvas(deps, owner, canvasId, "write");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        try { sendJson(res, 200, await (suffix.endsWith("retry-save") ? deps.imageDirectorScene.retrySave(owner, canvasId, requestId) : deps.imageDirectorScene.retryPlacement(owner, canvasId, requestId))); }
-        catch (error) { return badRequest(res, error instanceof Error ? error.message : "重试失败"); }
-        return true;
-      }
       const turnsCreate = /^conversations\/([^/]+)\/turns$/.exec(suffix);
       if (turnsCreate && method === "POST") {
         const conversationId = decodeURIComponent(turnsCreate[1]!);
@@ -478,7 +485,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const allowed = await authorizeCanvas(deps, owner, canvasId, permission);
         if (!allowed.ok) return respondError(res, allowed.error);
         if (decoded.value.entry.canvasId !== canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
-        // 冻结本回合连接身份：显式选择校验归属，缺失时映射兼容默认连接（change: 2026-10-16-...，任务 2.2）。
+        // 冻结本回合连接身份：显式选择校验归属，缺失时直接拒绝（change: 2026-10-16-...，任务 2.2）。
         const connection = await deps.service.resolveConnectionBinding({ owner, adapterId, ...(decoded.value.entry.connectionId ? { connectionId: decoded.value.entry.connectionId } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
         const frozen = decoded.value.entry.connection;

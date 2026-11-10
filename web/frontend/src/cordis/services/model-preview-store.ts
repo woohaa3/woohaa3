@@ -3,7 +3,7 @@ import {
   type BevyModelPreview,
 } from "@woohaa3/contracts";
 
-/** Local viewing state only. No nodeData/modelCameras writes. */
+/** Local viewing state only; never writes canonical nodeData. */
 const views = new Map<string, BevyModelPreview>();
 /** Default card pose follows the canvas camera pitch; see `defaultModelPreview`. */
 const fallback = defaultModelPreview();

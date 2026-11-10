@@ -269,6 +269,18 @@ export function createAgentConversationService(
       publish({ pendingSubmissions });
     };
     try {
+      // 提交前只读匹配：角色缺失/必要能力不足时保留草稿并禁止提交（host 仍会再校验）。
+      if (input.entry.roleId && remote.roles) {
+        const roles = await remote.roles(input.adapterId).catch(() => null);
+        if (roles?.ok) {
+          const role = roles.value.roles.find((entry) => entry.ref.namespacedId === input.entry.roleId);
+          if (!role || !role.available) {
+            const error = role?.reason ?? "所选角色不可用，请先启用对应角色插件";
+            if (submittedScope === dataScopeId()) publish({ loading: false, error });
+            return { ok: false, code: role ? "role-requirement-unsatisfied" : "role-not-found", error };
+          }
+        }
+      }
       const conversation = await ensureConversation(imageDirector ? { ...input, conversationId: undefined, entry: { ...input.entry, nodeId: undefined } } : input);
       if (!conversation.ok) {
         if (submittedScope === dataScopeId()) publish({ loading: false, error: conversation.error });

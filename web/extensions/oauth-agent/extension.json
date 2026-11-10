@@ -1,9 +1,46 @@
 {
   "schemaVersion": 1,
   "extensionId": "oauth-agent",
-  "backend": { "module": "./backend", "factory": "createOAuthAgentExtension", "optionsType": "OAuthAgentExtensionOptions", "order": 40 },
-  "metadata": { "module": "./shared", "export": "OAUTH_AGENT_PLUGIN_METADATA", "order": 10 },
+  "site": {
+    "name": "OAuth Agent 来源",
+    "description": "个人 OAuth 授权与连接；3D 生成面板由宿主内置（design D10）。",
+    "version": "1.0.0",
+    "configSchema": { "schemaId": "chatgpt-plugin-config", "schemaVersion": 1 },
+    "capabilities": [
+      { "id": "chatgpt.status", "kind": "handler", "description": "授权状态快照", "auth": "public" },
+      { "id": "chatgpt.generate", "kind": "handler", "description": "生成与进度流", "auth": "public" },
+      { "id": "chatgpt.http", "kind": "handler", "description": "OAuth 回调/SSE 受控原始 HTTP 面", "auth": "public" }
+    ],
+    "defaultEnabled": true,
+    "order": 40
+  },
+  "backend": {
+    "module": "./backend",
+    "factory": "createOAuthAgentExtension",
+    "optionsType": "OAuthAgentExtensionOptions",
+    "order": 40
+  },
+  "metadata": {
+    "module": "./shared",
+    "export": "OAUTH_AGENT_PLUGIN_METADATA",
+    "order": 10
+  },
   "publicRoutes": [
-    { "publicPathExport": "OAUTH_AGENT_PUBLIC_BASE_PATH", "module": "./shared", "route": "oauth-agent", "methods": ["GET", "POST"] }
+    {
+      "publicPathExport": "OAUTH_AGENT_PUBLIC_BASE_PATH",
+      "module": "./shared",
+      "route": "oauth-agent",
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    }
+  ],
+  "executors": [
+    {
+      "id": "oauth-agent",
+      "module": "./executor",
+      "export": "createExecutor"
+    }
   ]
 }

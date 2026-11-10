@@ -1,3 +1,4 @@
+import { roleIdForTarget } from "../../services/agent-role-bindings.js";
 import { AssistantTextInput } from "./text-input.js";
 /** 宿主统一的 3D 创作入口。草稿属于当前页面，会话事实仍由 Agent 服务持有。 */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -409,6 +410,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       nodeId: props.nodeId,
       mode: props.mode,
       ...(props.worldScope ? { worldScope: props.worldScope } : {}),
+      roleId: roleIdForTarget({ ...(props.mode ? { mode: props.mode } : {}), ...(props.worldScope ? { worldScope: props.worldScope } : {}) }),
       connectionId,
       ...(selectedConnection?.binding
         ? { connection: selectedConnection.binding }

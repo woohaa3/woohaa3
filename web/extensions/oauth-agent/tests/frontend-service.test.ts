@@ -99,16 +99,6 @@ describe("ChatGPT Service", () => {
     expect(service.getSnapshot().run).toMatchObject({ phase: "succeeded", commandId: "cmd-9" });
   });
 
-  it("生成捕获提交时目标身份（用户切换后不回投）", async () => {
-    const { remote, lastRequest } = remoteStub();
-    const service = createChatGptService({ remote, createRequestId: () => "req-3" });
-    await service.refresh();
-    service.setTarget({ canvasId: "cv", nodeId: "n1", mode: "camera" });
-    service.generate({ model: "gpt-5", prompt: "x", selectedCameraId: "cam-1" });
-    service.setTarget({ canvasId: "cv", nodeId: "n2", mode: "camera" });
-    expect(lastRequest()).toMatchObject({ nodeId: "n1", mode: "camera", selectedCameraId: "cam-1", requestId: "req-3" });
-  });
-
   it("授权未就绪时不生成", async () => {
     const { remote } = remoteStub();
     const service = createChatGptService({ remote });

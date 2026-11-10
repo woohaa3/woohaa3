@@ -58,6 +58,16 @@ test("合法最小声明与完整声明", () => {
   assert.equal(full.value.backend.factory, "createSampleAccessExtension");
 });
 
+test("executor declarations require an activation owner and unique package-local modules", () => {
+  const executor = { id: "sample-agent", module: "./executor", export: "createExecutor" };
+  assert.equal(validateExtensionDescriptor(complete({ executors: [executor] })).ok, true);
+  assert.match(errorsOf(complete({ executors: [executor, executor] })), /unique/);
+  assert.match(errorsOf(complete({ executors: [{ ...executor, module: "./../escape" }] })), /package subpath/);
+  assert.match(errorsOf(complete({ executors: [executor], backend: undefined })), /activation owner/);
+  assert.match(errorsOf(complete({ executors: [executor], site: undefined })), /site activation/);
+  assert.match(errorsOf(complete({ executors: [executor], hostPlugin: { module: "./backend", factory: "createPlugin" } })), /without hostPlugin/);
+});
+
 test("extensionId 与 schemaVersion 校验", () => {
   assert.match(errorsOf({ schemaVersion: 1 }), /extensionId 必须是非空 kebab-case/);
   assert.match(errorsOf({ schemaVersion: 1, extensionId: "Sample Access" }), /extensionId/);

@@ -78,27 +78,6 @@ describe("Canvas 内部 MCP client", () => {
     expect((await bad.ready()).ready).toBe(false);
   });
 
-  it("mutateCameras 走 /cameras/mutate 并透传变更意图", async () => {
-    let seenPath = "";
-    let seenBody: Record<string, unknown> = {};
-    const baseUrl = await start((req, res, body) => {
-      seenPath = req.url ?? "";
-      seenBody = body as Record<string, unknown>;
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, canvasId: "c", nodeId: "m1", commandId: "cmd", duplicate: false, noop: false, cameras: [] }));
-    });
-    const client = createCanvasMcpClient({ baseUrl, serviceToken: TOKEN });
-    const result = await client.mutateCameras({
-      canvasId: "c",
-      nodeId: "m1",
-      requestId: "r1",
-      mutation: { kind: "create", azimuth: 0, distance: 3 }
-    });
-    expect(seenPath).toBe("/internal/v1/model-mcp/cameras/mutate");
-    expect(seenBody).toMatchObject({ nodeId: "m1", requestId: "r1", mutation: { kind: "create", azimuth: 0, distance: 3 } });
-    expect(result).toMatchObject({ ok: true, nodeId: "m1" });
-  });
-
   it("批量模型能力走 /models/{nodes,validate,submit} 三条内部路径", async () => {
     const seen: Array<{ path: string; body: Record<string, unknown> }> = [];
     const baseUrl = await start((req, res, body) => {

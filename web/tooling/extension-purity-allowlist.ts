@@ -20,8 +20,8 @@ export type ExtensionImportDebt = {
 export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
   {
     file: "web/backend/package.json",
-    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-sample-site"],
-    reason: "宿主核心的站点插件（ChatGPT）与测试 fixture 的 workspace 依赖；application-extension-runtime 规范允许后端入口来自静态可信清单。"
+    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-standard-agent-roles", "@woohaa3/extension-sample-site"],
+    reason: "宿主核心的站点插件（ChatGPT / 标准 Agent 角色）与测试 fixture 的 workspace 依赖；application-extension-runtime 规范允许后端入口来自静态可信清单。"
   },
   {
     file: "web/backend/src/composition.ts",
@@ -35,8 +35,8 @@ export const EXTENSION_IMPORT_DEBT: readonly ExtensionImportDebt[] = [
   },
   {
     file: "web/backend/src/host/core/application.ts",
-    packages: ["@woohaa3/extension-oauth-agent"],
-    reason: "ChatGPT 服务选项的类型引用；扩展实现由目录宿主装载。"
+    packages: ["@woohaa3/extension-oauth-agent", "@woohaa3/extension-standard-agent-roles"],
+    reason: "宿主核心站点插件的服务选项/角色绑定常量引用；扩展实现仍由目录宿主装载，不 import 扩展实现。"
   },
   {
     file: "web/services/application-service/package.json",

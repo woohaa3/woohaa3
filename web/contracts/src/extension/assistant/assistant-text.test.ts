@@ -4,7 +4,7 @@ import {
   decodeAssistantTextCandidate,
 } from "./assistant-text.js";
 import { decodeAcceptTurnRequest } from "./conversation-codec.js";
-const request = {
+const request = { roleId: "test/role",
   requestId: "r",
   conversationId: "c",
   canvasId: "cv",
@@ -21,6 +21,8 @@ const request = {
 describe("assistant text public boundary", () => {
   it("accepts explicit assistant identity, never provider keys", () => {
     expect(decodeAssistantTextRequest(request).ok).toBe(true);
+    expect(decodeAssistantTextRequest({ ...request, roleId: undefined }).ok).toBe(false);
+    expect(decodeAcceptTurnRequest({ requestId: "r", entry: { action: "discuss", canvasId: "cv", prompt: "hello" } }).ok).toBe(false);
     expect(
       decodeAssistantTextRequest({ ...request, modelKey: "provider:language" })
         .ok,
@@ -38,7 +40,7 @@ describe("assistant text public boundary", () => {
       expect(
         decodeAcceptTurnRequest({
           requestId: "r",
-          entry: {
+          entry: { roleId: "test/role",
             action: "generate",
             mode: "text",
             canvasId: "cv",
@@ -54,7 +56,7 @@ describe("assistant text public boundary", () => {
     expect(
       decodeAcceptTurnRequest({
         requestId: "r",
-        entry: {
+        entry: { roleId: "test/role",
           action: "generate",
           mode: "text",
           canvasId: "cv",

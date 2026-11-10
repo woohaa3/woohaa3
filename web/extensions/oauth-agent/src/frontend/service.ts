@@ -11,6 +11,7 @@
  */
 import type { ChatGptAuthSnapshot, ChatGptGenerationMode, ChatGptGenerationReceipt, ChatGptModelView, ChatGptReasoningEffort } from "@woohaa3/contracts";
 import type { ChatGptGenerationSink, ChatGptRemote } from "./remote.js";
+import { OAUTH_AGENT_GENERATION_ROLE_IDS } from "../shared.js";
 
 export type ChatGptRunState =
   | { phase: "idle" }
@@ -264,6 +265,7 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
           canvasId: captured.canvasId,
           nodeId: captured.nodeId,
           mode: captured.mode,
+          roleId: OAUTH_AGENT_GENERATION_ROLE_IDS.model3d,
           ...(captured.clipId ? { clipId: captured.clipId } : {}),
           ...(captured.itemId ? { itemId: captured.itemId } : {}),
           model: input.model,

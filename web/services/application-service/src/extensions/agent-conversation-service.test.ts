@@ -23,6 +23,13 @@ import { createSqliteAgentConversationStore as openConversationStore } from "../
 import { loadNodeSqlite } from "../repository/sqlite-loader.js";
 import { createAgentAdapterRegistry } from "./agent-adapter-registry.js";
 import { createExtensionAssistants } from "./extension-assistants.js";
+import { createAgentRoleRegistry } from "../agent-roles/registry.js";
+
+/**
+ * 本套件关注会话账本/事件/取消，不关注角色语义：给每个服务注入一个无工具、
+ * 无内建能力要求的测试角色，避免每条用例重复角色样板。
+ */
+import { testRoleRegistry } from "./test-role-registry.js";
 import { createAgentConversationService, hashIntent } from "./agent-conversation-service.js";
 
 const dirs: string[] = [];
@@ -79,7 +86,7 @@ function fakeRegistry(adapter: AgentConversationAdapter) {
   });
 }
 
-function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number) {
+function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number, agentRoles = testRoleRegistry()) {
   const controls: FakeAdapterControls = {
     seen: [],
     outcomes: [],
@@ -92,6 +99,7 @@ function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageCh
     store,
     maxMessageChars,
     registry: fakeRegistry(fakeAdapter(controls)),
+    agentRoles,
     now: () => "2026-10-13T00:00:00.000Z",
     createId: (() => {
       let n = 0;
@@ -117,6 +125,7 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
   action: "discuss" as const,
   canvasId: "canvas-1",
   prompt: "你好",
+  roleId: "test/discussion",
   ...overrides
 });
 
@@ -184,6 +193,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "mixed", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     input.emit({ type: "stage", stage: "reasoning", summary: "公开摘要" });
     input.emit({ type: "message", role: "assistant", content: "先读取" });
@@ -212,6 +223,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "stream", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     // 真增量：多个 append 分片属于同一条助手消息。
     for (const chunk of ["一", "段", "流式", "文本"]) input.emit({ type: "message", role: "assistant", content: chunk, delivery: "append" });
@@ -236,6 +249,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "snapshot", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     input.emit({ type: "message", role: "assistant", content: "你", delivery: "replace", streamId: "part-1" });
     input.emit({ type: "message", role: "assistant", content: "你好", delivery: "replace", streamId: "part-1" });
@@ -255,6 +270,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "split", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     input.emit({ type: "message", role: "assistant", content: "先看一下", delivery: "append" });
     input.emit({ type: "tool-started", tool: "get_model", callId: "a" });
@@ -347,6 +364,7 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "aggregate", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     for (const event of events) controls.seen[0]!.emit(event);
     controls.pending[0]!({ status: "succeeded", assistantText: summary });
     await dispatched;
@@ -363,6 +381,7 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "long", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const text = "一段超过消息预算的回复";
     controls.seen[0]!.emit({ type: "message", role: "assistant", content: text });
     controls.pending[0]!({ status: "succeeded", assistantText: text });
@@ -775,7 +794,7 @@ describe("trusted structured assistant execution", () => {
     const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"ok":true}'}]});
     const created=service.createConversation({owner:"owner",canvasId:"canvas",adapterId:"fake"});
     if (!created.ok) throw new Error("create failed");
-    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"structured",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design"},candidate};
+    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"structured",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design",roleId:"test/discussion"},candidate};
     const accepted=service.acceptStructuredTurn(input);if(!accepted.ok)throw new Error("accept failed");
     expect(accepted.turn.target.structuredInputHash).toBeTruthy();
     await service.dispatchTurn(accepted.turn.turnId);expect(controls.seen).toHaveLength(0);
@@ -792,7 +811,7 @@ describe("trusted structured assistant execution", () => {
   it("restart and cancellation never restart structured inference",async()=>{
     const {service,controls}=setup();
     const created=service.createConversation({owner:"owner",canvasId:"canvas",adapterId:"fake"});if(!created.ok)throw Error();
-    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"lost",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design"},candidate};
+    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"lost",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design",roleId:"test/discussion"},candidate};
     const accepted=service.acceptStructuredTurn(input);if(!accepted.ok)throw Error();
     await service.reconcileUnknown();
     await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);
@@ -801,31 +820,42 @@ describe("trusted structured assistant execution", () => {
     service.cancelTurn({owner:"owner",requestId:"lost"});
     await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);expect(controls.seen).toHaveLength(0);
   });
-  it("extension facade freezes connections, scopes identities and reads canvas image bytes before execution",async()=>{
-    const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"design":true}'}]});
+  it("extension role facade freezes connections, scopes identities and reads canvas image bytes before execution",async()=>{
+    const registry=createAgentRoleRegistry({availableTools:()=>["get_model_node","submit_model_script"]});
+    const registered=registry.register({extensionId:"extension",artifactId:"extension@1",implementation:{
+      definition:{id:"writer",revision:"1",title:"写作",specialty:"写模型",instructions:"你是模型作者。",
+        inputSchema:{type:"object",additionalProperties:false,required:["prompt"],properties:{prompt:{type:"string",minLength:1}}},
+        contextSchema:{type:"object"},tools:{required:["get_model_node"],optional:["submit_model_script"]},
+        nativeCapabilities:{required:[],optional:[]},requirements:{imageInput:false,toolCalling:true,structuredOutput:"none"},
+        output:{kind:"tool-receipts"}},
+      prepare:({input})=>({messages:[{role:"user",content:String((input as {prompt:string}).prompt)}]})
+    }});
+    if(!registered.ok)throw Error(registered.message);
+    const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"design":true}'}]},undefined,registry);
     const binding={connectionId:"selected",adapterId:"fake",configRevision:2,credentialEpoch:3};
     vi.spyOn(service,"resolveConnectionBinding").mockResolvedValue({ok:true,binding});
     const read=vi.fn(async()=>candidate.images[0]);
     const services={canvasAccess:{authorize:vi.fn(async({subject,canvasId})=>({ok:subject==="owner" && canvasId==="canvas"}))},media:{verify:vi.fn(async()=>({exists:true,metadata:{checksum:"hash",contentType:"image/png"}})),resources:{read}}} as unknown as import("@woohaa3/contracts").ApplicationExtensionServices;
-    const facade=createExtensionAssistants("extension",services,()=>service);
-    const input={subject:"owner",canvasId:"canvas",nodeId:"node",requestId:"request",connection:binding,model:"chosen",reasoningEffort:"high" as const,prompt:"design",outputSchema:candidate.outputSchema,references:[{storageKey:"key",checksum:"hash"}]};
-    expect(await facade.submit({...input,connection:{...binding,credentialEpoch:1}})).toMatchObject({ok:false,code:"connection-unavailable"});
-    const accepted = await facade.submit(input);
+    const facade=createExtensionAssistants("extension",services,()=>service,()=>registry);
+    const input={subject:"owner",canvasId:"canvas",nodeId:"node",requestId:"request",connection:binding,roleId:"extension/writer",roleInput:{prompt:"design"},roleContext:{},model:"chosen",reasoningEffort:"high" as const,references:[{storageKey:"key",checksum:"hash"}]};
+    expect(await facade.submitRole({...input,connection:{...binding,credentialEpoch:1}})).toMatchObject({ok:false,code:"connection-unavailable"});
+    const accepted = await facade.submitRole(input);
     expect(accepted).toMatchObject({ok:true,conversation:{conversationId:expect.any(String),requestId:expect.stringMatching(/^extension-/)}});
     if (!accepted.ok || !accepted.conversation) throw Error("missing ledger reference");
     expect(accepted.conversation.requestId).not.toBe(input.requestId);
     await vi.waitFor(()=>expect(controls.seen).toHaveLength(1));
     await service.whenSettled(controls.seen[0].turnId);
-    expect(controls.seen[0]).toMatchObject({connection:binding,candidate,intent:{model:"chosen",reasoningEffort:"high"}});
+    expect(controls.seen[0]).toMatchObject({connection:binding,intent:{roleId:"extension/writer",model:"chosen",reasoningEffort:"high"}});
+    expect(controls.seen[0].candidate).toMatchObject({outputSchema:{},referenceIdentity:input.references});
     expect(read).toHaveBeenCalledWith("key","canvas");
     expect(await facade.query(input)).toMatchObject({state:"succeeded",text:'{"design":true}',conversation:accepted.conversation});
     expect(service.queryTurn({owner:input.subject,requestId:accepted.conversation.requestId})).toMatchObject({ok:true,turn:{conversationId:accepted.conversation.conversationId}});
-    expect(await facade.submit(input)).toEqual(accepted);expect(controls.seen).toHaveLength(1);
-    expect(await facade.submit({...input,prompt:"changed"})).toMatchObject({ok:false,code:"request-id-reused"});
+    expect(await facade.submitRole(input)).toEqual(accepted);expect(controls.seen).toHaveLength(1);
+    expect(await facade.submitRole({...input,roleInput:{prompt:"changed"}})).toMatchObject({ok:false,code:"request-id-reused"});
     expect(await facade.query({...input,nodeId:"other"})).toBeNull();
-    expect(await createExtensionAssistants("other-extension",services,()=>service).query(input)).toBeNull();
+    expect(await createExtensionAssistants("other-extension",services,()=>service,()=>registry).query(input)).toBeNull();
     await expect(facade.query({...input,subject:"other"})).rejects.toThrow();
-    expect(await facade.submit({...input,canvasId:"other"})).toMatchObject({ok:false,code:"authorization-unavailable"});
+    expect(await facade.submitRole({...input,canvasId:"other"})).toMatchObject({ok:false,code:"authorization-unavailable"});
     await facade.cancel(input);expect(controls.seen).toHaveLength(1);
   });
 });

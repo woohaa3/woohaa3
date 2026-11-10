@@ -120,7 +120,7 @@ export type { ControlPanelAction } from "../host.js";
 export { syncStatusView } from "../sync-status.js";
 export type { SyncStatusView, SyncStatusTone, SyncStatusInput } from "../sync-status.js";
 // MCP 指引文案（AI 面板 MCP tab 与节点级工具复用）
-export { mcpHintView, mcpCanvasPrompt, cameraMcpGuide, MCP_HINT_PREFIX, MCP_HINT_INSTALL_LABEL, MCP_HINT_CANVAS_LABEL } from "../mcp-hint.js";
+export { mcpHintView, mcpCanvasPrompt, MCP_HINT_PREFIX, MCP_HINT_INSTALL_LABEL, MCP_HINT_CANVAS_LABEL } from "../mcp-hint.js";
 export type { McpHintView } from "../mcp-hint.js";
 export { CanvasZoomControls } from "../plugins/canvas-shell/canvas-zoom-controls.js";
 export type { CanvasZoomControlsProps } from "../plugins/canvas-shell/canvas-zoom-controls.js";

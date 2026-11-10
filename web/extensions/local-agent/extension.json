@@ -5,19 +5,41 @@
     "name": "本地 agent",
     "description": "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy。",
     "version": "0.1.0",
-    "configSchema": { "schemaId": "local-agent-config", "schemaVersion": 1 },
+    "configSchema": {
+      "schemaId": "local-agent-config",
+      "schemaVersion": 1
+    },
     "capabilities": [
-      { "id": "agent-connection-provider:local-agent", "kind": "capability", "description": "本地 agent 连接发现" }
+      {
+        "id": "agent-connection-provider:local-agent",
+        "kind": "capability",
+        "description": "本地 agent 连接发现"
+      }
     ],
     "defaultEnabled": true,
     "order": 70
   },
-  "backend": { "module": "./backend", "factory": "createLocalAgentExtension", "optionsType": "LocalAgentExtensionOptions", "order": 70 },
+  "backend": {
+    "module": "./backend",
+    "factory": "createLocalAgentExtension",
+    "optionsType": "LocalAgentExtensionOptions",
+    "order": 70
+  },
   "publicRoutes": [
     {
       "publicPath": "/api/local-agent",
       "route": "local-agent",
-      "methods": ["GET", "POST"]
+      "methods": [
+        "GET",
+        "POST"
+      ]
+    }
+  ],
+  "executors": [
+    {
+      "id": "local-agent",
+      "module": "./executor",
+      "export": "createExecutor"
     }
   ]
 }

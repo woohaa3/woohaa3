@@ -14,7 +14,7 @@
  * 连接元数据/凭据由贡献方扩展按扩展、owner、connectionId 隔离保存；宿主只认识连接引用与能力。
  */
 
-import { isAgentReasoningEffort } from "./conversation.js";
+import { isAgentReasoningEffort, isAgentTargetMode, type AgentTargetMode } from "./conversation.js";
 
 /** 固定 API 引擎映射；历史 adapter ID 不作为引擎选择项。 */
 export const AGENT_API_ENGINES = {
@@ -125,6 +125,8 @@ export type AgentConnectionCapabilities = {
   structuredResult: boolean;
   cancel: boolean;
   resume: boolean;
+  /** 通道支持的显式目标模式；缺省表示未声明（调用方不得据此猜测）。 */
+  targets?: readonly AgentTargetMode[];
 };
 
 /** 连接可见模型：能力、来源与账号授权分离。 */
@@ -197,7 +199,8 @@ export function isAgentConnectionCapabilities(value: unknown): value is AgentCon
     typeof candidate.tools === "boolean" &&
     typeof candidate.structuredResult === "boolean" &&
     typeof candidate.cancel === "boolean" &&
-    typeof candidate.resume === "boolean"
+    typeof candidate.resume === "boolean" &&
+    (candidate.targets === undefined || (Array.isArray(candidate.targets) && candidate.targets.every(isAgentTargetMode)))
   );
 }
 

@@ -282,11 +282,9 @@ test("模型卡片独立渲染、聚焦视角同步、模型信息面板", async
   );
   // 普通 model3d 聚焦只保留 AI 修改与模型规模信息
   // （change: 2026-10-18-simplify-model-focus-panel）：镜头、取景与截图已移除，
-  // 即使画布残留 modelCameras 也不再套用拍摄镜头。
   await expect(page.locator(".model-info")).toBeVisible();
   await expect(page.locator("[data-model-info-rows]")).toBeVisible();
   await expect(page.getByRole("button", { name: "添加镜头", exact: true })).toHaveCount(0);
-  await expect(page.locator(".model-camera-preview")).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() => (window as any).__modelEditorGizmo()?.shot != null),

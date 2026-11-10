@@ -24,6 +24,7 @@ import { createSqliteAgentConversationStore as openConversationStore } from "../
 import { loadNodeSqlite } from "../repository/sqlite-loader.js";
 import { createAgentAdapterRegistry } from "./agent-adapter-registry.js";
 import { createAgentConversationService } from "./agent-conversation-service.js";
+import { testRoleRegistry } from "./test-role-registry.js";
 import type { AgentConnectionRegistry } from "./agent-connection-registry.js";
 
 const dirs: string[] = [];
@@ -97,7 +98,7 @@ function fakeAdapter(controls: Controls): AgentConversationAdapter {
   };
 }
 
-function setup(options: { byOwner?: Record<string, AgentConnectionView[]>; defaultConnectionFor?: (input: { owner: string; adapterId: string }) => AgentConnectionView | null } = {}) {
+function setup(options: { byOwner?: Record<string, AgentConnectionView[]> } = {}) {
   const controls: Controls = { seen: [], outcomes: [], pending: [] };
   const registry = createAgentAdapterRegistry({
     hasCapability: (id) => id === "agent-conversation-adapter:fake",
@@ -111,7 +112,7 @@ function setup(options: { byOwner?: Record<string, AgentConnectionView[]>; defau
     store,
     registry,
     ...(options.byOwner ? { connections: connectionRegistry(options.byOwner) } : {}),
-    ...(options.defaultConnectionFor ? { defaultConnectionFor: options.defaultConnectionFor } : {}),
+    agentRoles: testRoleRegistry(),
     now: () => "2026-10-16T00:00:00.000Z",
     createId: (() => {
       let n = 0;
@@ -122,6 +123,7 @@ function setup(options: { byOwner?: Record<string, AgentConnectionView[]>; defau
 }
 
 const entry = (overrides: Record<string, unknown> = {}) => ({
+  roleId: "test/discussion",
   action: "discuss" as const,
   canvasId: "canvas-1",
   prompt: "你好",
@@ -166,16 +168,11 @@ describe("来源连接解析与冻结（任务 2.2）", () => {
     if (!resolved.ok) expect(resolved.error.code).toBe("connection-unavailable");
   });
 
-  it("未显式选择时映射兼容默认连接；缺省不伪造连接身份", async () => {
-    const withDefault = setup({ defaultConnectionFor: () => conn({ connectionId: "legacy", adapterId: "fake", extensionId: "chatgpt" }) });
-    const resolved = await withDefault.service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake" });
-    expect(resolved.ok).toBe(true);
-    if (resolved.ok) expect(resolved.binding?.connectionId).toBe("legacy");
-
-    const without = setup();
-    const none = await without.service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake" });
-    expect(none.ok).toBe(true);
-    if (none.ok) expect(none.binding).toBeNull();
+  it("即使只有一个 OAuth 连接，也拒绝省略明确连接", async () => {
+    for (const byOwner of [{} as Record<string, AgentConnectionView[]>, { "user-a": [{ ...conn({ connectionId: "only", adapterId: "fake", extensionId: "oauth" }), authMode: "oauth" as const }] }]) {
+      const { service } = setup({ byOwner });
+      expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake" })).toMatchObject({ ok: false, error: { code: "connection-unavailable" } });
+    }
   });
 
   it("同 requestId 换连接/配置/凭据版本拒绝为原请求执行，原请求不重跑", async () => {
@@ -311,10 +308,10 @@ describe("旧数据兼容（任务 2.2）", () => {
     raw.close();
 
     const store = createSqliteAgentConversationStore({ path: dbPath });
-    // 旧记录连接为空；读取映射兼容默认连接由服务层处理。
+    // 旧记录连接为空，读取不会自动绑定连接。
     expect(store.getConversation("legacy-1")?.connectionId).toBeNull();
 
-    // 服务以兼容默认连接解析旧会话，历史保持可读、请求身份不变。
+    // 旧会话可读，但不能猜测默认连接发起新执行。
     const registry = createAgentAdapterRegistry({
       hasCapability: (id) => id === "agent-conversation-adapter:fake",
       resolveCapabilityOwner: (id) => (id === "agent-conversation-adapter:fake" ? { extensionId: "fake-ext", configVersion: 1, mode: "public" } : null),
@@ -325,13 +322,12 @@ describe("旧数据兼容（任务 2.2）", () => {
       store,
       registry,
       connections: connectionRegistry({ "user-a": [conn({ connectionId: "legacy", adapterId: "fake", extensionId: "chatgpt" })] }),
-      defaultConnectionFor: () => conn({ connectionId: "legacy", adapterId: "fake", extensionId: "chatgpt" }),
+      agentRoles: testRoleRegistry(),
       now: () => "2026-10-16T00:00:00.000Z"
     });
-    // 直接以默认连接解析旧会话来源。
+    // 没有明确连接时拒绝执行。
     const binding = await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake" });
-    expect(binding.ok).toBe(true);
-    if (binding.ok) expect(binding.binding?.connectionId).toBe("legacy");
+    expect(binding).toMatchObject({ ok: false, error: { code: "connection-unavailable" } });
     const read = service.readConversation({ owner: "user-a", conversationId: "legacy-1" });
     expect(read.ok).toBe(true);
     if (read.ok) expect(read.snapshot.conversation.connectionId).toBeUndefined();
@@ -387,7 +383,7 @@ it("升级归档后重启仍保留原请求、回复和作品命令回执，不�
   } finally { reopened.close(); }
 });
 
-it("旧 OAuth 历史只按可信 owner 解析唯一默认连接，原请求身份不改写", async () => {
+it("读取历史不自动绑定 OAuth 默认连接，原请求身份不改写", async () => {
   const oauth = { ...conn({ connectionId: "owner-account", adapterId: "fake", extensionId: "oauth-agent" }), authMode: "oauth" as const };
   const { service, controls } = setup({ byOwner: { "user-a": [oauth] } });
   const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
@@ -396,8 +392,8 @@ it("旧 OAuth 历史只按可信 owner 解析唯一默认连接，原请求身�
   if (!accepted.ok) throw new Error("accept failed");
   controls.outcomes.push({ status: "succeeded", assistantText: "historical reply" });
   await service.dispatchTurn(accepted.turn.turnId); await service.whenSettled(accepted.turn.turnId);
-  expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake" })).toMatchObject({ ok: true, binding: { connectionId: "owner-account" } });
-  expect(await service.resolveConnectionBinding({ owner: "user-b", adapterId: "fake" })).toEqual({ ok: true, binding: null });
+  expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake" })).toMatchObject({ ok: false, error: { code: "connection-unavailable" } });
+  expect(await service.resolveConnectionBinding({ owner: "user-b", adapterId: "fake" })).toMatchObject({ ok: false, error: { code: "connection-unavailable" } });
   expect(service.readConversation({ owner: "user-b", conversationId: created.conversation.conversationId }).ok).toBe(false);
   const read = service.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
   if (!read.ok) throw new Error("read failed");

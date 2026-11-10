@@ -27,6 +27,8 @@ export * from "./extensions/agent-adapter-registry.js";
 export * from "./extensions/agent-connection-registry.js";
 export * from "./extensions/agent-conversation-projection.js";
 export * from "./extensions/agent-conversation-service.js";
+export * from "./extensions/agent-runtime-adapter.js";
+export * from "./agent-roles/registry.js";
 export * from "./repository/extension-document-store.js";
 export * from "./repository/mongo-extension-document-store.js";
 export * from "./clients/domain-clients.js";

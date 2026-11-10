@@ -10,7 +10,7 @@
  * 本模块只含稳定 DTO、路径常量、状态枚举与无副作用 decoder；不含 OAuth、SDK、加密或
  * HTTP handler 实现（那些由 `@woohaa3/extension-oauth-agent` 提供）。
  */
-import { isJsonObject } from "../validation.js";
+import { isBoundedId, isJsonObject } from "../validation.js";
 
 export const DEFAULT_CHATGPT_BASE_PATH = "/api/oauth-agent";
 
@@ -36,8 +36,8 @@ export function isChatGptAuthState(value: unknown): value is ChatGptAuthState {
   return typeof value === "string" && (CHATGPT_AUTH_STATES as readonly string[]).includes(value);
 }
 
-/** 生成目标模式（片场已下线；`camera` 指模型自身的镜头预设子资源）。 */
-export const CHATGPT_GENERATION_MODES = ["model3d", "camera"] as const;
+/** 生成目标模式（片场与模型镜头生成已下线）。 */
+export const CHATGPT_GENERATION_MODES = ["model3d"] as const;
 export type ChatGptGenerationMode = (typeof CHATGPT_GENERATION_MODES)[number];
 
 export function isChatGptGenerationMode(value: unknown): value is ChatGptGenerationMode {
@@ -110,6 +110,12 @@ export type ChatGptGenerateRequest = {
   /** 提交时选中的稳定镜头 id（仅 camera 模式）。 */
   selectedCameraId?: string;
   clipId?: string; itemId?: string;
+  /**
+   * 业务入口显式选择的角色（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 浏览器只提交角色 id；prepared turn 由宿主在入口内准备，绝不从请求体接收。
+   */
+  roleId: string;
 };
 
 export type ChatGptGenerateAccepted = {
@@ -182,9 +188,10 @@ export function decodeChatGptGenerateRequest(body: unknown): DecodeResult<ChatGp
   const nodeId = readId(body.nodeId, "nodeId");
   if (typeof nodeId === "object") return fail("malformed-request", nodeId.error);
   const mode = body.mode;
-  if (!isChatGptGenerationMode(mode)) return fail("malformed-request", "mode 必须是 model3d / camera");
+  if (!isChatGptGenerationMode(mode)) return fail("malformed-request", "mode 必须是 model3d");
   const model = readId(body.model, "model");
   if (typeof model === "object") return fail("malformed-request", model.error);
+  if (!isBoundedId(body.roleId)) return fail("malformed-request", "roleId 非法");
   if (body.reasoningEffort !== undefined && !isChatGptReasoningEffort(body.reasoningEffort)) {
     return fail("malformed-request", "reasoningEffort 必须是 low / medium / high / xhigh / max / ultra");
   }
@@ -208,6 +215,7 @@ export function decodeChatGptGenerateRequest(body: unknown): DecodeResult<ChatGp
       mode,
       model,
       prompt: body.prompt,
+      roleId: body.roleId as string,
       ...(body.reasoningEffort === undefined ? {} : { reasoningEffort: body.reasoningEffort as ChatGptReasoningEffort }),
       ...(body.expectedContentHash === undefined ? {} : { expectedContentHash: body.expectedContentHash }),
       ...(body.clipId === undefined ? {} : { clipId: body.clipId as string }),

@@ -73,7 +73,7 @@ export type AgentConversationStore = {
   turnCount(conversationId: string): number;
   /** 会话当前活动回合数（只用于诊断/展示，不再是受理门禁）。 */
   activeTurnCount(conversationId: string): number;
-  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage">): void;
+  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage" | "roleRefJson" | "preparedJson" | "roleInputDigest"> & Partial<Pick<ConversationTurnRecord, "roleRefJson" | "preparedJson" | "roleInputDigest">>): void;
   updateTurn(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): void;
   appendMessage(message: ConversationMessageRecord): void;
   /**
@@ -156,6 +156,9 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         connection_config_revision INTEGER,
         connection_credential_epoch INTEGER,
         history_sequence INTEGER,
+        role_ref_json TEXT,
+        prepared_json TEXT,
+        role_input_digest TEXT,
         assistant_text TEXT,
         run_id TEXT,
         task_id TEXT,
@@ -218,6 +221,10 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversation_turns", "connection_credential_epoch", "INTEGER");
     // 受理时冻结的历史基准（change: 2026-10-22-remove-agent-execution-limits，任务 3.1）。
     this.ensureColumn("agent_conversation_turns", "history_sequence", "INTEGER");
+    // 角色冻结身份与准备内容（change: 2026-11-07-add-pluggable-agent-roles）：旧数据保持 NULL（legacy）。
+    this.ensureColumn("agent_conversation_turns", "role_ref_json", "TEXT");
+    this.ensureColumn("agent_conversation_turns", "prepared_json", "TEXT");
+    this.ensureColumn("agent_conversation_turns", "role_input_digest", "TEXT");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target ON agent_conversations(owner, canvas_id, node_id, updated_at DESC);");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target_connection ON agent_conversations(owner, canvas_id, node_id, connection_id, updated_at DESC);");
     // 旧版本把无法确认写成 `unknown`；迁移后统一按 failed 终态保留证据与已有错误码。
@@ -363,13 +370,14 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return row.count;
   }
 
-  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage">): void {
+  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage" | "roleRefJson" | "preparedJson" | "roleInputDigest"> & Partial<Pick<ConversationTurnRecord, "roleRefJson" | "preparedJson" | "roleInputDigest">>): void {
     this.db
       .prepare(
         `INSERT INTO agent_conversation_turns
            (turn_id, conversation_id, owner, canvas_id, request_id, action, status, stage, input_hash, target_json, intent_json,
-            connection_id, connection_adapter_id, connection_config_revision, connection_credential_epoch, history_sequence, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            connection_id, connection_adapter_id, connection_config_revision, connection_credential_epoch, history_sequence,
+            role_ref_json, prepared_json, role_input_digest, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         turn.turnId,
@@ -388,6 +396,9 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         turn.connectionConfigRevision,
         turn.connectionCredentialEpoch,
         turn.historySequence,
+        turn.roleRefJson ?? null,
+        turn.preparedJson ?? null,
+        turn.roleInputDigest ?? null,
         turn.createdAt,
         turn.updatedAt
       );
@@ -410,7 +421,10 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       connectionAdapterId: "connection_adapter_id",
       connectionConfigRevision: "connection_config_revision",
       connectionCredentialEpoch: "connection_credential_epoch",
-      historySequence: "history_sequence"
+      historySequence: "history_sequence",
+      roleRefJson: "role_ref_json",
+      preparedJson: "prepared_json",
+      roleInputDigest: "role_input_digest"
     };
     const sets: string[] = ["updated_at = ?"];
     const values: Array<string | number | null> = [now];

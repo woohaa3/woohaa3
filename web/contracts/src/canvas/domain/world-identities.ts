@@ -8,7 +8,7 @@ import { decodeModelContentVersion } from "../model-definition.js";
 import { storedHumanoidRig } from "../humanoid-rig.js";
 
 const WORLD_NODE_FIELDS = new Set(["title", "prompt", "panelPrompt", "agentId", "sceneId", "inputMapping", "workflowGroup2d", "sceneArea", "worldCamera", "imageDirectorSource", "imageDirectorGeneration"]);
-const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelCameras", "modelRig"]);
+const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelRig"]);
 const TEXT_FIELDS = ["title", "prompt", "panelPrompt", "agentId", "sceneId"];
 const LOCAL_FIELDS = new Set(["writeLease", "lease", "toolContext", "gpuResource", "gpuHandle", "runtimeHandle", "matrix"]);
 
@@ -138,7 +138,7 @@ export function validateWorldIdentities(nodes: readonly { id: string; type: stri
         const invalid = validModelFields(fields);
         if (invalid) return `Invalid ${invalid} on ${node.id}`;
       }
-      for (const key of ["modelPlacement", "shotPose", "modelCameras"]) {
+      for (const key of ["modelPlacement", "shotPose"]) {
         if (fields[key] === undefined) continue;
         const decoded = sanitizeRuntimeNodeConfigPatch({ [key]: fields[key] });
         if (!decoded.ok || !containsOnlyDecodedFields(fields[key], decoded.value[key])) return `Invalid ${key} on ${node.id}`;

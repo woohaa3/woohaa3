@@ -46,6 +46,33 @@ function snapshot(): ConversationSnapshot {
   return { conversation: summary(), turns: [turn()], messages: [], events: [], cursor: 3, resyncRequired: false };
 }
 
+describe("Agent 角色提交前匹配", () => {
+  it("角色不可用时保留草稿、不创建会话也不提交", async () => {
+    const create = vi.fn(async () => ({ ok: true as const, value: { conversation: summary() } }));
+    const accept = vi.fn();
+    const roles = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        roles: [{
+          ref: { namespacedId: "test/role", roleId: "role", extensionId: "test", revision: "1", descriptorDigest: "d", artifactId: "a" },
+          title: "角色",
+          specialty: "专长",
+          requirements: { imageInput: false, toolCalling: true, structuredOutput: "none" as const },
+          outputKind: "tool-receipts" as const,
+          available: false,
+          reason: "缺少必要工具：submit_model_script"
+        }]
+      }
+    }));
+    const service = createAgentConversationService({ remote: fakeRemote({ create, accept, roles }) });
+    const result = await service.submitTurn({ canvasId: "cv", adapterId: "adapter", requestId: "req-role", entry: { action: "discuss", canvasId: "cv", roleId: "test/role", prompt: "你好" } });
+    expect(result).toMatchObject({ ok: false, code: "role-requirement-unsatisfied" });
+    expect(create).not.toHaveBeenCalled();
+    expect(accept).not.toHaveBeenCalled();
+    expect(service.getSnapshot().error).toContain("缺少必要工具");
+  });
+});
+
 describe("exact assistant request reads", () => {
   it("creates an independent director conversation without source-image pending state or conversation reuse", async () => {
     const findForTarget = vi.fn();

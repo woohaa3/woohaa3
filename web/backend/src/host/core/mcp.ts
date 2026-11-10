@@ -1,3 +1,4 @@
+import { readRuntimeGeneratedImages } from "@woohaa3/application-service";
 /**
  * 核心层 · mcp：内置 MCP 服务与共享工具授权表。
  *
@@ -14,8 +15,8 @@ import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports
 import { groupScopedClient } from "../../ports/group-scoped-client.js";
 import { withMcpPrincipal } from "../../ports/mcp-principal.js";
 import { devPrincipalIdFromEnv } from "../base/access.js";
-import { decodeWorkflowGroupData, generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
-import { importCodexGeneratedImage, resolveCodexHome } from "../../ports/import-generated-image.js";
+import { decodeWorkflowGroupData } from "@woohaa3/contracts";
+import { importCodexGeneratedImage } from "../../ports/import-generated-image.js";
 import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
@@ -156,13 +157,23 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
           if (!groupNode || !groupNodeData || !workflowGroup?.ok) {
             return { ok: false as const, code: "group-target-missing", message: "2D 组已删除或成员表无效" };
           }
+          let images: { codexHome: string; paths: string[] };
+          try {
+            images = await readRuntimeGeneratedImages({
+              socketPath: env.WOOHAA3_AGENT_RUNTIME_SOCKET ?? "",
+              token: env.WOOHAA3_AGENT_RUNTIME_TOKEN ?? "",
+              workspaceKey: env.WOOHAA3_AGENT_WORKSPACE_KEY ?? ""
+            }, scope.owner, input.requestId);
+          } catch (error) {
+            return { ok: false as const, code: "generated-image-unavailable", message: error instanceof Error ? error.message : String(error) };
+          }
           const result = await importCodexGeneratedImage({
             canvasId: scope.canvasId,
             requestId: input.requestId,
             index: input.index ?? 0,
             group: { nodeId: scope.rootGroupId, nodeData: groupNodeData, workflowGroup: workflowGroup.value },
-            codexHome: generatedImageCodexHome(input.requestId) ?? resolveCodexHome(env),
-            paths: generatedImagePaths(input.requestId),
+            codexHome: images.codexHome,
+            paths: images.paths,
             importBytes: (bytes) => media.port().importBytes(bytes),
             apply: async (commands, commandId) => {
               const agent = ctx.canvas.mcpServices().agent;

@@ -1,0 +1,44 @@
+{
+  "name": "@woohaa3/extension-standard-agent-roles",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "标准业务 Agent 角色插件：模型、导演区、镜头、节点组、文本、图片场景重建与讨论。只声明角色，不拥有执行通道或授权。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend/index.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "extension.json"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend/index.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@types/node": "^22.15.3",
+    "typescript": "^7.0.2",
+    "vitest": "^2.0.0"
+  }
+}

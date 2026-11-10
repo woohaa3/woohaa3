@@ -195,7 +195,7 @@ export async function probeDeclaredExports(host) {
     return modules.get(file);
   };
   for (const registration of host.registrations ?? []) {
-    const probes = [];
+    const probes = (registration.executors ?? []).map(entry => ({ what: "executors.export", module: entry.module, exportName: entry.export }));
     if (registration.backend) {
       probes.push({ what: "backend.factory", module: registration.backend.module, exportName: registration.backend.factory });
     }
@@ -247,7 +247,7 @@ export async function probeDeclaredExports(host) {
  * 返回 `{ ok, errors, warnings, extensionId, version, descriptor, packageJson, engines,
  * activation, requiresRestart, hotSwappable }`；errors/warnings 是 `{ code, field?, message }`。
  * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 提交后生效。
- * `hotSwappable`：运行期能换版的后端形态（hostPlugin 且不声明站点 backend）；否则受控重启生效（D8）。
+ * `hotSwappable`：独立 hostPlugin 或有站点元数据的 backend；混合形态需重启。
  */
 export async function preflightDirectory(dir, { managed = false, contracts = null } = {}) {
   const errors = [];
@@ -308,8 +308,8 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
     for (const native of findNativeModules(root)) {
       fail("MARKETPLACE_FORBIDDEN_DECLARATION", `受管扩展不得包含原生模块（可绕过子进程的出网守卫）：${native}`, "native-module");
     }
-    if (descriptor.hostPlugin) {
-      const entries = [descriptor.hostPlugin.module, descriptor.metadata?.module, ...(descriptor.publicRoutes ?? []).filter((route) => route.publicPathExport).map((route) => route.module)].filter(Boolean);
+    if (descriptor.hostPlugin || descriptor.backend || descriptor.executors?.length) {
+      const entries = [descriptor.hostPlugin?.module, descriptor.backend?.module, ...(descriptor.executors ?? []).map(entry => entry.module), descriptor.metadata?.module, ...(descriptor.publicRoutes ?? []).filter((route) => route.publicPathExport).map((route) => route.module)].filter(Boolean);
       for (const subpath of new Set(entries)) {
         if (!String(subpath).startsWith("./backend-dist/")) {
           fail("MARKETPLACE_FORBIDDEN_DECLARATION", `受管扩展的后端入口必须在 backend-dist/ 下（先 pack:extension）：${subpath}`, "hostPlugin.module");
@@ -348,8 +348,8 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
   }
 
   const requiresRestart = Boolean(descriptor.backend || descriptor.hostPlugin || descriptor.metadata || (descriptor.publicRoutes?.length ?? 0) > 0);
-  // 站点 backend 工厂没有运行期换版入口；只有纯 hostPlugin 才能走扩展层的 add/swap。
-  const hotSwappable = Boolean(descriptor.hostPlugin) && descriptor.backend === undefined;
+  // Both activation owners have runtime mount/unmount support. Mixed owners remain invalid for hot swap.
+  const hotSwappable = descriptor.hostPlugin ? !descriptor.backend : Boolean(descriptor.backend && descriptor.site);
   return result({
     extensionId,
     version,

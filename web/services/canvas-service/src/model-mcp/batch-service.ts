@@ -4,7 +4,6 @@ import {
   isGlbModelNodeData,
   isModelAuthoringNodeType,
   MODEL_SCRIPT_LANGUAGE,
-  readModelCameras,
   v2SceneAabb,
   type CanvasCommand,
   type CanvasNodeData,
@@ -29,8 +28,6 @@ export type ModelBatchContext = {
   principalId: string;
   authorize?: () => Promise<boolean>;
 };
-const camerasHash = (data: CanvasNodeData | undefined) =>
-  digest(readModelCameras(data));
 const authorized = async (context: ModelBatchContext) =>
   Boolean(context.principalId.trim()) &&
   (!context.authorize || (await context.authorize().catch(() => false)));
@@ -64,7 +61,6 @@ export async function getModelNodes(
       nodes.push({
         ...fields,
         nodeType: node.nodeType!,
-        camerasHash: digest(node.cameras),
         ...(input.includeSource ? { source } : {}),
       });
     }
@@ -108,12 +104,8 @@ function checkTargets(
     ) {
       code = "stale-source";
       message = "模型内容已被并发修改";
-    } else if (
-      item.cameras !== undefined &&
-      item.expectedCamerasHash !== camerasHash(data)
-    ) {
-      code = "stale-cameras";
-      message = "镜头集合已被并发修改";
+    }
+    if (false) {
     }
     if (code) errors.push({ index, nodeId: item.nodeId, code, message });
   }
@@ -207,7 +199,6 @@ export async function authorModelBatch(
         modelScript: sources[index],
         modelScriptLanguage: MODEL_SCRIPT_LANGUAGE,
         modelScriptVersion: "woohaa-model-js-v2",
-        ...(item.cameras !== undefined ? { modelCameras: item.cameras } : {}),
       },
     }));
     let targetFailure: ModelBatchFailure | null = null;
@@ -232,8 +223,6 @@ export async function authorModelBatch(
           modelContentVersion: version.value,
           validation: "passed",
           geometry: geometry[index],
-          cameraCount: readModelCameras(data).length,
-          camerasHash: camerasHash(data),
         });
       }
       return {

@@ -10,7 +10,6 @@ import {
   decodeModelContentVersion,
   decodeModelPlacement,
   isModelAuthoringNodeType,
-  readModelCameras,
   resolveModelReferenceInputs,
   isGlbModelNodeData,
   readGlbModelAssetId
@@ -18,10 +17,6 @@ import {
 import type { GetModelNodeInput, GetModelNodeOutcome, ListModelNodesOutcome, ModelNodeSummary } from "./service-types.js";
 
 /** 节点当前可用的规范镜头集合。 */
-export function readAuthoringCameras(data: CanvasNodeData | undefined) {
-  return readModelCameras(data);
-}
-
 /** 校验并读取本节点模型内容版本；缺失或非法时返回 null。 */
 export function readModelContentVersion(input: unknown): ModelContentVersion | null {
   const decoded = decodeModelContentVersion(input);
@@ -93,7 +88,6 @@ export function projectModelNode(canvas: import("@woohaa3/contracts").ServerCanv
     ...(data?.modelScriptStatus ? { status: data.modelScriptStatus } : {}),
     ...(data?.modelScriptError !== undefined ? { error: data.modelScriptError } : {}),
     references,
-    cameras: readAuthoringCameras(data)
   };
 }
 
@@ -132,7 +126,6 @@ export async function listModelNodes(
       ...(isFileModel ? { sourceKind: "glb" as const } : {}),
       ...(status ? { status } : {}),
       pending: isFileModel ? status === "failed" : (!hasScript || status === "failed"),
-      cameraCount: readAuthoringCameras(data).length
     });
   }
   return { ok: true, canvasId, nodes };

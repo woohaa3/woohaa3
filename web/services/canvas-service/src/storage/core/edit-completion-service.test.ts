@@ -98,7 +98,7 @@ function imageCanvas(input: { outputStorageKey?: string; imageEdit?: ImageEditDo
   } as unknown as ServerCanvas;
 }
 
-function modelCanvas(script: string, opts: { modelCameras?: unknown; placement?: unknown } = {}): ServerCanvas {
+function modelCanvas(script: string, opts: { placement?: unknown } = {}): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas(CANVAS, NOW);
   return {
     ...base,
@@ -112,7 +112,6 @@ function modelCanvas(script: string, opts: { modelCameras?: unknown; placement?:
         modelScriptVersion: "woohaa-model-js-v2",
         modelContentVersion: { revision: 1, sourceHash: hashModelScript(script), contentHash: "hc" },
         modelPlacement: opts.placement ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-        ...(opts.modelCameras ? { modelCameras: opts.modelCameras } : {})
       }
     }
   } as unknown as ServerCanvas;
@@ -403,10 +402,8 @@ describe("图片编辑完成", () => {
 });
 
 describe("模型会话完成", () => {
-  it("归档包含规范镜头的最终版本且不额外推进 revision", async () => {
-    const canvas = modelCanvas("build(default)", {
-      modelCameras: [{ id: "cam-1", name: "镜头 1", order: 0, azimuth: 0, elevation: 0, distance: 5, aspect: "16:9" }]
-    });
+  it("归档包含模型最终版本且不额外推进 revision", async () => {
+    const canvas = modelCanvas("build(default)");
     const { editService, room, historyService } = setup(canvas);
     const revisionBefore = room.canvas.revision;
     const result = await editService.complete({
@@ -418,7 +415,7 @@ describe("模型会话完成", () => {
     expect(room.canvas.revision).toBe(revisionBefore);
     const entries = await historyService.listEntriesForNode(CANVAS, "node-1");
     expect(entries).toHaveLength(1);
-    expect(entries[0].payload).toMatchObject({ kind: "model", modelCameras: expect.any(Array) });
+    expect(entries[0].payload).toMatchObject({ kind: "model" });
   });
 
   it("无净变化（内容回到基线）不新增版本", async () => {

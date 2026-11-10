@@ -4,13 +4,13 @@
  * 复用宿主既有的**非画布插件任务**通路：扩展不能碰 Provider 凭据或画布 run，只能提交
  * 自己拥有的文本任务、轮询状态并读取完整结果。结果文本写回草稿由前端 Host 负责。
  */
-import type { ApplicationExtensionTaskFacade } from "@woohaa3/contracts";
+import type { ApplicationExtensionTaskFacade, PreparedAgentRoleTurn } from "@woohaa3/contracts";
 import {
   cleanRewrittenPrompt,
   PROMPT_SKILLS_MODEL_TYPE,
   type PromptSkillRewriteRequest
 } from "../shared.js";
-import { buildRewriteInput } from "./prompts.js";
+
 
 export type PromptSkillRewriteDeps = {
   tasks: ApplicationExtensionTaskFacade;
@@ -20,6 +20,8 @@ export type PromptSkillRewriteDeps = {
   pollIntervalMs?: number;
   wait?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** 宿主准备的 prompt-rewriter 角色回合（change: 2026-11-07-add-pluggable-agent-roles）。 */
+  prepared?: PreparedAgentRoleTurn;
 };
 
 export type PromptSkillRewriteResult =
@@ -63,16 +65,20 @@ export async function rewritePromptWithTask(
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const log = deps.logger ?? (() => undefined);
-  const workerTaskKey = `prompt-skills-${request.requestId}`;
-  const input = buildRewriteInput(request);
+  const prepared = deps.prepared;
+  if (!prepared) return { ok: false, status: 503, error: "快捷改写角色不可用，请确认 standard 角色插件已启用" };
+  // 角色版本进入 workerTaskKey 输入指纹：升级后的新请求不复用旧模板结果。
+  const workerTaskKey = `prompt-skills-${request.requestId}-${prepared.roleRef.revision}`;
+  const system = prepared.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n");
+  const userPrompt = prepared.messages.filter((message) => message.role !== "system").map((message) => message.content).join("\n\n");
 
   const submitted = await deps.tasks.submit({
     workerTaskKey,
     modelType: PROMPT_SKILLS_MODEL_TYPE,
     modelKey: request.modelKey,
-    prompt: input.prompt,
+    prompt: userPrompt,
     // 系统提示词走 Provider 的独立字段；`maxTokens` 与目录 defaultInput 同名。
-    parameters: { system: input.system, maxTokens: 1600 }
+    parameters: { system, maxTokens: 1600 }
   });
   if (!submitted.ok) {
     log({ event: "prompt-skills-submit-rejected", code: submitted.code });

@@ -1,0 +1,23 @@
+{
+  "name": "@woohaa3/test-fixtures-agent-role-turns",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "\u6d4b\u8bd5\u7528 Agent \u89d2\u8272 prepared turn \u6784\u9020\u5668\uff1a\u53ea\u6784\u9020\u5bbf\u4e3b\u5df2\u51c6\u5907\u7684\u89c4\u8303\u8bf7\u6c42\uff0c\u4e0d\u5305\u542b\u4e1a\u52a1\u89d2\u8272\u5b9e\u73b0\u3002",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "@types/node": "^22.15.3"
+  }
+}

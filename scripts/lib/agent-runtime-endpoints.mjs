@@ -12,7 +12,7 @@
  * 同理，Windows 上 npm / pnpm 全局安装的 CLI 是 `.cmd` / `.bat` 批处理垫片，Node 不能直接
  * exec：`spawn` 会**同步抛 EINVAL**（不是 `error` 事件），必须交给 shell 执行。shell 模式下
  * 参数按空格拼接，空参数要显式写成 `""`，否则会被吞掉。与 local-agent 的
- * `process-supervisor.ts` 保持一致。
+ * `packages/execution-runtime/src/endpoints.ts` 保持一致。
  *
  * platform 由调用方显式传入（默认 `process.platform`），让两个分支都能在任意机器上被测试。
  */

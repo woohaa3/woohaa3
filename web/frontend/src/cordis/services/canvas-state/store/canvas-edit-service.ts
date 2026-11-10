@@ -8,7 +8,7 @@
  * 本模块只依赖注入的会话与选择读取，不直接触碰 DOM/Yjs，便于组件与单元测试。
  */
 import type { CanvasCommand, ServerCanvas } from "@woohaa3/contracts";
-import { applyCanvasCommands, decodeImageDirectorSceneReceipt, isCanvasCommandBatchSatisfied, planCanvasEdit, type EditPlan, type ImageDirectorSceneReceipt } from "@woohaa3/contracts";
+import { isCanvasCommandBatchSatisfied, planCanvasEdit, type EditPlan } from "@woohaa3/contracts";
 import type { CanvasRemoteService, CanvasSession } from "../../../contracts.js";
 import { EditJournal, type EditJournalSnapshot, type JournalConnectionState, type JournalEntry, type JournalPendingEntry, type JournalPlannedEdit } from "./edit-journal.js";
 
@@ -66,7 +66,6 @@ function equalJson(a: unknown, b: unknown): boolean {
  */
 export interface CanvasEditService {
   convertWorld(input: { remote: CanvasRemoteService; canvasId: string; operationId: string; targets: Array<{ nodeId: string; instanceId: string }> }): Promise<CanvasEditRecordResult>;
-  adoptImageDirector(input: { canvasId: string; receipt: ImageDirectorSceneReceipt; revision: number; allowNew: boolean }): Promise<CanvasEditRecordResult>;
   record(commands: readonly CanvasCommand[], label: string): Promise<CanvasEditRecordResult>;
   /**
    * 把已在权威端确认的动作加入同一条撤销时间线。
@@ -280,18 +279,6 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
   };
 
   return {
-    async adoptImageDirector(input) {
-      if (busy || !options.session.isWritable()) return { ok: false, reason: "当前无法记录操作" };
-      const receipt = decodeImageDirectorSceneReceipt(input.receipt);
-      if (!receipt) return { ok: false, reason: "交付回执无效" };
-      const canvas = options.getCanvas();
-      if (!canvas || canvas.id !== input.canvasId || canvas.revision < input.revision) return { ok: false, reason: "画布尚未同步交付结果" };
-      const checked = applyCanvasCommands(canvas, [{ type: "edit.apply", ...receipt.inverse }], { lifecycle: options.lifecycle, content: options.getContent?.() });
-      if (!checked.ok) return { ok: false, reason: "结果已变更，无法记录撤销" };
-      const result = await journal.adoptExternal(`image-director:${receipt.operationId}`, async () => ({ ok: true, label: "生成模型与导演区", forward: receipt.forward, inverse: receipt.inverse, allowNew: input.allowNew }));
-      if (result.ok) publish();
-      return result;
-    },
     async convertWorld(input) {
       if (busy) return { ok: false, reason: "正在结算上一次操作，请稍候" };
       if (!options.session.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };

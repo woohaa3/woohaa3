@@ -7,11 +7,9 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type {
   CanvasCommand,
   McpApplyCommandsResult,
-  McpCameraMutation,
   McpGetNodeResult,
   McpListNodesResult,
   McpModelStatisticsResult,
-  McpMutateCamerasResult,
   McpRenderPreviewResult,
   McpSubmitScriptResult,
   SupportedModelScriptVersion
@@ -47,7 +45,6 @@ export type ModelMcpToolService = {
     width?: number;
     height?: number;
     background?: string;
-    cameraPreset?: string;
     timeSeconds?: number;
     clipId?: string;
   }) => Promise<McpRenderPreviewResult>;
@@ -57,12 +54,7 @@ export type ModelMcpToolService = {
     baseRevision: number;
     commands: CanvasCommand[];
   }) => Promise<McpApplyCommandsResult>;
-  mutateCameras?: (input: {
-    canvasId: string;
-    nodeId: string;
-    requestId: string;
-    mutation: McpCameraMutation;
-  }) => Promise<McpMutateCamerasResult>;
+
 };
 
 export type ModelMcpHttpHandler = {

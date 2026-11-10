@@ -289,7 +289,7 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
     expect(text).toContain("MUST NOT 按上面的成本表自行推算");
   });
 
-  it("指南包含镜头 CRUD 的最小流程与瞬态字段禁令", async () => {
+  it("指南不再包含模型镜头 CRUD", async () => {
     const { base } = await start();
     const result = await mcpPost(base, {
       jsonrpc: "2.0",
@@ -298,11 +298,8 @@ describe("模型脚本指南的朝向约定（change: model-orientation-conventi
       params: { name: "get_model_api", arguments: {} }
     });
     const text = ((result.body.result as { content: Array<{ text: string }> }).content[0]?.text) ?? "";
-    expect(text).toContain("get_model_cameras");
-    expect(text).toContain("requestId");
-    expect(text).toContain("set_model_camera");
-    // 明确瞬态字段禁令，避免 Agent 写入 session 状态。
-    expect(text).toContain("瞬态");
+    expect(text).not.toContain("get_model_cameras");
+    expect(text).not.toContain("set_model_camera");
   });
 
 });
@@ -331,7 +328,6 @@ describe("render_model_preview MCP（change: enhance-model-scene-authoring-api�
             width: 256,
             height: 256,
             background: "transparent",
-            cameraPreset: "dimetric"
           }
         };
       }
@@ -375,7 +371,7 @@ describe("render_model_preview MCP（change: enhance-model-scene-authoring-api�
       .tools.find((entry) => entry.name === "render_model_preview");
     expect(tool).toBeTruthy();
     const properties = Object.keys(tool?.inputSchema.properties ?? {});
-    expect(properties).toEqual(expect.arrayContaining(["canvasId", "nodeId", "width", "height", "background", "cameraPreset"]));
+    expect(properties).toEqual(expect.arrayContaining(["canvasId", "nodeId", "width", "height", "background"]));
     expect(properties).not.toContain("source");
     expect(properties).not.toContain("modelScript");
     expect(properties).not.toContain("ops");

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { createSdkAgentConversationAdapter, type SdkAgentRuntimeOptions } from "./sdk-agent-connections.js";
+import { createSdkAgentConversationAdapter } from "./execution-client.js";
+import type { SdkAgentRuntimeOptions } from "./sdk-agent-connections.js";
 import { createFixedEngineRuntime } from "./fixed-engine-runtime.js";
 import { sdkEngineForAdapter } from "../shared.js";
 /**
@@ -22,6 +23,7 @@ import type {
   ApplicationExtensionRawResponse,
   ApplicationExtensionRequestContext,
   ApplicationToolDelegationFacade,
+  ApplicationExtensionAgentRoleFacade,
 } from "@woohaa3/contracts";
 import {
   createEndpointPolicy,
@@ -50,7 +52,12 @@ export type SdkAgentHandlerOptions = {
   deployment: SdkAgentHandlerDeployment;
   tools?: ApplicationToolDelegationFacade;
   runtimeOptions?: SdkAgentRuntimeOptions;
+  /** 宿主角色准备面：连接测试也必须使用已注册角色，不绕过角色执行。 */
+  prepareRole?: ApplicationExtensionAgentRoleFacade;
 };
+
+/** 连接测试使用无工具文本角色；绑定配置显式指定，不由通道按 mode 推导。 */
+export const SDK_AGENT_PROBE_ROLE_ID = "standard-agent-roles/text-author";
 
 const BASE_PATH = "/api/sdk-agent";
 
@@ -401,11 +408,22 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
       const model = typeof body?.model === "string" && body.model.trim() ? body.model.trim() : record.models?.[0];
       if (!model) return sendJson(res, 400, { code: "malformed-request", message: "请选择模型" });
       const requestId = `maintenance-${randomUUID()}`;
+      const prepared = options.prepareRole?.prepare({
+        roleId: SDK_AGENT_PROBE_ROLE_ID,
+        input: { prompt: "请只回复 ok。", action: "discuss" },
+        context: { prompt: "请只回复 ok。" },
+        target: { canvasId: "maintenance" },
+        requestId,
+        channel: { toolCalling: false, imageInput: false, structuredOutput: "validated-json", nativeCapabilities: [] }
+      });
+      if (!prepared || !prepared.ok) {
+        return sendJson(res, 409, { ok: false, code: prepared?.code ?? "role-unavailable", message: prepared?.message ?? "宿主未提供角色准备面", model });
+      }
       const runner = createSdkAgentConversationAdapter(adapter, options.runtimeOptions ?? {
         service, ...deployment, ...(options.tools ? { tools: options.tools } : {})
       });
       const outcome = await runner.run({ owner, canvasId: "maintenance", conversationId: requestId,
-        turnId: requestId, requestId, connection: { connectionId, adapterId: record.adapterId, configRevision: record.configRevision, credentialEpoch: record.credentialEpoch },
+        turnId: requestId, requestId, prepared: prepared.turn, connection: { connectionId, adapterId: record.adapterId, configRevision: record.configRevision, credentialEpoch: record.credentialEpoch },
         intent: { action: "discuss", canvasId: "maintenance", prompt: "请只回复 ok。", model }, history: [], signal: AbortSignal.timeout(60_000), emit: () => undefined });
       const result = outcome.status === "succeeded"
         ? { ok: true as const, outcome: { assistantText: outcome.assistantText ?? "" } }

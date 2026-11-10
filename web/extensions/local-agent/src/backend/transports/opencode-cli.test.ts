@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { startExecutorDaemon } from "woohaa3-executor/daemon";
 import { createProcessManager } from "../process-manager.js";
 import { defaultArgs } from "../index.js";
 import { createOpenCodeTransport } from "./opencode-transport.js";
@@ -80,7 +81,9 @@ it.runIf(Boolean(process.env.WOOHAA3_TEST_OPENCODE_CLI))("real OpenCode v2 calls
   const port = portAddress.port;
   await new Promise<void>(resolve => portProbe.close(() => resolve()));
   const directory = await mkdtemp(path.join(tmpdir(), "wh-agent-"));
-  const manager = createProcessManager({ workDirRoot: directory, portRange: { min: port, max: port }, executableFor: () => process.env.WOOHAA3_TEST_OPENCODE_CLI! });
+  const runtime = { socketPath: path.join(directory, "executor.sock"), token: "fixture", workspaceKey: "fixture", portRange: { min: port, max: port } };
+  const daemon = await startExecutorDaemon({ ...runtime, stateDir: directory });
+  const manager = createProcessManager({ workDirRoot: directory, portRange: runtime.portRange, supervisor: runtime, executableFor: () => process.env.WOOHAA3_TEST_OPENCODE_CLI! });
   try {
     const handle = await manager.ensure({ adapterId: "opencode-server", owner: "fixture", connectionId: "fixture", args: defaultArgs("opencode-server"), kind: "http", env: {
       OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: "woohaa_fixture/fixture", share: "disabled", warming: false, snapshots: false,
@@ -106,6 +109,7 @@ it.runIf(Boolean(process.env.WOOHAA3_TEST_OPENCODE_CLI))("real OpenCode v2 calls
     expect(modelToolResults.join("\n")).toContain("fixture-commit");
   } finally {
     await manager.stopAll();
+    await daemon.close();
     await mcp.close();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));

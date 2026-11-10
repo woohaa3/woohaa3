@@ -17,6 +17,7 @@ import {
   type SdkAgentHandlerOptions,
 } from "./handler.js";
 import type { ConnectionService } from "@woohaa3/agent-connections";
+import { buildTestPreparedTurn } from "@woohaa3/test-fixtures-agent-role-turns";
 
 type ConnectionRecord = {
   connectionId: string;
@@ -190,7 +191,18 @@ async function call(
   body?: unknown,
   owner = "u1",
 ) {
-  const handler = createSdkAgentHandler(options);
+  const handler = createSdkAgentHandler({
+    // 连接测试也必须消费宿主准备的讨论角色回合。
+    prepareRole: {
+      prepare: () => ({
+        ok: true,
+        turn: buildTestPreparedTurn({ requestId: "maintenance", target: { canvasId: "maintenance" }, prompt: "请只回复 ok。", tools: [] })
+      }),
+      list: () => [],
+      availability: () => ({ available: true })
+    },
+    ...options
+  });
   const req = request(
     method,
     `/api/sdk-agent/${path.replace(/^\/+/, "")}`,
@@ -302,7 +314,7 @@ describe("sdk-agent handler（任务 1.4/1.5/5.3）", () => {
       "test-generation",
       { connectionId: "c1" },
     );
-    expect(noKey.body).toMatchObject({ code: "credential-missing" });
+    expect(noKey.body).toMatchObject({ code: "runtime-unavailable" });
 
     await call({ service, deployment }, "POST", "connections/c1/credential", {
       secret: "sk-x",
@@ -323,7 +335,7 @@ describe("sdk-agent handler（任务 1.4/1.5/5.3）", () => {
       { connectionId: "c1", model: "gpt-5" },
     );
     expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ ok: false, code: "runtime-missing", model: "gpt-5" });
+    expect(result.body).toMatchObject({ ok: false, code: "runtime-unavailable", model: "gpt-5" });
   });
 
   it("跨 owner 不可见：他人连接返回 not-found", async () => {

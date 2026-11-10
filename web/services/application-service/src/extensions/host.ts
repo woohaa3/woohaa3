@@ -47,6 +47,7 @@ export type {
 } from "./host-types.js";
 
 export type ApplicationExtensionHost = {
+  declaredPublicRoutes?: () => readonly import("@woohaa3/contracts").ApplicationExtensionPublicRouteMapping[];
   activate: (definition: ApplicationBackendExtensionDefinition) => Promise<ExtensionActivationResult>;
   activateVersioned: (
     definition: ApplicationBackendExtensionDefinition,
@@ -115,6 +116,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
    * 记录只回答「这个扩展注册了什么」。
    */
   const records = new Map<string, ExtensionRecord>();
+  const publicRouteDeclarations = new Map<string, readonly import("@woohaa3/contracts").ApplicationExtensionPublicRouteMapping[]>();
 
   /** 新建一条空记录：非版本化装载的生命周期字段全为空，语义是「没挂任何东西」。 */
   const newRecord = (extensionId: string): ExtensionRecord => ({
@@ -158,6 +160,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
 
   /** 反序释放一次 activation 的贡献（幂等；容忍重复调用）。 */
   const rollback = async (owner: OwnerState, handle: string): Promise<void> => {
+    publicRouteDeclarations.delete(handle);
     for (const providerId of [...owner.generationProviderIds].reverse()) {
       owner.releaseGeneration?.(providerId);
     }
@@ -212,6 +215,11 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     }
     // 基础提供者随 activation 释放：provider registry 不保留已回滚 owner 的登记。
     owner.releaseProviders?.();
+    try {
+      options.onExtensionReleased?.(owner.extensionId);
+    } catch (error) {
+      log({ event: "extension-release-hook-failed", extensionId: owner.extensionId, message: String(error) });
+    }
   };
 
   const resolveDependencies = (
@@ -412,6 +420,14 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     };
 
     installMediaFormatRegistration(host, owner, options.registerMediaFormatFor?.(definition.extensionId));
+    const registerAgentRole = options.registerAgentRoleFor?.(definition.extensionId);
+    if (registerAgentRole) {
+      host.registerAgentRole = (implementation) => {
+        const dispose = registerAgentRole.register(implementation);
+        owner.startedResources.push({ id: `agent-role:${implementation.definition.id}`, stop: dispose });
+        return dispose;
+      };
+    }
     const registerMarketplaceSource = options.registerMarketplaceSourceFor?.(definition.extensionId);
     if (registerMarketplaceSource) {
       host.registerMarketplaceSource = (source) => {
@@ -501,6 +517,15 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     }
 
     try {
+      for (const route of definition.publicRoutes ?? []) {
+        if (route.extensionId !== definition.extensionId) throw new Error("Public route owner mismatch");
+        if (mode === "public" && [...publicRouteDeclarations.values()].flat().some(existing => existing.publicPath === route.publicPath && existing.extensionId !== route.extensionId)) throw new Error("Duplicate extension public route");
+      }
+      const executors = await options.activateExecutors?.(definition, configVersion);
+      if (executors) {
+        host.services = { ...host.services, executor: executors.service };
+        owner.startedResources.push({ id: "extension-executors", stop: executors.dispose });
+      }
       const activation: ApplicationBackendActivation | void = await definition.activate(host);
       owner.activation = activation ?? {};
       for (const resource of owner.resources.values()) {
@@ -516,6 +541,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       return fail(hostError);
     }
 
+    if (mode === "public") publicRouteDeclarations.set(handle, definition.publicRoutes ?? []);
     log({ event: "extension-activated", extensionId: definition.extensionId, configVersion, mode });
     const activationHandle: ExtensionActivationHandle = {
       extensionId: definition.extensionId,
@@ -586,8 +612,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       release = () => releaseRegistrations(extensionId);
     }
     const services = options.servicesFor?.(extensionId, 0);
-    const registerMediaFormat = options.registerMediaFormatFor?.(extensionId);
-    const mediaFormats: import("@woohaa3/contracts").HostMediaFormatService | undefined = registerMediaFormat
+    const registerMediaFormat = options.registerMediaFormatFor?.(extensionId);    const mediaFormats: import("@woohaa3/contracts").HostMediaFormatService | undefined = registerMediaFormat
       ? {
           register: (format: import("@woohaa3/contracts").MediaFormatValidator) => {
             const dispose = registerMediaFormat(format);
@@ -609,9 +634,25 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
           }
         }
       : undefined;
+    const registerAgentRole = options.registerAgentRoleFor?.(extensionId);
+    const agentRoles: import("@woohaa3/contracts").HostAgentRoleService | undefined = registerAgentRole
+      ? {
+          register: (implementation) => {
+            const dispose = registerAgentRole.register(implementation);
+            if (found) {
+              // 已有 backend owner：登记成资源，停用/回滚时按反序释放本次 activation 的角色。
+              found[1].startedResources.push({ id: `agent-role:${implementation.definition.id}`, stop: dispose });
+            }
+            return dispose;
+          },
+          list: () => registerAgentRole.list(),
+          availability: (namespacedId) => registerAgentRole.availability(namespacedId)
+        }
+      : undefined;
     return {
       ...(webServer ? { webServer } : {}),
       ...(mediaFormats ? { mediaFormats } : {}),
+      ...(agentRoles ? { agentRoles } : {}),
       capabilities: {
         register: (id: string, value: unknown) => {
           const handle = found ? found[0] : extensionId;
@@ -658,6 +699,11 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       }
       pluginMediaFormats.delete(extensionId);
     }
+    try {
+      options.onExtensionReleased?.(extensionId);
+    } catch (error) {
+      log({ event: "extension-release-hook-failed", extensionId, message: String(error) });
+    }
     records.delete(extensionId);
   };
 
@@ -665,6 +711,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     activate,
     activateVersioned,
     activateManifest,
+    declaredPublicRoutes: () => [...publicRouteDeclarations.values()].flat(),
     pluginContextFor,
     basePath: options.deployment?.basePath ?? "",
     resolveCapability: (id) => globalCapabilities.get(id) !== undefined ? records.get(globalCapabilities.get(id)!)?.capabilities.get(id) : undefined,

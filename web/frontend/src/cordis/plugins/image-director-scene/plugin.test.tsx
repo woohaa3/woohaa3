@@ -14,7 +14,7 @@ it("uses the original dialog and assistant toolbar, then closes on explicit gene
   woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
   rememberAssistantPreference("dialog-test", { sourceId: "adapter", connectionId: "connection", model: "model", reasoningEffort: "" });
   const submitImageDirectorScene = vi.fn(async (_input: { requestId: string }) => ({ ok: true, value: { conversationId: "conversation", turn: { target: { nodeId: "director" } } } }));
-  const listConnections = vi.fn(async () => ({ ok: true, value: [{ connectionId: "connection", adapterId: "adapter", name: "助手", ready: true, capabilities: { textDelivery: { imageInput: true, maxImages: 1 } }, models: [{ id: "model", label: "模型" }] }] }));
+  const listConnections = vi.fn(async () => ({ ok: true, value: [{ connectionId: "connection", adapterId: "adapter", name: "助手", ready: true, capabilities: { tools: true, targets: ["world"], textDelivery: { imageInput: true, maxImages: 1 } }, models: [{ id: "model", label: "模型" }] }] }));
   const service = { getDataScopeId: () => "dialog-test", listConnections, submitImageDirectorScene };
   const openDialog = vi.fn(), onClose = vi.fn();
   const ctx = { get: () => service, applicationRemote: { transport: { request: async () => ({ ok: true, data: null }) } }, canvasSession: { isWritable: () => true }, canvasNavigation: { openDialog } };

@@ -128,7 +128,6 @@ export function toNodeHistoryDetail(entry: NodeGenerationHistoryEntry): NodeGene
         version: payload.version,
         sourceHash: payload.sourceHash,
         ...(payload.placement ? { placement: payload.placement } : {}),
-        ...(payload.modelCameras ? { modelCameras: payload.modelCameras } : {}),
       };
     }
     default: {

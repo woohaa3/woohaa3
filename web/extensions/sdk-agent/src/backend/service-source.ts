@@ -34,7 +34,7 @@ export function createSdkServiceSource(service: ConnectionService): ServiceConne
       return (await service.readCredential<{ secret: string }>({ owner, connectionId: id, purpose: "model-api-key" }))?.secret ?? null;
     } };
 }
-export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, owner: string, connectionId: string, service?: ConnectionService) {
+export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, owner: string, connectionId: string, service?: Pick<ConnectionService, "get">) {
   const record = await service?.get(owner, connectionId);
   if (record?.serviceConnectionId) return port.get(owner, record.serviceConnectionId);
   return (await port.list(owner)).find(source => source.bindings.some(binding => binding.extensionId === "sdk-agent" && binding.consumerId === connectionId)) ?? null;

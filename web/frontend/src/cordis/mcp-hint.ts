@@ -54,40 +54,6 @@ export function mcpCanvasPrompt(canvasId: string): string {
   return `使用 Woohaa3 Model Canvas MCP 操作${target}：先调用 list_model_requests 了解节点，再用 get_model_node / submit_model_script 读写。`;
 }
 
-/**
- * 模型聚焦编辑器工具栏的「镜头 MCP 控制指引」
- * （change: add-model-camera-mcp-crud）。
- *
- * 纯派生文案：显式带上画布 id、节点 id、当前选中镜头 id 与该节点现有的全部镜头 id/名称，
- * 并列出镜头读工具、单条 CRUD 工具与整体替换工具，使外部 Agent 无需用户口述即可精确操作
- * 指定镜头。随选中镜头变化。不发起请求、不写画布。
- *
- * 与 3D 模型节点的提示词指引（`modelPromptGuide`）同一约定：指引文本**不内嵌服务器地址**，
- * 地址由面板单独的只读字段承载；此处同样不再拼接 `serverUrl`。
- */
-export function cameraMcpGuide(
-  canvasId: string,
-  nodeId: string,
-  cameras: ReadonlyArray<{ id: string; name: string }> = [],
-  selectedCameraId: string | null = null
-): string {
-  const target = canvasId ? `画布 ${canvasId} 的节点 ${nodeId}` : `节点 ${nodeId}`;
-  const lines = [`使用 Woohaa3 Model Canvas MCP 控制${target}的镜头：`];
-  if (cameras.length > 0) {
-    const list = cameras.map((camera) => `${camera.id}（${camera.name}）`).join("、");
-    lines.push(`现有镜头：${list}。`);
-  }
-  if (selectedCameraId) {
-    lines.push(`当前选中镜头：${selectedCameraId}（单条 update/delete/rename/reset 传该 cameraId）。`);
-  }
-  lines.push(
-    "先调用 get_model_cameras 读取现有镜头与稳定 id（字段含 azimuth/elevation/distance/aspect/focusOffset）；",
-    "再用 create_model_camera / update_model_camera / delete_model_camera / rename_model_camera / reset_model_camera 单条增删改（写工具带稳定 requestId 以便幂等重试）；",
-    "需要一次性重建整组镜头时用 set_model_camera 整体替换。"
-  );
-  return lines.join("\n");
-}
-
 /** 由同源端点与画布 id 派生 MCP 指引。 */
 export function mcpHintView(
   serverUrl: string = resolveModelMcpServerUrl(),

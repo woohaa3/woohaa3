@@ -321,36 +321,6 @@ describe("节点历史契约", () => {
     expect(mediaIdentity.ok && mediaIdentity.value.currentIdentity.startsWith("media:")).toBe(true);
   });
 
-  it("模型历史 payload 可选规范镜头快照且旧条目保留兼容", () => {
-    const entry = textEntry();
-    const modelBase = { kind: "model" as const, modelScript: "build(()=>{})", language: "javascript", version: "woohaa-model-js-v2", sourceHash: "hash" };
-    const withCameras = {
-      ...entry,
-      kind: "model",
-      sourceIdentity: "model-edit:hash:k1",
-      payload: {
-        ...modelBase,
-        placement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
-        modelCameras: [{ id: "cam-1", name: "镜头 1", order: 0, azimuth: 0, elevation: 0, distance: 5, aspect: "16:9" }]
-      }
-    };
-    const decoded = decodeNodeGenerationHistoryEntry(withCameras as never);
-    expect(decoded.ok).toBe(true);
-    if (decoded.ok && decoded.value.payload.kind === "model") {
-      expect(decoded.value.payload.modelCameras).toHaveLength(1);
-    }
-    expect(toNodeHistoryDetail(withCameras as NodeGenerationHistoryEntry)).toMatchObject({ kind: "model", modelCameras: expect.any(Array) });
-
-    // 旧条目无镜头快照继续可读；详情缺省该字段。
-    const withoutCameras = { ...entry, kind: "model", payload: modelBase };
-    expect(decodeNodeGenerationHistoryEntry(withoutCameras as never).ok).toBe(true);
-    expect(toNodeHistoryDetail(withoutCameras as NodeGenerationHistoryEntry)).not.toHaveProperty("modelCameras");
-
-    // 非法镜头集合被拒绝。
-    const badCameras = { ...withCameras, payload: { ...withCameras.payload, modelCameras: [{ id: "cam-1" }] } };
-    expect(decodeNodeGenerationHistoryEntry(badCameras as never).ok).toBe(false);
-  });
-
   it("失败归档 payload 结构化且与 outcome 一致（change: 2026-10-12）", () => {
     const failure = {
       version: NODE_GENERATION_HISTORY_VERSION,

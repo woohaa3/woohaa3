@@ -51,7 +51,7 @@ describe("讨论回合关闭内建生图", () => {
     expect(config?.["features.image_generation"]).toBe(false);
   });
 
-  it("目标回合（有 MCP endpoint）不设置 features.image_generation", async () => {
+  it("未声明生图能力时，即使有 MCP endpoint 也关闭生图", async () => {
     const fake = captureThreadStart({ name: "woohaa3-model-canvas", url: "http://127.0.0.1/mcp/model-canvas" });
     const run = transport().run(fake.input());
     for (let n = 0; n < 80 && !fake.requests.some(r => r.method === "thread/start"); n++) await Promise.resolve();
@@ -70,6 +70,6 @@ describe("讨论回合关闭内建生图", () => {
     const start = fake.requests.find(r => r.method === "thread/start");
     const config = start?.params?.config as Record<string, unknown> | undefined;
     expect(config).toBeDefined();
-    expect(config?.["features.image_generation"]).toBeUndefined();
+    expect(config?.["features.image_generation"]).toBe(false);
   });
 });

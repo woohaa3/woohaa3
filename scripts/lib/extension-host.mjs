@@ -427,6 +427,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     }
 
     const modules = new Set();
+    for (const entry of descriptor.executors ?? []) modules.add(resolveModuleFile(extension.dir, entry.module, context));
     if (backend) modules.add(backend.module);
     if (hostPlugin) modules.add(hostPlugin.module);
     if (canvasContent) modules.add(canvasContent.module);
@@ -445,6 +446,7 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       hostPluginOrder: descriptor.hostPlugin?.order ?? FALLBACK_ORDER,
       canvasContentOrder: descriptor.canvasContent?.order ?? FALLBACK_ORDER,
       backend,
+      executors: (descriptor.executors ?? []).map(entry => ({ ...entry, module: resolveModuleFile(extension.dir, entry.module, context) })),
       hostPlugin,
       canvasContent,
       iconPath,
@@ -645,7 +647,11 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
           { extensionId: registration.extensionId, directory: registration.directory, actual: definition?.extensionId }
         );
       }
-      definitions.push(definition);
+      definitions.push({ ...definition, publicRoutes: publicRoutes.filter(route => route.extensionId === registration.extensionId), executors: (registration.descriptor.executors ?? []).map(entry => ({
+        ...entry, module: resolveModuleFile(registration.directory, entry.module, {
+          extensionId: registration.extensionId, directory: registration.directory, descriptorPath: registration.descriptorPath
+        })
+      })) });
     }
     // 稳定顺序：声明 order 已在 registrations 排好，定义按同一顺序输出。
     const orderOf = new Map(registrations.map((registration, index) => [registration.extensionId, index]));

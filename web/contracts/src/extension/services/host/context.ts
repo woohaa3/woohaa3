@@ -19,6 +19,7 @@
  * 全局增强也能拿到完整类型。
  */
 import type { Context } from "@deepseek-ai/cordis";
+import type { HostAgentRoleService } from "./agent-roles.js";
 import type { HostCapabilityService } from "./capabilities.js";
 import type { ApplicationBackendDiagnostics } from "./diagnostics.js";
 import type { ApplicationExtensionServices } from "./facades.js";
@@ -86,6 +87,12 @@ export type HostExtensionContext = Context & {
    * 与 `capabilities` 同级：注册按 extensionId 记账，插件停用/回滚时由宿主自动注销。
    */
   readonly mediaFormats?: HostMediaFormatService;
+  /**
+   * Agent 角色注册面（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 注册按实际装载 owner 记账，插件停用/回滚时宿主自动注销；插件不能自报其他扩展身份。
+   */
+  readonly agentRoles?: HostAgentRoleService;
   /** 宿主诊断缓冲（可选）：只读投影，用于排障面板。 */
   readonly diagnostics?: ApplicationBackendDiagnostics;
 };

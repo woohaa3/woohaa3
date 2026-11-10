@@ -1,3 +1,4 @@
+import { AGENT_ROLE_BINDINGS } from "../agent-role-bindings.js";
 import type { ConversationSnapshot, ServerCanvas } from "@woohaa3/contracts";
 import type {
   AgentConversationService,
@@ -170,6 +171,7 @@ export function resolveTextSubmission(
       entry: {
         action: "generate",
         mode: "text",
+        roleId: AGENT_ROLE_BINDINGS.textAuthor,
         canvasId: canvas.id,
         nodeId,
         connectionId: connection.connectionId,

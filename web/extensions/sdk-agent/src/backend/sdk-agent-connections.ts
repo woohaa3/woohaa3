@@ -7,7 +7,7 @@ import type {
 } from "@woohaa3/contracts";
 import {
   createEndpointPolicy, createModelTransport, nativeContextFor, nativeContextKey, preflightInput,
-  localAgentToolsForMode, buildTargetPrompt, type ConnectionService, type ConnectionDescriptor
+  preparedPromptText, type ConnectionService, type ConnectionDescriptor
 } from "@woohaa3/agent-connections";
 import { SDK_AGENT_ADAPTERS, SDK_AGENT_PLUGIN_ID, findSdkAgentAdapter, sdkEngineForAdapter, type SdkAgentAdapterDescriptor } from "../shared.js";
 import { createAgentSdkAdapter, type AgentSdkTransport } from "./adapters/agent-sdk-adapter.js";
@@ -16,7 +16,8 @@ import { createMcpTurnGateway } from "./mcp-turn-gateway.js";
 import { ASSISTANT_CANDIDATE_CAPABILITIES } from "@woohaa3/agent-connections";
 
 export type SdkAgentRuntimeOptions = {
-  service: ConnectionService;
+  service: Pick<ConnectionService, "get" | "list" | "readCredential" | "credentialConfigured" | "setRuntimeProbe" | "resolveNativeBinding" | "setNativeBinding" | "setStatus">;
+  executor?: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade;
   serviceConnections?: import("@woohaa3/contracts").ApplicationServiceConnectionFacade;
   admission?: () => boolean;
   shutdownSignal?: AbortSignal;
@@ -29,8 +30,8 @@ export type SdkAgentRuntimeOptions = {
   fetchImpl?: typeof globalThis.fetch;
   transports?: Partial<Record<AgentEngineId, AgentSdkTransport>>;
   runtime?: FixedEngineRuntime;
-  tools?: ApplicationToolDelegationFacade;
-  authoring?: ApplicationCanvasAuthoringFacade;
+  tools?: Pick<ApplicationToolDelegationFacade, "issue" | "revoke">;
+  authoring?: Pick<ApplicationCanvasAuthoringFacade, "readNode">;
   ownerDelegation?: (owner: string) => ApplicationUserDelegation;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -45,7 +46,7 @@ export function sdkReasoningEfforts(adapterId: string, model: string): readonly 
 }
 
 export function capabilitiesFor(_adapter: SdkAgentAdapterDescriptor): AgentConnectionCapabilities {
-  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true };
+  return { textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, discussion: true, imageInput: false, tools: true, structuredResult: false, cancel: true, resume: true, targets: ["model3d", "world", "canvas-group"] };
 }
 
 export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, "allowedHosts" | "allowHttp">): Record<string, ConnectionDescriptor> {
@@ -105,8 +106,12 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     const model = input.intent.model ?? record.models?.[0];
     if (!model) return fail("malformed-request", "请明确选择模型");
     if (input.intent.reasoningEffort && !sdkReasoningEfforts(adapter.adapterId, model).includes(input.intent.reasoningEffort)) return fail("capability-unsupported", "当前模型未开放此思考强度，请使用默认设置");
+    // 通道只消费宿主准备好的角色回合；缺失即拒绝，不从 mode/用户文字推断业务职责。
+    const prepared = input.prepared;
+    if (!prepared) return fail("role-not-found", "本回合没有宿主准备的角色请求");
+    const toolNames = input.intent.action === "discuss" ? [] : prepared.tools;
     if (input.intent.action !== "discuss" && record.modelCapabilities?.[model]?.tools === false) return fail("capability-unsupported", "当前模型明确不支持工具，仅可用于讨论；请选择支持目标工具的模型");
-    const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: input.intent.action !== "discuss", imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
+    const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: toolNames.length > 0, imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
     if (!preflight.ok) return fail(preflight.code, preflight.message);
     const source = options.serviceConnections ? await sdkSourceFor(options.serviceConnections, input.owner, record.connectionId, options.service) : null;
     if (options.serviceConnections && !source) return fail("connection-unavailable", "模型提供商尚未迁移，请重试");
@@ -160,7 +165,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
             workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
             ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
             ...(expectedScopeEpoch !== undefined ? { expectedScopeEpoch } : {}),
-            tools: localAgentToolsForMode(input.intent.mode, input.intent.worldScope) });
+            tools: toolNames });
           gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
             // The issued world context revalidates scope/version/leases on every write.
             validateTarget: async () => valid() });
@@ -176,7 +181,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
           const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
             workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
             ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-            tools: localAgentToolsForMode(input.intent.mode, input.intent.worldScope) });
+            tools: toolNames });
           gateway = await createMcpTurnGateway({ input: { ...frozenInput, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
             validateTarget: async () => {
               const target = await options.authoring!.readNode({ delegation: { subject: input.owner, authLevel: "authenticated" }, canvasId: input.canvasId, nodeId: input.intent.nodeId! });
@@ -191,9 +196,12 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         probeRuntime: async () => ({ ok: true }) });
       // Legal host history is replayable when an engine cannot resume or the process restarted.
       const history = (native && input.intent.action !== "discuss" ? [] : input.history).map((message) => `${message.role}: ${message.content}`).join("\n");
-      const prompt = (history ? `会话历史：\n${history}\n\n` : "") + (input.intent.action === "discuss" ? input.intent.prompt : buildTargetPrompt(input.intent, input.requestId));
+      const prompt = (history ? `会话历史：\n${history}\n\n` : "") + preparedPromptText(prepared);
       const result = await sdk.run({ model, prompt, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
-        ...(input.candidate ? { images: input.candidate.images, outputSchema: input.candidate.outputSchema } : {}),
+        ...(input.candidate
+          ? { images: input.candidate.images, outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : input.candidate.outputSchema }
+          : input.images?.length ? { images: input.images }
+          : {}),
         ...(gateway ? { toolToken: gateway.token, mcpEndpoint: { name: "woohaa", url: gateway.url } } : {}),
         // Discussion cannot resurrect a thread carrying a previous target grant.
         ...(native && input.intent.action !== "discuss" ? { resumeNativeId: native.nativeId } : {}),

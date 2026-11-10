@@ -104,7 +104,7 @@ it("image director API rejects private fields and derives the owner and connecti
   service.resolveConnectionBinding = async () => ({ ok: true, binding: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } });
   const accept = vi.fn(async () => ({ ok: true, conversation: {}, turn: {}, reused: false }));
   const { base } = await boot({ service, imageDirectorScene: { accept } as never });
-  const entry = { action: "discuss", canvasId: "canvas", nodeId: "image", model: "model", connectionId: "connection", prompt: "build" };
+  const entry = { action: "generate", canvasId: "canvas", nodeId: "image", model: "model", connectionId: "connection", roleId: "test/scene-director", prompt: "build" };
   const path = `${base}/api/agent-conversations/conversations/conversation/image-director-scenes`;
   const post = (body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   expect((await post({ requestId: "request", entry: { ...entry, owner: "forged" } })).status).toBe(400);
@@ -457,7 +457,7 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
       acceptTurn: (input: { conversationId: string }) => { accepted.push(input.conversationId); return { ok: true, conversation: { conversationId: input.conversationId }, turn: { turnId: "t1" }, reused: true }; }
     } as unknown as AgentConversationService;
     const { base } = await boot({ service });
-    const submit = () => fetch(`${base}/api/agent-conversations/conversations/old/turns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId: "req", entry: { action: "modify", canvasId: "cv", nodeId: "node", prompt: "修改", connectionId: "c1" } }) });
+    const submit = () => fetch(`${base}/api/agent-conversations/conversations/old/turns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId: "req", entry: { action: "modify", canvasId: "cv", nodeId: "node", roleId: "test/discussion", prompt: "修改", connectionId: "c1" } }) });
     expect((await submit()).status).toBe(200);
     expect(created).toEqual([{ owner: "user-a", canvasId: "cv", adapterId: "fake", nodeId: "node", connectionId: "c1" }]);
     expect(accepted).toEqual(["fresh"]);
@@ -482,13 +482,13 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     const okResponse = await fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "req-1", entry: { action: "discuss", canvasId: "cv", prompt: "hi" } })
+      body: JSON.stringify({ requestId: "req-1", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi" } })
     });
     expect(okResponse.status).toBe(200);
     expect(calls[0]?.connection).toEqual({ connectionId: "c1", adapterId: "fake", configRevision: 1, credentialEpoch: 0 });
     const stale = await fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "frozen", entry: { action: "discuss", canvasId: "cv", prompt: "hi", connectionId: "c1",
+      body: JSON.stringify({ requestId: "frozen", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi", connectionId: "c1",
         connection: { connectionId: "c1", adapterId: "fake", configRevision: 0, credentialEpoch: 0 } } })
     });
     expect(stale.status).toBe(409);
@@ -498,7 +498,7 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     const failResponse = await fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "req-2", entry: { action: "discuss", canvasId: "cv", prompt: "hi", connectionId: "c9" } })
+      body: JSON.stringify({ requestId: "req-2", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi", connectionId: "c9" } })
     });
     expect(failResponse.status).toBe(409);
   });
