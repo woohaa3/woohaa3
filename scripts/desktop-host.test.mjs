@@ -54,5 +54,11 @@ test('desktop development uses local dependencies; only packaged hosts enable co
   const packaged=desktopEnvironment({dataDir:dir,resourceRoot:dir});
   assert.equal(packaged.WOOHAA3_RUNTIME_DATA_DIR,dir);
   assert.equal(packaged.WOOHAA3_RUNTIME_LOCK_FILE,path.join(dir,'runtime-components.lock.json'));
+  // npm registry 运行期安装：同一数据目录缓存、app-local tools、随包 lock 与显式策略。
+  assert.equal(packaged.WOOHAA3_RUNTIME_NPM_LOCK_FILE,path.join(dir,'runtime-npm-lock.json'));
+  assert.equal(packaged.WOOHAA3_RUNTIME_TOOLS_DIR,path.join(dir,'tools'));
+  assert.equal(packaged.WOOHAA3_RUNTIME_INSTALL,'enabled');
+  const disabled=desktopEnvironment({dataDir:dir,resourceRoot:dir,baseEnv:{WOOHAA3_DESKTOP_RUNTIME_INSTALL:'disabled'}});
+  assert.equal(disabled.WOOHAA3_RUNTIME_INSTALL,'disabled');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

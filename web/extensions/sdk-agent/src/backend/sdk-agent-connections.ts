@@ -73,9 +73,12 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
       const endpointAllowed = createEndpointPolicy({ allowedHosts: options.allowedHosts, allowHttp: options.allowHttp }).check(record.baseUrl ?? adapter.officialBaseUrl).ok &&
         (adapter.allowCustomBaseUrl || !record.baseUrl || record.baseUrl.replace(/\/$/, "") === adapter.officialBaseUrl);
       const unknown = { state: "unknown" as const, checkedAt: null };
+      // A pending probe means preparation is in flight: never project it as executable, and never
+      // turn it into "unknown" (which callers may treat as an implicit retry).
+      const probe = record.runtimeProbe?.version === `${binding.engine}@${binding.version}:1` ? record.runtimeProbe.evidence : unknown;
       const runtime: AgentConnectionRuntime = {
         schemaVersion: 1, apiType: binding.apiType, engine: binding.engine, engineVersion: binding.version,
-        dependency: endpointAllowed ? (record.runtimeProbe?.version === `${binding.engine}@${binding.version}:1` ? record.runtimeProbe.evidence : unknown) : { state: "unavailable", reason: "服务地址不符合当前部署策略，请检查 Base URL" },
+        dependency: endpointAllowed ? probe : { state: "unavailable", reason: "服务地址不符合当前部署策略，请检查 Base URL" },
         tasks: {
           discussion: record.lastStatus?.modelAccess ?? unknown,
           imageInput: { state: "unavailable", reason: "当前引擎尚未开放图片附件" },
@@ -92,6 +95,7 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
       const status: AgentConnectionStatus = { transport: transportEvidence, credential: record.lastStatus?.credential ?? unknown,
         modelAccess: record.lastStatus?.modelAccess ?? unknown, tools: record.lastStatus?.tools ?? unknown };
       const blockedReason = !endpointAllowed ? runtime.dependency.reason
+        : runtime.dependency.state === "pending" ? runtime.dependency.reason ?? "正在准备固定 Agent 运行时…"
         : !credentialConfigured ? "尚未保存 API Key"
         : runtime.dependency.state === "unavailable" || runtime.dependency.state === "failed" ? runtime.dependency.reason
         : undefined;
@@ -141,10 +145,21 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     if (!credential?.secret) return fail("credential-missing", "该连接尚未保存 API Key");
     let transport: AgentSdkTransport;
     try {
+      if (!options.transports?.[engine.engine] && !runtime) return fail("runtime-missing", `缺少 ${engine.engine} ${engine.version} 配套运行时，请在设置 → 运行时组件中准备`);
+      if (!options.transports?.[engine.engine] && runtime?.prepare) {
+        // 准备发生在任何模型传输与工具授权之前；等待同一版本的单飞安装。
+        const preparing = await runtime.prepare(engine.engine);
+        if (preparing.state !== "ready") {
+          await options.service.setRuntimeProbe?.(input.owner, record.connectionId, `${engine.engine}@${engine.version}:1`, { state: "unavailable", checkedAt: new Date().toISOString(), reason: preparing.reason ?? `缺少 ${engine.engine} ${engine.version} 配套运行时` });
+          return fail("runtime-missing", preparing.reason ?? `缺少 ${engine.engine} ${engine.version} 配套运行时`);
+        }
+        await options.service.setRuntimeProbe?.(input.owner, record.connectionId, `${engine.engine}@${engine.version}:1`, { state: "ready", checkedAt: new Date().toISOString() });
+      }
       transport = options.transports?.[engine.engine] ?? await runtime!.resolve(engine.engine);
-    } catch {
-      await options.service.setRuntimeProbe?.(input.owner, record.connectionId, `${engine.engine}@${engine.version}:1`, { state: "unavailable", checkedAt: new Date().toISOString(), reason: "缺少配套运行时，请重新安装对应平台扩展" });
-      return fail("runtime-missing", `缺少 ${engine.engine} ${engine.version} 配套运行时`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : `缺少 ${engine.engine} ${engine.version} 配套运行时`;
+      await options.service.setRuntimeProbe?.(input.owner, record.connectionId, `${engine.engine}@${engine.version}:1`, { state: "unavailable", checkedAt: new Date().toISOString(), reason });
+      return fail("runtime-missing", reason);
     }
     await options.service.setRuntimeProbe?.(input.owner, record.connectionId, `${engine.engine}@${engine.version}:1`, { state: "ready", checkedAt: new Date().toISOString() });
     if (record.runtimeVersion !== `${engine.engine}@${engine.version}:1`) return fail("migration-required", "连接执行版本尚未升级，请从作品面板重新发起并先核对活动或未知回合");

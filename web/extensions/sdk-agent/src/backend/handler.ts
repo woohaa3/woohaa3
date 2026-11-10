@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createSdkAgentConversationAdapter } from "./execution-client.js";
 import type { SdkAgentRuntimeOptions } from "./sdk-agent-connections.js";
+import type { EnginePreparation } from "./runtime-preparation.js";
 import { createFixedEngineRuntime } from "./fixed-engine-runtime.js";
 import { sdkEngineForAdapter } from "../shared.js";
 /**
@@ -64,6 +65,27 @@ const BASE_PATH = "/api/sdk-agent";
 export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
   const { service, deployment } = options;
   const configureQueues = new Map<string, Promise<void>>();
+  let runtimeInstance: import("./fixed-engine-runtime.js").FixedEngineRuntime | undefined;
+  const runtimeOf = () => {
+    runtimeInstance ??= options.runtimeOptions?.runtime ?? (deployment.agentSdkDirs ? createFixedEngineRuntime(deployment.agentSdkDirs) : undefined);
+    return runtimeInstance;
+  };
+  const probeKey = (engine: string, version: string) => `${engine}@${version}:1`;
+  /** 连接保存/重试时的预检：只准备 runtime，不发送模型请求。 */
+  const prepareConnection = async (owner: string, connectionId: string): Promise<EnginePreparation | undefined> => {
+    const record = await service.get(owner, connectionId);
+    const binding = record && sdkEngineForAdapter(record.adapterId);
+    if (!record || !binding) return undefined;
+    const key = probeKey(binding.engine, binding.version);
+    await service.setRuntimeProbe?.(owner, connectionId, key, { state: "pending", checkedAt: new Date().toISOString(), reason: `正在准备 ${binding.engine} 运行时…` });
+    const runtime = runtimeOf();
+    if (!runtime?.prepare) return undefined;
+    const prepared = await runtime.prepare(binding.engine);
+    await service.setRuntimeProbe?.(owner, connectionId, key, prepared.state === "ready"
+      ? { state: "ready", checkedAt: new Date().toISOString() }
+      : { state: "unavailable", checkedAt: new Date().toISOString(), reason: prepared.reason ?? "运行时准备失败，请重试" });
+    return prepared;
+  };
 
   const sendJson = (
     res: ApplicationExtensionRawResponse,
@@ -158,6 +180,10 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
               }
             : {}),
         } satisfies ModelServiceInput);
+        // 保存设置不发起推理，但会触发一次可取消的 runtime 预检；失败只影响该连接。
+        if (result.status === 200 && result.body && "connectionId" in result.body) {
+          void prepareConnection(owner, result.body.connectionId).catch(() => undefined);
+        }
         return sendJson(res, result.status, result.body);
       } finally {
         release();
@@ -196,6 +222,7 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
             baseUrl: record.baseUrl,
             models: record.models ?? [],
             lastStatus: record.lastStatus,
+            runtimeProbe: record.runtimeProbe,
           };
         }),
       );
@@ -274,6 +301,20 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
           code: "not-found",
           message: "连接不存在或无权访问",
         });
+
+      if (segments.length === 3 && segments[2] === "runtime" && method === "POST") {
+        const prepared = await prepareConnection(owner, connectionId);
+        const binding = sdkEngineForAdapter(record.adapterId);
+        if (!prepared || !binding) return sendJson(res, 400, { code: "connection-unsupported", message: "该连接不需要外部运行时" });
+        return sendJson(res, 200, {
+          runtime: prepared.state,
+          engine: binding.engine,
+          engineVersion: binding.version,
+          ...(prepared.source ? { source: prepared.source } : {}),
+          ...(prepared.version ? { runtimeVersion: prepared.version } : {}),
+          ...(prepared.reason ? { reason: prepared.reason } : {})
+        });
+      }
 
       if (
         segments.length === 3 &&
@@ -366,14 +407,12 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
         purpose: "model-api-key",
       });
       const fixed = sdkEngineForAdapter(adapter.adapterId)!;
-      let runtimeReady = false;
-      try {
-        const runtime = options.runtimeOptions?.runtime ?? (deployment.agentSdkDirs ? createFixedEngineRuntime(deployment.agentSdkDirs) : undefined);
-        if (runtime) { await runtime.resolve(fixed.engine); runtimeReady = true; }
-      } catch { /* Runtime failure does not lose the saved key or contact a model. */ }
-      await service.setRuntimeProbe?.(owner, connectionId, `${fixed.engine}@${fixed.version}:1`, { state: runtimeReady ? "ready" : "unavailable", checkedAt: new Date().toISOString(), ...(!runtimeReady ? { reason: "缺少配套运行时，请重新安装对应平台扩展" } : {}) });
+      // 显式探测会准备 runtime（可能需要联网安装），但绝不发送模型请求。
+      const prepared = await prepareConnection(owner, connectionId);
+      const runtimeReady = prepared?.state === "ready" || !prepared;
       return sendJson(res, 200, {
         runtime: runtimeReady ? "ready" : "runtime-missing",
+        ...(!runtimeReady ? { runtimeReason: prepared?.reason ?? "缺少配套运行时，请重试准备" } : {}),
         engine: fixed.engine,
         engineVersion: fixed.version,
         transport: "unknown",

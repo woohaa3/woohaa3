@@ -1,6 +1,17 @@
 # 可选运行时与最小安装包
 
-桌面核心保留单份 Node、基础本机宿主和画布，首次安装后无需下载组件即可离线编辑。Codex、Claude、DSH、录制和模型离屏程序及图片编辑 WASM 独立发布，缺少时不会自动下载。设置 → 运行时组件提供安装、取消、重试、删除及本机程序入口；Agent 设置可直接跳转。
+桌面核心保留单份 Node、基础本机宿主和画布，首次安装后无需下载组件即可离线编辑。录制、模型离屏程序和图片编辑 WASM 仍按签名 CDN 分发；Codex、Claude、DSH 三套 Agent runtime 改为**按需从 npm registry 安装**到用户数据目录，命中首次使用（或连接保存后的预检）时自动准备，不需要用户先失败再手动下载。设置 → 运行时组件仍提供来源、进度、重试、删除及本机程序入口。
+
+## npm registry Agent runtime
+
+发行包不内置三套 harness，但随包提供固定 Node 与同版本 npm CLI（`tools/npm/bin/npm-cli.js`）。安装器只消费构建期发布的 `runtime-npm-lock.json`：每个引擎的精确 npm 包、版本、平台包、完整依赖闭包和 integrity 都在 lock 里，运行期不解析 semver、不读 dist-tag、不执行 `npx`，也不安装清单外的包。
+
+- 安装目录：`<appData>/runtimes/<engine>/<version>/<platform>-<arch>`；tarball 缓存在 `<appData>/cache/npm/`，同一版本在应用升级、多个连接、多个扩展之间共享。
+- 安装写随机 staging：逐包校验 integrity → 解包到 npm 兼容的 `node_modules` → 校验每个包版本与依赖解析 → 入口探针（dsh 生成 `entry.mjs`，Claude/Codex 使用平台包内绝对 executable）→ 只运行审核过的 lifecycle script → 写 `ready.json`/receipt 后原子 rename。中断、取消、校验失败都不会覆盖既有 ready 版本。
+- 生命周期脚本由 `desktop/runtime-npm-scripts.json` 审核：未列出的脚本让构建失败；明确 deny 的脚本记录在 lock 中且运行期永不执行。安装器只用应用自己的 Node 执行允许的 `node <script>`，PATH 只含应用工具目录。
+- 同一引擎版本的并发准备合并为一个 job；运行中的 lease 阻止删除。失败状态带真实来源与原因（registry 不可达、integrity、磁盘不足、脚本被拒绝、管理员关闭），不会提示重新安装扩展。
+- Web host 复用同一 manager 与 app-local Node/npm。部署显式关闭时（`--runtime-install disabled` 或 `WOOHAA_WEB_HOST_RUNTIME_INSTALL=disabled`）API 返回“管理员未启用运行时安装”，不静默下载、不宣称助手可用。
+- 自有 CDN（下文签名 archive 方案）保留为可选的企业镜像/离线来源，不是默认运行期流量入口。
 
 ## 配置
 
@@ -21,7 +32,7 @@
 }
 ```
 
-以上是发行默认格式，示例域名与公钥内容需替换。用户覆盖可修改 cdn/components，额外信任公钥使用 `additionalTrustKeys`，不能覆盖发行 trustKeys。组件下载 CDN 与 `WOOHAA_DESKTOP_UPDATE_ENDPOINT` 相互独立。没有 CDN 时基础功能及已安装/本机程序仍可用。
+以上是发行默认格式，示例域名与公钥内容需替换。用户覆盖可修改 cdn/components，额外信任公钥使用 `additionalTrustKeys`，不能覆盖发行 trustKeys。npm registry 是默认来源；下面的 CDN 配置只在企业镜像/离线部署时使用。组件下载 CDN 与 `WOOHAA_DESKTOP_UPDATE_ENDPOINT` 相互独立。没有 CDN 时基础功能、已安装组件与 npm registry 来源仍可用。
 
 使用自有 CLI 的用户覆盖示例：
 
@@ -39,7 +50,7 @@ Claude 本机程序按锁文件 `localVersions` 精确校验，CLI 版本与 SDK
 
 打包 App 由 Finder 启动，PATH 只有 launchd 的最小值（`/usr/bin:/bin:/usr/sbin:/sbin`），里面既没有版本管理器的目录也没有 `node`。因此探测会额外搜索 `~/.local/bin`、`~/.bun/bin`、`~/.opencode/bin`、`~/Library/pnpm`、fnm/nvm 的 `aliases/default/bin`、`/opt/homebrew/bin`、`/usr/local/bin` 和 `ChatGPT.app`；选中的入口若是 `#!/usr/bin/env node` 脚本，会就地解析到同一个 npm 包 `@openai/codex-<平台>-<架构>/vendor/<triple>/bin/codex` 的原生二进制，解析不到时保留原路径并由 `--version` 探测给出明确失败原因，不会改成别的安装。设置 → 运行时组件里「探测本机程序」会把已填路径一并回传，因此路径不可用时能显示具体原因，而不是只报「未找到」。
 
-## 构建和上传 CDN
+## 可选：构建和上传 CDN
 
 先完成客户端依赖安装与对应平台的 release 工具构建，保留锁定版本。原生录制、模型渲染与图片编辑组件版本从实际二进制/WASM 的 SHA-256 派生；组件构建与 App 打包必须使用同一组二进制。构建脚本不会替用户安装 npm 依赖，也不会上传文件。
 

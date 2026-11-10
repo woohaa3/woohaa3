@@ -25,6 +25,24 @@ export function copyRuntimeFiles(source,target){
  }
 }
 export function locateDependency(source,name){let dir=source;for(;;){const candidate=path.join(dir,'node_modules',name);if(fs.existsSync(path.join(candidate,'package.json')))return fs.realpathSync(candidate);const parent=path.dirname(dir);if(parent===dir)return null;dir=parent;}}
+/**
+ * 把 Node 发行包自带的 npm CLI 复制到 app-local tools。
+ *
+ * 只复制 CLI 本体（约 10MB），不装任何 Agent harness。运行期用绝对路径
+ * `<app-node> <tools>/npm/bin/npm-cli.js` 调用，绝不依赖用户 PATH、全局 npm 或 shim。
+ */
+export function copyNpmCli(nodeRoot,target){
+ const source=path.join(nodeRoot,process.platform==='win32'?'node_modules/npm':'lib/node_modules/npm');
+ if(!fs.existsSync(path.join(source,'bin','npm-cli.js')))throw new Error(`Node 发行包缺少 npm CLI：${source}`);
+ copyRuntimeFiles(source,path.join(target,'npm'));
+ // npm 自带的依赖在 `node_modules/npm/node_modules`（目录名被排除），必须单独复制，否则 CLI 一启动就缺依赖。
+ const bundled=path.join(source,'node_modules');
+ if(fs.existsSync(bundled))copyRuntimeFiles(bundled,path.join(target,'npm','node_modules'));
+ const cli=path.join(target,'npm','bin','npm-cli.js');
+ if(!fs.existsSync(cli))throw new Error(`npm CLI 复制失败：${cli}`);
+ return {npmCli:cli,source,bytes:directorySize(path.join(target,'npm'))};
+}
+function directorySize(root){let total=0;const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isSymbolicLink())continue;if(entry.isDirectory())walk(file);else if(entry.isFile())total+=fs.statSync(file).size;}};walk(root);return total;}
 export function linkRuntimePackage(source,target,bundleRoot,state){if((state?.platform==='win32'||state?.deferLinks)){state.links??=[];state.links.push({link:path.relative(bundleRoot,target).split(path.sep).join('/'),target:path.relative(bundleRoot,source).split(path.sep).join('/')});return;}linkPackage(source,target);}
 function linkPackage(source,target){fs.mkdirSync(path.dirname(target),{recursive:true});if(!fs.existsSync(target))fs.symlinkSync(path.relative(fs.realpathSync(path.dirname(target)),fs.realpathSync(source)),target,'dir');}
 function supportsTarget(values,value){if(!values)return true;const allowed=values.filter(item=>!item.startsWith('!'));return !values.includes('!'+value)&&(!allowed.length||allowed.includes(value));}

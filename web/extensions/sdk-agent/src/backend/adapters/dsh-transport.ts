@@ -422,7 +422,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
         const code = (error as { code?: unknown } | null)?.code;
         // 只有确实缺依赖才报 runtime-missing；启动/协议失败单独报告，不吞掉原因。
         if (code === "ERR_MODULE_NOT_FOUND" || /^Cannot find (module|package) /.test(message)) {
-          return { ok: false, code: "runtime-missing", message: "缺少 DeepSeek Harness 运行时，请重新安装本扩展" };
+          return { ok: false, code: "runtime-missing", message: "缺少 DeepSeek Harness 运行时，请在设置 → 运行时组件中准备并重试" };
         }
         return { ok: false, code: "transport-unavailable", message: `DeepSeek Harness 执行失败：${message.slice(0, 200)}` };
       } finally {

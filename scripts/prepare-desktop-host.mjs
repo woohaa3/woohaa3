@@ -9,10 +9,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage, isExternalDesktopDependency } from './lib/desktop-host-package.mjs';
+import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage, isExternalDesktopDependency, copyNpmCli } from './lib/desktop-host-package.mjs';
 import { systemTar, systemTarArgs } from './lib/desktop-platform-commands.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 import { resolvedRuntimeLock } from './package-runtime-components.mjs';
+import { assertRuntimeNpmLockCurrent, auditRuntimeNpmScripts } from './lib/runtime-npm-manifest.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
 import { loadBuildProfile } from './lib/build-profile.mjs';
 import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
@@ -109,11 +110,19 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  fs.writeFileSync(path.join(output,'runtime-components.lock.json'),JSON.stringify(resolvedRuntimeLock(),null,2)+'\n');
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
  fs.copyFileSync(path.join(root,'.local/desktop-node',artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,''),'LICENSE'),path.join(output,'tools/NODE_LICENSE'));
+ // app-local npm CLI：运行期从 npm registry 安装 Agent runtime 的唯一入口。
+ const npmCli=copyNpmCli(path.join(root,'.local/desktop-node',artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,'')),path.join(output,'tools'));
+ const npmLock=assertRuntimeNpmLockCurrent({clientRoot:root});
+ fs.writeFileSync(path.join(output,'runtime-npm-lock.json'),JSON.stringify(npmLock,null,2)+'\n');
+ // 构建期审核：本平台已安装依赖里出现未审核的 lifecycle script 直接失败。
+ const scriptAudit=auditRuntimeNpmScripts({clientRoot:root,lock:npmLock});
+ fs.writeFileSync(path.join(output,'runtime-npm-scripts.audit.json'),JSON.stringify(scriptAudit,null,2)+'\n');
+ fs.writeFileSync(path.join(output,'runtime-npm-toolchain.json'),JSON.stringify({schema:1,node:DESKTOP_NODE_VERSION,npmCli:path.relative(output,npmCli.npmCli).split(path.sep).join('/'),bytes:npmCli.bytes},null,2)+'\n');
  if(process.platform==='win32')writeRuntimeLinks(output,state.links??[]);
- fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
+ fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,npmCli:path.relative(output,npmCli.npmCli).split(path.sep).join('/'),npmLock:'runtime-npm-lock.json',inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
  assertPortableTree(output);
  console.log(`[desktop-host] ${state.size} packages, ${extensions.length} extensions → ${output}`);
- return {resourceRoot:output,node,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size};
+ return {resourceRoot:output,node,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,npmCli:npmCli.npmCli};
 }
 export async function prepareDevelopmentHost(){
  const prepared=await prepareDesktopNode();const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';

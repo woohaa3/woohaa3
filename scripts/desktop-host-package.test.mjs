@@ -54,3 +54,19 @@ test('standalone Tauri frontend embeds only self-contained startup HTML',()=>{
  fs.writeFileSync(path.join(source,'desktop-startup.html'),'<script src="bundle.js"></script>');assert.throws(()=>prepareStartupFrontend(source,path.join(root,'other')),/自包含/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+import { copyNpmCli } from './lib/desktop-host-package.mjs';
+test('app-local npm CLI is copied from the pinned Node distribution without PATH shims',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-npm-cli-'));try{
+  const nodeRoot=path.join(root,'node-v24.22.0-linux-x64');
+  const cli=path.join(nodeRoot,process.platform==='win32'?'node_modules/npm':'lib/node_modules/npm');
+  fs.mkdirSync(path.join(cli,'bin'),{recursive:true});
+  fs.writeFileSync(path.join(cli,'bin/npm-cli.js'),'process.stdout.write("10.0.0")');
+  fs.writeFileSync(path.join(cli,'package.json'),JSON.stringify({name:'npm',version:'10.0.0'}));
+  const result=copyNpmCli(nodeRoot,path.join(root,'tools'));
+  assert.equal(result.npmCli,path.join(root,'tools/npm/bin/npm-cli.js'));
+  assert.ok(fs.existsSync(path.join(root,'tools/npm/package.json')));
+  assert.equal(fs.existsSync(path.join(root,'tools/npm/bin/npm-cli.js')),true);
+  assert.ok(result.bytes>0);
+  assert.throws(()=>copyNpmCli(path.join(root,'missing'),path.join(root,'other')),/缺少 npm CLI/);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

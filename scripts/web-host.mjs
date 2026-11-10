@@ -16,7 +16,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +34,7 @@ const { resolveAppBasePath } = await load('app-base-path.mjs');
 const { resolveAppPageTitle } = await load('app-html.mjs');
 const { startWebHostServer } = await load('web-host-runtime.mjs');
 const { loadExtensionHost } = await load('extension-host.mjs');
+const { buildWebHostEnvironment } = await load('web-host-environment.mjs');
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -63,59 +63,6 @@ function resolveDataDir(resourceRoot) {
   return path.resolve(explicit ?? path.join(resourceRoot, 'data'));
 }
 
-/**
- * 组装运行环境。
- *
- * 与桌面宿主同一原则：**不继承**宿主 shell 里的 `WOOHAA3_*` / 数据库 / 端口配置，
- * 只接受本目录与显式 CLI 参数，避免「在某个项目的开发 shell 里启动」时读到别的仓库配置。
- * 需要覆盖时用本文件列出的环境变量（它们仍然生效，因为下面会显式写入）。
- */
-function buildEnvironment({ resourceRoot, dataDir, host, port, basePath }) {
-  const data = (name) => path.join(dataDir, name);
-  for (const dir of ['stores', 'media', 'config', 'secrets', 'extension-data', 'extensions', 'logs', 'cache']) {
-    fs.mkdirSync(data(dir), { recursive: true, mode: 0o700 });
-  }
-  const env = { ...process.env };
-  // 清掉可能来自外部 shell 的仓库/服务端配置，只留下面显式声明的。
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('WOOHAA3_') || key.startsWith('VITE_') || ['MONGODB_URI', 'MONGODB_DB', 'NODE_OPTIONS', 'NODE_PATH'].includes(key)) {
-      delete env[key];
-    }
-  }
-  Object.assign(env, {
-    NODE_ENV: 'production',
-    HOST: host,
-    PORT: String(port),
-    WOOHAA3_BASE_PATH: basePath,
-    WOOHAA3_REPO_ROOT: resourceRoot,
-    WOOHAA3_TASK_STORE_PATH: data('stores/task.sqlite'),
-    WOOHAA3_APPLICATION_STORE_PATH: data('stores/application.sqlite'),
-    WOOHAA3_CANVAS_STORAGE_BACKEND: 'sqlite',
-    WOOHAA3_CANVAS_STORAGE_SQLITE_PATH: data('stores/canvas.sqlite'),
-    WOOHAA3_APPLICATION_DOCUMENT_STORE_BACKEND: 'sqlite',
-    WOOHAA3_CONFIG_FILE: data('config/woohaa.config.yml'),
-    WOOHAA3_SECRETS_FILE: data('config/woohaa.secrets.yml'),
-    WOOHAA3_PLUGIN_SECRET_DIR: data('secrets/plugins'),
-    WOOHAA3_EXTENSION_DATA_DIR: data('extension-data'),
-    WOOHAA3_LOG_DIR: data('logs'),
-    WOOHAA3_MODELS_CONFIG_PATH: fs.existsSync(data('config/models.json'))
-      ? data('config/models.json')
-      : path.join(resourceRoot, 'models.json'),
-    WOOHAA3_EXTENSION_DIRS: [path.join(resourceRoot, 'extensions'), data('extensions')].join(','),
-    WOOHAA3_EXTENSION_WRITABLE_DIRS: data('extensions')
-  });
-  // 主密钥：存在则复用，不存在首次生成后固定（凭据密文的解密依赖它，绝不能每次启动重算）。
-  const master = data('secrets/master.key');
-  if (fs.existsSync(master)) {
-    env.WOOHAA3_PLUGIN_SECRET_MASTER_KEY = fs.readFileSync(master, 'utf8').trim();
-  } else {
-    const key = randomBytes(32).toString('base64');
-    fs.writeFileSync(master, key, { mode: 0o600 });
-    env.WOOHAA3_PLUGIN_SECRET_MASTER_KEY = key;
-  }
-  return env;
-}
-
 async function main() {
   const resourceRoot = resolveResourceRoot();
   const manifestFile = path.join(resourceRoot, 'web-host-manifest.json');
@@ -135,8 +82,10 @@ async function main() {
   const basePath = resolveAppBasePath({ WOOHAA3_BASE_PATH: rawBasePath });
   const dataDir = resolveDataDir(resourceRoot);
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const runtimeInstall = arg('runtime-install', process.env.WOOHAA_WEB_HOST_RUNTIME_INSTALL ?? 'npm-registry');
+  if (!['npm-registry', 'disabled'].includes(runtimeInstall)) throw new Error(`非法运行期安装策略：${runtimeInstall}（npm-registry|disabled）`);
 
-  const env = buildEnvironment({ resourceRoot, dataDir, host, port, basePath });
+  const env = buildWebHostEnvironment({ resourceRoot, dataDir, host, port, basePath, runtimeInstall: runtimeInstall === 'disabled' ? 'disabled' : 'enabled' });
   const pageTitle = resolveAppPageTitle(env);
   // 后端产物是独立 bundle：必须在设置完 env 之后加载，它读的是 process.env。
   Object.assign(process.env, env);

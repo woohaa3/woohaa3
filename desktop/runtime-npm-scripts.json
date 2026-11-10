@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "comment": "Audited npm lifecycle scripts for the registry runtime lock. Anything not listed here (and not explicitly denied) fails the build. Denied scripts are never executed on user machines; `prepare` is ignored because npm does not run it for registry tarballs.",
+  "allowed": [
+    {
+      "package": "@deepseek-ai/dsh-subprocess-local",
+      "lifecycle": "postinstall",
+      "command": "node scripts/ensure-spawn-helper.mjs",
+      "reason": "仅在安装目录内恢复 node-pty 预构建 spawn-helper 的可执行位；不联网、不写应用外路径。"
+    }
+  ],
+  "denied": [
+    {
+      "package": "node-pty",
+      "lifecycle": "install",
+      "command": "node scripts/prebuild.js || node-gyp rebuild",
+      "reason": "可能下载编译器或触发本地编译；dsh 的 shell 工具在 Woohaa 中被禁用，预构建二进制已足够。"
+    },
+    {
+      "package": "node-pty",
+      "lifecycle": "postinstall",
+      "command": "node scripts/post-install.js",
+      "reason": "安装后脚本会尝试修补/下载原生构建产物；运行期不执行。"
+    },
+    {
+      "package": "protobufjs",
+      "lifecycle": "postinstall",
+      "command": "node scripts/postinstall",
+      "reason": "上游仅打印赞助提示，无安装副作用；运行期不执行。"
+    }
+  ]
+}

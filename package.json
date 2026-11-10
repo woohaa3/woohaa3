@@ -54,6 +54,8 @@
     "config:export": "node scripts/export-config.mjs",
     "task:compact": "node scripts/task-compact.mjs",
     "desktop:runtimes": "node scripts/package-runtime-components.mjs",
+    "runtime:npm:manifest": "node scripts/build-runtime-npm-manifest.mjs --measure",
+    "runtime:npm:check": "node scripts/build-runtime-npm-manifest.mjs --check",
     "build:media-image": "node scripts/build-media-image.mjs"
   },
   "devDependencies": {

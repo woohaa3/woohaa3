@@ -1,11 +1,15 @@
 import { getAppPublicFetch } from "./app-base-path.js";
 
 export type RuntimeComponent = {
-  id: string; version: string; source: "managed" | "local"; status: string;
+  id: string; version: string; source: "managed" | "npm-registry" | "local"; status: string;
   entry?: string; path?: string; error?: string; progress?: { received: number; total?: number };
+  engine?: string; registry?: string; requests?: number;
 };
+export type RuntimeInstallPolicy = { installEnabled: boolean; sources: string[]; registry: string | null };
 export type RuntimeComponentsSnapshot = {
   available: boolean; components: RuntimeComponent[]; configPath?: string;
+  /** 部署侧安装策略；关闭运行期安装时 message 说明管理员原因。 */
+  policy?: RuntimeInstallPolicy; installEnabled?: boolean; message?: string;
 };
 export type RuntimeComponentsState = { snapshot: RuntimeComponentsSnapshot | null; error: string | null };
 

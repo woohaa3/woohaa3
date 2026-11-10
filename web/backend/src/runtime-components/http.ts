@@ -24,10 +24,10 @@ export function createRuntimeComponentsHandler(options: { getManager?: () => Man
     const origin = originGuard(req);
     if (!origin.ok) { send(403, { message: origin.message }); return true; }
     const manager = getManager();
-    if (!manager) { send(req.method === "GET" ? 200 : 409, { available: false, components: [], message: "运行时组件仅在桌面 App 中可用" }); return true; }
+    if (!manager) { send(req.method === "GET" ? 200 : 409, { available: false, installEnabled: false, components: [], message: "管理员未启用运行时安装" }); return true; }
     try {
       if (pathname === PREFIX && req.method === "GET") {
-        send(200, { available: true, components: await manager.list(), configPath: manager.configPath });
+        send(200, { available: true, ...(manager.policy ? { policy: manager.policy() } : {}), components: await manager.list(), configPath: manager.configPath });
         return true;
       }
       const match = /^\/api\/runtime-components\/([a-z0-9-]+)\/(install|cancel|configure|remove|discover)$/.exec(pathname);
@@ -57,10 +57,10 @@ export function createRuntimeComponentsHandler(options: { getManager?: () => Man
         const configured = await readBody();
         if (configured === null) { send(413, { message: "配置内容过大" }); return true; }
         const value = JSON.parse(configured) as { source?: unknown; path?: unknown };
-        if ((value.source !== "managed" && value.source !== "local") || (value.path !== undefined && typeof value.path !== "string")) {
-          send(400, { message: "请选择托管下载或本机程序" }); return true;
+        if (!["managed", "npm-registry", "local"].includes(String(value.source)) || (value.path !== undefined && typeof value.path !== "string")) {
+          send(400, { message: "请选择 npm registry、托管下载或本机程序" }); return true;
         }
-        await manager.configure(id, { source: value.source, ...(typeof value.path === "string" ? { path: value.path } : {}) });
+        await manager.configure(id, { source: value.source as "managed" | "npm-registry" | "local", ...(typeof value.path === "string" ? { path: value.path } : {}) });
         send(200, { ok: true });
       } else if (action === "remove") {
         await manager.remove(id);

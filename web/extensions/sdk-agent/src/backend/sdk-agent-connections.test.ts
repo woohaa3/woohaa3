@@ -84,6 +84,22 @@ describe("固定 SDK 连接执行前门禁", () => {
     expect(inFlight.size).toBe(0);
     await expect(fetch(baseUrl + "/models")).rejects.toThrow();
   });
+  it("首次执行先准备固定引擎，准备失败的连接不进入模型传输", async () => {
+    const f = fixture();
+    const prepare = vi.fn(async () => ({ engine: "codex-agent-sdk", component: "codex", state: "unavailable" as const, code: "REGISTRY_UNAVAILABLE", reason: "npm registry 暂不可达：HTTP 503。请检查网络后重试准备。" }));
+    const resolve = vi.fn(async () => { throw new Error("resolve must not run after a failed preparation"); });
+    const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, {
+      service: f.service, allowedHosts: ["api.openai.com"], allowHttp: false,
+      runtime: { prepare, resolve } as never
+    });
+    const outcome = await adapter.run(f.input());
+    expect(outcome).toMatchObject({ status: "failed", error: { code: "runtime-missing" } });
+    expect(outcome).toMatchObject({ error: { message: expect.stringContaining("npm registry 暂不可达") } });
+    expect(prepare).toHaveBeenCalledWith("codex-agent-sdk");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.service.setRuntimeProbe).toHaveBeenCalledWith("owner", "connection", "codex-agent-sdk@0.161.0:1", expect.objectContaining({ state: "unavailable", reason: expect.stringContaining("npm registry 暂不可达") }));
+  });
   it("缺运行依赖不调用模型，不回退 HTTP", async () => {
     const f = fixture();
     expect(await f.create(false).run(f.input())).toMatchObject({ status: "failed", error: { code: "runtime-missing" } });

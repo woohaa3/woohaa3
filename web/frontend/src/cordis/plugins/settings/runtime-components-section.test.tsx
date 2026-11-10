@@ -39,3 +39,22 @@ it("surfaces why a typed local path is unusable instead of reporting nothing fou
   expect(element.textContent).toContain("node");
   await act(async () => root.unmount());
 });
+it("shows the npm registry source, progress and the administrator-disabled reason", async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({
+    available: true,
+    installEnabled: false,
+    policy: { installEnabled: false, sources: ["managed", "local"], registry: "https://registry.npmjs.org/" },
+    message: "管理员未启用运行时安装",
+    components: [{ id: "dsh", version: "0.2.1-rc.2", status: "unavailable", source: "npm-registry", engine: "dsh-agent-sdk", registry: "https://registry.npmjs.org/", requests: 624, error: "管理员未启用运行时安装", progress: { received: 12, total: 624 } }]
+  })));
+  vi.stubGlobal("fetch", fetcher);
+  const element = document.createElement("div");
+  const root = createRoot(element);
+  await act(async () => root.render(<RuntimeComponentsSection />));
+  expect(element.textContent).toContain("npm registry");
+  expect(element.textContent).toContain("管理员未启用运行时安装");
+  expect(element.textContent).toContain("已获取 12 / 624 个运行包");
+  expect(element.textContent).not.toContain("重新安装");
+  for (const button of element.querySelectorAll("button")) expect(button.disabled).toBe(true);
+  await act(async () => root.unmount());
+});

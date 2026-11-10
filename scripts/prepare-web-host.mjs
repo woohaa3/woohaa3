@@ -34,12 +34,14 @@ import { createRequire } from 'node:module';import {
   attachRuntimePackage,
   assertPortableTree,
   linkRuntimePackage,
-  isExternalDesktopDependency
+  isExternalDesktopDependency,
+  copyNpmCli
 } from './lib/desktop-host-package.mjs';
 import { prepareWebHostNode, webNodeArtifact } from './lib/web-host-node.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
 import { loadBuildProfile, buildDefines, describeBuildProfile } from './lib/build-profile.mjs';
 import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
+import { assertRuntimeNpmLockCurrent, auditRuntimeNpmScripts } from './lib/runtime-npm-manifest.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_ROOT = path.resolve(HERE, '..');
@@ -403,6 +405,15 @@ export async function prepareWebHost({
   fs.copyFileSync(node.binary, nodeTarget);
   fs.chmodSync(nodeTarget, 0o755);
   if (node.license) fs.copyFileSync(node.license, path.join(output, 'node/NODE_LICENSE'));
+  // npm registry runtime 安装所需的 app-local npm CLI；与桌面装配同一份来源和口径。
+  const npmCli = copyNpmCli(node.extracted, path.join(output, 'tools'));
+  const npmLock = assertRuntimeNpmLockCurrent({ clientRoot });
+  fs.writeFileSync(path.join(output, 'runtime-npm-lock.json'), `${JSON.stringify(npmLock, null, 2)}\n`);
+  const scriptAudit = auditRuntimeNpmScripts({ clientRoot, lock: npmLock });
+  fs.writeFileSync(path.join(output, 'runtime-npm-scripts.audit.json'), `${JSON.stringify(scriptAudit, null, 2)}\n`);
+  // 与桌面同一份 CDN 缺省/组件版本锁（Web host 可能只用 npm registry，但缺省值必须一致）。
+  fs.copyFileSync(path.join(clientRoot, 'desktop/runtime-downloads.json'), path.join(output, 'runtime-downloads.json'));
+  fs.copyFileSync(path.join(clientRoot, 'desktop/runtime-components.lock.json'), path.join(output, 'runtime-components.lock.json'));
 
   // 7) 启动器与清单
   fs.copyFileSync(path.join(layout.scriptsDir, 'web-host.mjs'), path.join(output, 'web-host.mjs'));
@@ -416,6 +427,8 @@ export async function prepareWebHost({
     arch: process.arch,
     backend: { entry: 'backend.cjs', bytes: backend.size, modules: backend.modules },
     frontend: path.basename(frontendDir),
+    tools: { npm: path.relative(output, npmCli.npmCli).split(path.sep).join('/') },
+    runtime: { npmLock: 'runtime-npm-lock.json' },
     extensions: installed,
     // 版本标识：`--status` 与部署脚本靠它回答「目标机上跑的是哪一版」。
     // 部署脚本用 `--commit` 显式传入（与它校验的工作区一致），避免「打包时的 HEAD」
@@ -428,7 +441,7 @@ export async function prepareWebHost({
   for (const map of ['backend.cjs.map']) fs.rmSync(path.join(output, map), { force: true });
 
   assertPortableTree(output);
-  return { output, node: nodeTarget, nodeVersion: artifact.version, backend, extensions: installed };
+  return { output, node: nodeTarget, nodeVersion: artifact.version, backend, extensions: installed, npmCli: path.join(output, 'tools/npm/bin/npm-cli.js') };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

@@ -91,5 +91,5 @@ export async function prepareWebHostNode({ cacheDir, platform = process.platform
   if (probe !== artifact.version) throw new Error(`Node 探针失败：期望 ${artifact.version}，实际 ${probe}`);
 
   const license = path.join(extracted, 'LICENSE');
-  return { artifact, binary, license: fs.existsSync(license) ? license : null, sha256: actual };
+  return { artifact, binary, license: fs.existsSync(license) ? license : null, sha256: actual, extracted };
 }

@@ -73,3 +73,26 @@ it("explains an unusable selected path while still listing working candidates", 
   diagnose.mockResolvedValueOnce({ entry: "/opt/codex", version: "0.163.0", source: "local", kind: "executable" } as never);
   expect(await (await fetch(`${url}/codex/discover`, { method: "POST" })).json()).toEqual({ candidates: [{ entry: "/opt/codex", version: "0.163.0", source: "local", kind: "executable" }] });
 });
+
+it("explains a disabled install policy instead of claiming desktop-only", async () => {
+  const url = await serve();
+  expect(await (await fetch(url)).json()).toMatchObject({ available: false, installEnabled: false, message: "管理员未启用运行时安装" });
+});
+
+it("exposes the npm registry policy and accepts switching a component to it", async () => {
+  const configure = vi.fn(async () => ({ id: "dsh", version: "0.2.1-rc.2", source: "npm-registry", configured: true, status: "missing" }));
+  const url = await serve({
+    configPath: "/tmp/config.json",
+    inspect: vi.fn(),
+    configure,
+    list: vi.fn(async () => [{ id: "dsh", version: "0.2.1-rc.2", source: "npm-registry", configured: true, status: "missing", engine: "dsh-agent-sdk", registry: "https://registry.npmjs.org/" }]),
+    policy: () => ({ installEnabled: true, sources: ["npm-registry", "managed", "local"], registry: "https://registry.npmjs.org/" })
+  });
+  const snapshot = await (await fetch(url)).json();
+  expect(snapshot.available).toBe(true);
+  expect(snapshot.policy).toMatchObject({ installEnabled: true, registry: "https://registry.npmjs.org/" });
+  expect(snapshot.components[0]).toMatchObject({ id: "dsh", source: "npm-registry", engine: "dsh-agent-sdk" });
+  expect((await fetch(`${url}/dsh/configure`, { method: "POST", body: JSON.stringify({ source: "npm-registry" }) })).status).toBe(200);
+  expect(configure).toHaveBeenCalledWith("dsh", { source: "npm-registry" });
+  expect((await fetch(`${url}/dsh/configure`, { method: "POST", body: JSON.stringify({ source: "arbitrary" }) })).status).toBe(400);
+});
