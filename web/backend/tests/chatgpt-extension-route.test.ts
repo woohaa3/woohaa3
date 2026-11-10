@@ -107,13 +107,17 @@ describe("ChatGPT 插件公开路由", () => {
       const settings = (await (await fetch(`${app.base}/api/settings`)).json()) as {
         plugins: Array<{ id: string; configPrefix?: string; siteManaged: boolean }>;
       };
-      for (const providerId of ["tokenhub", "replicate", "fal", "grsai", "runninghub", "ark"]) {
+      for (const providerId of ["tokenhub", "replicate", "fal", "grsai", "ark", "deepseek"]) {
         const row = settings.plugins.find((entry) => entry.id === `${providerId}-provider`);
         expect(row, `${providerId}-provider`).toBeDefined();
         expect(row?.configPrefix, `${providerId}-provider`).toBe(`providers.${providerId}`);
         // 启停不再由站点控制面管理。
         expect(row?.siteManaged, `${providerId}-provider`).toBe(false);
       }
+      // RunningHub 同时声明了 `site` 段（余额 handler），因此它仍属于站点控制面；
+      // 这一行与上面那批的差异是真实状态，不是遗漏。
+      const runninghub = settings.plugins.find((entry) => entry.id === "runninghub-provider");
+      expect(runninghub).toMatchObject({ configPrefix: "providers.runninghub", siteManaged: true });
     } finally {
       await app.close();
     }

@@ -92,6 +92,7 @@ describe("扩展声明流水线", () => {
       "runninghub-provider",
       "ark-provider",
       "bailian-provider",
+      "deepseek-provider",
       "local-storage",
       "cos-storage"
     ]) {
@@ -109,9 +110,10 @@ describe("扩展声明流水线", () => {
       "replicate-provider": ["language", "image", "video", "audio"],
       "fal-provider": ["language", "image", "video", "audio"],
       "grsai-provider": ["language", "image", "video"],
-      "runninghub-provider": ["image", "video"],
+      "runninghub-provider": ["language", "image", "video"],
       "ark-provider": ["language", "image", "video"],
       "bailian-provider": ["image"],
+      "deepseek-provider": ["language"],
     })) expect(byId.get(id)?.modelTypes, id).toEqual(types);
 
     // 模型刷新入口由插件自己声明（宿主不再有 Provider → 刷新路径的映射表）。
@@ -123,13 +125,14 @@ describe("扩展声明流水线", () => {
     // 刷新只做增量；入口同样由插件声明，宿主不硬编码路径。
     expect(byId.get("runninghub-provider")?.modelRefresh?.path).toBe("/api/providers/runninghub/refresh");
     expect(byId.get("cephalon-provider")?.modelRefresh?.path).toBe("/api/providers/cephalon/refresh");
+    expect(byId.get("deepseek-provider")?.modelRefresh?.path).toBe("/api/providers/deepseek/refresh");
   });
 
   it("声明装载的 Provider 真的注册进生成 registry", async () => {
     const { generation } = await boot();
     const ids = generation.list().map((provider) => provider.providerId);
     // 未配凭据的 Provider 仍要装载并注册（否则管理面看不到、也没法预填配置）；模型可用性另算。
-    for (const id of ["tokenhub", "cephalon", "replicate", "fal", "grsai", "runninghub", "ark", "bailian"]) {
+    for (const id of ["tokenhub", "cephalon", "replicate", "fal", "grsai", "runninghub", "ark", "bailian", "deepseek"]) {
       expect(ids).toContain(id);
     }
   });

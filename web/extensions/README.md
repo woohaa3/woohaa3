@@ -81,6 +81,11 @@ DashScope 的 `/api/v1/models` 与 OpenAI 兼容 `/compatible-mode/v1/models` �
 `input.messages[].content[].image`（要公网 URL，所以没有 `uploadReference`），`status` 只能抛错
 （没有可查询的远端任务），模型定义声明 `cancel: "local"`。
 
+[deepseek-provider](deepseek-provider)（DeepSeek 官方）是**自描述目录 + 只有文本**的变体：
+`modelTypes: ["language"]`，地址固定 `https://api.deepseek.com`，目录来自 `GET /models`
+（官方自带输出上限、输入模态与思考档位），执行只有 `/v1/chat/completions`。思考模式用
+`thinking.type` 开合、档位用 `reasoning_effort`，并只转发目录声明过的档位。
+
 ## 前端入口与 metadata
 
 - **唯一身份来源**是 `src/frontend/metadata.ts`：只导出 JSON 可序列化的

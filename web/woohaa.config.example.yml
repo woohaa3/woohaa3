@@ -54,3 +54,6 @@ providers:
   #   baseUrl: https://dashscope.aliyuncs.com
   #   workspaceId: ""
   #   region: cn-beijing
+  # DeepSeek 官方（只有文本）。地址固定 https://api.deepseek.com，没有 baseUrl 配置项；
+  # 模型从官方 GET /models 发现（含输出上限、图像输入与思考档位）。apiKey 见密钥文件。
+  # deepseek: {}

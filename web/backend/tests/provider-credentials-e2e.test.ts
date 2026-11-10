@@ -109,7 +109,7 @@ function writeSettings(base: string, values: Record<string, unknown>, headers: R
 }
 
 /** 全部自带 Provider 的稳定集合（providerId 排序后）。新增 Provider 时同步这里。 */
-const ALL_PROVIDER_IDS = ["ark", "bailian", "cephalon", "fal", "grsai", "replicate", "runninghub", "tokenhub"].sort();
+const ALL_PROVIDER_IDS = ["ark", "bailian", "cephalon", "deepseek", "fal", "grsai", "replicate", "runninghub", "tokenhub"].sort();
 
 describe("Provider 密钥在自己的配置段里", () => {
   it("每个 Provider 都声明 apiKey 密钥项；写入后 RunningHub 模型进入目录，清除后撤出", async () => {
@@ -187,11 +187,17 @@ describe("插件管理里的 Provider 开关", () => {
       const providerIds = async () =>
         app.service.modules().generation.list().map((provider) => provider.providerId).sort();
       // Provider 自带 Config 与装配入口：它们不出现在控制面 catalog 里（那里只列有后端入口的扩展）。
-      for (const extensionId of ALL_PROVIDER_IDS.map((id) => `${id}-provider`)) {
+      // RunningHub 例外：它同时声明了 `site` 段（账户余额 handler），因此确实由站点控制面管理。
+      for (const extensionId of ALL_PROVIDER_IDS.map((id) => `${id}-provider`).filter((id) => id !== "runninghub-provider")) {
         expect(plane.status(extensionId), extensionId).toBeUndefined();
       }
+      expect(plane.status("runninghub-provider")).toBeDefined();
       // 但 Provider 仍然全部注册可用：启停不经过控制面不等于不工作。
-      expect(await providerIds()).toEqual(ALL_PROVIDER_IDS);
+      // 目录里的 Provider 还有一个不靠 API Key 的 `sdpppx`（登录后投影租户模板），
+      // 它不在上面这份「声明 apiKey 的 Provider」清单里，因此这里只断言包含关系。
+      const registered = await providerIds();
+      for (const id of ALL_PROVIDER_IDS) expect(registered, id).toContain(id);
+      expect(registered).toContain("sdpppx");
     } finally {
       await app.close();
     }

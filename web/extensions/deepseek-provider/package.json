@@ -1,0 +1,38 @@
+{
+  "name": "@woohaa3/extension-deepseek-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DeepSeek 官方生成 Provider：从 GET /models 发现模型，文本走 OpenAI 兼容 Chat Completions（含思考模式与图像理解）。",
+  "exports": {
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "extension.json",
+    "assets"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sdppp/pptask": "workspace:*",
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/provider-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^7.0.2",
+    "vitest": "^2.0.0"
+  }
+}
