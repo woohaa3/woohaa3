@@ -127,7 +127,19 @@ export type SiteExtensionControlPlane = {
    * 详见 control-plane-runtime.ts。
    */
   addExtension: (input: { metadata: ApplicationExtensionMetadata; definition: ApplicationBackendExtensionDefinition }) => Promise<SiteExtensionRuntimeOutcome>;
-  /** 移除运行期登记的扩展：有在途工作 → `extension-busy`；启动期清单 → `extension-not-removable`。站点配置保留。 */
+  /**
+   * 同 id 换版（市场版本覆盖内置版本、受管扩展升级、回滚、开发者模式重装）：元数据覆盖原来那一行、
+   * 定义换成新目录工厂，释放旧实例后按当前配置重新协调。未登记 → `extension-not-found`；
+   * 有在途工作 → `extension-busy`。
+   */
+  replaceExtension: (input: { metadata: ApplicationExtensionMetadata; definition: ApplicationBackendExtensionDefinition }) => Promise<SiteExtensionRuntimeOutcome>;
+  /**
+   * 移除一个扩展：有在途工作 → `extension-busy`。
+   *
+   * **可移除性由元数据的 `origin` 决定，不由「什么时候登记的」决定**：只有 `builtin`（随客户端发布的
+   * 内置根）不可移除（`extension-not-removable`）；`managed` / `dev` / `writable` 都可以卸载，
+   * 包括那些因为装过一次、重启后被扫进启动期清单的受管扩展。站点配置与审计一律保留。
+   */
   removeExtension: (extensionId: string) => Promise<SiteExtensionRuntimeOutcome>;
   /** 在途工作 lease（供插件 facade / 内部工作接线）。 */
   workLease: (extensionId: string) => ExtensionWorkLease | undefined;

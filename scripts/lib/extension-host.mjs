@@ -170,7 +170,10 @@ function siteEntryOf(extension, descriptor, { hasBrowser }) {
     frontendEntry: hasBrowser,
     backendHosts: ["backend"],
     configScope: "site",
-    defaultEnabled: site.defaultEnabled
+    defaultEnabled: site.defaultEnabled,
+    // 来源归属必须跟着条目走：受管扩展装过并重启后也在启动期清单里，但依旧不是内置的。
+    // 可写根（运维手放目录）在扫描记录里沿用 `builtin` 口径，这里按 rootWritable 校正成 `writable`。
+    origin: extension.rootWritable ? "writable" : extension.origin
   };
 }
 
@@ -450,6 +453,8 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
       publicRoutes,
       site: descriptor.site ? true : false,
       hasBrowserArtifact: hasBrowserArtifact(extension.dir),
+      // 扫描器给的在场形态（dev > managed > builtin）；可写根沿用 builtin，由 rootWritable 区分。
+      origin: extension.origin,
       managed: extension.managed === true,
       managedVersion: extension.managedVersion ?? null,
       rootWritable: extension.rootWritable === true,
@@ -491,7 +496,10 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     )
     .map((registration) => siteEntryOf({
       extensionId: registration.extensionId,
-      directory: registration.directory
+      directory: registration.directory,
+      // 来源归属：受管根 / 开发者目录 / 可写根各自保留，只有内置根是不可移除的。
+      origin: registration.origin,
+      rootWritable: registration.rootWritable
     }, registration.descriptor, { hasBrowser: registration.hasBrowserArtifact }));
   const catalogValidation = resolvedContracts.validateApplicationExtensionCatalog?.(siteEntries);
   if (catalogValidation && !catalogValidation.ok) {
@@ -536,7 +544,16 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
         { extensionId: registration.extensionId, directory: registration.directory, actual: value.extensionId }
       );
     }
-    providerMetadata.push({ registration, value: { ...value, directory: registration.directory } });
+    providerMetadata.push({
+      registration,
+      // 来源归属同样要带上：provider metadata 会与站点条目一起去重合并，
+      // 缺了 origin 的那一条会按 `builtin` 缺省处理，导致受管的 provider 扩展不可卸载。
+      value: {
+        ...value,
+        directory: registration.directory,
+        origin: registration.rootWritable ? "writable" : registration.origin
+      }
+    });
   }
 
   // 公开路由：字面量直接取值；导出名从扩展模块读取。

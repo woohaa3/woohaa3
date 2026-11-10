@@ -152,6 +152,8 @@ test("加载声明：后端清单、站点目录、公开路由与 browser 产�
   assert.deepEqual(host.roots.map((root) => path.relative(repoRoot, root)), ["rootA", "rootB"]);
   assert.deepEqual(host.siteExtensionIds, ["alpha"]);
   assert.deepEqual(host.siteEntries[0].frontendEntry, true);
+  // 来源归属随条目一路带出：rootA 是内置根（rootWritable=false）。
+  assert.equal(host.siteEntries[0].origin, "builtin");
   // metadata = provider metadata（按声明 order）+ 站点目录条目。
   assert.deepEqual(host.metadata.map((entry) => entry.extensionId), ["beta", "alpha"]);
 
@@ -861,6 +863,23 @@ test("内置根里的市场来源：正常装配到 marketplace-source 分组，
   const plugins = await host.createHostPlugins({});
   assert.deepEqual(plugins.plugins.map((plugin) => plugin.name), ["builtin-source"]);
   assert.deepEqual(plugins.plugins[0].origin, { managed: false, rootWritable: false });
+});
+
+test("受管根里的站点扩展：siteEntries 带 origin=managed（不是内置，可卸载可换版）", async () => {
+  const repoRoot = makeRepo();
+  const managedRoot = path.join(repoRoot, "managed");
+  writeManagedExtension(managedRoot, "managed-site", {
+    descriptor: { site: siteBlock("managed-site", 20), hostPlugin: { module: "./backend", factory: "createOk", features: ["provider"] } },
+    backendSource: hostPluginSource("managed-site", "createOk")
+  });
+  writeExtension(repoRoot, "rootA", "builtin-site", {
+    descriptor: { schemaVersion: 1, extensionId: "builtin-site", site: siteBlock("builtin-site", 10) }
+  });
+  const host = await loadExtensionHost({ repoRoot, env: { [MANAGED_DIR_ENV]: managedRoot }, logger: () => undefined, isolation: false });
+  // 两者都在启动期清单里，但归属不同：只有内置根不可卸载。
+  const byId = Object.fromEntries(host.siteEntries.map((entry) => [entry.extensionId, entry]));
+  assert.equal(byId["managed-site"].origin, "managed");
+  assert.equal(byId["builtin-site"].origin, "builtin");
 });
 
 test("受管根：bootstrap / canvasContent / 来源 / 模块缺失只拒绝该扩展，其他扩展照常装配", async () => {

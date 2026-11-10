@@ -151,20 +151,30 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
       const layer = () => ctx.get("extensionLayer");
       const versionOf = (directory: string) => path.basename(directory);
       /**
-       * 运行期安装的站点扩展不在启动扫描的 host.metadata 里；从包声明派生一份与
-       * `siteEntryOf` 同形的元数据，否则 hostPlugin + site 只会装载插件、不会进站点目录，
-       * 前端 `server-active` 要等到下次启动才生效。
+       * 站点扩展的元数据：优先用**这次要装载的目录**里的声明，只有启动期那一行指向同一目录时才复用它。
+       *
+       * 受管扩展装过一次并被重启扫到后，`host.metadata` 里那一行的 version / directory 指向旧版本目录；
+       * 换版若沿用它会得到「新代码 + 旧元数据」，前端版本号与控制面目录都停在旧值。
+       *
+       * `origin` 同样要跟着目录重算：它决定这一行能不能被卸载。目录落在受管根下就是 `managed`——
+       * 即便它出现在启动期扫描清单里，也不是内置扩展。
        */
+      const originOfDirectory = (extensionId: string, directory: string) => {
+        const installedRoot = path.join(managedRoot, "installed") + path.sep;
+        if (path.resolve(directory).startsWith(installedRoot)) return "managed" as const;
+        const found = host.metadata?.find((entry) => entry.extensionId === extensionId);
+        return found?.origin ?? "builtin";
+      };
       const siteMetadataOf = (extensionId: string, directory: string, descriptor: unknown) => {
         const found = host.metadata?.find((entry) => entry.extensionId === extensionId);
-        if (found) return found;
         const site = (descriptor as { site?: Record<string, unknown> } | null)?.site;
-        if (!site) return null;
+        if (!site) return found ?? null;
         return {
+          ...(found ?? {}),
           extensionId,
           directory,
-          name: typeof site.name === "string" ? site.name : extensionId,
-          description: typeof site.description === "string" ? site.description : "",
+          name: typeof site.name === "string" ? site.name : found?.name ?? extensionId,
+          description: typeof site.description === "string" ? site.description : found?.description ?? "",
           version: typeof site.version === "string" ? site.version : versionOf(directory),
           managementScope: "site",
           host: "backend",
@@ -174,10 +184,17 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
           ...(site.defaultEnabled === undefined ? {} : { defaultEnabled: site.defaultEnabled }),
           frontendEntry: existsSync(path.join(directory, "browser-dist", "artifact-manifest.json")),
           backendHosts: ["backend"],
-          configScope: "site"
+          configScope: "site",
+          origin: originOfDirectory(extensionId, directory)
         } as never;
       };
-      const mount = async (extensionId: string, directory: string, version?: string) => {
+      /**
+       * 装配一个版本。
+       *
+       * `replace` = 控制面目录里已有这个 id（受管扩展装过、重启后被扫描进启动期清单，或换版/回滚）。
+       * 那种情况走 `replaceExtension` 覆盖同一行，而不是 add。
+       */
+      const mount = async (extensionId: string, directory: string, version?: string, options: { replace?: boolean } = {}) => {
         // `version` 同时是模块身份：开发者模式的产物始终在同一目录，靠它制造新的模块 URL（D6）。
         const loaded = await toolkit.loadRuntimePlugin!({ dir: directory, extensionId, version: version ?? versionOf(directory) });
         const plane = application()?.service.plugins();
@@ -194,7 +211,9 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
         }
         await entry.started;
         if (definition && plane) {
-          const outcome = await plane.addExtension({ metadata: metadata as never, definition });
+          const outcome = options.replace
+            ? await plane.replaceExtension({ metadata: metadata as never, definition })
+            : await plane.addExtension({ metadata: metadata as never, definition });
           if (!outcome.ok) {
             await layer()!.remove(extensionId);
             gate?.remove(extensionId);
@@ -209,16 +228,12 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
           if (!target) throw Object.assign(new Error("宿主不支持运行期装配"), { code: "extension-host-unsupported" });
           const plane = application()?.service.plugins();
           const gate = application()?.siteGate;
-          // 站点扩展的旧版本在控制面里还有一条运行期记录；先移除，否则新版本 addExtension
-          // 会撞 extension-exists。provider/storage 插件没有这条记录，listed 为 false。
+          // 控制面目录里已有这个 id 时，新版本要**覆盖同一行**（replaceExtension），不能先摘再加：
+          // 摘除对启动期清单的行是拒绝的，受管扩展装过并重启后它就在启动期清单里。
           const listed = plane?.snapshot().catalog.some((entry) => entry.extensionId === extensionId) ?? false;
-          if (listed && plane) {
-            const removed = await plane.removeExtension(extensionId);
-            if (!removed.ok && removed.code !== "extension-not-found") {
-              throw Object.assign(new Error(removed.message ?? "站点扩展无法热切换"), { code: removed.code });
-            }
-            gate?.remove(extensionId);
-          }
+          // 门禁的那一条要重建：装载闭包（fiber / 注册面）换新了，旧 handle 只会重启动旧插件。
+          // 它只影响「谁来 acquire」，不动控制面那一行。
+          gate?.remove(extensionId);
           // 换版窗口：从撤旧到装配完成之间，该扩展的路由 / Provider 都不存在。
           // 网关据此返回可重试的 extension-reloading，而不是让调用方看到 404。
           beginSwap(extensionId);
@@ -226,13 +241,13 @@ export const extensionManagerPlugin: HostPlugin<ExtensionManagerPluginConfig> = 
             // 先撤旧：同名插件不能并存。
             await target.remove(extensionId);
             try {
-              await mount(extensionId, directory, version);
+              await mount(extensionId, directory, version, { replace: listed });
               return { swapped: true };
             } catch (error) {
               if (previousDirectory) {
                 try {
                   // 装回时必须带旧 token：同目录不同 token 才是不同模块实例。
-                  await mount(extensionId, previousDirectory, previousVersion ?? undefined);
+                  await mount(extensionId, previousDirectory, previousVersion ?? undefined, { replace: listed });
                 } catch (restoreError) {
                   log({ event: "extension-swap-restore-failed", extensionId, message: restoreError instanceof Error ? restoreError.message : String(restoreError) });
                 }

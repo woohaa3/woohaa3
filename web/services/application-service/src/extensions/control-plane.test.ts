@@ -573,7 +573,8 @@ describe("崩溃熔断 quarantined（change: 2026-10-21-isolate-extension-host-p
 });
 
 describe("运行期登记 addExtension / removeExtension（首次安装的受管后端扩展）", () => {
-  const LATE: ApplicationExtensionMetadata = { ...METADATA, extensionId: "late-ext", name: "运行期扩展", defaultEnabled: true };
+  // 运行期登记的就是市场装到受管根里的扩展：来源是 managed，所以可卸载。
+  const LATE: ApplicationExtensionMetadata = { ...METADATA, extensionId: "late-ext", name: "运行期扩展", defaultEnabled: true, origin: "managed" };
   const lateDefinition = (counter: { activations: number }, activate?: () => Promise<void>) =>
     ({
       extensionId: "late-ext",
@@ -672,6 +673,116 @@ describe("运行期登记 addExtension / removeExtension（首次安装的受管
     expect(enabled.ok && enabled.status.actualState).toBe("quarantined");
     expect(counter.activations).toBe(activations);
     second.store.close();
+  });
+});
+
+/**
+ * 跨重启升级 / 卸载（回归：0.1.3 → 0.1.4 报 `MARKETPLACE_SWAP_FAILED` / `extension-not-removable`）。
+ *
+ * 受管扩展装过一次并重启后，它就在启动期扫描出的清单里。归属必须由 `origin` 决定，而不是
+ * 「是否由运行期 add 登记」——否则它会一路被当成内置扩展：既不能换版，也不能卸载。
+ */
+describe("归属由 origin 决定：受管可换版可卸载，内置不可", () => {
+  const BOOTSTRAP: ApplicationExtensionMetadata = {
+    ...METADATA,
+    extensionId: "bootstrap-ext",
+    name: "启动期装配的受管扩展",
+    directory: "installed/bootstrap-ext/1.0.0",
+    version: "1.0.0",
+    defaultEnabled: true,
+    // 已装过一次并被重启扫到：在启动期清单里，但来自受管根。
+    origin: "managed"
+  };
+  const NEXT: ApplicationExtensionMetadata = { ...BOOTSTRAP, directory: "installed/bootstrap-ext/1.1.0", version: "1.1.0" };
+  const definitionFor = (counter: { activations: number }, id = "bootstrap-ext") =>
+    ({
+      extensionId: id,
+      activate: async () => {
+        counter.activations += 1;
+      }
+    }) satisfies ApplicationBackendExtensionDefinition;
+
+  const planeWithBootstrap = (counter: { activations: number }, overrides: Parameters<typeof makePlane>[0] = {}) =>
+    makePlane({
+      metadata: [METADATA, BOOTSTRAP],
+      definitions: [definitionFor(counter), { extensionId: METADATA.extensionId, activate: () => undefined }],
+      ...overrides
+    });
+
+  it("replace：覆盖启动期那一行（版本与目录更新），旧实例释放后按配置重新激活；add 仍撞 extension-exists", async () => {
+    const counter = { activations: 0 };
+    const { plane, store, host } = planeWithBootstrap(counter);
+    await plane.reconcile();
+    expect(plane.status("bootstrap-ext")).toMatchObject({ actualState: "active" });
+    expect(host.activeVersions("bootstrap-ext")).toHaveLength(1);
+    const before = counter.activations;
+
+    // 这一行已经存在：add 会撞 extension-exists，换版才是正确路径。
+    expect(await plane.addExtension({ metadata: NEXT, definition: definitionFor(counter) })).toMatchObject({ ok: false, code: "extension-exists" });
+
+    const replaced = await plane.replaceExtension({ metadata: NEXT, definition: definitionFor(counter) });
+    expect(replaced.ok).toBe(true);
+    expect(replaced.ok && replaced.status).toMatchObject({ extensionId: "bootstrap-ext", actualState: "active" });
+    // 旧实例已被释放，新版本重新装配了一次。
+    expect(counter.activations).toBe(before + 1);
+    expect(host.activeVersions("bootstrap-ext")).toHaveLength(1);
+    // 目录与版本跟着新目录走，不会停在启动期扫描到的旧值。
+    expect(plane.snapshot().catalog.find((entry) => entry.extensionId === "bootstrap-ext")).toMatchObject({
+      version: "1.1.0",
+      directory: "installed/bootstrap-ext/1.1.0"
+    });
+    // 仍然只有一行。
+    expect(plane.snapshot().catalog.filter((entry) => entry.extensionId === "bootstrap-ext")).toHaveLength(1);
+    store.close();
+  });
+
+  it("replace：未登记 → extension-not-found；有在途工作 → extension-busy；运行期 add 的行同样可换版", async () => {
+    const counter = { activations: 0 };
+    const { plane, store } = makePlane();
+    expect(await plane.replaceExtension({ metadata: NEXT, definition: definitionFor(counter) })).toMatchObject({ ok: false, code: "extension-not-found" });
+
+    const late = { ...BOOTSTRAP, extensionId: "late-ext", directory: "installed/late-ext/1.0.0" };
+    await plane.addExtension({ metadata: late, definition: definitionFor(counter, "late-ext") });
+    const work = plane.workFacade("late-ext").admit();
+    expect(await plane.replaceExtension({ metadata: { ...late, version: "1.1.0" }, definition: definitionFor(counter, "late-ext") })).toMatchObject({
+      ok: false,
+      code: "extension-busy"
+    });
+    plane.workFacade("late-ext").resume((work as { workId: string }).workId)!.settle("succeeded");
+    const replaced = await plane.replaceExtension({ metadata: { ...late, directory: "installed/late-ext/1.1.0", version: "1.1.0" }, definition: definitionFor(counter, "late-ext") });
+    expect(replaced.ok && replaced.status?.actualState).toBe("active");
+    expect(plane.snapshot().catalog.map((entry) => entry.extensionId)).toEqual(["sample-site-extension", "late-ext"]);
+    store.close();
+  });
+
+  it("受管扩展（已在启动期清单里）可以直接卸载：实例释放、本进程内消失；重装沿用配置", async () => {
+    const counter = { activations: 0 };
+    const { plane, store, host } = planeWithBootstrap(counter);
+    await plane.reconcile();
+    expect(host.activeVersions("bootstrap-ext")).toHaveLength(1);
+
+    const removed = await plane.removeExtension("bootstrap-ext");
+    expect(removed).toMatchObject({ ok: true });
+    expect(host.activeVersions("bootstrap-ext")).toEqual([]);
+    expect(plane.status("bootstrap-ext")).toBeUndefined();
+    expect(plane.snapshot().catalog.map((entry) => entry.extensionId)).toEqual([METADATA.extensionId]);
+    // 卸载只推进实际状态、不改 desiredEnabled：本次进程内重新登记时仍按 manifest 的 defaultEnabled 生效。
+    const readded = await plane.addExtension({ metadata: BOOTSTRAP, definition: definitionFor(counter) });
+    expect(readded.ok && readded.status).toMatchObject({ actualState: "active", desiredEnabled: true });
+    store.close();
+  });
+
+  it("内置扩展仍拒绝卸载；未声明 origin 按内置处理（保守缺省）", async () => {
+    const counter = { activations: 0 };
+    // METADATA 没有 origin → 缺省 builtin。
+    const { plane, store } = makePlane({
+      definitions: [{ extensionId: METADATA.extensionId, activate: () => undefined }]
+    });
+    await plane.reconcile();
+    expect(await plane.removeExtension(METADATA.extensionId)).toMatchObject({ ok: false, code: "extension-not-removable" });
+    expect(await plane.removeExtension("nope")).toMatchObject({ ok: false, code: "extension-not-found" });
+    store.close();
+    expect(counter.activations).toBe(0);
   });
 });
 

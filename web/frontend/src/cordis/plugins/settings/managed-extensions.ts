@@ -54,7 +54,7 @@ const FAILURE_LABELS: Record<string, string> = {
   MARKETPLACE_UNAVAILABLE: "本机宿主未启用扩展安装",
   MARKETPLACE_CANCELLED: "已取消",
   MARKETPLACE_PACKAGE_INVALID: "安装包缺少构建期描述，请用新版 pack:extension 重新打包",
-  MARKETPLACE_SWAP_FAILED: "新版本未能在独立进程中就绪，已保留原版本",
+  MARKETPLACE_SWAP_FAILED: "新版本未能在本进程内就绪，已保留原版本",
   MARKETPLACE_SOURCE_NOT_FOUND: "安装来源不存在",
   unauthorized: "需要管理员权限",
   forbidden: "没有管理插件的权限",

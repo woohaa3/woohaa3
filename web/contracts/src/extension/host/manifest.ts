@@ -29,6 +29,15 @@ export type ApplicationExtensionManagementScope = (typeof APPLICATION_EXTENSION_
 export const APPLICATION_EXTENSION_HOSTS = ["backend", "application", "task"] as const;
 export type ApplicationExtensionHost = (typeof APPLICATION_EXTENSION_HOSTS)[number];
 
+/**
+ * 扩展的来源归属（它来自哪个根）。
+ *
+ * 与「是否在启动期清单里」是两件事：受管扩展安装过一次并重启后，也会出现在启动期扫描结果里，
+ * 但它依旧来自受管根、依旧可以被卸载或被更高版本替换。只有 `builtin` 是不可移除的。
+ */
+export const APPLICATION_EXTENSION_ORIGINS = ["builtin", "managed", "dev", "writable"] as const;
+export type ApplicationExtensionOrigin = (typeof APPLICATION_EXTENSION_ORIGINS)[number];
+
 /** 后端宿主注入的 identity；站点插件生产宿主为 application。 */
 export type ApplicationExtensionHostIdentity = ApplicationExtensionHost;
 
@@ -89,6 +98,18 @@ export type ApplicationExtensionMetadata = {
    * 未声明按 `false` 处理（控制面只看 `=== true`）：站点扩展不会因为漏写这一项而自动启用。
    */
   defaultEnabled?: boolean;
+  /**
+   * 这一行的**来源归属**：它来自哪个根，而不是「什么时候登记的」。
+   *
+   * 决定可移除性：只有 `builtin`（随客户端发布的内置根）是不可移除的；`managed`（市场安装到受管根）、
+   * `dev`（开发者目录）与 `writable`（运维手放的可写根）都是外部装入的，随时可以卸载或被替换。
+   *
+   * 这个字段必须随扫描结果一路带到控制面：受管扩展装过一次并重启后也会出现在启动期扫描清单里，
+   * 若用「是否在启动期清单」判断归属，它就会被误当成内置、拒绝卸载与换版。
+   *
+   * 缺省（未声明）按 `builtin` 处理——最保守的一侧，旧调用方不会因此获得额外权限。
+   */
+  origin?: ApplicationExtensionOrigin;
 };
 
 /** 编码器禁止字段：可执行入口和秘密载体不允许进入公开元数据。 */
@@ -208,6 +229,9 @@ export function decodeApplicationExtensionMetadata(body: unknown): DecodeResult<
   if (body.defaultEnabled !== undefined && typeof body.defaultEnabled !== "boolean") {
     return fail("malformed-request", "defaultEnabled 必须是布尔值");
   }
+  if (body.origin !== undefined && !APPLICATION_EXTENSION_ORIGINS.includes(body.origin as never)) {
+    return fail("malformed-request", "origin 非法");
+  }
   if (!isJsonObject(body.configSchema)) return fail("malformed-request", "configSchema 非法");
   if (!isBoundedId(body.configSchema.schemaId)) return fail("malformed-request", "configSchema.schemaId 非法");
   if (!isNonNegativeInteger(body.configSchema.schemaVersion)) {
@@ -229,6 +253,7 @@ export function decodeApplicationExtensionMetadata(body: unknown): DecodeResult<
       managementScope: "site",
       host: body.host as ApplicationExtensionHost,
       ...(body.defaultEnabled !== undefined ? { defaultEnabled: body.defaultEnabled } : {}),
+      ...(body.origin !== undefined ? { origin: body.origin as ApplicationExtensionOrigin } : {}),
       configSchema: {
         schemaId: body.configSchema.schemaId,
         schemaVersion: body.configSchema.schemaVersion

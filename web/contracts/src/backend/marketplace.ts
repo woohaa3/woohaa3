@@ -48,7 +48,7 @@ export const MARKETPLACE_FAILURE_CODES = [
   "MARKETPLACE_CANCELLED",
   /** 包缺少必需产物（如旧包没有 backend-dist/config-schema.json）。 */
   "MARKETPLACE_PACKAGE_INVALID",
-  /** 子进程蓝绿切换失败（新进程未就绪 / 健康检查失败），保留旧版本。 */
+  /** 进程内热切换失败（新版本未能装配就绪），保留旧版本。 */
   "MARKETPLACE_SWAP_FAILED"
 ] as const;
 export type MarketplaceFailureCode = (typeof MARKETPLACE_FAILURE_CODES)[number];

@@ -502,6 +502,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     reconcile,
     requiredReconciled: () => requiredReconciled,
     addExtension: runtime.addExtension,
+    replaceExtension: runtime.replaceExtension,
     removeExtension: runtime.removeExtension,
     quarantine: quarantineOps.quarantine,
     unquarantine: quarantineOps.unquarantine,
