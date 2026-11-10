@@ -339,6 +339,12 @@ export type ConversationTurn = {
   connection?: AgentConnectionBinding;
   /** 该回合冻结的角色身份；旧回合缺省即 legacy，不补造。 */
   role?: AgentRoleRef;
+  /**
+   * 执行器 journal 的已消费事件 cursor（change: 2026-11-10-split-agent-runtime-lifecycle）。
+   *
+   * 宿主重启后从这里继续；旧回合缺省表示尚未建立游标。
+   */
+  executorCursor?: number;
   error?: { code: string; message: string };
   createdAt: string;
   updatedAt: string;
@@ -346,7 +352,9 @@ export type ConversationTurn = {
 
 /**
  * 事件类型：accepted/stage/message-delta/message-completed/tool-started/tool-completed/
- * task-linked/receipt/error。
+ * task-linked/receipt/error/recovered。
+ *
+ * `recovered` 只表示宿主重启后按执行器 journal 接回了原回合，不是伪造的助手消息。
  *
  * `message-delta` 标记一条消息**开始**并有内容更新（payload 只带 `messageId`/`role`；正文从快照
  * 读取，避免按 token 膨胀事件窗口）；`message-completed` 标记该消息结束。同一条消息只有这两个
@@ -362,6 +370,7 @@ export const CONVERSATION_EVENT_TYPES = [
   "task-linked",
   "receipt",
   "error",
+  "recovered",
   "skill-step-updated"
 ] as const;
 export type ConversationEventType = (typeof CONVERSATION_EVENT_TYPES)[number];
@@ -473,6 +482,20 @@ export type AgentAdapterRunInput = {
   images?: readonly { bytes: Uint8Array; contentType: string }[];
   signal: AbortSignal;
   emit: (event: AgentConversationAdapterEvent) => void;
+  /**
+   * 宿主重启接管（change: 2026-11-10-split-agent-runtime-lifecycle，任务 3.2）。
+   *
+   * 只由宿主在 `resume` 路径注入：表示从执行器 journal 的哪个 cursor 继续。
+   * 缺省表示新回合，从头跟随。旧回合没有 cursor 时由宿主传 `"head"`，跳过历史重放。
+   */
+  resumeCursor?: number | "head";
+  /**
+   * 带执行器 cursor 的事件投递（宿主接管时注入）。
+   *
+   * 提供时通道用它替代 `emit`：宿主按 `(turnId, cursor)` 幂等落库，重复重放不重复写
+   * 消息/阶段；没有 cursor 的旧通道仍调用 `emit`。
+   */
+  emitExecutor?: (cursor: number, event: AgentConversationAdapterEvent) => void;
 };
 
 export type AgentImageInput = { bytes: Uint8Array; contentType: string };
@@ -489,6 +512,12 @@ export type AgentConversationAdapter = {
   models(input: { owner: string }): Promise<AgentCatalogSnapshot>;
   /** 讨论或目标执行；未声明能力时调用方 MUST 拒绝并说明原因。 */
   run(input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome>;
+  /**
+   * 宿主重启接管：按冻结输入接回执行器 journal，从 cursor 继续跟随事件并返回终态。
+   *
+   * 缺失时宿主退回「查询一次 + 按事实结算」；不得为了接管而重新推理或重放写动作。
+   */
+  resume?(input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome | null>;
   /** 重启后核对领域回执（不自动重推理）。 */
   query?(input: { owner: string; requestId: string }): Promise<AgentAdapterRunOutcome | null>;
   /** 取消在途回合（不撤销已提交领域动作）。 */

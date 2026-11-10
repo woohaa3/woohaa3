@@ -589,3 +589,31 @@ it("text query, retry and exact stop authorize the trusted owner before touching
   const link = await fetch(`${allowed.base}/api/agent-conversations/turns/round/link`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: "spoofed" }) });
   expect(link.status).toBe(400);
 });
+
+describe("conversation read recovery (task 5.1)", () => {
+  it("returns the adopted running turn on re-read without resubmitting work", async () => {
+    const acceptTurn = vi.fn(() => { throw new Error("must not accept"); });
+    const dispatchTurn = vi.fn(() => { throw new Error("must not dispatch"); });
+    const snapshot = {
+      conversation: { conversationId: "conv-1", canvasId: "canvas-1", adapterId: "local-agent", title: "t", status: "active", createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:01:00.000Z", turnCount: 1 },
+      messages: [{ messageId: "m1", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "user", content: "hello", truncated: false, sequence: 1, createdAt: "2026-11-10T00:00:00.000Z" }],
+      turns: [{ turnId: "turn-1", conversationId: "conv-1", requestId: "req-1", action: "modify", status: "running", stage: "writing", target: { canvasId: "canvas-1", nodeId: "n1" }, tools: [], executorCursor: 3, createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:01:00.000Z" }],
+      events: [],
+      cursor: 0
+    };
+    const service = {
+      ...serviceStub(),
+      readConversation: () => ({ ok: true, snapshot }),
+      acceptTurn,
+      dispatchTurn
+    } as unknown as AgentConversationService;
+    const { base } = await boot({ service });
+    const first = await fetch(`${base}/api/agent-conversations/conversations/conv-1`).then((response) => response.json()) as typeof snapshot;
+    const second = await fetch(`${base}/api/agent-conversations/conversations/conv-1`).then((response) => response.json()) as typeof snapshot;
+    expect(first.turns[0]).toMatchObject({ status: "running", stage: "writing", executorCursor: 3 });
+    expect(second.messages).toEqual(first.messages);
+    expect(second.turns[0]!.status).toBe("running");
+    expect(acceptTurn).not.toHaveBeenCalled();
+    expect(dispatchTurn).not.toHaveBeenCalled();
+  });
+});

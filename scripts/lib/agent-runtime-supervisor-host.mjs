@@ -1,14 +1,12 @@
 /**
- * Agent Supervisor 的宿主侧生命周期：启动、探活与自动重启。
+ * 执行器运行时的宿主侧接入：连接既有实例，缺失时才按需拉起。
  *
- * Supervisor 是 dev 启动器拉起的独立进程，后端只是它的客户端。二者生命周期不同：
- * 后端由 `node --watch` 长期持有，Supervisor 却可能在开发过程中被外部清理（清理脚本、
- * OOM、`kill -9`）——此后后端的每一次 ensure 都变成裸的
- * `connect ENOENT .../supervisor.sock`，页面表现为「生成」直接失败，而且不会自己恢复。
+ * change: 2026-11-10-split-agent-runtime-lifecycle（任务 1.3 / design D5）
  *
- * 这里把「Supervisor 必须存在」变成启动器持续维持的不变量：`startWatch()` 定时 ping，
- * 端点消失或换了 workspace 就重新拉起。socket 路径、token 与 workspaceKey 保持不变，
- * 因此已经持有这些环境变量的后端无需重启，下一次请求即可连上新的 Supervisor。
+ * 运行时是 **workspace 级独立实例**：宿主与开发启动器只负责探活与连接，不拥有它的生命周期。
+ * - 先读 `executor.json` 身份快照并 `ping`，workspace/schema 匹配就复用；
+ * - 端点缺失或进程已退出才 detached 拉起，且不再传 `--owner-pid`；
+ * - `stopWatch()` / `stop()` 只停止探活，不调用 `shutdown`。
  *
  * 端点命名与 Windows 差异见 ./agent-runtime-endpoints.mjs。
  */
@@ -28,6 +26,9 @@ const RPC_TIMEOUT_MS = 3000;
 /** 探活使用更短的超时：卡死的进程也要在下一轮之前被判定为不可用。 */
 const PING_TIMEOUT_MS = 2000;
 const STARTUP_TIMEOUT_MS = 5000;
+
+/** 与 `execution-runtime/src/identity.ts` 对齐（脚本不编译 TS，只读同一份快照）。 */
+export const EXECUTOR_IDENTITY_SCHEMA_VERSION = 2;
 
 function delay(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms));
@@ -66,11 +67,69 @@ export function supervisorRpc(config, method, params = {}, timeoutMs = RPC_TIMEO
 }
 
 /**
+ * 读取身份快照；不在这里创建目录（创建语义归 daemon 与 dev 启动器）。
+ * 返回 `{ status: "missing" | "legacy" | "malformed" | "insecure" | "ok", identity? }`。
+ */
+export function readRuntimeIdentity(runtimeDir) {
+	let stat;
+	try {
+		stat = fs.lstatSync(runtimeDir);
+	} catch (error) {
+		if (error?.code === "ENOENT") return { status: "missing" };
+		return { status: "malformed", message: describeError(error) };
+	}
+	if (process.platform !== "win32") {
+		if (!stat.isDirectory() || stat.isSymbolicLink()) return { status: "insecure", message: "运行时目录必须是真实目录" };
+		if (typeof process.getuid === "function" && stat.uid !== process.getuid()) return { status: "insecure", message: "运行时目录必须属于当前用户" };
+		if ((stat.mode & 0o077) !== 0) return { status: "insecure", message: "运行时目录必须为私有目录（0700）" };
+	}
+	let text;
+	try {
+		text = fs.readFileSync(path.join(runtimeDir, "executor.json"), "utf8");
+	} catch (error) {
+		if (error?.code === "ENOENT") return { status: "missing" };
+		return { status: "malformed", message: describeError(error) };
+	}
+	let value;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return { status: "malformed", message: "executor.json 不是合法 JSON" };
+	}
+	if (!value || typeof value !== "object" || typeof value.schemaVersion !== "number") {
+		return { status: "legacy", message: "executor.json 缺少 schemaVersion" };
+	}
+	const strings = ["workspaceKey", "socketPath", "token", "runtimeVersion"];
+	if (strings.some(key => typeof value[key] !== "string" || value[key].trim() === "")
+		|| !Number.isInteger(value.pid) || value.pid <= 0
+		|| !Number.isFinite(value.startedAt) || value.startedAt <= 0) {
+		return { status: "malformed", message: "executor.json 字段不完整" };
+	}
+	if (value.schemaVersion !== EXECUTOR_IDENTITY_SCHEMA_VERSION) {
+		return { status: "incompatible", message: `运行时 schema ${value.schemaVersion} 与当前 ${EXECUTOR_IDENTITY_SCHEMA_VERSION} 不兼容`, identity: value };
+	}
+	return {
+		status: "ok",
+		identity: {
+			schemaVersion: value.schemaVersion,
+			workspaceKey: value.workspaceKey,
+			pid: value.pid,
+			socketPath: value.socketPath,
+			token: value.token,
+			startedAt: value.startedAt,
+			runtimeVersion: value.runtimeVersion
+		}
+	};
+}
+
+/**
  * @param {{
  *   root: string,
  *   runtimeDir: string,
  *   workspaceKey?: string,
  *   rpc?: typeof supervisorRpc,
+ *   spawnProcess?: typeof spawn,
+ *   readIdentity?: typeof readRuntimeIdentity,
  *   log?: (message: string) => void,
  *   watchIntervalMs?: number,
  *   startupTimeoutMs?: number
@@ -81,6 +140,8 @@ export function createAgentSupervisorHost({
 	runtimeDir,
 	workspaceKey = hashKey(path.resolve(root)),
 	rpc = supervisorRpc,
+	spawnProcess = spawn,
+	readIdentity = readRuntimeIdentity,
 	log = () => undefined,
 	watchIntervalMs = SUPERVISOR_WATCH_INTERVAL_MS,
 	startupTimeoutMs = STARTUP_TIMEOUT_MS
@@ -106,7 +167,8 @@ export function createAgentSupervisorHost({
 		}
 		return script;
 	};
-	/** token 在本次会话内固定：文件被删掉后重建新 token 会让已注入后端的环境失效。 */
+
+	/** token 只用于「没有既有身份时的新实例」；已有身份一律复用其 token。 */
 	let token = "";
 	let config = null;
 	let pending = null;
@@ -117,12 +179,12 @@ export function createAgentSupervisorHost({
 	const readToken = () => {
 		if (token) return token;
 		fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-        if(process.platform!=="win32") {
-            const directory=fs.lstatSync(runtimeDir);
-            if(!directory.isDirectory() || directory.isSymbolicLink() || directory.uid!==process.getuid() || (directory.mode & 0o077)!==0) {
-                throw new Error("Agent runtime directory must be a private directory owned by the current user");
-            }
-        }
+		if (process.platform !== "win32") {
+			const directory = fs.lstatSync(runtimeDir);
+			if (!directory.isDirectory() || directory.isSymbolicLink() || (typeof process.getuid === "function" && directory.uid !== process.getuid()) || (directory.mode & 0o077) !== 0) {
+				throw new Error("Agent runtime directory must be a private directory owned by the current user");
+			}
+		}
 		token = fs.existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : "";
 		if (!token) {
 			token = crypto.randomBytes(32).toString("hex");
@@ -131,22 +193,41 @@ export function createAgentSupervisorHost({
 		return token;
 	};
 
+	const pingIdentity = async (identity) => {
+		const state = await rpc({ socketPath: identity.socketPath, token: identity.token, workspaceKey: identity.workspaceKey }, "ping", {}, PING_TIMEOUT_MS);
+		return state?.workspaceKey === workspaceKey;
+	};
+
 	const launch = async () => {
 		if (stopped) throw new Error("Agent Supervisor 已停止");
-		const next = { socketPath, token: readToken(), workspaceKey };
-		if (fs.existsSync(socketPath)) {
+		const stored = readIdentity(runtimeDir);
+		if (stored.status === "ok") {
+			const identity = stored.identity;
+			if (identity.workspaceKey !== workspaceKey) {
+				throw new Error(`运行时属于其它 workspace（${identity.workspaceKey}），拒绝复用也不结束该实例`);
+			}
 			try {
-				const state = await rpc(next, "ping", {}, PING_TIMEOUT_MS);
-				if (state?.workspaceKey === workspaceKey) return { ...next, pid: state.pid };
+				if (await pingIdentity(identity)) {
+					log(`复用执行器运行时（pid ${identity.pid}，${identity.runtimeVersion}）`);
+					return { socketPath: identity.socketPath, token: identity.token, workspaceKey, pid: identity.pid, reused: true };
+				}
+				log(`执行器运行时端点无响应（pid ${identity.pid}），按缺失处理`);
 			} catch (error) {
-				log(`Agent Supervisor 端点不可用（${describeError(error)}），重新拉起`);
+				log(`执行器运行时探活失败（${describeError(error)}），按缺失处理`);
 			}
-			// 命名管道没有 unlink 语义：随最后一个句柄关闭由系统回收，跳过清理。
-			if (process.platform !== "win32") {
-				try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
-			}
+		} else if (stored.status === "legacy" || stored.status === "incompatible") {
+			// 旧运行时不是「缺失」：不接管，也不结束；端点可能仍被它占用。
+			throw new Error(`执行器运行时${stored.status === "legacy" ? "缺少身份版本" : "版本不兼容"}：${stored.message}；请显式 runtime stop 后重启`);
+		} else if (stored.status === "insecure") {
+			throw new Error(`执行器运行时目录不满足私有权限：${stored.message}`);
 		}
-		const child = spawn(process.execPath, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey, "--owner-pid", String(process.pid)], {
+
+		const next = { socketPath, token: readToken(), workspaceKey };
+		// 命名管道没有 unlink 语义：随最后一个句柄关闭由系统回收，跳过清理。
+		if (process.platform !== "win32") {
+			try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
+		}
+		const child = spawnProcess(process.execPath, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey], {
 			cwd: root, detached: true, stdio: "ignore", windowsHide: true
 		});
 		child.unref();
@@ -156,7 +237,7 @@ export function createAgentSupervisorHost({
 			if (stopped) throw new Error("Agent Supervisor 已停止");
 			try {
 				const state = await rpc(next, "ping", {}, PING_TIMEOUT_MS);
-				if (state?.workspaceKey === workspaceKey) return { ...next, pid: state.pid };
+				if (state?.workspaceKey === workspaceKey) return { ...next, pid: state.pid, reused: false };
 			} catch (error) {
 				lastError = error;
 				await delay(100);
@@ -195,14 +276,15 @@ export function createAgentSupervisorHost({
 			}
 			config = null;
 			await ensure();
-			log(`Agent Supervisor 已重启（pid ${config?.pid ?? "unknown"}）`);
+			log(`Agent Supervisor 已恢复（pid ${config?.pid ?? "unknown"}）`);
 		} catch (error) {
-			log(`Agent Supervisor 自动重启失败：${error.message}，下一轮继续重试`);
+			log(`Agent Supervisor 自动恢复失败：${error.message}，下一轮继续重试`);
 		} finally {
 			checking = false;
 		}
 	};
 
+	/** 只停止探活；运行时继续存活（spec: 启动器退出不停止运行时）。 */
 	const stopWatch = () => {
 		if (timer) clearInterval(timer);
 		timer = null;
@@ -218,11 +300,8 @@ export function createAgentSupervisorHost({
 		stopped = true;
 		stopWatch();
 		if (pending) await pending.catch(() => undefined);
-		const current = config;
 		config = null;
-		if (!current) return;
-		try { await rpc(current, "shutdown", {}, PING_TIMEOUT_MS); } catch { /* supervisor may already be gone */ }
 	};
 
-	return { socketPath, readToken, ensure, ping, startWatch, stopWatch, stop };
+	return { socketPath, readToken, ensure, ping, check, startWatch, stopWatch, stop };
 }

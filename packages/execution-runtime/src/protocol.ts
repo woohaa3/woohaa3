@@ -21,6 +21,7 @@ export type ExecutorMethod =
   | "proc.list"
   | "executor.register"
   | "executor.unregister"
+  | "executor.detach"
   | "executor.list"
   | "turn.run"
   | "turn.drain"
@@ -175,6 +176,9 @@ export type Executor = {
 
 export type HealthInfo = {
   protocolVersion: typeof EXECUTOR_PROTOCOL_VERSION;
+  /** 身份快照结构版本；接管前必须匹配。 */
+  schemaVersion?: number;
+  runtimeVersion?: string;
   workspaceKey: string;
   pid: number;
   socketPath: string;

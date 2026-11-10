@@ -6,6 +6,8 @@ import { readRuntimeGeneratedImages } from "@woohaa3/application-service";
  * mcp 与 application；插件扩展的 MCP 工具清单在调用时从 application 懒取。
  */
 import { createMcpService } from "@woohaa3/mcp-service";
+import path from "node:path";
+import { createMemoryToolGrantStore, createSqliteToolGrantStore } from "../../ports/tool-grant-store.js";
 import type { SkillStepClient } from "@woohaa3/mcp-service";
 import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
@@ -23,7 +25,13 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
   name: "mcp",
   inject: ["log", "gateway", "canvas"],
   apply(ctx, { env }) {
-    const toolGrants = createToolGrantRegistry();
+    // 持久 grant registry（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）：
+    // 与应用库同目录的独立文件，避免与业务表争锁；没有可用库路径时退回内存。
+    const storePath = env.WOOHAA3_APPLICATION_STORE_PATH?.trim() || env.WOOHAA3_TASK_STORE_PATH?.trim() || "";
+    const grantStore = storePath
+      ? createSqliteToolGrantStore({ path: path.join(path.dirname(path.resolve(storePath)), "tool-grants.sqlite") })
+      : createMemoryToolGrantStore();
+    const toolGrants = createToolGrantRegistry({ store: grantStore });
     const application = () => {
       const module = ctx.get("application");
       if (!module) throw new Error("插件宿主尚未就绪");
@@ -131,7 +139,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       agentClient: groupScopedClient({
         ...agentCanvasServiceToClient(services.agent, { principalId: devPrincipalIdFromEnv(env) }),
         // Codex 生图导入：目标只来自当前受信的 2D 组作用域，不接受工具参数自报。
-        importGeneratedImage: async (input) => {
+        importGeneratedImage: async (input: { canvasId?: string; requestId: string; index?: number }) => {
           const scope = currentCanvasGroupScope();
           const media = ctx.get("media");
           if (!scope || !media) {
@@ -205,7 +213,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       },
       logger: ctx.log.scope("mcp")
     });
-    ctx.effect(() => () => mcp.close());
+    ctx.effect(() => () => { toolGrants.close?.(); mcp.close(); });
     ctx.provide("toolGrants", toolGrants);
     ctx.provide("mcp", mcp);
     // 2D 组作用域：grant 命中组绑定时，把本轮 MCP 调用放进受信作用域；成员/写膜由

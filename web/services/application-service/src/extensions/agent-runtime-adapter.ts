@@ -21,7 +21,12 @@ export type HostRuntimeOptions = {
   workspaceKey: string;
   executor: string;
   ensure?: () => Promise<void>;
-  hostCalls?: { registerCall(handler: (method: string, params: unknown) => Promise<unknown>): { leaseId: string; release(): void } };
+  hostCalls?: {
+    registerCall(
+      handler: (method: string, params: unknown) => Promise<unknown>,
+      claims?: { turnId: string; requestId: string; owner: string; methods: readonly string[]; exp: number }
+    ): { leaseId: string; release(): void };
+  };
   bridge: { socketPath: string; token: string; workspaceKey: string };
   mcpEndpoint?: string;
 };
@@ -68,46 +73,52 @@ function outcomeFromView(view: TurnView | null): AgentAdapterRunOutcome | null {
   return null;
 }
 
-function emitEvent(emit: (event: AgentConversationAdapterEvent) => void, event: RuntimeEvent): void {
+function mapRuntimeEvent(event: RuntimeEvent): AgentConversationAdapterEvent | null {
   const payload = event.payload as Record<string, unknown> | undefined;
-  if (!payload || typeof payload !== "object") return;
+  if (!payload || typeof payload !== "object") return null;
   if (event.type === "message" && typeof payload.content === "string") {
-    emit({
+    return {
       type: "message",
       role: payload.role === "system" ? "system" : "assistant",
       content: payload.content,
       ...(payload.delivery === "append" || payload.delivery === "replace" ? { delivery: payload.delivery } : {}),
       ...(typeof payload.streamId === "string" ? { streamId: payload.streamId } : {})
-    });
-    return;
+    };
   }
   if (event.type === "stage") {
-    emit({
+    return {
       type: "stage",
       stage: typeof payload.stage === "string" ? payload.stage : "running",
       ...(typeof payload.detail === "string" ? { detail: payload.detail } : {}),
       ...(typeof payload.summary === "string" ? { summary: payload.summary } : {})
-    });
-    return;
+    };
   }
   if (event.type === "tool-started") {
-    emit({
+    return {
       type: "tool-started",
       tool: typeof payload.tool === "string" ? payload.tool : "tool",
       ...(typeof payload.callId === "string" ? { callId: payload.callId } : {}),
       ...(typeof payload.summary === "string" ? { summary: payload.summary } : {})
-    });
-    return;
+    };
   }
   if (event.type === "tool-completed") {
-    emit({
+    return {
       type: "tool-completed",
       tool: typeof payload.tool === "string" ? payload.tool : "tool",
       ...(typeof payload.callId === "string" ? { callId: payload.callId } : {}),
       ok: payload.ok === true,
       ...(typeof payload.summary === "string" ? { summary: payload.summary } : {})
-    });
+    };
   }
+  return null;
+}
+
+/** 接管时按 cursor 幂等投递；普通回合仍走 `emit`。 */
+function deliverRuntimeEvent(input: AgentAdapterRunInput, event: RuntimeEvent): void {
+  const mapped = mapRuntimeEvent(event);
+  if (!mapped) return;
+  if (input.emitExecutor) input.emitExecutor(event.cursor, mapped);
+  else input.emit(mapped);
 }
 
 /**
@@ -123,12 +134,47 @@ export function createRuntimeConversationAdapter(
     token: options.token,
     workspaceKey: options.workspaceKey
   }) : null;
+  /**
+   * 宿主重启接管（任务 3.2）：只查询既有 journal 并继续跟随，不重新提交、不重新推理。
+   *
+   * 执行器已丢失该回合时返回 `null`，由宿主走「按原身份核对领域回执」的不可证明路径。
+   */
+  const resume = async (input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome | null> => {
+    if (!client || !options) return null;
+    // 重启窗口内连接/凭据被切换或撤销：按事实拒绝，不沿用旧授权继续执行。
+    if (input.connection && connections) {
+      const current = await connections.getConnection({ owner: input.owner, connectionId: input.connection.connectionId }).catch(() => null);
+      if (!current || current.adapterId !== input.connection.adapterId
+        || current.configRevision !== input.connection.configRevision
+        || current.credentialEpoch !== input.connection.credentialEpoch) {
+        return { status: "failed", error: { code: "connection-unavailable", message: "连接在宿主重启期间已变更或撤销" } };
+      }
+    }
+    const executionId = runtimeTurnId(input.owner, input.requestId);
+    const existing = await client.queryTurn(executionId).catch(() => null);
+    if (!existing) return null;
+    const since = typeof input.resumeCursor === "number"
+      ? input.resumeCursor
+      : (await client.turnEvents(executionId, 0)).cursor;
+    await followTurn(client, executionId, {
+      intervalMs: 150,
+      since,
+      signal: input.signal,
+      onEvent: (event) => deliverRuntimeEvent(input, event)
+    });
+    await client.call("turn.drain", { turnId: executionId });
+    return outcomeFromView(await client.queryTurn(executionId));
+  };
+
   return {
     ...adapter,
     capabilities: () => adapter.capabilities(),
     authorization: (input) => adapter.authorization(input),
     models: (input) => adapter.models(input),
     async run(input) {
+      if (input.resumeCursor !== undefined) {
+        return (await resume(input)) ?? { status: "failed", error: { code: "journal-missing", message: "执行器已丢失该回合" } };
+      }
       if (!input.prepared) return { status: "failed", error: { code: "role-not-found", message: "缺少宿主准备的角色请求" } };
       if (!client || !options) return { status: "failed", error: { code: "runtime-unavailable", message: "宿主未配置独立执行器" } };
       if (!input.connection) return { status: "failed", error: { code: "connection-unavailable", message: "回合未冻结助手连接" } };
@@ -189,7 +235,7 @@ export function createRuntimeConversationAdapter(
           intervalMs: 150,
           signal: input.signal,
           onEvent: (event) => {
-            emitEvent(input.emit, event);
+            deliverRuntimeEvent(input, event);
           }
         });
         await cancellation;
@@ -212,6 +258,7 @@ export function createRuntimeConversationAdapter(
       const view = await client.queryTurn(runtimeTurnId(input.owner, input.requestId));
       if (!view || view.status === "queued" || view.status === "running") return null;
       return outcomeFromView(view);
-    }
+    },
+    resume
   };
 }

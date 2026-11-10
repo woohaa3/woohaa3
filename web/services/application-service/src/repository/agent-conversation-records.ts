@@ -71,6 +71,14 @@ export type ConversationTurnRecord = {
   roleRefJson: string | null;
   preparedJson: string | null;
   roleInputDigest: string | null;
+  /**
+   * 执行器 journal 已消费的事件 cursor（change: 2026-11-10-split-agent-runtime-lifecycle）。
+   * 旧回合为 null：接管时从当前 journal 头开始，跳过历史重放。
+   */
+  executorCursor: number | null;
+  /** 接管者实例 id 与租约截止（epoch ms）；CAS 保证同一回合只有一个接管者。 */
+  adoptionOwner: string | null;
+  adoptionLeaseUntil: number | null;
   assistantText: string | null;
   runId: string | null;
   taskId: string | null;
@@ -153,6 +161,9 @@ export type TurnRow = {
   role_ref_json?: string | null;
   prepared_json?: string | null;
   role_input_digest?: string | null;
+  executor_cursor?: number | null;
+  adoption_owner?: string | null;
+  adoption_lease_until?: number | null;
   assistant_text: string | null;
   run_id: string | null;
   task_id: string | null;
@@ -242,6 +253,9 @@ export function turnFromRow(row: TurnRow): ConversationTurnRecord {
     roleRefJson: row.role_ref_json ?? null,
     preparedJson: row.prepared_json ?? null,
     roleInputDigest: row.role_input_digest ?? null,
+    executorCursor: row.executor_cursor ?? null,
+    adoptionOwner: row.adoption_owner ?? null,
+    adoptionLeaseUntil: row.adoption_lease_until ?? null,
     assistantText: row.assistant_text,
     runId: row.run_id,
     taskId: row.task_id,
@@ -289,5 +303,103 @@ export function toolFromRow(row: ToolRow): ConversationToolRecord {
     summary: row.summary,
     sequence: row.sequence,
     createdAt: row.created_at
+  };
+}
+
+/**
+ * 回合授权（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.1 / design D2）。
+ *
+ * 把「宿主进程内存闭包 + 内存 lease」换成可按回合身份跨宿主读取的持久权威：
+ * 冻结 owner/画布/会话/连接版本/目标/准备摘要、允许的 host-call 方法与工具范围，
+ * 以及过期/撤销状态。新宿主只按这份记录授权，不扩大原回合权限。
+ */
+export type TurnAuthorityRecord = {
+  turnId: string;
+  requestId: string;
+  conversationId: string;
+  owner: string;
+  canvasId: string;
+  action: string;
+  adapterId: string;
+  /** 该通道使用的 daemon executor id；非执行器通道为 null。 */
+  executor: string | null;
+  connectionId: string | null;
+  configRevision: number | null;
+  credentialEpoch: number | null;
+  targetJson: string;
+  preparedHash: string | null;
+  /** 本回合可调用的宿主方法（`extension.call` 的 method 白名单）。 */
+  hostMethods: readonly string[];
+  /** 冻结的工具范围（与 grant 的 tools 交集），不接受接管时扩宽。 */
+  toolScope: readonly string[];
+  createdAt: string;
+  expiresAt: number | null;
+  revokedAt: string | null;
+};
+
+export type TurnAuthorityRow = {
+  turn_id: string;
+  request_id: string;
+  conversation_id: string;
+  owner: string;
+  canvas_id: string;
+  action: string;
+  adapter_id: string;
+  executor: string | null;
+  connection_id: string | null;
+  config_revision: number | null;
+  credential_epoch: number | null;
+  target_json: string;
+  prepared_hash: string | null;
+  host_methods_json: string;
+  tool_scope_json: string;
+  created_at: string;
+  expires_at: number | null;
+  revoked_at: string | null;
+};
+
+const stringArray = (value: unknown, field: string): string[] => {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error(`turn authority ${field} 必须是字符串数组`);
+  }
+  return value as string[];
+};
+
+/** 严格解码：缺字段、类型错误或非法数组都拒绝，不猜默认值。 */
+export function decodeTurnAuthority(row: TurnAuthorityRow): TurnAuthorityRecord {
+  for (const field of ["turn_id", "request_id", "conversation_id", "owner", "canvas_id", "action", "adapter_id", "target_json", "created_at"] as const) {
+    if (typeof row[field] !== "string" || row[field] === "") throw new Error(`turn authority 缺少 ${field}`);
+  }
+  for (const field of ["config_revision", "credential_epoch", "expires_at"] as const) {
+    const value = row[field];
+    if (value !== null && (typeof value !== "number" || !Number.isFinite(value))) throw new Error(`turn authority ${field} 类型错误`);
+  }
+  let hostMethods: string[];
+  let toolScope: string[];
+  try {
+    hostMethods = stringArray(JSON.parse(row.host_methods_json) as unknown, "hostMethods");
+    toolScope = stringArray(JSON.parse(row.tool_scope_json) as unknown, "toolScope");
+  } catch (error) {
+    throw new Error(`turn authority 解码失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  return {
+    turnId: row.turn_id,
+    requestId: row.request_id,
+    conversationId: row.conversation_id,
+    owner: row.owner,
+    canvasId: row.canvas_id,
+    action: row.action,
+    adapterId: row.adapter_id,
+    executor: row.executor ?? null,
+    connectionId: row.connection_id ?? null,
+    configRevision: row.config_revision ?? null,
+    credentialEpoch: row.credential_epoch ?? null,
+    targetJson: row.target_json,
+    preparedHash: row.prepared_hash ?? null,
+    hostMethods,
+    toolScope,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at ?? null,
+    revokedAt: row.revoked_at ?? null
   };
 }

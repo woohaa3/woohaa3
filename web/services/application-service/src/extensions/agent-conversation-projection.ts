@@ -93,6 +93,7 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
     ...(record.receiptJson !== null ? { receipt: JSON.parse(record.receiptJson) } : {}),
     ...(connection ? { connection } : {}),
     ...(turnRoleBinding(record) ? { role: turnRoleBinding(record)! } : {}),
+    ...(record.executorCursor !== null ? { executorCursor: record.executorCursor } : {}),
     ...(record.errorCode !== null ? { error: { code: record.errorCode, message: record.errorMessage ?? "" } }
       : legacyUnconfirmed ? { error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } } : {}),
     createdAt: record.createdAt,

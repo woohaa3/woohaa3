@@ -506,3 +506,31 @@ it("target submission resolves the node conversation without a whole-set context
   expect(accept.mock.calls[1][0]).toBe("legacy");
   expect(create).not.toHaveBeenCalled();
 });
+
+describe("host restart recovery (task 5.2)", () => {
+  it("keeps showing the real running stage from the executor cursor without duplicating messages", async () => {
+    const messages = [
+      { messageId: "m1", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "user" as const, content: "生成一张图", truncated: false, sequence: 1, createdAt: "2026-10-13T00:00:00.000Z" },
+      { messageId: "m2", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "assistant" as const, content: "正在写模型", truncated: false, sequence: 2, createdAt: "2026-10-13T00:00:01.000Z" }
+    ];
+    const adopted: ConversationSnapshot = {
+      conversation: summary(),
+      turns: [turn({ status: "running", stage: "writing", executorCursor: 7 })],
+      messages,
+      events: [],
+      cursor: 7,
+      resyncRequired: false
+    };
+    const read = vi.fn(async () => ({ ok: true as const, value: adopted }));
+    const accept = vi.fn();
+    const service = createAgentConversationService({ remote: fakeRemote({ read, accept }) });
+    await service.openDetail("conv-1");
+    // 断流后重新读取：只按 cursor 恢复快照，不重新提交。
+    await service.openDetail("conv-1");
+    const detail = service.getDetail();
+    expect(detail?.turns[0]).toMatchObject({ status: "running", stage: "writing", executorCursor: 7 });
+    expect(detail?.messages).toEqual(messages);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(accept).not.toHaveBeenCalled();
+  });
+});

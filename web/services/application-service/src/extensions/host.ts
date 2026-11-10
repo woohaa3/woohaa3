@@ -98,8 +98,8 @@ export type ApplicationExtensionHost = {
     method: import("./contract.js").ApplicationExtensionHttpMethod
   ) => { owned: boolean };
   snapshot: () => Array<{ extensionId: string } & ExtensionRegistrationSummary>;
-  disposeExtension: (extensionId: string) => Promise<void>;
-  disposeVersion: (extensionId: string, configVersion: number) => Promise<void>;
+  disposeExtension: (extensionId: string, reason?: import("@woohaa3/contracts").ApplicationDisposeReason) => Promise<void>;
+  disposeVersion: (extensionId: string, configVersion: number, reason?: import("@woohaa3/contracts").ApplicationDisposeReason) => Promise<void>;
   activeVersions: (extensionId: string) => number[];
   dispose: () => Promise<void>;
 };
@@ -159,14 +159,14 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
   };
 
   /** 反序释放一次 activation 的贡献（幂等；容忍重复调用）。 */
-  const rollback = async (owner: OwnerState, handle: string): Promise<void> => {
+  const rollback = async (owner: OwnerState, handle: string, reason: import("@woohaa3/contracts").ApplicationDisposeReason = "disable"): Promise<void> => {
     publicRouteDeclarations.delete(handle);
     for (const providerId of [...owner.generationProviderIds].reverse()) {
       owner.releaseGeneration?.(providerId);
     }
     owner.generationProviderIds = [];
     for (const resource of [...owner.startedResources].reverse()) {
-      await Promise.resolve(resource.stop()).catch((error) =>
+      await Promise.resolve(resource.stop(reason)).catch((error) =>
         log({ event: "extension-resource-stop-failed", extensionId: owner.extensionId, message: String(error) })
       );
     }
@@ -546,10 +546,10 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     const activationHandle: ExtensionActivationHandle = {
       extensionId: definition.extensionId,
       summary: () => toSummary(owner),
-      dispose: async () => {
+      dispose: async (reason = "disable") => {
         const current = records.get(key);
         if (!current) return;
-        await rollback(current, handle);
+        await rollback(current, handle, reason);
         records.delete(key);
         log({ event: "extension-disposed", extensionId: definition.extensionId, configVersion, mode });
       }
@@ -571,11 +571,11 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     return results;
   };
 
-  const disposeVersion = async (extensionId: string, configVersion: number): Promise<void> => {
+  const disposeVersion = async (extensionId: string, configVersion: number, reason: import("@woohaa3/contracts").ApplicationDisposeReason = "disable"): Promise<void> => {
     const key = keyFor(extensionId, configVersion);
     const owner = records.get(key);
     if (!owner) return;
-    await rollback(owner, key);
+    await rollback(owner, key, reason);
     records.delete(key);
   };
 
@@ -731,10 +731,10 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       [...records.values()]
         .sort((a, b) => a.order - b.order)
         .map((owner) => ({ extensionId: owner.extensionId, ...toSummary(owner) })),
-    disposeExtension: async (extensionId) => {
+    disposeExtension: async (extensionId, reason = "disable") => {
       for (const [key, owner] of [...records]) {
         if (owner.extensionId === extensionId) {
-          await rollback(owner, key);
+          await rollback(owner, key, reason);
           records.delete(key);
         }
       }
@@ -749,7 +749,7 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       if (disposed) return;
       disposed = true;
       const all = [...records.entries()].sort(([, a], [, b]) => b.order - a.order);
-      for (const [key, owner] of all) await rollback(owner, key);
+      for (const [key, owner] of all) await rollback(owner, key, "shutdown");
       records.clear();
       globalCapabilities.clear();
       globalHandlers.clear();

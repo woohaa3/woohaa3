@@ -53,11 +53,17 @@ export type ApplicationBackendCapabilityRegistration = {
 };
 
 /** 后台资源：拥有 start/stop 生命周期，disposer 必须幂等（design D2）。 */
+/**
+ * 释放原因（change: 2026-11-10-split-agent-runtime-lifecycle，任务 4.1）：
+ * 宿主优雅关闭/热重载只 detach；停用/升级/卸载才 cancel 并排空。
+ */
+export type ApplicationDisposeReason = "shutdown" | "reload" | "disable" | "upgrade" | "uninstall";
+
 export type ApplicationBackendResource = {
   id: string;
   start?: () => Promise<void> | void;
-  /** 幂等停止；activation 回滚与停用都调用它。 */
-  stop: () => Promise<void> | void;
+  /** 幂等停止；activation 回滚与停用都调用它，并携带释放原因。 */
+  stop: (reason?: ApplicationDisposeReason) => Promise<void> | void;
 };
 
 /** 宿主提供的配置读写 facade（只读已提交配置；不暴露秘密）。 */

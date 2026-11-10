@@ -14,6 +14,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 import {
   conversationFromRow,
+  decodeTurnAuthority,
   eventFromRow,
   messageFromRow,
   toolFromRow,
@@ -28,6 +29,8 @@ import {
   type MessageRow,
   type OwnerCanvasScope,
   type ToolRow,
+  type TurnAuthorityRecord,
+  type TurnAuthorityRow,
   type TurnRow
 } from "./agent-conversation-records.js";
 
@@ -73,8 +76,31 @@ export type AgentConversationStore = {
   turnCount(conversationId: string): number;
   /** 会话当前活动回合数（只用于诊断/展示，不再是受理门禁）。 */
   activeTurnCount(conversationId: string): number;
-  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage" | "roleRefJson" | "preparedJson" | "roleInputDigest"> & Partial<Pick<ConversationTurnRecord, "roleRefJson" | "preparedJson" | "roleInputDigest">>): void;
+  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage" | "roleRefJson" | "preparedJson" | "roleInputDigest" | "executorCursor" | "adoptionOwner" | "adoptionLeaseUntil"> & Partial<Pick<ConversationTurnRecord, "roleRefJson" | "preparedJson" | "roleInputDigest">>): void;
   updateTurn(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): void;
+  /** 只在回合仍未终态时写入；返回是否真的发生更新（终态只结算一次）。 */
+  updateTurnIfActive(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): boolean;
+  /**
+   * 回合授权（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.1）。
+   *
+   * `recordTurnAuthority` 幂等：同一 turnId 已存在时保持首次冻结值，返回 `false`；
+   * 接管者不得用它扩宽 owner、连接版本或工具范围。
+   */
+  recordTurnAuthority(authority: TurnAuthorityRecord): boolean;
+  getTurnAuthority(turnId: string): TurnAuthorityRecord | undefined;
+  revokeTurnAuthority(turnId: string, now: string): void;
+  /** 记录该回合并发通道实际声明的 host-call 方法（只增不减，便于接管校验）。 */
+  recordTurnAuthorityHostMethods(turnId: string, methods: readonly string[]): void;
+  /**
+   * 接管 CAS（任务 3.3）：只有空闲、租约过期或同一 owner 才能取得；返回是否成为唯一接管者。
+   */
+  claimAdoption(turnId: string, owner: string, leaseUntil: number, now: string, nowMs?: number): boolean;
+  renewAdoption(turnId: string, owner: string, leaseUntil: number): boolean;
+  releaseAdoption(turnId: string, owner: string): void;
+  /** 消费执行器事件 `(turnId, cursor)`；首次返回 true，重复返回 false（不重复落库）。 */
+  consumeExecutorEvent(turnId: string, cursor: number): boolean;
+  /** 回合终态后清理幂等游标行，避免事件表无界增长。 */
+  clearExecutorEvents(turnId: string): void;
   appendMessage(message: ConversationMessageRecord): void;
   /**
    * 更新已存在消息的正文（流式聚合：同一条消息的分片只更新这一行，不新增行）。
@@ -196,6 +222,34 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       );
       CREATE INDEX IF NOT EXISTS agent_conversation_events_conv ON agent_conversation_events(conversation_id, sequence ASC);
 
+      CREATE TABLE IF NOT EXISTS agent_conversation_turn_authority (
+        turn_id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        adapter_id TEXT NOT NULL,
+        executor TEXT,
+        connection_id TEXT,
+        config_revision INTEGER,
+        credential_epoch INTEGER,
+        target_json TEXT NOT NULL,
+        prepared_hash TEXT,
+        host_methods_json TEXT NOT NULL,
+        tool_scope_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at INTEGER,
+        revoked_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_conversation_turn_executor_events (
+        turn_id TEXT NOT NULL,
+        cursor INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (turn_id, cursor)
+      );
+
       CREATE TABLE IF NOT EXISTS agent_conversation_tools (
         tool_id TEXT PRIMARY KEY,
         conversation_id TEXT NOT NULL,
@@ -225,6 +279,10 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversation_turns", "role_ref_json", "TEXT");
     this.ensureColumn("agent_conversation_turns", "prepared_json", "TEXT");
     this.ensureColumn("agent_conversation_turns", "role_input_digest", "TEXT");
+    // 执行器 journal 游标与接管租约（change: 2026-11-10-split-agent-runtime-lifecycle）。
+    this.ensureColumn("agent_conversation_turns", "executor_cursor", "INTEGER");
+    this.ensureColumn("agent_conversation_turns", "adoption_owner", "TEXT");
+    this.ensureColumn("agent_conversation_turns", "adoption_lease_until", "INTEGER");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target ON agent_conversations(owner, canvas_id, node_id, updated_at DESC);");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target_connection ON agent_conversations(owner, canvas_id, node_id, connection_id, updated_at DESC);");
     // 旧版本把无法确认写成 `unknown`；迁移后统一按 failed 终态保留证据与已有错误码。
@@ -370,7 +428,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     return row.count;
   }
 
-  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage" | "roleRefJson" | "preparedJson" | "roleInputDigest"> & Partial<Pick<ConversationTurnRecord, "roleRefJson" | "preparedJson" | "roleInputDigest">>): void {
+  createTurn(turn: Omit<ConversationTurnRecord, "assistantText" | "runId" | "taskId" | "receiptJson" | "errorCode" | "errorMessage" | "roleRefJson" | "preparedJson" | "roleInputDigest" | "executorCursor" | "adoptionOwner" | "adoptionLeaseUntil"> & Partial<Pick<ConversationTurnRecord, "roleRefJson" | "preparedJson" | "roleInputDigest">>): void {
     this.db
       .prepare(
         `INSERT INTO agent_conversation_turns
@@ -404,7 +462,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       );
   }
 
-  updateTurn(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): void {
+  private turnPatch(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): { sets: string[]; values: Array<string | number | null> } {
     const columns: Record<string, string> = {
       status: "status",
       stage: "stage",
@@ -424,7 +482,10 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       historySequence: "history_sequence",
       roleRefJson: "role_ref_json",
       preparedJson: "prepared_json",
-      roleInputDigest: "role_input_digest"
+      roleInputDigest: "role_input_digest",
+      executorCursor: "executor_cursor",
+      adoptionOwner: "adoption_owner",
+      adoptionLeaseUntil: "adoption_lease_until"
     };
     const sets: string[] = ["updated_at = ?"];
     const values: Array<string | number | null> = [now];
@@ -435,7 +496,102 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       values.push(value as string | number | null);
     }
     values.push(turnId);
+    return { sets, values };
+  }
+
+  updateTurn(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): void {
+    const { sets, values } = this.turnPatch(turnId, patch, now);
     this.db.prepare(`UPDATE agent_conversation_turns SET ${sets.join(", ")} WHERE turn_id = ?`).run(...values);
+  }
+
+  updateTurnIfActive(turnId: string, patch: Partial<Omit<ConversationTurnRecord, "turnId" | "conversationId" | "owner" | "canvasId" | "requestId" | "createdAt">>, now: string): boolean {
+    const { sets, values } = this.turnPatch(turnId, patch, now);
+    const result = this.db
+      .prepare(`UPDATE agent_conversation_turns SET ${sets.join(", ")} WHERE turn_id = ? AND status IN ('queued','running','committing')`)
+      .run(...values);
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  recordTurnAuthority(authority: TurnAuthorityRecord): boolean {
+    const result = this.db.prepare(`
+      INSERT INTO agent_conversation_turn_authority
+        (turn_id, request_id, conversation_id, owner, canvas_id, action, adapter_id, executor, connection_id,
+         config_revision, credential_epoch, target_json, prepared_hash, host_methods_json, tool_scope_json,
+         created_at, expires_at, revoked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(turn_id) DO NOTHING`)
+      .run(
+        authority.turnId,
+        authority.requestId,
+        authority.conversationId,
+        authority.owner,
+        authority.canvasId,
+        authority.action,
+        authority.adapterId,
+        authority.executor,
+        authority.connectionId,
+        authority.configRevision,
+        authority.credentialEpoch,
+        authority.targetJson,
+        authority.preparedHash,
+        JSON.stringify([...authority.hostMethods]),
+        JSON.stringify([...authority.toolScope]),
+        authority.createdAt,
+        authority.expiresAt,
+        authority.revokedAt
+      );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  getTurnAuthority(turnId: string): TurnAuthorityRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM agent_conversation_turn_authority WHERE turn_id = ?").get(turnId) as TurnAuthorityRow | undefined;
+    return row ? decodeTurnAuthority(row) : undefined;
+  }
+
+  revokeTurnAuthority(turnId: string, now: string): void {
+    this.db.prepare("UPDATE agent_conversation_turn_authority SET revoked_at = ? WHERE turn_id = ? AND revoked_at IS NULL").run(now, turnId);
+  }
+
+  recordTurnAuthorityHostMethods(turnId: string, methods: readonly string[]): void {
+    const current = this.getTurnAuthority(turnId);
+    if (!current) return;
+    const merged = [...new Set([...current.hostMethods, ...methods])];
+    if (merged.length === current.hostMethods.length) return;
+    this.db.prepare("UPDATE agent_conversation_turn_authority SET host_methods_json = ? WHERE turn_id = ?")
+      .run(JSON.stringify(merged), turnId);
+  }
+
+  claimAdoption(turnId: string, owner: string, leaseUntil: number, now: string, nowMs = Date.now()): boolean {
+    const result = this.db.prepare(`
+      UPDATE agent_conversation_turns
+         SET adoption_owner = ?, adoption_lease_until = ?, updated_at = ?
+       WHERE turn_id = ?
+         AND status IN ('queued','running','committing')
+         AND (adoption_owner IS NULL OR adoption_owner = ? OR adoption_lease_until IS NULL OR adoption_lease_until <= ?)`)
+      .run(owner, leaseUntil, now, turnId, owner, nowMs);
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  renewAdoption(turnId: string, owner: string, leaseUntil: number): boolean {
+    const result = this.db.prepare("UPDATE agent_conversation_turns SET adoption_lease_until = ? WHERE turn_id = ? AND adoption_owner = ?")
+      .run(leaseUntil, turnId, owner);
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  releaseAdoption(turnId: string, owner: string): void {
+    this.db.prepare("UPDATE agent_conversation_turns SET adoption_owner = NULL, adoption_lease_until = NULL WHERE turn_id = ? AND adoption_owner = ?")
+      .run(turnId, owner);
+  }
+
+  consumeExecutorEvent(turnId: string, cursor: number): boolean {
+    if (!Number.isInteger(cursor) || cursor <= 0) return false;
+    const result = this.db.prepare("INSERT INTO agent_conversation_turn_executor_events (turn_id, cursor, created_at) VALUES (?, ?, ?) ON CONFLICT(turn_id, cursor) DO NOTHING")
+      .run(turnId, cursor, new Date().toISOString());
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  clearExecutorEvents(turnId: string): void {
+    this.db.prepare("DELETE FROM agent_conversation_turn_executor_events WHERE turn_id = ?").run(turnId);
   }
 
   appendMessage(message: ConversationMessageRecord): void {

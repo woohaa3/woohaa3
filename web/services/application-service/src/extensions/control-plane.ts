@@ -209,7 +209,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
     const outcome = await awaitActivationWithDeadline(options.host.activateVersioned(definition, configVersion, "public"), timeoutMs, async () => {
       if (publicVersion.get(extensionId) === configVersion) return;
       log({ event: "site-extension-late-activation-released", extensionId, configVersion });
-      await options.host.disposeVersion(extensionId, configVersion);
+      await options.host.disposeVersion(extensionId, configVersion, "upgrade");
     });
     if (outcome.ok) publicVersion.set(extensionId, configVersion);
     return outcome;
@@ -219,7 +219,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
   const deactivatePublic = async (extensionId: string): Promise<void> => {
     const version = publicVersion.get(extensionId);
     if (version === undefined) return;
-    await options.host.disposeVersion(extensionId, version);
+    await options.host.disposeVersion(extensionId, version, "disable");
     publicVersion.delete(extensionId);
   };
 
@@ -233,7 +233,7 @@ export function createSiteExtensionControlPlane(options: SiteExtensionControlPla
       const current = options.store.get(extensionId)?.configVersion;
       if (version === current) continue;
       if (lease.activeWorkCountForVersion(version) > 0) continue;
-      await options.host.disposeVersion(extensionId, version);
+      await options.host.disposeVersion(extensionId, version, "upgrade");
     }
   };
 

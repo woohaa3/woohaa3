@@ -19,6 +19,7 @@ async function fixture(source: string, id = "custom") {
   const daemon = await startExecutorDaemon({ stateDir: dir, socketPath: path.join(dir, "daemon.sock"), token: "daemon", workspaceKey: "test" });
   cleanup.push(() => daemon.close());
   const callbacks = new Map<string, (method: string, params: unknown) => Promise<unknown>>();
+  const leases: Array<{ turnId: string; requestId: string; owner: string; methods: readonly string[] }> = [];
   const server = net.createServer(socket => {
     let buffer = "";
     socket.on("data", chunk => {
@@ -38,11 +39,15 @@ async function fixture(source: string, id = "custom") {
   cleanup.push(() => new Promise<void>(resolve => server.close(() => resolve())));
   let next = 0;
   const runtime = createExtensionExecutorRuntime({ socketPath: daemon.socketPath, token: "daemon", workspaceKey: "test", executor: "", bridge: { socketPath: hostSocket, token: "host", workspaceKey: "test" }, hostCalls: {
-    registerCall(handler) { const leaseId = String(++next); callbacks.set(leaseId, handler); return { leaseId, release: () => { callbacks.delete(leaseId); } }; }
+    registerCall(handler, claims) {
+      const leaseId = String(++next); callbacks.set(leaseId, handler);
+      if (claims) leases.push({ turnId: claims.turnId, requestId: claims.requestId, owner: claims.owner, methods: claims.methods });
+      return { leaseId, release: () => { callbacks.delete(leaseId); } };
+    }
   } });
   const definition = { extensionId: "external-extension", executors: [{ id, module, export: "createExecutor" }], activate: () => undefined };
   const client = createExecutorClient({ socketPath: daemon.socketPath, token: "daemon", workspaceKey: "test" });
-  return { dir, module, daemon, runtime, definition, callbacks, client };
+  return { dir, module, daemon, runtime, definition, callbacks, leases, client };
 }
 
 it("loads an extension contribution, scopes host calls, replays results, and never journals credentials", async () => {
@@ -181,4 +186,59 @@ it("re-registers declared modules after daemon restart and loads a changed artif
   const upgraded = await f.runtime.activate(f.definition, 2);
   expect(await upgraded!.service.run({ ...input, requestId: "after-upgrade" })).toMatchObject({ status: "succeeded", result: "v2" });
   await upgraded!.dispose();
+});
+
+it("detaches on host shutdown/reload without cancelling in-flight turns", async () => {
+  const f = await fixture(`export const createExecutor = () => ({ id: "custom", kind: "agent", async run(_input, ctx) {
+    await new Promise(resolve => setTimeout(resolve, 120));
+    return { status: "succeeded", result: "kept-running" };
+  } });`);
+  const first = await f.runtime.activate(f.definition, 1);
+  const operation = first!.service.run({ executor: "custom", owner: "alice", requestId: "shutdown", prepared });
+  while ((await f.client.listTurns()).turns.length === 0) await new Promise(resolve => setTimeout(resolve, 5));
+  await first!.dispose("shutdown");
+  expect(await operation).toMatchObject({ status: "succeeded", result: "kept-running" });
+  // 模块注册保留在 daemon 中，供下一宿主接管/回收。
+  expect((await f.client.call<{ executors: Array<{ id: string }> }>("executor.list")).executors.some(entry => entry.id.startsWith("external-extension:")))
+    .toBe(true);
+  const replacement = await f.runtime.activate(f.definition, 2);
+  expect(await replacement!.service.run({ executor: "custom", owner: "alice", requestId: "after-shutdown", prepared }))
+    .toMatchObject({ status: "succeeded", result: "kept-running" });
+  await replacement!.dispose("disable");
+});
+
+it("disable and upgrade still cancel and drain only the affected extension turns", async () => {
+  const f = await fixture(`export const createExecutor = () => ({ id: "custom", kind: "agent", async run(_input, ctx) {
+    await new Promise(resolve => ctx.signal.addEventListener("abort", resolve, { once: true }));
+    return { status: "cancelled", result: "drained" };
+  } });`);
+  const binding = await f.runtime.activate(f.definition, 1);
+  const first = binding!.service.run({ executor: "custom", owner: "alice", requestId: "disable", prepared });
+  const second = binding!.service.run({ executor: "custom", owner: "bob", requestId: "sibling", prepared });
+  while ((await f.client.listTurns()).turns.filter(turn => turn.status === "running").length < 2) await new Promise(resolve => setTimeout(resolve, 5));
+  await binding!.dispose("disable");
+  expect(await first).toMatchObject({ status: "cancelled", result: "drained" });
+  expect(await second).toMatchObject({ status: "cancelled", result: "drained" });
+  expect(await f.client.call("executor.list")).toEqual({ executors: [] });
+  const afterUpgrade = await f.runtime.activate(f.definition, 2);
+  const third = afterUpgrade!.service.run({ executor: "custom", owner: "alice", requestId: "upgrade", prepared });
+  while ((await f.client.listTurns()).turns.filter(turn => turn.status === "running").length < 1) await new Promise(resolve => setTimeout(resolve, 5));
+  await afterUpgrade!.dispose("upgrade");
+  expect(await third).toMatchObject({ status: "cancelled" });
+});
+
+it("binds each lease to the channel-declared host methods only (tasks 2.4/3.2)", async () => {
+  const f = await fixture(`export const createExecutor = () => ({ id: "custom", kind: "agent", async run(_input, ctx) {
+    const value = await ctx.host.call("connection.get");
+    return { status: "succeeded", result: value };
+  } });`);
+  const binding = await f.runtime.activate(f.definition, 1);
+  const input = { executor: "custom", owner: "alice", requestId: "methods", prepared, hostMethods: ["connection.get", "connection.credential"] as const, hostCall: async () => "ok" };
+  expect(await binding!.service.run(input)).toMatchObject({ status: "succeeded" });
+  expect(f.leases).toEqual([{ turnId: expect.any(String), requestId: "methods", owner: "alice", methods: ["connection.get", "connection.credential"] }]);
+  // 接管复跑同一回合时，lease 仍只声明同一组方法，不扩大范围。
+  await binding!.service.run({ ...input, since: 0 });
+  expect(f.leases).toHaveLength(2);
+  expect(f.leases[1]).toEqual(f.leases[0]);
+  await binding!.dispose();
 });

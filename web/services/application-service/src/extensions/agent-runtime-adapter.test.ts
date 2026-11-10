@@ -107,6 +107,46 @@ describe("宿主 runtime adapter", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
+  it("adopts a running turn from the journal without re-running the executor", async () => {
+    const stateDir = tempDir();
+    let runs = 0;
+    const daemon = await startExecutorDaemon({
+      socketPath: path.join(stateDir, "executor.sock"),
+      stateDir,
+      token: "token",
+      workspaceKey: "workspace",
+      defaultExecutor: "echo",
+      executors: [{
+        id: "echo",
+        kind: "any",
+        async run(_input, context) {
+          runs += 1;
+          context.emit("stage", { stage: "writing" });
+          await new Promise((resolve) => setTimeout(resolve, 120));
+          context.emit("message", { type: "message", role: "assistant", content: "after restart", delivery: "replace", streamId: "s1" });
+          return { status: "succeeded", result: { outcome: { status: "succeeded", assistantText: "after restart" } } };
+        }
+      }]
+    });
+    cleanups.push(() => daemon.close());
+    const client = createExecutorClient({ socketPath: daemon.socketPath, token: "token", workspaceKey: "workspace" });
+    const input = { ...runInput([]), requestId: "resume-request" };
+    await client.runTurn({ turnId: runtimeTurnId(input.owner, input.requestId), requestId: input.requestId, kind: "agent", executor: "echo", prepared: input.prepared });
+    const wrapped = createRuntimeConversationAdapter(adapter(), {
+      socketPath: daemon.socketPath,
+      token: "token",
+      workspaceKey: "workspace",
+      executor: "echo",
+      bridge: { socketPath: path.join(stateDir, "bridge.sock"), token: "bridge", workspaceKey: "workspace" }
+    });
+    const cursors: Array<{ cursor: number; event: AgentConversationAdapterEvent }> = [];
+    const outcome = await wrapped.resume!({ ...input, resumeCursor: 0, emitExecutor: (cursor, event) => cursors.push({ cursor, event }) });
+    expect(outcome).toMatchObject({ status: "succeeded", assistantText: "after restart" });
+    expect(runs).toBe(1);
+    expect(cursors.map((entry) => entry.cursor)).toEqual([...new Set(cursors.map((entry) => entry.cursor))]);
+    expect(cursors.some((entry) => entry.event.type === "message" && entry.event.content === "after restart")).toBe(true);
+  });
+
   it("daemon 不可用时明确失败，禁止调用原 adapter", async () => {
     const emitted: AgentConversationAdapterEvent[] = [];
     const fallback = vi.fn(async () => ({ status: "succeeded" as const, assistantText: "fallback" }));
@@ -199,4 +239,28 @@ describe("daemon execution identities and artifacts", () => {
     expect(await wrapped.run({ ...runInput([]), prepared: undefined })).toMatchObject({ status: "failed", error: { code: "role-not-found" } });
     expect(original.run).not.toHaveBeenCalled();
   });
+});
+
+it("refuses to adopt when the connection version changed during the restart window", async () => {
+  const stateDir = tempDir();
+  const daemon = await startExecutorDaemon({
+    socketPath: path.join(stateDir, "executor.sock"),
+    stateDir,
+    token: "token",
+    workspaceKey: "workspace",
+    defaultExecutor: "echo",
+    executors: [{ id: "echo", kind: "any", async run() { return { status: "succeeded" }; } }]
+  });
+  cleanups.push(() => daemon.close());
+  const input = { ...runInput([]), requestId: "revoked-connection" };
+  const wrapped = createRuntimeConversationAdapter(adapter(), {
+    socketPath: daemon.socketPath, token: "token", workspaceKey: "workspace", executor: "echo",
+    bridge: { socketPath: path.join(stateDir, "bridge.sock"), token: "bridge", workspaceKey: "workspace" }
+  });
+  const outcome = await wrapped.resume!({
+    ...input,
+    connection: { ...input.connection!, credentialEpoch: (input.connection!.credentialEpoch ?? 0) + 1 },
+    resumeCursor: 0
+  });
+  expect(outcome).toMatchObject({ status: "failed", error: { code: "connection-unavailable" } });
 });

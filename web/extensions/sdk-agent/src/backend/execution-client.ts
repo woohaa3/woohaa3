@@ -5,6 +5,19 @@ import { sdkEngineForAdapter } from "../shared.js";
 import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
 import { createSdkAgentConversationAdapter as createMetadataAdapter, type SdkAgentRuntimeOptions } from "./sdk-agent-connections.js";
 
+/** 本通道实现（switch）实际支持的 host-call 方法；写入回合授权供接管校验。 */
+const SDK_HOST_METHODS = [
+  "connection.get",
+  "connection.credential",
+  "connection.probe",
+  "connection.native.get",
+  "connection.native.set",
+  "connection.status",
+  "authoring.read",
+  "tools.issue",
+  "tools.revoke"
+] as const;
+
 /** Host-side metadata and authority. Inference always runs in the separately loaded executor. */
 export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescriptor, options: SdkAgentRuntimeOptions): AgentConversationAdapter {
   const metadata = createMetadataAdapter(adapter, options);
@@ -22,6 +35,9 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       if (!options.executor) throw new Error("宿主未配置 SDK 执行器");
       const outcome = await options.executor.query({ ...input, executor: "sdk-agent" });
       return outcome ? unwrap(outcome) : null;
+    },
+    resume(input) {
+      return this.run(input);
     },
     async run(input) {
       if (!options.executor) return { status: "failed", error: { code: "runtime-unavailable", message: "宿主未配置 SDK 执行器" } };
@@ -70,9 +86,17 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const images = (values: AgentAdapterRunInput["images"]) => values?.map(image => ({ ...image, bytes: Buffer.from(image.bytes).toString("base64") }));
       try {
         const result = await options.executor.run({ executor: "sdk-agent", owner: input.owner, requestId: input.requestId, prepared: input.prepared, signal: input.signal,
+          ...(input.resumeCursor !== undefined ? { since: input.resumeCursor, resume: true } : {}),
+          hostMethods: SDK_HOST_METHODS,
           payload: { input: { ...serializable, images: images(input.images), ...(input.candidate ? { candidate: { ...input.candidate, images: images(input.candidate.images) } } : {}) },
             deployment: { allowedHosts: options.allowedHosts, allowHttp: options.allowHttp, agentSdkDirs: options.agentSdkDirs, mcpServerUrl: options.mcpServerUrl, hasTools: !!options.tools, hasAuthoring: !!options.authoring } },
-          hostCall, onEvent: event => { if (event.type === "agent-event") input.emit(event.payload as Parameters<typeof input.emit>[0]); } });
+          hostCall,
+          onEvent: (event, cursor) => {
+            if (event.type !== "agent-event") return;
+            const mapped = event.payload as Parameters<typeof input.emit>[0];
+            if (cursor !== undefined && input.emitExecutor) input.emitExecutor(cursor, mapped);
+            else input.emit(mapped);
+          } });
         return unwrap(result);
       } catch (error) { return { status: "failed", error: { code: "runtime-error", message: error instanceof Error ? error.message : String(error) } }; }
       finally { options.tools?.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" }); }

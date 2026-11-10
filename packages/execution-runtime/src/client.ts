@@ -29,6 +29,8 @@ export type ExecutorClient = {
   queryProcess(input: { requestId?: string; adapterId?: string; owner?: string; connectionId?: string } | string): Promise<ProcessRunRecord | null>;
   processEvents(input: { key?: string; adapterId?: string; owner?: string; connectionId?: string } | string, after?: number): Promise<{ key: string; events: Array<{ cursor: number; data: string }>; cursor: number }>;
   runTurn(input: TurnRunInput): Promise<TurnView>;
+  /** 宿主优雅关闭：保留在途回合与模块注册，不取消。 */
+  detach(input: { registrationId: string }): Promise<{ detached: boolean; removed: string[] }>;
   queryTurn(turnId: string): Promise<TurnView | null>;
   listTurns(): Promise<{ turns: TurnView[] }>;
   turnEvents(turnId: string, since?: number): Promise<{ events: RuntimeEvent[]; cursor: number }>;
@@ -110,6 +112,7 @@ class SocketClient implements ExecutorClient {
     return this.call<{ key: string; events: Array<{ cursor: number; data: string }>; cursor: number }>("proc.events", { ...(typeof input === "string" ? { key: input } : input), after });
   }
   runTurn(input: TurnRunInput) { return this.call<TurnView>("turn.run", input); }
+  detach(input: { registrationId: string }) { return this.call<{ detached: boolean; removed: string[] }>("executor.detach", input); }
   queryTurn(turnId: string) { return this.call<TurnView | null>("turn.query", { turnId }); }
   listTurns() { return this.call<{ turns: TurnView[] }>("turn.list"); }
   turnEvents(turnId: string, since = 0) { return this.call<{ events: RuntimeEvent[]; cursor: number }>("turn.events", { turnId, since }); }

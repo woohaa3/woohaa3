@@ -19,6 +19,7 @@ export function createExecutorCodexAdapter(options: Omit<CodexAdapterDependencie
         payload: { input: { ...serializable, images: input.images?.map(image => ({ ...image, bytes: Buffer.from(image.bytes).toString("base64") })) },
           deployment: { codexHomeDir: options.codexHomeDir, workspaceDir: options.workspaceDir, codexBin: options.codexBin,
             mcpTools: options.mcpTools ? { name: options.mcpTools.name, url: options.mcpTools.url } : null } },
+        hostMethods: ["oauth.access-token", "oauth.tool-grant"],
         hostCall: async method => {
           if (controller.signal.aborted) throw new Error("OAuth execution cancelled");
           if (method === "oauth.access-token") return options.accessTokenFor(input.ownerId);

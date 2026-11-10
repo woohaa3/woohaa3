@@ -13,6 +13,8 @@ import { startExecutorDaemon } from "./daemon.js";
 import { createExecutorClient, followTurn } from "./client.js";
 import { builtInExecutors } from "./executors.js";
 import { executorEndpoint, workspaceKeyFor } from "./endpoints.js";
+import { readExecutorIdentity } from "./identity.js";
+import { inspectRuntime, stopExecutorRuntime } from "./runtime.js";
 import type { AgentRoleChannelCapabilities, AgentRoleImplementation, AgentRoleTargetRef } from "@woohaa3/contracts";
 import type { Executor, TurnRunInput, TurnView } from "./protocol.js";
 import { channelForDefinition, prepareCliRoleTurn, roleEntries, type CliRoleEntry } from "./roles.js";
@@ -84,6 +86,8 @@ function socketPath(parsed: Parsed): string {
 }
 
 function readTokenFile(directory: string): { token?: string; socketPath?: string } {
+  const stored = readExecutorIdentity(directory);
+  if (stored.ok) return { token: stored.identity.token, socketPath: stored.identity.socketPath };
   try {
     const value = JSON.parse(fs.readFileSync(path.join(directory, "executor.json"), "utf8")) as { token?: unknown; socketPath?: unknown };
     return {
@@ -209,7 +213,9 @@ async function main(): Promise<number> {
     console.log(`woohaa3-executor — 独立 Agent / 任务执行运行时
 
 用法：
-  woohaa3-executor daemon [--socket P] [--state DIR] [--workspace K] [--token T] [--owner-pid PID]
+  woohaa3-executor daemon [--socket P] [--state DIR] [--workspace K] [--token T]
+  woohaa3-executor runtime status [--json]
+  woohaa3-executor runtime stop [--json]
   woohaa3-executor status|health [--json]
   woohaa3-executor doctor [--json]
   woohaa3-executor ps [--json]
@@ -226,8 +232,29 @@ async function main(): Promise<number> {
   woohaa3-executor events ID [--since N] [--follow] [--json]
 
 默认端点：<state>/executor.sock（Windows 为命名管道）；token 从 --token / 环境变量 /
-<state>/executor.json 读取。`);
+<state>/executor.json 读取。运行时是 workspace 级独立实例：宿主与 dev 启动器只连接或按需
+拉起，退出不停止；只有 \`runtime stop\` 或制品升级才终止。`);
     return 0;
+  }
+
+  if (parsed.command === "runtime") {
+    const sub = parsed.argv[0];
+    if (sub === "status") {
+      const report = await inspectRuntime({ runtimeDir: stateDir(parsed), workspaceKey: workspaceKey(parsed) });
+      print(report, asJson, report.status === "healthy"
+        ? `executor runtime: healthy (pid ${report.pid}, workspace ${report.workspaceKey})`
+        : `executor runtime: ${report.status}${report.detail ? ` — ${report.detail}` : ""}`);
+      return report.status === "healthy" ? 0 : 1;
+    }
+    if (sub === "stop") {
+      const result = await stopExecutorRuntime({ runtimeDir: stateDir(parsed), workspaceKey: workspaceKey(parsed) });
+      const line = result.stopped
+        ? `executor runtime: stopped (pid ${result.report.pid})`
+        : `executor runtime: not stopped (${result.report.status}${result.detail ? ` — ${result.detail}` : ""})`;
+      print({ stopped: result.stopped, status: result.report.status, ...(result.detail ? { detail: result.detail } : {}), report: result.report }, asJson, line);
+      return result.stopped ? 0 : 1;
+    }
+    throw new Error(`未知 runtime 子命令：${sub ?? "(empty)"}`);
   }
 
   if (parsed.command === "daemon") {
@@ -238,9 +265,9 @@ async function main(): Promise<number> {
       stateDir: stateDir(parsed),
       token: generated,
       workspaceKey: workspaceKey(parsed),
-      ...(flag(parsed, "owner-pid") ? { ownerPid: Number(flag(parsed, "owner-pid")) } : {}),
       executors,
       defaultExecutor: "echo",
+      exitOnShutdown: true,
       logger: (event) => console.error(JSON.stringify(event))
     });
     await new Promise<void>((resolve) => {

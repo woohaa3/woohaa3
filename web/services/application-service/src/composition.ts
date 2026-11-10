@@ -559,11 +559,6 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.mcpDiscovery ? { mcpDiscovery: options.mcpDiscovery } : {}),
     ...(options.logger ? { logger: options.logger } : {})
   });
-  // 重启恢复：未结算回合标记 unknown 并核对 adapter 回执（不自动重推理；design D2/D7）。
-  void agentConversations.reconcileUnknown().catch((error) => {
-    log({ event: "agent-conversation-reconcile-failed", message: error instanceof Error ? error.message : String(error) });
-  });
-
   // 跨进程提交意图（design D5）：在本地事务记录意图后再调用 Task；由恢复循环收尾。
   const taskRecovery = createExtensionTaskRecovery({
     intents: taskIntentStore,
@@ -597,6 +592,13 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
   // 启动 reconciliation（design D4/D6：commit 后崩溃由启动 reconcile 完成）。
   const initialReconcile = extensionControlPlane.reconcile().catch((error) => {
     log({ event: "application-plugin-reconcile-failed", message: error instanceof Error ? error.message : String(error) });
+  });
+  /**
+   * 重启恢复必须在扩展重新激活之后：adapter 与执行器模块要先回到注册表，`reconcileUnknown()`
+   * 才能按原回合身份接管；否则会把仍在执行的回合误判为 adapter 不可用。
+   */
+  void initialReconcile.then(() => agentConversations.reconcileUnknown()).catch((error) => {
+    log({ event: "agent-conversation-reconcile-failed", message: error instanceof Error ? error.message : String(error) });
   });
   // 跨进程提交意图恢复循环（Task 事件只降延迟；持久化查询是最终依据）。
   const recoveryTimer = setInterval(() => void taskRecovery.sweep(), 30_000);

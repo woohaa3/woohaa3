@@ -347,3 +347,24 @@ it("pluginContextFor 暴露 mediaFormats，并在 release 时注销", () => {
   surface.release();
   expect(registrations.size).toBe(0);
 });
+
+describe("dispose reasons (task 4.1)", () => {
+  it("passes detach/cancel reasons to resources and treats host shutdown as detach", async () => {
+    const host = createApplicationExtensionHost();
+    const reasons: string[] = [];
+    const definition: ApplicationBackendExtensionDefinition = {
+      extensionId: "executor-holder",
+      activate: (h) => {
+        h.registerResource({ id: "executors", start: () => undefined, stop: (reason) => { reasons.push(reason ?? "none"); } });
+      }
+    };
+    const activated = await host.activate(definition);
+    expect(activated.ok).toBe(true);
+    await host.disposeVersion("executor-holder", 0, "upgrade");
+    expect(reasons).toEqual(["upgrade"]);
+
+    await host.activate(definition);
+    await host.dispose();
+    expect(reasons).toEqual(["upgrade", "shutdown"]);
+  });
+});

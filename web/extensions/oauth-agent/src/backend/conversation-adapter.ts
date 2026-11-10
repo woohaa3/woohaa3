@@ -240,6 +240,9 @@ export function createChatGptConversationAdapter(
     authorization,
     models,
     run,
+    // 宿主重启接管：领域回执/执行器 journal 都按 requestId 幂等；重新进入 run 只接回原回合，
+    // 不重新推理（daemon `turn.run` 按 turnId 去重）。重复事件由宿主按 content 指纹去重。
+    resume: (input) => run(input),
     query,
     cancel
   };

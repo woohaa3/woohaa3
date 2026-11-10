@@ -53,6 +53,8 @@ type FakeAdapterControls = {
   queries: Array<{ owner: string; requestId: string }>;
   /** 手动 resolve 当前 run（用于在途查询/取消）。 */
   pending: Array<(outcome: AgentAdapterRunOutcome) => void>;
+  /** 宿主重启接管（任务 3.2/3.3）：可选，记录每次接管的输入。 */
+  resume?: (input: AgentAdapterRunInput) => Promise<AgentAdapterRunOutcome | null>;
 };
 
 function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
@@ -73,7 +75,8 @@ function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
     },
     async cancel() {
       /* fake：由调用方通过 pending 收尾 */
-    }
+    },
+    ...(controls.resume ? { resume: controls.resume } : {})
   };
 }
 
@@ -886,4 +889,130 @@ it("whole-set context persists separately from legacy local conversations withou
   expect(service.findConversationForTarget({ ...scope, connectionId: "other", contextKey: "film-set:whole" }).conversation).toBeNull();
   const read = service.readConversation({ owner: scope.owner, conversationId: legacy.conversation.conversationId });
   expect(read.ok).toBe(true);
+});
+
+describe("in-flight turn adoption across host restarts", () => {
+  const adoptionEntry = () => entry({ action: "modify", nodeId: "node-1" });
+
+  it("adopts a running turn from the executor cursor, emits each event once, and settles once", async () => {
+    const resumed: AgentAdapterRunInput[] = [];
+    const { controls, service, store } = setup({
+      resume: async (input) => {
+        resumed.push(input);
+        // 执行器 journal 里已有两条未读事件；宿主按 cursor 幂等落库。
+        input.emitExecutor?.(1, { type: "stage", stage: "writing" });
+        input.emitExecutor?.(2, { type: "message", role: "assistant", content: "adopted reply", delivery: "replace", streamId: "s1" });
+        return { status: "succeeded", assistantText: "adopted reply", receipt: { commandId: "adopted" } };
+      }
+    });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "adopt-1", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    store.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: 0 }, "2026-10-13T00:00:30.000Z");
+
+    const discovered = await service.reconcileUnknown();
+    expect(discovered.some((turn) => turn.turnId === accepted.turn.turnId)).toBe(true);
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]!.resumeCursor).toBe(0);
+    expect(controls.seen).toHaveLength(0); // 没有重新调用 run / 推理
+
+    // 再核对一次：终态不再接管，不重复写消息。
+    await service.reconcileUnknown();
+    const read = service.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) return;
+    expect(read.snapshot.messages.filter((message) => message.role === "assistant" && message.content === "adopted reply")).toHaveLength(1);
+    expect(service.queryTurn({ owner: "user-a", requestId: "adopt-1" })).toMatchObject({ ok: true, turn: { status: "succeeded" } });
+  });
+
+  it("starts legacy turns without a cursor from the journal head and records a recovered event", async () => {
+    let cursor: number | "head" | undefined;
+    const { service, store } = setup({
+      resume: async (input) => {
+        cursor = input.resumeCursor;
+        return { status: "succeeded", receipt: { commandId: "legacy" } };
+      }
+    });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "legacy", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    store.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: null }, "2026-10-13T00:00:30.000Z");
+    await service.reconcileUnknown();
+    expect(cursor).toBe("head");
+    const read = service.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) return;
+    expect(read.snapshot.events.some((event) => event.type === "recovered")).toBe(true);
+  });
+
+  it("allows only one host to adopt the same turn", async () => {
+    const file = path.join(tempDir(), "shared.sqlite");
+    const firstStore = createSqliteAgentConversationStore({ path: file });
+    const secondStore = createSqliteAgentConversationStore({ path: file });
+    let resumeCalls = 0;
+    const resume = async (input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome | null> => {
+      resumeCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      input.emitExecutor?.(1, { type: "message", role: "assistant", content: "only once", delivery: "replace", streamId: "s1" });
+      return { status: "succeeded", assistantText: "only once", receipt: { commandId: "c" } };
+    };
+    const make = (store: typeof firstStore) => createAgentConversationService({
+      store,
+      registry: fakeRegistry(fakeAdapter({ seen: [], outcomes: [], queries: [], pending: [], resume })),
+      agentRoles: testRoleRegistry(),
+      now: () => "2026-10-13T00:00:00.000Z"
+    });
+    const first = make(firstStore);
+    const created = first.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = first.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "dual", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    firstStore.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: 0 }, "2026-10-13T00:00:30.000Z");
+    const second = make(secondStore);
+    await Promise.all([first.reconcileUnknown(), second.reconcileUnknown()]);
+    expect(resumeCalls).toBe(1);
+    const read = second.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) return;
+    expect(read.snapshot.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+  });
+
+  it("settles failed when the executor journal no longer holds the turn", async () => {
+    const { service, store, controls } = setup({ resume: async () => null });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "lost", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    store.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: 4 }, "2026-10-13T00:00:30.000Z");
+    await service.reconcileUnknown();
+    expect(service.queryTurn({ owner: "user-a", requestId: "lost" })).toMatchObject({ ok: true, turn: { status: "failed" } });
+    expect(controls.seen).toHaveLength(0); // 不自动重跑
+  });
+
+  it("persists the turn authority before dispatch", async () => {
+    const { service } = setup({ outcomes: [{ status: "succeeded", receipt: { commandId: "x" } }] });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "auth", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    await service.dispatchTurn(accepted.turn.turnId);
+    await service.whenSettled(accepted.turn.turnId);
+    expect(service.turnAuthority(accepted.turn.turnId)).toMatchObject({ owner: "user-a", canvasId: "canvas-1", adapterId: "fake", revokedAt: null });
+  });
+});
+
+describe("turn authority revocation", () => {
+  it("revokes the persisted authority when the user cancels a turn", async () => {
+    const { service, controls } = setup();
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "cancel-authority", entry: entry({ action: "modify", nodeId: "node-1" }) });
+    if (!accepted.ok) return;
+    void service.dispatchTurn(accepted.turn.turnId);
+    while (controls.seen.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(service.turnAuthority(accepted.turn.turnId)?.revokedAt).toBeNull();
+    service.cancelTurn({ owner: "user-a", requestId: "cancel-authority" });
+    expect(service.turnAuthority(accepted.turn.turnId)?.revokedAt).not.toBeNull();
+    controls.pending[0]?.({ status: "cancelled" });
+    await service.whenSettled(accepted.turn.turnId);
+  });
 });

@@ -240,13 +240,35 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         logger: (event) => ctx.log.scope("agent-runtime-bridge")(event)
       });
       ctx.effect(() => () => void bridge.close());
+      // 跨宿主重启授权（任务 2.3/3.2）：桥按持久回合授权校验 lease，并按需重建接管处理器。
+      // 通过 ctx.get("application") 延迟读取，避免装配顺序耦合。
+      const conversations = () => ctx.get("application")?.service.agentConversations();
+      bridge.setTurnAuthority((turnId) => {
+        const authority = conversations()?.turnAuthority(turnId);
+        if (!authority) return null;
+        return {
+          turnId: authority.turnId,
+          requestId: authority.requestId,
+          owner: authority.owner,
+          canvasId: authority.canvasId,
+          hostMethods: authority.hostMethods,
+          toolScope: authority.toolScope,
+          configRevision: authority.configRevision,
+          credentialEpoch: authority.credentialEpoch,
+          expiresAt: authority.expiresAt,
+          revokedAt: authority.revokedAt
+        };
+      });
+      bridge.setAdoptionHandler(async (turnId) => (await conversations()?.adoptTurn(turnId)) ?? false);
+      bridge.setLeaseRecorder((turnId, methods) => conversations()?.recordHostMethods(turnId, methods));
       agentRuntime = {
         socketPath: executorSocket,
         token: executorToken,
         workspaceKey: executorWorkspace,
         executor: "",
         hostCalls: bridge,
-        bridge: { socketPath: bridgeSocket, token: bridgeToken, workspaceKey: executorWorkspace },
+        // token 与 host key 持久化：新宿主重启后旧 daemon 仍能用原 token 回调。
+        bridge: { socketPath: bridgeSocket, token: bridge.token, workspaceKey: executorWorkspace },
         mcpEndpoint: mcpEndpoint.url
       };
     }
@@ -354,6 +376,8 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // released against that same application ledger. Failed/cancelled turns
       // never create completion history.
       onTurnSettled: ({ turn, status }) => {
+        // 失败/取消的回合不再保留工具授予（用户停止、扩展停用、运行时停止都经同一条结算路径）。
+        if (status === "cancelled" || status === "failed") ctx.toolGrants.revoke(turn.requestId, turn.owner);
         const assistantWorld = ctx.canvas.assistantWorld;
         if (!assistantWorld) return;
         const input = {

@@ -3,21 +3,28 @@ import type { ApplicationBackendExtensionDefinition, ApplicationExtensionExecuto
 import { createExecutorClient, followTurn } from "woohaa3-executor/client";
 import type { HostRuntimeOptions } from "./agent-runtime-adapter.js";
 
+/**
+ * 扩展执行器运行时绑定（change: 2026-11-07-add-pluggable-agent-roles；
+ * detach/cancel change: 2026-11-10-split-agent-runtime-lifecycle，任务 4.1/4.2）。
+ */
+export type ExecutorDisposeReason = "shutdown" | "reload" | "disable" | "upgrade" | "uninstall";
+
 export function createExtensionExecutorRuntime(options: HostRuntimeOptions | undefined) {
-  const bindings = new Map<string, { options: HostRuntimeOptions; dispose(): Promise<void> }>();
+  const bindings = new Map<string, { options: HostRuntimeOptions; dispose(reason?: ExecutorDisposeReason): Promise<void> }>();
   const key = (id: string, version: number) => JSON.stringify([id, version]);
   return {
     optionsFor(id: string, version: number, executor: string): HostRuntimeOptions | undefined {
       const binding = bindings.get(key(id, version));
       return binding ? { ...binding.options, executor: `${binding.options.executor}/${executor}` } : undefined;
     },
-    async activate(definition: ApplicationBackendExtensionDefinition, version: number): Promise<{ service: ApplicationExtensionExecutorFacade; dispose(): Promise<void> } | undefined> {
+    async activate(definition: ApplicationBackendExtensionDefinition, version: number): Promise<{ service: ApplicationExtensionExecutorFacade; dispose(reason?: ExecutorDisposeReason): Promise<void> } | undefined> {
       if (!definition.executors?.length) return undefined;
       if (!options?.hostCalls) throw new Error("宿主未配置扩展独立执行器");
       const client = createExecutorClient(options);
       const registrationId = `${definition.extensionId}:${version}:${randomUUID()}`;
       const ids = new Set(definition.executors.map(item => item.id));
       let disposed = false;
+      let detached = false;
       const controllers = new Set<AbortController>();
       const turnControllers = new Map<string, Set<AbortController>>();
       const running = new Set<Promise<unknown>>();
@@ -28,8 +35,17 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
       await ensure();
       const binding = {
         options: { ...options, executor: registrationId, ensure },
-        async dispose() {
+        async dispose(reason: ExecutorDisposeReason = "disable") {
+          const graceful = reason === "shutdown" || reason === "reload";
+          if (graceful) {
+            // detach：拒绝新回合，保留 daemon 模块注册与在途回合；宿主退出后由下一宿主接管。
+            detached = true;
+            if (bindings.get(key(definition.extensionId, version)) === binding) bindings.delete(key(definition.extensionId, version));
+            await client.detach({ registrationId }).catch(() => undefined);
+            return;
+          }
           disposed = true;
+          detached = false;
           if (bindings.get(key(definition.extensionId, version)) === binding) bindings.delete(key(definition.extensionId, version));
           for (const controller of controllers) controller.abort();
           await Promise.allSettled([...running]);
@@ -54,8 +70,9 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
           await client.call("turn.drain", { turnId });
         },
         run(input) {
+          const resuming = input.since !== undefined;
           const operation = (async (): Promise<ExtensionExecutorOutcome> => {
-            if (disposed || !ids.has(input.executor)) throw new Error("Executor is not declared by this extension");
+            if (disposed || (!resuming && detached) || !ids.has(input.executor)) throw new Error("Executor is not declared by this extension");
             if (!input.prepared) throw new Error("Executor requires a prepared role turn");
             const controller = new AbortController();
             controllers.add(controller);
@@ -71,6 +88,12 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
               const result = await input.hostCall(method, params);
               if (disposed || controller.signal.aborted) throw new Error("Executor host lease is revoked");
               return result;
+            }, {
+              turnId,
+              requestId: input.requestId,
+              owner: input.owner,
+              methods: input.hostMethods ?? [],
+              exp: 0
             });
             let submitted = false;
             const cancel = () => { void client.cancelTurn(turnId).catch(() => undefined); };
@@ -83,7 +106,13 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
                 prepared: input.prepared, payload: input.payload, host: { ...options.bridge, leaseId: lease.leaseId } });
               submitted = true;
               if (controller.signal.aborted) cancel();
-              await followTurn(client, turnId, { intervalMs: 50, onEvent: event => input.onEvent?.(event) });
+              // 旧回合没有 cursor 时从当前 journal 头开始，跳过历史重放。
+              const since = typeof input.since === "number" ? input.since : input.since === "head" ? (await client.turnEvents(turnId, 0)).cursor : 0;
+              await followTurn(client, turnId, {
+                intervalMs: 50,
+                since,
+                onEvent: event => input.onEvent?.(event, event.cursor)
+              });
               await client.call("turn.drain", { turnId });
               const view = await client.queryTurn(turnId);
               if (!view) throw new Error("Executor did not return a terminal view");
@@ -108,7 +137,7 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
           return operation;
         }
       };
-      return { service, dispose: () => binding.dispose() };
+      return { service, dispose: (reason?: ExecutorDisposeReason) => binding.dispose(reason) };
     }
   };
 }

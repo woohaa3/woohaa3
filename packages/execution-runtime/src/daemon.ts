@@ -13,6 +13,15 @@ import path from "node:path";
 import { executorEndpoint } from "./endpoints.js";
 import { ProcessHost } from "./processes.js";
 import { createExecutorClient } from "./client.js";
+import {
+  EXECUTOR_IDENTITY_SCHEMA_VERSION,
+  EXECUTOR_RUNTIME_VERSION,
+  clearExecutorIdentity,
+  isAdoptableIdentity,
+  processAlive,
+  readExecutorIdentity,
+  writeExecutorIdentity
+} from "./identity.js";
 import { ExecutorModules, type ExecutorModuleRegistration } from "./modules.js";
 import { TurnStore } from "./turns.js";
 import type {
@@ -29,10 +38,10 @@ export type ExecutorDaemonOptions = {
   stateDir: string;
   token: string;
   workspaceKey: string;
-  /** dev 启动器的 pid；它消失后 daemon 有 15 秒宽限期再自退。 */
-  ownerPid?: number;
   executors?: readonly Executor[];
   defaultExecutor?: string;
+  /** 独立进程形态（CLI daemon）在显式 shutdown 后退出；嵌入式测试保持进程。 */
+  exitOnShutdown?: boolean;
   logger?: (event: Record<string, unknown>) => void;
 };
 
@@ -75,12 +84,32 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
   const executors = options.executors ?? [];
   const modules = new ExecutorModules(options.stateDir);
   const startedAt = Date.now();
-  let closed = false;
+
+  // 同一 workspace 至多一个健康实例：已有匹配身份且端点仍可 ping 时拒绝再起第二份。
+  // 不匹配 workspace / schema 的实例只报告，不结束（design D1）。
+  const existing = readExecutorIdentity(options.stateDir);
+  if (existing.ok && existing.identity.workspaceKey !== options.workspaceKey && processAlive(existing.identity.pid)) {
+    throw new Error(`运行时目录已属于 workspace ${existing.identity.workspaceKey}；不覆盖其他 workspace 的实例`);
+  }
+  if (existing.ok && existing.identity.workspaceKey === options.workspaceKey && existing.identity.socketPath === options.socketPath) {
+    if (isAdoptableIdentity(existing.identity).ok && processAlive(existing.identity.pid)) {
+      const probe = createExecutorClient({
+        socketPath: existing.identity.socketPath,
+        token: existing.identity.token,
+        workspaceKey: existing.identity.workspaceKey,
+        timeoutMs: 1_500
+      });
+      const healthy = await probe.ping().then(() => true, () => false);
+      if (healthy) throw new Error(`执行器运行时已在运行（pid ${existing.identity.pid}）；请使用 runtime stop 后再启动`);
+    }
+  }
 
   const health = (): HealthInfo => {
     const views = turns.list();
     return {
       protocolVersion: EXECUTOR_PROTOCOL_VERSION,
+      schemaVersion: EXECUTOR_IDENTITY_SCHEMA_VERSION,
+      runtimeVersion: EXECUTOR_RUNTIME_VERSION,
       workspaceKey: options.workspaceKey,
       pid: process.pid,
       socketPath: options.socketPath,
@@ -135,6 +164,14 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
         await Promise.all(active.map(view => turns.drain(view.turnId)));
         return { removed: ids };
       }
+      case "executor.detach": {
+        // 宿主优雅关闭/热重载：保留模块与在途回合，终态后再注销（任务 4.3）。
+        const registrationId = String(params?.registrationId ?? "");
+        const ids = modules.detach(registrationId);
+        if (ids.length === 0) return { detached: false, removed: [] };
+        sweepDetached();
+        return { detached: true, removed: [] };
+      }
       case "executor.list":
         return { executors: [...executors, ...modules.list()].map(({ id, kind }) => ({ id, kind })) };
       case "turn.run":
@@ -163,8 +200,8 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
         return turns.cancel(String((params as { turnId?: unknown } | undefined)?.turnId ?? ""));
       case "shutdown":
         void close().then(() => {
-          // 关闭完成后进程可以自然退出；dev 启动器会负责重新拉起。
-          setTimeout(() => process.exit(0), 10).unref?.();
+          // 关闭完成后独立进程可以退出；嵌入式调用（测试/宿主内）保持进程。
+          if (options.exitOnShutdown) setTimeout(() => process.exit(0), 10).unref?.();
         });
         return { shuttingDown: true };
       default:
@@ -200,31 +237,34 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
   if (process.platform !== "win32") {
     try { fs.chmodSync(options.socketPath, 0o600); } catch { /* best effort */ }
   }
-  fs.writeFileSync(
-    path.join(options.stateDir, "executor.json"),
-    JSON.stringify({ workspaceKey: options.workspaceKey, pid: process.pid, socketPath: options.socketPath, token: options.token, startedAt }),
-    { mode: 0o600 }
-  );
+  writeExecutorIdentity(options.stateDir, {
+    schemaVersion: EXECUTOR_IDENTITY_SCHEMA_VERSION,
+    workspaceKey: options.workspaceKey,
+    pid: process.pid,
+    socketPath: options.socketPath,
+    token: options.token,
+    startedAt,
+    runtimeVersion: EXECUTOR_RUNTIME_VERSION
+  });
 
-  let ownerTimer: ReturnType<typeof setInterval> | undefined;
-  if (options.ownerPid && options.ownerPid > 0) {
-    let orphanTimer: ReturnType<typeof setTimeout> | undefined;
-    const ownerAlive = (): boolean => {
-      try { process.kill(options.ownerPid!, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
-    };
-    ownerTimer = setInterval(() => {
-      if (closed || ownerAlive()) return;
-      if (!orphanTimer) orphanTimer = setTimeout(() => void close(), 15_000);
-    }, 2_000);
-    ownerTimer.unref?.();
-  }
+  /**
+   * detach 注册只在没有在途回合时真正注销；有回合时保留模块到终态。
+   * 由回合结算、`executor.list` 与 1s 定时器共同推进，避免依赖下一次宿主请求。
+   */
+  const sweepDetached = (): void => {
+    const active = new Set(turns.list().filter(view => view.status === "queued" || view.status === "running").map(view => view.executor));
+    for (const id of modules.unregisterIdleDetached(active)) {
+      log({ event: "executor-detached-unregistered", registrationId: id });
+    }
+  };
+  const detachTimer = setInterval(sweepDetached, 1_000);
+  detachTimer.unref?.();
 
   let closing: Promise<void> | null = null;
   const close = (): Promise<void> => {
     if (closing) return closing;
-    closed = true;
     turningOff = true;
-    if (ownerTimer) clearInterval(ownerTimer);
+    clearInterval(detachTimer);
     closing = (async () => {
       turns.cancelAll();
       await processes.stopAll();
@@ -233,6 +273,7 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
       if (process.platform !== "win32") {
         try { fs.unlinkSync(options.socketPath); } catch { /* gone */ }
       }
+      clearExecutorIdentity(options.stateDir, { pid: process.pid, workspaceKey: options.workspaceKey });
       log({ event: "executor-daemon-stopped", workspaceKey: options.workspaceKey, pid: process.pid });
     })();
     return closing;
@@ -258,7 +299,6 @@ export async function runDaemonCommand(argv: readonly string[]): Promise<Executo
     socketPath,
     stateDir: runtimeDir,
     token,
-    workspaceKey,
-    ...(readFlag(flags, "owner-pid") ? { ownerPid: Number(readFlag(flags, "owner-pid")) } : {})
+    workspaceKey
   });
 }

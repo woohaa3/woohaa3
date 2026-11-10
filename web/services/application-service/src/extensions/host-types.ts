@@ -62,8 +62,8 @@ export type ExtensionRegistrationSummary = {
 
 export type ExtensionActivationHandle = {
   extensionId: string;
-  /** 幂等释放本 activation 的全部贡献（反序）。 */
-  dispose: () => Promise<void>;
+  /** 幂等释放本 activation 的全部贡献（反序），并携带 detach/cancel 原因。 */
+  dispose: (reason?: import("@woohaa3/contracts").ApplicationDisposeReason) => Promise<void>;
   summary: () => ExtensionRegistrationSummary;
 };
 
@@ -81,7 +81,7 @@ export type ApplicationExtensionHostOptions = {
   deployment?: { basePath: string };
   configFacadeFor?: (extensionId: string) => ApplicationBackendConfigFacade;
   workFacadeFor?: (extensionId: string) => ApplicationBackendWorkFacade;
-  activateExecutors?: (definition: ApplicationBackendExtensionDefinition, version: number) => Promise<{ service: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade; dispose(): Promise<void> } | undefined>;
+  activateExecutors?: (definition: ApplicationBackendExtensionDefinition, version: number) => Promise<{ service: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade; dispose(reason?: import("@woohaa3/contracts").ApplicationDisposeReason): Promise<void> } | undefined>;
   servicesFor?: (extensionId: string, configVersion?: number) => ApplicationExtensionServices;
   /**
    * 只读诊断缓冲（可选）：宿主把已脱敏的服务端接入/同步事件投影给可信扩展。
