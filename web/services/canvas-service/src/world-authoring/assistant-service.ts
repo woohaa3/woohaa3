@@ -46,6 +46,7 @@ import {
   type AssistantWorldWriteOperation,
   type AssistantWorldWriteOutcome,
   type CanvasNodeData,
+  type GroundAabb,
   type SceneAreaData,
   type ServerCanvas,
   type WorldObjectIdentity,
@@ -63,7 +64,7 @@ import {
 import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash, stableStringify } from "@woohaa3/contracts/canvas-yjs";
 import { executeSceneIr } from "../model-mcp/script-executor.js";
 import type { CanvasRoom } from "../sync/room.js";
-import type { RoomCommandResult } from "../sync/room-types.js";
+import type { RoomCommandResult, RoomSpatialDiagnostic } from "../sync/room-types.js";
 import { instanceFootprint, stableAuthorityVersion, worldObjectVersion, nextSceneAreaScopeVersion, type WorldAuthoringAuthority } from "./authority.js";
 import { findWorldCameraNodeId, planWorldCameraSettings, worldCameraSettingsOf, type WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldCameraCompletionVerification } from "./camera-service.js";
@@ -194,22 +195,57 @@ function sameIdentity(left: WorldObjectIdentity, right: WorldObjectIdentity): bo
     : left.cameraId === (right as Extract<WorldObjectIdentity, { kind: "camera" }>).cameraId);
 }
 
+/** Axes whose footprint leaves `bounds` (inclusive edges count as inside). */
+function outsideGroundAxes(actual: GroundAabb, bounds: GroundAabb): Array<"u" | "v"> {
+  const axes: Array<"u" | "v"> = [];
+  for (const axis of ["u", "v"] as const) {
+    if (actual.min[axis] < bounds.min[axis] || actual.max[axis] > bounds.max[axis]) axes.push(axis);
+  }
+  return axes;
+}
+
+/**
+ * Carry the authority's typed spatial reason into the assistant failure.
+ *
+ * The reason must survive so an assistant can tell `outside-scope` from
+ * `version-conflict` and `version-unknown`; dropping it would turn a real
+ * version mismatch into a misleading scope error.
+ */
+function spatialDetail(result: Extract<RoomCommandResult, { ok: false }>): Partial<AssistantWorldFailure> {
+  return result.spatialReason ? { spatialReason: result.spatialReason } : {};
+}
+
+/** Room-reported geometry (when the authority could read it) plus the assistant's own explanation. */
+function spatialDiagnostic(
+  result: Extract<RoomCommandResult, { ok: false }>,
+  fallback: RoomSpatialDiagnostic = {}
+): RoomSpatialDiagnostic {
+  const room = result.spatialDiagnostic;
+  return {
+    ...fallback,
+    ...room,
+    ...(room?.actual || !fallback.actual ? {} : { actual: fallback.actual }),
+    ...(room?.bounds || !fallback.bounds ? {} : { bounds: fallback.bounds }),
+    ...(room?.outsideAxes || !fallback.outsideAxes ? {} : { outsideAxes: fallback.outsideAxes })
+  };
+}
+
 function commandFailure(result: Extract<RoomCommandResult, { ok: false }>): AssistantWorldFailure {
   switch (result.code) {
     case "spatial-rejected": {
       switch (result.spatialReason) {
-        case "version-conflict": return failure("version-conflict", "模型或镜头版本已变化");
-        case "lease-conflict": return failure("lease-conflict", "目标正被其他运行占用");
-        case "stale-epoch": return failure("stale-epoch", "写能力已失效");
-        case "cancelled": return failure("cancelled", "运行已取消");
+        case "version-conflict": return failure("version-conflict", "模型或镜头版本已变化", spatialDetail(result));
+        case "version-unknown": return failure("version-conflict", "无法核对模型或镜头的当前版本，请重新读取世界上下文后重试", spatialDetail(result));
+        case "lease-conflict": return failure("lease-conflict", "目标正被其他运行占用", spatialDetail(result));
+        case "stale-epoch": return failure("stale-epoch", "写能力已失效", spatialDetail(result));
+        case "cancelled": return failure("cancelled", "运行已取消", spatialDetail(result));
         case "outside-scope":
-        case "version-unknown":
-          return failure("outside-scope", result.message, { ...(result.spatialReason ? { spatialReason: result.spatialReason } : {}) });
-        default: return failure("invalid-data", result.message, { ...(result.spatialReason ? { spatialReason: result.spatialReason } : {}) });
+          return failure("outside-scope", result.message, spatialDetail(result));
+        default: return failure("invalid-data", result.message, spatialDetail(result));
       }
     }
     case "lease-conflict": return { ...failure("lease-conflict", result.message), ...(result.conflict ? { conflicts: [{ target: result.conflict.target, version: null, runId: result.conflict.runId, epoch: result.conflict.epoch }] } : {}) };
-    case "outside-scope": return failure("outside-scope", result.message, { ...(result.spatialReason ? { spatialReason: result.spatialReason } : {}) });
+    case "outside-scope": return failure("outside-scope", result.message, spatialDetail(result));
     case "stale-epoch": return failure("stale-epoch", result.message);
     case "version-conflict":
     case "edit-precondition-failed": return failure("version-conflict", result.message);
@@ -1372,9 +1408,16 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         const areaId = context.scope.scope.areaId;
         const area = findArea(inspected.canvas, areaId)?.area;
         const actual = instanceFootprint(prepared.localAabb, operation.transform);
-        if (area && (actual.min.u < area.bounds.min.u || actual.max.u > area.bounds.max.u
-          || actual.min.v < area.bounds.min.v || actual.max.v > area.bounds.max.v)) {
-          return { ...rejected, message: `模型 ${operation.instanceId} 移动后占地 u=[${actual.min.u}, ${actual.max.u}]，v=[${actual.min.v}, ${actual.max.v}] 超出导演区 ${areaId}：u=[${area.bounds.min.u}, ${area.bounds.max.u}]，v=[${area.bounds.min.v}, ${area.bounds.max.v}]。请调整位置，或先手动调整范围后重新授权` };
+        const axes = area ? outsideGroundAxes(actual, area.bounds) : [];
+        if (area && axes.length > 0) {
+          // Keep the authority's own geometry when it reported some; otherwise the
+          // footprint just classified here is the actionable diagnostic.
+          const diagnostic = spatialDiagnostic(result, { actual, bounds: area.bounds, outsideAxes: axes });
+          return {
+            ...rejected,
+            spatialDiagnostic: diagnostic,
+            message: `模型 ${operation.instanceId} 移动后占地 u=[${actual.min.u}, ${actual.max.u}]，v=[${actual.min.v}, ${actual.max.v}] 超出导演区 ${areaId}：u=[${area.bounds.min.u}, ${area.bounds.max.u}]，v=[${area.bounds.min.v}, ${area.bounds.max.v}]。请调整位置，或先手动调整范围后重新授权`
+          };
         }
       }
       return rejected;
@@ -1457,7 +1500,15 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     const bounds = area.area.bounds;
     const inside = planned.position.u >= bounds.min.u && planned.position.u <= bounds.max.u
       && planned.position.v >= bounds.min.v && planned.position.v <= bounds.max.v;
-    if (!inside) return failure("outside-scope", `镜头 ${operation.cameraId} 定位点 (u=${planned.position.u}, v=${planned.position.v}) 超出导演区 ${areaId}：u=[${bounds.min.u}, ${bounds.max.u}]，v=[${bounds.min.v}, ${bounds.max.v}]。请调整机位，或先手动调整导演区范围后重新授权`);
+    if (!inside) {
+      const axes: Array<"u" | "v"> = [];
+      if (planned.position.u < bounds.min.u || planned.position.u > bounds.max.u) axes.push("u");
+      if (planned.position.v < bounds.min.v || planned.position.v > bounds.max.v) axes.push("v");
+      const anchor = { u: planned.position.u, v: planned.position.v };
+      return failure("outside-scope", `镜头 ${operation.cameraId} 定位点 (u=${planned.position.u}, v=${planned.position.v}) 超出导演区 ${areaId}：u=[${bounds.min.u}, ${bounds.max.u}]，v=[${bounds.min.v}, ${bounds.max.v}]。请调整机位，或先手动调整导演区范围后重新授权`, {
+        spatialDiagnostic: { anchor, actual: { min: anchor, max: anchor }, bounds, outsideAxes: axes }
+      });
+    }
     const commandId = intentCommandId("assistant-world-create-camera", operation);
     const result = await inspected.room.submitDerived({
       commandId,

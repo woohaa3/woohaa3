@@ -161,6 +161,17 @@ export interface WorldAuthoringFailure {
   message: string;
   conflicts?: WorldAuthoringConflict[];
   spatialReason?: string;
+  /**
+   * Actionable out-of-scope geometry the authority actually read: the classified
+   * footprint/anchor, the authorized bounds and the axes that overflowed. Only
+   * present when the authority could read the offending geometry.
+   */
+  spatialDiagnostic?: {
+    actual?: GroundAabb;
+    bounds?: GroundAabb;
+    anchor?: { u: number; v: number };
+    outsideAxes?: Array<"u" | "v">;
+  };
 }
 
 export type WorldAuthoringPrepareOutcome =

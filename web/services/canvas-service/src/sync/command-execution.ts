@@ -13,7 +13,7 @@ import type { ModelScriptBatchMeta, CanvasScriptSubmissionMeta } from "@woohaa3/
 import type { YjsCommandRecord, YjsDocumentRepository } from "./yjs-repository.js";
 import { applyCommandTransaction } from "./command-transaction.js";
 import { computeCommandPayloadHash, type CanvasCommandBatch } from "@woohaa3/contracts/canvas-yjs";
-import type { CanvasRoomState, RoomCommandResult, RoomSubmitOptions } from "./room-types.js";
+import type { CanvasRoomState, RoomCommandResult, RoomSpatialReason, RoomSubmitOptions } from "./room-types.js";
 import { currentCanvasGroupScope, invalidateRemovedCanvasGroups } from "../agent-authoring/group-scope.js";
 import { validateCanvasGroupChange } from "@woohaa3/contracts";
 
@@ -328,6 +328,19 @@ function duplicateResult(
   };
 }
 
+/** Authority reasons the room recognises; anything else stays an explicit value, never guessed. */
+const SPATIAL_REASONS: readonly RoomSpatialReason[] = [
+  "outside-scope", "version-conflict", "version-unknown", "invalid-data", "unavailable",
+  "request-conflict", "lease-conflict", "stale-epoch", "cancelled", "unverified-stop"
+];
+
+/** Keep the authority reason typed so callers can distinguish scope from version failures. */
+function spatialReason(reason: string | undefined): RoomSpatialReason | undefined {
+  return reason !== undefined && (SPATIAL_REASONS as readonly string[]).includes(reason)
+    ? reason as RoomSpatialReason
+    : undefined;
+}
+
 /** 持久化失败 → 稳定错误码映射。 */
 function commitFailure(
   commit: { ok: false; code: string; message?: string; reason?: string; conflict?: import("../world-authoring/spatial-leases.js").LeaseConflict },
@@ -335,7 +348,7 @@ function commitFailure(
 ): RoomCommandResult {
   if (commit.code === "cancelled") return { ok: false, status: "rejected", commandId, code: "cancelled", message: "提交已取消" };
   if (commit.code === "lease-conflict") return { ok: false, status: "rejected", commandId, code: "lease-conflict", message: "对象正在被其他运行占用", conflict: commit.conflict };
-  if (commit.code === "spatial-rejected") return { ok: false, status: "rejected", commandId, code: "spatial-rejected", message: "空间写入资格无效", spatialReason: commit.reason, conflict: commit.conflict };
+  if (commit.code === "spatial-rejected") return { ok: false, status: "rejected", commandId, code: "spatial-rejected", message: "空间写入资格无效", spatialReason: spatialReason(commit.reason), conflict: commit.conflict };
   if (commit.code === "storage-seq-conflict") {
     // room 已在本层之上自动重载并重试（见 `CanvasRoom.withStorageSeqRecovery`）；走到这里
     // 说明重试上限用尽（仍在与别的 writer 竞争），因此这里的失败确实可以再试一次。

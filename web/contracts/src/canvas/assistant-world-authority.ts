@@ -30,7 +30,7 @@ import type {
 import type { WorldCameraSettings, WorldCameraSettingsPatch } from "./node-history/world-camera.js";
 import type { WorldCameraView } from "./world-camera-ui.js";
 import type { WorldAnimationScript } from "./world-animation-script.js";
-import type { WorldAuthoringConflict, WorldAuthoringFailureCode } from "./world-authoring.js";
+import type { WorldAuthoringConflict, WorldAuthoringFailure, WorldAuthoringFailureCode } from "./world-authoring.js";
 import { isBoundedId, isJsonObject } from "../validation.js";
 import { decodeGroundAabb } from "./creation-scope-codec.js";
 
@@ -172,6 +172,8 @@ export interface AssistantWorldFailure {
   message: string;
   conflicts?: WorldAuthoringConflict[];
   spatialReason?: string;
+  /** Actionable out-of-scope geometry, only when the authority could read it. */
+  spatialDiagnostic?: WorldAuthoringFailure["spatialDiagnostic"];
 }
 
 export type AssistantWorldIssueOutcome = ({ ok: true } & AssistantWorldIssued) | AssistantWorldFailure;

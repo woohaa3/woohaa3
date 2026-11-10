@@ -763,3 +763,21 @@ describe("存储 sequence 冲突自动恢复（change: 2026-10-29-recover-storag
     expect(room.diagnostics).toContain("not-found");
   });
 });
+
+describe("room spatial rejection reasons", () => {
+  it("keeps version-conflict and version-unknown distinguishable from outside-scope", async () => {
+    for (const reason of ["outside-scope", "version-conflict", "version-unknown"] as const) {
+      class ReasonRepository extends InMemoryYjsDocumentRepository {
+        override async commitYjsCommand(): Promise<{ ok: false; code: "spatial-rejected"; reason: string }> {
+          return { ok: false, code: "spatial-rejected", reason };
+        }
+      }
+      const { room } = await readyRoom({ repository: new ReasonRepository() });
+      const result = await room.submit(batch());
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("spatial-rejected");
+      expect(result.spatialReason).toBe(reason);
+    }
+  });
+});
