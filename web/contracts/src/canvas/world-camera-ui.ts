@@ -21,6 +21,7 @@ import {
   SHARED_WORLD_VERSION,
   WORLD_ROTATION_UNIT_TOLERANCE,
   rendererToWorldRotation,
+  worldToRendererPosition,
   worldToRendererRotation,
   type GroundPoint,
   type RendererRotation,
@@ -33,6 +34,7 @@ import {
   type WorldRotation
 } from "./shared-world.js";
 import { decodeWorldInstanceData } from "./shared-world-codec.js";
+import { worldToCanvasPoint } from "./model-focus/canvas-projection.js";
 
 /** Camera cards stay independent of framing; this is presentation card geometry only. */
 export const WORLD_CAMERA_CARD_SIZE = { width: 248, height: 156 } as const;
@@ -144,6 +146,25 @@ export function createDefaultWorldCameraData(
     captureMode: { kind: "static" },
     aspect: { width: WORLD_CAMERA_ASPECT_PRESETS[0].width, height: WORLD_CAMERA_ASPECT_PRESETS[0].height },
     boundInstanceId: null
+  };
+}
+
+/**
+ * Place a new camera card just above the camera body's projected canvas point.
+ *
+ * The card must stay tied to where the camera actually is in the shared world, not to
+ * the canvas origin or a fixed spawn slot: a camera created by the assistant for a
+ * distant director area would otherwise land outside the current view and look like a
+ * generic fixed position. This is the single placement rule shared by the canvas menu
+ * and the host-side world authoring tools.
+ */
+export function initialCameraCardPosition(camera: Pick<WorldCameraData, "position">): { x: number; y: number } {
+  const position = worldToRendererPosition(camera.position);
+  const body = worldToCanvasPoint([position[0], position[1], position[2]]);
+  const gap = 56;
+  return {
+    x: body.x + gap,
+    y: body.y - WORLD_CAMERA_CARD_SIZE.height - gap
   };
 }
 

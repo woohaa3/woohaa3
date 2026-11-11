@@ -687,7 +687,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "在导演区创建镜头",
       description:
-        "在宿主签发的导演区内创建一台新的世界镜头。镜头身份（nodeId/cameraId）由宿主从内容派生，传入值会被忽略；定位点（settings.position）必须落在 get_world_context.bounds 内；若镜头机身落在导演区外，宿主会自动扩大导演区把它包含进来。height 轴朝上；projection 可选等距或透视；boundInstanceId 为 null 时看全世界。朝向用 settings.lookAt（世界 u/v/h 的注视点，推荐）或 settings.rotation（单位四元数 [x,y,z,w]，必须是全精度值，不要传四舍五入后的 0.7071）。只允许导演区范围，2D 组没有此能力。",
+        "在宿主签发的导演区内创建一台新的世界镜头。镜头身份（nodeId/cameraId）由宿主从内容派生，传入值会被忽略；定位点（settings.position）必须落在 get_world_context.bounds 内；若镜头机身落在导演区外，宿主会自动扩大导演区把它包含进来。省略 cardPosition 时卡片会自动落在该镜头世界位置的上方，不需要为它编造画布坐标。height 轴朝上；projection 可选等距或透视；boundInstanceId 为 null 时看全世界。朝向用 settings.lookAt（世界 u/v/h 的注视点，推荐）或 settings.rotation（单位四元数 [x,y,z,w]，必须是全精度值，不要传四舍五入后的 0.7071）。只允许导演区范围，2D 组没有此能力。",
       inputSchema: z.strictObject({
         settings: cameraSettingsInput,
         cardPosition: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).optional()

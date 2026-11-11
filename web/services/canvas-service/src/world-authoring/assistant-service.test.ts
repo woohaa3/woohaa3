@@ -5,7 +5,7 @@ import type {
   WorldScopeVersion,
   WorldToolContext
 } from "@woohaa3/contracts";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, findNonOverlappingNodePosition, initialCameraCardPosition, WORLD_CAMERA_CARD_SIZE } from "@woohaa3/contracts";
 import { worldObjectVersion } from "./authority.js";
 import { createAssistantWorldService } from "./assistant-service.js";
 import { InMemoryAssistantHostCompletionRepository } from "./host-completions.js";
@@ -84,6 +84,7 @@ function harness(overrides: {
   const revoked: string[] = [];
   const saved: Array<Record<string, unknown>> = [];
   const completed: Array<Record<string, unknown>> = [];
+  const submitted: Array<Record<string, unknown>> = [];
   let remainingHistoryFailures = overrides.historyFailures ?? 0;
   let current = overrides.canvas ?? canvasFixture();
   const room = {
@@ -92,6 +93,7 @@ function harness(overrides: {
     },
     async submitDerived<T>(input: { derive: (canvas: ServerCanvas) => T | Promise<T> }): Promise<Record<string, unknown>> {
       const derived = await input.derive(current);
+      submitted.push(derived as Record<string, unknown>);
       if (overrides.commitFailure) return overrides.commitFailure;
       return { ok: true, status: "accepted", commandId: "cmd-1", revision: 2, noop: false, update: null, derived };
     }
@@ -181,7 +183,7 @@ function harness(overrides: {
       })) as never;
     }
   });
-  return { service, context, revoked, saved, completed };
+  return { service, context, revoked, saved, completed, submitted };
 }
 
 describe("assistant world authority", () => {
@@ -290,6 +292,56 @@ describe("assistant world authority", () => {
     });
     expect(outside).toMatchObject({ ok: false, code: "outside-scope", message: expect.stringContaining("u=50") });
     expect(JSON.stringify(canvas)).toBe(before);
+  });
+
+  it("places a camera card above the camera's world position when no card position is given", async () => {
+    const canvas = canvasFixture();
+    canvas.nodeData["area"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+      }
+    } as never;
+    const { service, submitted } = harness({ canvas });
+    const issued = await service.issue({
+      canvasId: "canvas-1",
+      requestId: "req-1",
+      runId: "run-1",
+      epoch: 0,
+      executionId: "exec-1",
+      scope: { kind: "scene-area", areaId: "area-1" }
+    });
+    if (!issued.ok) throw new Error(issued.message);
+    const written = await service.write({
+      contextId: issued.context.contextId,
+      operation: {
+        kind: "create-world-camera",
+        operationId: "create-camera-3",
+        nodeId: "asset-camera-node-3",
+        cameraId: "asset-camera-3",
+        settings: {
+          position: { u: 6, v: 7, h: 2 },
+          rotation: [0, 0, 0, 1],
+          projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
+          captureMode: { kind: "static" },
+          aspect: { width: 16, height: 9 },
+          boundInstanceId: null
+        }
+      }
+    });
+    expect(written).toMatchObject({ ok: true, cameraId: "asset-camera-3" });
+    const batch = submitted.at(-1) as { batch: { commands: Array<{ type: string; node?: { position?: { x: number; y: number } } }> } };
+    const added = batch.batch.commands.find(command => command.type === "node.add");
+    const expected = findNonOverlappingNodePosition(
+      initialCameraCardPosition({ position: { u: 6, v: 7, h: 2 } }),
+      WORLD_CAMERA_CARD_SIZE,
+      canvas.document.nodes
+    );
+    expect(added?.node?.position).toEqual(expected);
+    expect(added?.node?.position).not.toEqual({ x: 0, y: 0 });
   });
 
   it("returns the camera view so a wrong framing is visible after a successful write", async () => {

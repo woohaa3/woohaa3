@@ -19,9 +19,9 @@ import {
   findNodeTemplate
 } from "../../domain/node-catalog.js";
 import { planInsertNode } from "../../../extension-api/command-planner.js";
-import { initialCameraCardPosition, revealWorldCamera } from "../../services/world-camera-frame.js";
+import { revealWorldCamera } from "../../services/world-camera-frame.js";
 import { findNonOverlappingNodePosition } from "@woohaa3/contracts";
-import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, partitionManagedNodeDeletion, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
+import { CANVAS_MENU_SECTION, COMPOSITE_ASSET_NODE_TYPE, SHARED_WORLD_VERSION, WORLD_CAMERA_CARD_SIZE, canvasPointToGround, createDefaultWorldCameraData, createHighEntropyId, initialCameraCardPosition, partitionManagedNodeDeletion, type CanvasCommand, type CanvasNodeData } from "@woohaa3/contracts";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { IMPORT_SERVICE, type ImportService } from "../service-keys.js";
 import { definePlugin } from "../../plugin.js";

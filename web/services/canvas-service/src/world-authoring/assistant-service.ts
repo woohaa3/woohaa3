@@ -23,6 +23,7 @@ import {
   DEFAULT_MODEL_PLACEMENT,
   describeWorldModelAnimationRig,
   findNonOverlappingNodePosition,
+  initialCameraCardPosition,
   SHARED_WORLD_VERSION,
   assistantWorldToolsForScope,
   decodeSceneAreaData,
@@ -1882,7 +1883,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             id: operation.nodeId,
             type: "world-camera",
             position: operation.cardPosition ?? findNonOverlappingNodePosition(
-              { x: 0, y: 0 },
+              initialCameraCardPosition(planned),
               WORLD_CAMERA_CARD_SIZE,
               canvas.document.nodes
             ),
