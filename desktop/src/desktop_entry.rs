@@ -39,6 +39,29 @@ fn startup_log_path() -> Option<std::path::PathBuf> {
     Some(logs.join("startup.log"))
 }
 
+/// 启动 ping（WOO-65 / WOO-66）：每次启动最多一条、异步、失败静默。
+///
+/// 开关与安装 ID 都在后台线程里读，启动路径不等网络、也不等磁盘；数据目录不可用或开关关闭时
+/// 一条都不发，连安装 ID 都不生成。端点默认 `https://woohaa3.zombee.tech/woohaa/ping`，
+/// `WOOHAA3_INSTALL_PING_URL` 可改。
+fn start_install_ping() {
+    use woohaa_desktop_host::install_ping;
+    let Some(base) = woohaa_desktop_host::diagnostics::data_directory() else {
+        return;
+    };
+    let config = std::env::var_os("WOOHAA3_CONFIG_FILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| install_ping::config_file(None, &base));
+    // 桌面壳只读宿主配置文件里的开关：`telemetry.export.enabled`，缺省关闭。
+    let enabled = install_ping::leak_enabled(config);
+    let endpoint = install_ping::endpoint(
+        std::env::var(install_ping::INSTALL_PING_URL_ENV)
+            .ok()
+            .as_deref(),
+    );
+    install_ping::dispatch(enabled, endpoint);
+}
+
 fn write_startup_log(message: &str) {
     use std::io::Write;
     let Some(path) = startup_log_path() else {
@@ -113,6 +136,7 @@ pub fn run(factories: Vec<std::sync::Arc<dyn crate::document_editor::NativeDocum
         return;
     }
     woohaa_desktop_host::diagnostics::initialize();
+    start_install_ping();
     // 预先检查显示会话：没有会话时 GTK 初始化会失败；这里给出明确诊断而不是静默继续。
     let session = woohaa_desktop_host::probe_desktop_session();
     if !session.has_session_env {

@@ -64,6 +64,9 @@ pub mod local_host;
 pub mod diagnostic_watchdog;
 pub mod diagnostics;
 
+/// 持久安装 ID 与启动 ping（WOO-65 / WOO-66）。
+pub mod install_ping;
+
 mod diagnostic_export;
 
 mod diagnostic_upload;
