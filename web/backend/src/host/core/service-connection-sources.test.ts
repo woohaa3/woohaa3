@@ -45,6 +45,13 @@ it("excludes models the site policy does not enable from the assistant directory
     // 策略未初始化时与任务目录一致：全开。
     const open = enabledAssistantModels(provider(), { initialized: false, revision: 0, models: [] });
     expect(open.map(model => model.providerModelId)).toEqual(["llm/enabled", "llm/disabled", "llm/absent", "llm/tombstoned"]);
+
+    // 启停结果属于来源内容：关掉模型必须推进 configRevision，缓存连接才不会继续用旧集合。
+    const unfiltered = createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider });
+    const unfilteredSource = (await unfiltered.get("admin", "demo"))!;
+    expect(unfilteredSource.bindings.find(binding => binding.bindingId === "provider-assistant:demo")?.modelKeys)
+      .toEqual(["llm/enabled", "llm/disabled", "llm/absent", "llm/tombstoned"]);
+    expect(source.configRevision).not.toBe(unfilteredSource.configRevision);
   } finally {
     settings.close();
     fs.rmSync(directory, { recursive: true, force: true });
