@@ -116,6 +116,11 @@ export function verifyHostLease(key: string, token: string, now: number): { ok: 
   return { ok: true, claims };
 }
 
+/** 宿主侧错误：带上可行动的失败原因，执行器与界面能直接显示，而不是只看到一句英文。 */
+function hostCallError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
 function readBridgeIdentity(runtimeDir: string, socketPath: string): BridgeIdentity | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(runtimeDir, BRIDGE_IDENTITY_FILE), "utf8")) as Partial<BridgeIdentity>;
@@ -184,19 +189,33 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
   /** 签名/过期/authority 校验；返回可继续调用的方法白名单。 */
   const authorizeLease = (token: string, method: string): HostLeaseClaims => {
     const verified = verifyHostLease(identity.key, token, now());
-    if (!verified.ok) throw new Error(`Executor host lease rejected (${verified.reason})`);
+    if (!verified.ok) {
+      throw hostCallError(
+        `host-lease-${verified.reason}`,
+        verified.reason === "expired-lease"
+          ? "本轮授权已过期，请重新发起该回合"
+          : verified.reason === "invalid-signature"
+            ? "执行器提交的回合授权签名无效（可能来自已被替换的执行器实例），请重启执行器后重试"
+            : "执行器提交的回合授权格式无效"
+      );
+    }
     const claims = verified.claims;
     const authority = authorityOf(claims);
-    if ((authorityFor || authorityByRequest) && !authority) throw new Error("Executor host lease has no persisted turn authority");
+    if ((authorityFor || authorityByRequest) && !authority) {
+      throw hostCallError(
+        "host-turn-authority-missing",
+        `宿主账本里没有该回合的授权记录（turn ${claims.turnId}），本轮已结束或来自旧宿主；请重新发起该回合`
+      );
+    }
     if (authority) {
-      if (authority.owner !== claims.owner || authority.requestId !== claims.requestId) throw new Error("Executor host lease owner mismatch");
-      if (authority.revokedAt) throw new Error("Executor turn authority is revoked");
-      if (authority.expiresAt !== null && authority.expiresAt !== undefined && authority.expiresAt <= now()) throw new Error("Executor turn authority has expired");
+      if (authority.owner !== claims.owner || authority.requestId !== claims.requestId) throw hostCallError("host-turn-authority-mismatch", "回合授权与执行器提交的身份不一致");
+      if (authority.revokedAt) throw hostCallError("host-turn-authority-revoked", "本轮授权已被撤销，无法继续调用宿主能力");
+      if (authority.expiresAt !== null && authority.expiresAt !== undefined && authority.expiresAt <= now()) throw hostCallError("host-turn-authority-expired", "本轮授权已过期，请重新发起该回合");
       const allowed = claims.methods.length > 0 ? claims.methods : authority.hostMethods;
-      if (allowed.length > 0 && !allowed.includes(method)) throw new Error(`Executor host method not allowed: ${method}`);
-      if (authority.hostMethods.length > 0 && !authority.hostMethods.includes(method)) throw new Error(`Executor host method not allowed: ${method}`);
+      if (allowed.length > 0 && !allowed.includes(method)) throw hostCallError("host-method-not-allowed", `本轮无权调用宿主方法：${method}`);
+      if (authority.hostMethods.length > 0 && !authority.hostMethods.includes(method)) throw hostCallError("host-method-not-allowed", `本轮授权未包含宿主方法：${method}`);
     } else if (claims.methods.length > 0 && !claims.methods.includes(method)) {
-      throw new Error(`Executor host method not allowed: ${method}`);
+      throw hostCallError("host-method-not-allowed", `本轮无权调用宿主方法：${method}`);
     }
     return claims;
   };
@@ -215,12 +234,12 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
           return handler(method, params.params);
         }
         const claims = authorizeLease(leaseId, method);
-        if (!authorityFor && !authorityByRequest) throw new Error("Executor host lease is unavailable");
-        if (!onAdopt) throw new Error("Executor host lease is unavailable");
+        if (!authorityFor && !authorityByRequest) throw hostCallError("host-lease-unavailable", "宿主尚未准备好回合授权，请稍后重试");
+        if (!onAdopt) throw hostCallError("host-lease-unavailable", "宿主尚未准备好回合接管，请稍后重试");
         const turnId = canonicalTurnId(claims);
         const adopted = await onAdopt(turnId);
         const rebuilt = byTurn.get(turnId);
-        if (!adopted || !rebuilt) throw new Error("Executor host lease could not be re-established");
+        if (!adopted || !rebuilt) throw hostCallError("host-lease-adopt-failed", "无法在当前宿主恢复该回合，请重新发起");
         return rebuilt(method, params.params);
       }
       case "tools.issue":

@@ -67,7 +67,7 @@ describe("Agent runtime host bridge", () => {
     const invoke = () => call(socketPath, { token: "secret", workspaceKey: "ws", method: "extension.call", params: { leaseId: lease.leaseId, method: "connection.read", params: { id: 1 } } });
     expect(await invoke()).toMatchObject({ ok: true, result: { owner: "bound-owner" } });
     lease.release();
-    expect(await invoke()).toMatchObject({ ok: false, error: expect.stringContaining("lease") });
+    expect(await invoke()).toMatchObject({ ok: false, error: expect.stringContaining("授权") });
 
     // 领域错误码必须原样回到执行端，否则目标准备失败只能显示通用文案。
     const coded = bridge.registerCall(async () => {
@@ -181,21 +181,21 @@ describe("Host bridge turn leases across host restarts (task 2.3)", () => {
 
     // 伪造签名：不改 payload 只改签名。
     const forged = `${lease.leaseId.slice(0, lease.leaseId.lastIndexOf("."))}.AAAA`;
-    expect(await invoke(forged)).toMatchObject({ ok: false, error: expect.stringContaining("signature") });
+    expect(await invoke(forged)).toMatchObject({ ok: false, error: expect.stringContaining("签名无效") });
     // 越权方法：authority 未列入。
-    expect(await invoke(lease.leaseId, "connection.credential")).toMatchObject({ ok: false, error: expect.stringContaining("not allowed") });
+    expect(await invoke(lease.leaseId, "connection.credential")).toMatchObject({ ok: false, error: expect.stringContaining("无权调用") });
     // 撤销后立即拒绝。
     authorities.set("turn-1", authority({ revokedAt: new Date().toISOString() }));
-    expect(await invoke(lease.leaseId)).toMatchObject({ ok: false, error: expect.stringContaining("revoked") });
+    expect(await invoke(lease.leaseId)).toMatchObject({ ok: false, error: expect.stringContaining("授权已被撤销") });
     // owner 不匹配。
     authorities.set("turn-1", authority({ owner: "mallory" }));
-    expect(await invoke(lease.leaseId)).toMatchObject({ ok: false, error: expect.stringContaining("owner mismatch") });
+    expect(await invoke(lease.leaseId)).toMatchObject({ ok: false, error: expect.stringContaining("身份不一致") });
     // 过期 lease。
     authorities.set("turn-1", authority());
     const expired = bridge.registerCall(async () => ({ ok: true }), {
       turnId: "turn-1", requestId: "req-1", owner: "alice", methods: ["connection.get"], exp: 1
     });
-    expect(await invoke(expired.leaseId)).toMatchObject({ ok: false, error: expect.stringContaining("expired") });
+    expect(await invoke(expired.leaseId)).toMatchObject({ ok: false, error: expect.stringContaining("过期") });
     expect(calls).toEqual([]);
   });
 });
