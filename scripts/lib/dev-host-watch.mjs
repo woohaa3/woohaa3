@@ -130,6 +130,12 @@ function buildSteps({ dir, manifest, backendDir }) {
     steps.push({ scope: "package", script: "build:browser" });
     steps.push({ scope: "workspace", script: "assemble:extensions" });
   }
+  // `executor` 入口已把 `@woohaa3/contracts` 与 `@woohaa3/agent-connections` 内联进扩展自己的
+  // `dist/executor.js`；当这两个底层包变化时，必须同步重建声明了 `executor` 的扩展包，
+  // 否则常驻的 `woohaa3-executor` daemon 仍会运行内联了旧版底层包的 `dist/executor.js`。
+  if (manifest.name === "@woohaa3/contracts" || manifest.name === "@woohaa3/agent-connections") {
+    steps.push({ scope: "workspace", script: "build:executors" });
+  }
   return steps;
 }
 
@@ -240,8 +246,8 @@ export function startHostWatch({
     runBuild: async (target) => {
       for (const step of target.steps) await runStep(step, target);
       // Windows 只监听这个重载入口，避免 Node 隐式监听依赖目录的重复通知。
-      // 浏览器发布目录同样经 fs 读取，需要在装配完成后显式通知宿主。
-      if (process.platform === "win32" || target.steps.some(step => step.script === 'assemble:extensions')) {
+      // 浏览器发布目录与扩展 executor 产物不由宿主进程直接静态 import，构建后需显式通知宿主重新注册。
+      if (process.platform === "win32" || target.steps.some(step => step.script === 'assemble:extensions' || step.script === 'build:executors')) {
         const entry = path.join(backendDir, 'server-dist/index.js');
         if (fs.existsSync(entry)) {
           const now = new Date();

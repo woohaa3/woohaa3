@@ -27,6 +27,7 @@
     "e2e:telemetry": "playwright test -c playwright.telemetry.config.ts",
     "build:browser": "node scripts/build-extension-browser.mjs --all",
     "build:extension-backend": "node scripts/build-extension-backend.mjs",
+    "build:executors": "pnpm --filter @woohaa3/extension-oauth-agent --filter @woohaa3/extension-sdk-agent --filter @woohaa3/extension-local-agent run build",
     "assemble:extensions": "node ../scripts/assemble-extension-release.mjs",
     "dev:extensions": "node scripts/build-extension-browser.mjs --all"
   },

@@ -184,3 +184,8 @@ WOOHAA_REVIEW_CDP_URL=http://<复核机>:9222 pnpm -C web run e2e
 - 视觉基线按浏览器所在系统命名：复核机生成的叫 `*-chromium-cdp-win32.png`，与本机
   `*-chromium-linux.png` 并存；改基线必须回同一台复核机重生成。
 - 新增 spec 不要写 `import { test, expect } from "@playwright/test"`，否则会绕过这套通道。
+
+### 运行期故障排查与常驻 Executor 边界
+
+- **先查当前工作区日志与后端状态接口**：多 worktree 并存时，先核对当前目录对应的 `.local/atc-dev.log`（或 `.local/devsvr.log`）、监听端口与 `WOOHAA3_BASE_PATH`，再请求 `/api/extensions`、`/api/agent-conversations/connections` 确认后端 `actualState`，禁止跨 worktree 混看端口或在未确认后端状态前盲跑浏览器脚本。
+- **常驻 `woohaa3-executor` 的模块缓存**：`woohaa3-executor` daemon 跨 dev 重启常驻，按 `?revision=<sha256>` 加载扩展 `dist/executor.js`；`executor` 产物必须内联 `workspace:*` 依赖（`build-package.mjs` 的 `--entry-name executor`），避免命中 daemon 进程内旧版 `@woohaa3/*` 的 Node ESM 缓存。修改 `execution-runtime` 自身代码后须显式执行 `woohaa3-executor runtime stop` 重启 daemon。
