@@ -16,11 +16,11 @@
 
 use std::collections::BTreeMap;
 
-/// 保留层：世界、编辑器/gizmo（1）、片场相机（2）、运行特效（3）、空场占位（4）、截取（7），
-/// 以及「已注册但没有卡片视图」的模型根停放层 31。
+/// 保留层：世界、编辑器/gizmo（1）、片场相机（2）、运行特效（3）、空场占位（4）、截取（7）、
+/// 世界镜头内容（11）、拍摄主光（12），以及「已注册但没有卡片视图」的模型根停放层 31。
 ///
 /// `1` 同时是 transform gizmo 与 shot gizmo；`2` 是片场小相机；`7` 是 capture。
-pub const RESERVED_LAYERS: [usize; 9] = [0, 1, 2, 3, 4, 7, 8, WORLD_CAMERA_CONTENT_LAYER, PARKED_LAYER];
+pub const RESERVED_LAYERS: [usize; 10] = [0, 1, 2, 3, 4, 7, 8, WORLD_CAMERA_CONTENT_LAYER, SHOOTING_KEY_LAYER, PARKED_LAYER];
 
 /// 没有卡片视图的模型根停放在此层：任何预览/主相机都不看它，但仍保留合法渲染层身份。
 pub const PARKED_LAYER: usize = 31;
@@ -33,6 +33,14 @@ pub const GRID_LAYER: usize = 10;
 /// Shared-world geometry as seen by shooting cameras. The global canvas light
 /// never includes this layer; main-canvas geometry keeps layer 0 as well.
 pub const WORLD_CAMERA_CONTENT_LAYER: usize = 11;
+
+/// 只用于把「拍摄用无阴影主光」限定到拍摄视图的光照层：没有任何几何体在上面，
+/// 拍摄相机把该层加入自己的 `RenderLayers`，主画布相机不加。
+///
+/// 分离成独立层的原因是 Bevy 的光照按「光源自己的 `RenderLayers` 与视图
+/// `RenderLayers` 是否相交」生效：把光源挂在相机实体上会继承相机的层（其中包含主画布
+/// 层），主画布就会被这盏补光照到。光源单独一层可避免这种串光。
+pub const SHOOTING_KEY_LAYER: usize = 12;
 
 /// 可出租层区间起点：高于全部保留层。
 pub const SLOT_BASE: usize = 32;

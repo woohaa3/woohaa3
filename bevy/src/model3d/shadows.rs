@@ -15,7 +15,7 @@ use bevy::{
 pub(crate) const MAP_SIZE: usize = 2048;
 
 /// Shooting views do not consume the canvas light. Geometry is shared, while
-/// their ambient baseline is owned by the camera rather than global state.
+/// their lighting rig is owned by the camera rather than global state.
 #[derive(Component)]
 pub(crate) struct IgnoreGlobalLight;
 
@@ -29,6 +29,79 @@ pub(crate) fn camera_lighting() -> (IgnoreGlobalLight, bevy::light::AmbientLight
         },
     )
 }
+
+/// World-camera rig for card previews and captures.
+///
+/// A camera that only receives ambient light renders white geometry as a flat
+/// silhouette: no normal-dependent shading, so a desk against a wall is one
+/// value. The rig therefore keeps the ambient baseline and adds **one**
+/// shadowless key light per shooting view (see [`shooting_key_light`]).
+///
+/// Consequences:
+/// - still `IgnoreGlobalLight`, so the canvas's global light and its cast
+///   shadows never enter the generation input (the shot-list rule that camera
+///   cards and captures carry no global contact shadow);
+/// - the key light is a spot light on its own view layer, so it neither competes
+///   for the canvas's single directional-light slot nor reaches the main canvas.
+pub(crate) fn world_camera_lighting() -> (IgnoreGlobalLight, bevy::light::AmbientLight) {
+    (
+        IgnoreGlobalLight,
+        bevy::light::AmbientLight {
+            color: Color::WHITE,
+            brightness: WORLD_CAMERA_AMBIENT,
+            ..default()
+        },
+    )
+}
+
+/// Shadowless key light for a shooting view. Spawn it as a child of the view's
+/// camera so its direction follows the view forward (a studio headlight).
+///
+/// A **spot** light, not a directional one: the canvas's single directional
+/// light is a scarce global resource, and adding a second one costs the canvas
+/// its own key light and cast shadows (measured: the floor went from shadowed to
+/// lit). Spot lights are per-view punctual lights, filtered by `RenderLayers`
+/// and budgeted separately.
+pub(crate) fn shooting_key_light(layers: RenderLayers) -> (SpotLight, RenderLayers) {
+    (
+        SpotLight {
+            color: Color::WHITE,
+            intensity: WORLD_CAMERA_KEY_LUMENS,
+            // Renderer units (64/m); covers the largest case scene with margin.
+            range: WORLD_CAMERA_KEY_RANGE,
+            radius: 0.0,
+            // Form comes from the key light's N·L; contacts stay unprojected so
+            // the capture stays a faithful geometry reference.
+            shadow_maps_enabled: false,
+            inner_angle: 0.0,
+            outer_angle: WORLD_CAMERA_KEY_ANGLE,
+            ..default()
+        },
+        // Bevy 对每盏 punctual 光做两道过滤：与视图层相交，且与网格层相交。传入相机自己的
+        // 视图层（几何层 + 主光层 12）即可同时满足两者；主画布相机只包含 0/10/8，与它
+        // 不相交，所以这盏灯不会进入主画布。
+        layers,
+    )
+}
+
+/// Layer that exists only to scope the shooting key light to shooting views.
+/// No geometry uses it; the shooting camera adds it to its view layers so the
+/// light reaches that view and nothing else.
+pub(crate) const SHOOTING_KEY_LAYER: usize = crate::preview_layers::SHOOTING_KEY_LAYER;
+
+/// Ambient baseline for shooting views. Lower than the canvas's 600 so the key
+/// light owns the shading; high enough that faces turned away are not crushed.
+pub(crate) const WORLD_CAMERA_AMBIENT: f32 = 210.0;
+
+/// Shadowless key light intensity for shooting views, in lumens.
+pub(crate) const WORLD_CAMERA_KEY_LUMENS: f32 = 145_000_000.0;
+
+/// Key light range in renderer units (64 units per meter).
+pub(crate) const WORLD_CAMERA_KEY_RANGE: f32 = 9_000.0;
+
+/// Key light cone half-angle: wide enough to cover a room interior from the
+/// camera position without a visible hot spot.
+pub(crate) const WORLD_CAMERA_KEY_ANGLE: f32 = std::f32::consts::FRAC_PI_3;
 
 /// Light arrives from world +Z and casts toward -Z: lower-left to upper-right
 /// along a ground-grid axis in the default orthographic canvas. Keep elevation.

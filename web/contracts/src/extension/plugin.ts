@@ -81,10 +81,10 @@ export type ExtensionPlugin<F extends HostConfigFields = HostConfigFields> = {
   readonly directory?: string;
   /** 设置页插件卡片上的图标：语义图形名（`PLUGIN_ICON_NAMES`）或品牌图形路径；缺省显示通用插件图标。 */
   readonly icon?: PluginIcon;
-  /** Provider 适配器支持的输出类型，用于配置前的能力标签；不代表账号已有模型或授权。 */
-  readonly modelTypes?: readonly CanvasTaskModelType[];
   /** 服务商网站，由扩展声明；缺省不提供网站跳转。 */
   readonly website?: string;
+  /** Provider 适配器支持的输出类型，用于配置前的能力标签；不代表账号已有模型或授权。 */
+  readonly modelTypes?: readonly CanvasTaskModelType[];
   /** 添加提供商列表的展示顺序；未声明时排在推荐入口之后。 */
   readonly setupOrder?: number;
   /**

@@ -6,7 +6,7 @@
 //! 稳定若干帧后用 `Screenshot::image` 回读 RGBA，随即拆相机、删图像。
 //!
 //! 与镜头卡片预览一样直接复用页面世界实体，不重建模型、不新建 App/context、不写规范状态。
-//! 捕获是生成输入，**不含等距网格**，使用相机专属环境光并忽略全局方向光，
+//! 捕获是生成输入，**不含等距网格**，使用相机专属环境光 + 一盏无阴影主光，忽略全局方向光，
 //! 不改变主画布照明或网格。作业严格串行（一个在飞），迟到的结果按
 //! `(requestId, generation)` 丢弃。
 
@@ -222,10 +222,11 @@ fn start(
     let width = request.width.clamp(32, MAX_EDGE);
     let height = request.height.clamp(32, MAX_EDGE);
     let image = create_target(images, width, height);
+    let world_camera_layers = world_layers.with(crate::preview_layers::SHOOTING_KEY_LAYER);
     let camera = commands
         .spawn((
             Camera3d::default(),
-            crate::model3d::shadows::camera_lighting(),
+            crate::model3d::shadows::world_camera_lighting(),
             bevy::render::view::NoIndirectDrawing,
             Camera {
                 // 固定浅色底：捕获是生成输入，不跟随页面主题。
@@ -234,13 +235,19 @@ fn start(
                 ..default()
             },
             RenderTarget::Image(image.clone().into()),
-            world_layers,
+            // 视图层加上拍摄主光层：主光只对这个视图生效，几何仍只在 world_layers 上。
+            world_camera_layers.clone(),
             world_camera_view::pose(&camera_data),
             world_camera_view::projection(&camera_data, UVec2::new(width, height)),
             bevy::render::view::Tonemapping::None,
             bevy::render::view::DebandDither::Disabled,
         ))
         .id();
+    commands.spawn((
+        crate::model3d::shadows::shooting_key_light(world_camera_layers.clone()),
+        Transform::default(),
+        ChildOf(camera),
+    ));
     state.job = Some(Job {
         request_id: request.request_id,
         generation: request.generation,

@@ -387,7 +387,25 @@ fn shooting_views_ignore_global_light_without_switching_off_the_canvas() {
         .get::<bevy::light::AmbientLight>(shooting)
         .unwrap();
     assert_eq!(ambient.color, Color::WHITE);
+    // 这个用例挂的是 `camera_lighting()`（原生模型预览的既有策略，仍与画布同环境光）；
+    // 拍摄视图用的是 `world_camera_lighting()`，环境光见下方 `WORLD_CAMERA_AMBIENT`。
     assert_eq!(ambient.brightness, 600.0);
+    // 拍摄视图的主光是聚光灯：它不能占用方向光槽位（WebGL2 只有 1 个），否则主画布的
+    // 全局方向光与其投影会被挤掉。
+    let (key, key_layers) = shooting_key_light(RenderLayers::from_layers(&[
+        crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER,
+        crate::preview_layers::SHOOTING_KEY_LAYER,
+    ]));
+    assert!(!key.shadow_maps_enabled, "拍摄主光不得投影");
+    assert_eq!(key.intensity, WORLD_CAMERA_KEY_LUMENS);
+    assert!(
+        key_layers.intersects(&RenderLayers::layer(crate::preview_layers::SHOOTING_KEY_LAYER)),
+        "主光必须能被拍摄视图的层集合命中"
+    );
+    assert!(
+        !key_layers.intersects(&RenderLayers::layer(0)),
+        "主光不得覆盖主画布层"
+    );
     // A released ordinary-preview layer is leased to a shooting camera. The
     // global light must drop the stale membership even with no switch change.
     app.world_mut().despawn(ordinary);
