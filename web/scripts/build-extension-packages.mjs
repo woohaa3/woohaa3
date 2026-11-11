@@ -64,6 +64,50 @@ const filters = local.flatMap((extension) => {
 const invocation = packageManagerInvocation(["-r", ...filters, "run", "build"]);
 
 /**
+ * 构建前置：先产出扩展依赖的工作区包 `dist/`。
+ *
+ * `build-package.mjs` 把已声明的依赖当 external，esbuild 只按 `package.json` 的
+ * `exports.import` 去找文件；这些工作区包的 `dist/` 被 gitignore，干净 checkout 里并不存在
+ * （2026-11-11 macOS 分发流水线：local-agent 报 `Could not resolve "@woohaa3/agent-connections"`
+ * 与 `woohaa3-executor/client`，而本机因为残留 dist 一直构建成功）。
+ * 因此按扩展真实依赖推导出必须先构建的工作区包，递归构建完成后再构建扩展。
+ */
+const EXTENSION_DEPENDENCY_ORDER = [
+  "@woohaa3/contracts",
+  "@woohaa3/runtime-foundation",
+  "@woohaa3/agent-connections",
+  "@woohaa3/provider-sdk",
+  "woohaa3-executor"
+];
+
+function workspaceDependencyBuilds() {
+  const needed = new Set();
+  for (const extension of buildable) {
+    const pkg = readPackageJson(path.join(extension.dir, "package.json"));
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    for (const name of Object.keys(deps)) if (EXTENSION_DEPENDENCY_ORDER.includes(name)) needed.add(name);
+  }
+  return EXTENSION_DEPENDENCY_ORDER.filter((name) => needed.has(name));
+}
+
+const dependencyBuilds = workspaceDependencyBuilds();
+if (dependencyBuilds.length > 0) {
+  console.log(`先构建扩展依赖的工作区包：${dependencyBuilds.join("、")}`);
+  for (const name of dependencyBuilds) {
+    const build = packageManagerInvocation(["-r", "--filter", name, "run", "build"]);
+    try {
+      execFileSync(build.command, build.args, { stdio: "inherit", cwd: webRoot, windowsHide: true });
+    } catch (failure) {
+      throw new Error(
+        `扩展依赖的工作区包构建失败：${name}\n` +
+        `扩展产物以它作为 external 依赖，缺少 dist 时 esbuild 会报 Could not resolve。\n` +
+        `原始错误：${failure instanceof Error ? failure.message.split("\n")[0] : String(failure)}`
+      );
+    }
+  }
+}
+
+/**
  * 递归构建失败时逐个重试，把失败归因到具体扩展。
  *
  * `pnpm -r` 一次失败只回一个非零退出码；在 CI 里输出被折叠成 `##[error]` 后，调用方拿到的
