@@ -22,8 +22,11 @@ const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'
 export async function prepareDesktopNode(){
  const artifact=nodeArtifact();const cache=path.join(root,'.local/desktop-node');fs.mkdirSync(cache,{recursive:true});
  const archive=path.join(cache,artifact.archive);const sums=path.join(cache,'SHASUMS256.txt');
- if(!fs.existsSync(sums))run(process.platform==='win32'?'curl.exe':'curl',['--fail','--location','--retry','2',`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/SHASUMS256.txt`,'-o',sums]);
- if(!fs.existsSync(archive))run(process.platform==='win32'?'curl.exe':'curl',['--fail','--location','--retry','2',`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/${artifact.archive}`,'-o',archive]);
+ // 静默进度条 + 断点续传 + 传输中断重试：CI 会把 curl 进度整体标成错误，而 --retry 默认只管连接失败。
+ const curlBin=process.platform==='win32'?'curl.exe':'curl';
+ const fetchTo=(url,dest)=>run(curlBin,['-sS','--fail','--location','--retry','5','--retry-delay','2','--retry-all-errors','--continue-at','-',url,'-o',dest]);
+ if(!fs.existsSync(sums))fetchTo(`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/SHASUMS256.txt`,sums);
+ if(!fs.existsSync(archive))fetchTo(`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/${artifact.archive}`,archive);
  const expected=fs.readFileSync(sums,'utf8').split('\n').find(line=>line.trim().endsWith(` ${artifact.archive}`))?.split(/\s+/)[0];
  const actual=createHash('sha256').update(fs.readFileSync(archive)).digest('hex');if(!expected||expected!==actual)throw new Error('Node SHA256 校验失败');
  const extracted=path.join(cache,artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,''));

@@ -53,14 +53,36 @@ export async function prepareWebHostNode({ cacheDir, platform = process.platform
   const sums = path.join(cache, 'SHASUMS256.txt');
   const curl = platform === 'win32' ? 'curl.exe' : 'curl';
   const base = `https://nodejs.org/dist/v${artifact.version}`;
-  if (!fs.existsSync(sums)) run(curl, ['--fail', '--location', '--retry', '2', `${base}/SHASUMS256.txt`, '-o', sums]);
-  if (!fs.existsSync(archive)) run(curl, ['--fail', '--location', '--retry', '2', `${base}/${artifact.archive}`, '-o', archive]);
+  // 静默进度条并让传输中断也可重试：CI 会把 curl 的进度输出整体标成错误，
+  // 而 `--retry` 默认只管连接失败。`--continue-at -` 让重试从断点续传，配合下方的
+  // sha256 校验，续传出错时仍会因摘要不符而丢弃重来。
+  const download = (url, destination) => run(curl, [
+    '-sS', '--fail', '--location',
+    '--retry', '5', '--retry-delay', '2', '--retry-all-errors', '--continue-at', '-',
+    url, '-o', destination
+  ]);
+  if (!fs.existsSync(sums)) download(`${base}/SHASUMS256.txt`, sums);
 
   const expected = fs
     .readFileSync(sums, 'utf8')
     .split('\n')
     .find((line) => line.trim().endsWith(` ${artifact.archive}`))
     ?.split(/\s+/)[0];
+  /**
+   * 下载并校验归档；摘要不符（或缺条目）时丢弃重下一次。
+   *
+   * 只在两次都失败后才抛错：`--continue-at -` 让上次中断的归档从断点续传，但若中间那份
+   * 本身已损坏，续传结果依旧过不了摘要——那一次先删掉从头再来，避免坏成永久失败。
+   */
+  const ensureArchive = () => {
+    if (fs.existsSync(archive) && expected) {
+      const current = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+      if (current === expected) return;
+      fs.rmSync(archive, { force: true });
+    }
+    download(`${base}/${artifact.archive}`, archive);
+  };
+  ensureArchive();
   const actual = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
   if (!expected || expected !== actual) {
     fs.rmSync(archive, { force: true });
