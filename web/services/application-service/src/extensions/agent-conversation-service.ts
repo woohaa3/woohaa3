@@ -257,9 +257,12 @@ export type AgentConversationService = {
    *
    * 显式选择必须经连接注册表校验属于该 owner；缺失时拒绝。API 在接受回合前调用，
    * 把结果作为 `connection` 传入 `acceptTurn`（保持后者同步，便于复用/测试）。
+   *
+   * `upgradedFrom` 只在本次解析触发执行器版本迁移时出现，记录迁移前身份；调用方据此
+   * 接受「在自动升级前冻结」的选择，同时仍用迁移后身份冻结本回合。
    */
   resolveConnectionBinding(input: { owner: string; adapterId: string; connectionId?: string; model?: string; reasoningEffort?: string }):
-    Promise<{ ok: true; binding: AgentConnectionBinding | null } | { ok: false; error: AgentConversationServiceError }>;
+    Promise<{ ok: true; binding: AgentConnectionBinding | null; upgradedFrom?: AgentConnectionBinding } | { ok: false; error: AgentConversationServiceError }>;
   /** 异步 dispatch（accept 后调用）；幂等，同一 turn 只运行一次。 */
   dispatchTurn(turnId: string): Promise<void>;
   /** 等待指定回合 dispatch 完成（测试/受控收尾用）。 */
@@ -340,15 +343,22 @@ export function createAgentConversationService(options: AgentConversationService
 
   const resolveAdapter = (adapterId: string | undefined) => registry.resolve(adapterId);
 
-  /** 新调用必须显式选择归属于当前 owner 的连接。 */
+  /**
+   * 新调用必须显式选择归属于当前 owner 的连接。
+   *
+   * 执行器版本升级会在解析时迁移连接并推进 `configRevision`。先读取迁移前身份，
+   * 让调用方可以接受「恰好在本次自动升级前冻结」的选择：否则请求自己触发升级，
+   * 又以升级后的版本不一致为由拒绝，用户只能反复重选。
+   */
   const resolveTurnConnection = async (
     owner: string,
     adapterId: string,
     requestedId: string | undefined,
     reasoning?: { model?: string; effort?: string }
-  ): Promise<{ ok: true; binding: AgentConnectionBinding | null } | { ok: false; error: { code: AgentConversationServiceError["code"]; message: string } }> => {
+  ): Promise<{ ok: true; binding: AgentConnectionBinding | null; upgradedFrom?: AgentConnectionBinding } | { ok: false; error: { code: AgentConversationServiceError["code"]; message: string } }> => {
     if (requestedId) {
       if (!connections) return { ok: false, error: { code: "connection-unavailable", message: "连接服务未配置" } };
+      const before = await connections.getConnection({ owner, connectionId: requestedId });
       try {
         await connections.migrateConnection?.({ owner, connectionId: requestedId, beforeMigration: () => store.prepareConnectionMigration?.(owner, requestedId) ?? false });
       } catch { return { ok: false, error: { code: "connection-unavailable", message: "连接执行版本升级未完成；请先核对活动或未知回合再重试" } }; }
@@ -362,16 +372,18 @@ export function createAgentConversationService(options: AgentConversationService
           return { ok: false, error: { code: "capability-unsupported", message: "当前模型未开放此思考强度，请清除强度或重新选择模型" } };
         }
       }
-      return {
-        ok: true,
-        binding: {
-          connectionId: view.connectionId,
-          adapterId: view.adapterId,
-          configRevision: view.configRevision,
-          credentialEpoch: view.credentialEpoch,
-          ...(view.capabilityRevision ? { capabilityRevision: view.capabilityRevision } : {})
-        }
+      const binding = {
+        connectionId: view.connectionId,
+        adapterId: view.adapterId,
+        configRevision: view.configRevision,
+        credentialEpoch: view.credentialEpoch,
+        ...(view.capabilityRevision ? { capabilityRevision: view.capabilityRevision } : {})
       };
+      const upgradedFrom = before && before.connectionId === view.connectionId && before.adapterId === view.adapterId
+        && (before.configRevision !== view.configRevision || before.credentialEpoch !== view.credentialEpoch)
+        ? { connectionId: before.connectionId, adapterId: before.adapterId, configRevision: before.configRevision, credentialEpoch: before.credentialEpoch, ...(before.capabilityRevision ? { capabilityRevision: before.capabilityRevision } : {}) }
+        : undefined;
+      return { ok: true, binding, ...(upgradedFrom ? { upgradedFrom } : {}) };
     }
     return { ok: false, error: { code: "connection-unavailable", message: "请求必须明确选择助手连接" } };
   };

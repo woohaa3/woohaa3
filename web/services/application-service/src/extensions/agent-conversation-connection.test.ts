@@ -98,7 +98,7 @@ function fakeAdapter(controls: Controls): AgentConversationAdapter {
   };
 }
 
-function setup(options: { byOwner?: Record<string, AgentConnectionView[]> } = {}) {
+function setup(options: { byOwner?: Record<string, AgentConnectionView[]>; migrateConnection?: AgentConnectionRegistry["migrateConnection"] } = {}) {
   const controls: Controls = { seen: [], outcomes: [], pending: [] };
   const registry = createAgentAdapterRegistry({
     hasCapability: (id) => id === "agent-conversation-adapter:fake",
@@ -108,10 +108,12 @@ function setup(options: { byOwner?: Record<string, AgentConnectionView[]> } = {}
   });
   const storePath = path.join(tempDir(), "agents.sqlite");
   const store = createSqliteAgentConversationStore({ path: storePath });
+  const connections = options.byOwner ? connectionRegistry(options.byOwner) : undefined;
+  if (connections && options.migrateConnection) connections.migrateConnection = options.migrateConnection;
   const service = createAgentConversationService({
     store,
     registry,
-    ...(options.byOwner ? { connections: connectionRegistry(options.byOwner) } : {}),
+    ...(connections ? { connections } : {}),
     agentRoles: testRoleRegistry(),
     now: () => "2026-10-16T00:00:00.000Z",
     createId: (() => {
@@ -158,6 +160,26 @@ describe("来源连接解析与冻结（任务 2.2）", () => {
     const { service } = setup({ byOwner: { "user-a": [view] } });
     expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "c1", model: "m", reasoningEffort: "high" })).toMatchObject({ ok: false, error: { code: "capability-unsupported" } });
     expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "c1", model: "m", reasoningEffort: "low" })).toMatchObject({ ok: true, binding: { capabilityRevision: "r1" } });
+  });
+
+  it("执行器版本迁移推进连接版本时同时返回迁移前身份", async () => {
+    const byOwner: Record<string, AgentConnectionView[]> = { "user-a": [conn({ connectionId: "c1", adapterId: "fake", extensionId: "sdk-agent", configRevision: 3 })] };
+    let migrations = 0;
+    const { service } = setup({ byOwner, migrateConnection: async ({ connectionId }) => {
+      const index = byOwner["user-a"]!.findIndex(entry => entry.connectionId === connectionId);
+      const view = byOwner["user-a"]![index]!;
+      if (view.configRevision === 3) { byOwner["user-a"]![index] = { ...view, configRevision: 4 }; migrations++; }
+    } });
+    const first = await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "c1" });
+    expect(first).toMatchObject({
+      ok: true,
+      binding: { connectionId: "c1", adapterId: "fake", configRevision: 4, credentialEpoch: 0 },
+      upgradedFrom: { connectionId: "c1", adapterId: "fake", configRevision: 3, credentialEpoch: 0 }
+    });
+    const again = await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "c1" });
+    expect(again).toMatchObject({ ok: true, binding: { connectionId: "c1", configRevision: 4 } });
+    if (again.ok) expect(again.upgradedFrom).toBeUndefined();
+    expect(migrations).toBe(1);
   });
 
   it("未知连接或跨 owner 连接返回 connection-unavailable（不静默降级）", async () => {

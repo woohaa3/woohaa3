@@ -488,6 +488,39 @@ describe("agent conversation service · 节点会话复用与清空（design D8�
     expect(failure.ok).toBe(false);
     expect(failing.getSnapshot().contextRevision).toBe(0);
   });
+
+  it("连接版本推进或版本冲突后丢弃目录缓存，下一次选择读到迁移后的版本", async () => {
+    const connections = [
+      { connectionId: "c1", adapterId: "a", extensionId: "sdk-agent", name: "A", runCategory: "agent-sdk", authMode: "api-key", configRevision: 2, credentialEpoch: 0, status: { transport: { state: "ready" }, credential: { state: "ready" }, modelAccess: { state: "ready" }, tools: { state: "ready" } }, ready: true, capabilities: { discussion: true, imageInput: false, tools: true, structuredResult: true, cancel: true, resume: false }, models: [], credentialConfigured: true }
+    ] as never[];
+    const listConnections = vi.fn(async () => ({ ok: true as const, value: { connections } }));
+    const create = vi.fn(async () => ({ ok: true as const, value: { conversation: summary({ conversationId: "conv-new" }) } }));
+    const accept = vi.fn(async () => ({ ok: true as const, value: {
+      conversation: summary({ conversationId: "conv-new" }),
+      turn: turn({ connection: { connectionId: "c1", adapterId: "a", configRevision: 2, credentialEpoch: 0 } }),
+      reused: false
+    } }));
+    const service = createAgentConversationService({ remote: fakeRemote({ listConnections, create: create as never, accept }) });
+    await service.listConnections();
+    await service.listConnections();
+    expect(listConnections).toHaveBeenCalledTimes(1);
+    await service.submitTurn({ canvasId: "cv", adapterId: "a", connectionId: "c1", requestId: "req-advance", entry: {
+      action: "discuss", canvasId: "cv", prompt: "hi",
+      connection: { connectionId: "c1", adapterId: "a", configRevision: 1, credentialEpoch: 0 }
+    } });
+    await service.listConnections();
+    expect(listConnections).toHaveBeenCalledTimes(2);
+
+    const retryList = vi.fn(async () => ({ ok: true as const, value: { connections } }));
+    const rejecting = createAgentConversationService({ remote: fakeRemote({ listConnections: retryList,
+      create: async () => ({ ok: true as const, value: { conversation: summary({ conversationId: "conv-new" }) } }),
+      accept: async () => ({ ok: false as const, code: "connection-unavailable", error: "助手连接版本已变更，请重新选择" }) }) });
+    await rejecting.listConnections();
+    const rejected = await rejecting.submitTurn({ canvasId: "cv", adapterId: "a", connectionId: "c1", requestId: "req-conflict", entry: { action: "discuss", canvasId: "cv", prompt: "hi" } });
+    expect(rejected).toMatchObject({ ok: false, code: "connection-unavailable" });
+    await rejecting.listConnections();
+    expect(retryList).toHaveBeenCalledTimes(2);
+  });
 });
 
 it("target submission resolves the node conversation without a whole-set context", async () => {

@@ -223,6 +223,8 @@ export function createAgentConversationService(
     const detail = snapshot.detail?.conversation;
     const shouldClearDetail = detail !== undefined && detail.nodeId === input.nodeId && detail.canvasId === input.canvasId;
     const clearActive = snapshot.active !== null && shouldClearDetail;
+    // 切换成功说明连接身份刚被解析/升级：丢弃目录缓存，避免宿主与选择器继续用旧版本提交。
+    directoryReads.invalidateDirectory();
     publish({
       detail: shouldClearDetail ? null : snapshot.detail,
       active: clearActive ? null : snapshot.active,
@@ -291,7 +293,16 @@ export function createAgentConversationService(
       if (!accept) return { ok: false, code: "unavailable", error: "图片场景创建不可用" };
       const accepted = await accept(conversation.value, { requestId: input.requestId, entry: input.entry });
       if (!accepted.ok) {
-        if (submittedScope === dataScopeId()) publish({ loading: false, error: accepted.error });
+        if (submittedScope === dataScopeId()) {
+          // 版本冲突可能由本请求触发的执行器迁移造成：清掉目录缓存并让宿主重读，
+          // 用户「重新选择」时才拿到迁移后的真实版本，而不是继续命中 60 秒旧缓存。
+          if (accepted.code === "connection-unavailable") directoryReads.invalidateDirectory();
+          publish({
+            loading: false,
+            error: accepted.error,
+            ...(accepted.code === "connection-unavailable" ? { contextRevision: snapshot.contextRevision + 1 } : {})
+          });
+        }
         return accepted;
       }
       const value: AgentConversationSubmitResult = {
@@ -300,13 +311,20 @@ export function createAgentConversationService(
         turn: accepted.value.turn,
         reused: accepted.value.reused
       };
+      // 受理时可能刚完成执行器版本迁移：回合冻结的版本与客户端提交的不再相同，
+      // 清目录缓存并让宿主重读，后续提交才不会继续携带旧版本。
+      const frozen = accepted.value.turn.connection;
+      const sent = input.entry.connection;
+      const connectionAdvanced = Boolean(frozen && sent && (frozen.configRevision !== sent.configRevision || frozen.credentialEpoch !== sent.credentialEpoch || frozen.connectionId !== sent.connectionId || frozen.adapterId !== sent.adapterId));
+      if (connectionAdvanced) directoryReads.invalidateDirectory();
       if (submittedScope === dataScopeId()) publish({
         loading: false,
         active: { conversationId: accepted.value.conversation.conversationId, requestId: input.requestId, turn: accepted.value.turn },
         error: null,
         conversations: snapshot.conversations.map((entry) =>
           entry.conversationId === conversation.value ? accepted.value.conversation : entry
-        )
+        ),
+        ...(connectionAdvanced ? { contextRevision: snapshot.contextRevision + 1 } : {})
       });
       return { ok: true, value };
     } finally { clearPending(); }

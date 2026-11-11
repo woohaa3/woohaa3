@@ -462,7 +462,15 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             const nextOptions = agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === value) ? reasoningEffortsOf(agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === value)!) : [];
             setConfigurationNotice(effort && !nextEffort && !nextOptions.includes(effort) ? "新模型不支持原思考强度，已恢复默认" : "");
             controller.edit({ models: { ...models, [key]: value } });
-            if (c.connectionId !== connectionId || (selectedConnection?.binding && (selectedConnection.binding.configRevision !== c.configRevision || selectedConnection.binding.credentialEpoch !== c.credentialEpoch))) selection?.onSelectConnection(c.connectionId);
+            if (c.adapterId && c.connectionId) {
+              rememberAssistantPreference(preferenceScope, {
+                sourceId: c.adapterId,
+                connectionId: c.connectionId,
+                model: value,
+                reasoningEffort: nextOptions.includes(nextEffort as AgentReasoningEffort) ? (nextEffort as AgentReasoningEffort) : ""
+              });
+            }
+            if (c.connectionId !== connectionId || selection?.selectedSourceId !== c.adapterId || (selectedConnection?.binding && (selectedConnection.binding.configRevision !== c.configRevision || selectedConnection.binding.credentialEpoch !== c.credentialEpoch))) selection?.onSelectConnection(c.connectionId);
           }} /> : null}
         model={<ReasoningParameters value={effort} options={supportedEfforts} open={openSelector === "model"} onOpenChange={open => setOpenSelector(current => open ? "model" : current === "model" ? null : current)} disabled={locked}
           onChange={value => { setEfforts(current => ({ ...current, [effortKey]: value as AgentReasoningEffort | "" })); remember(model, value as AgentReasoningEffort | ""); }} />}

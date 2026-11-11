@@ -34,6 +34,7 @@ import {
   decodeCursorQuery,
   decodeLinkRunRequest,
   decodeSwitchConnectionRequest,
+  type AgentConnectionBinding,
   type ApplicationExtensionCanvasAccessFacade
 } from "@woohaa3/contracts";
 import type { ApplicationRequestAuthenticator } from "../auth/adapter.js";
@@ -108,6 +109,24 @@ const STATUS_FOR: Record<AgentConversationServiceError["code"], number> = {
   "role-requirement-unsatisfied": 409,
   "role-prepare-failed": 500
 };
+
+/** 冻结连接身份是否等于给定身份（四个字段共同构成回合的版本快照）。 */
+const sameConnectionBinding = (frozen: AgentConnectionBinding, current: AgentConnectionBinding) =>
+  frozen.connectionId === current.connectionId && frozen.adapterId === current.adapterId
+  && frozen.configRevision === current.configRevision && frozen.credentialEpoch === current.credentialEpoch
+  && (frozen.capabilityRevision === undefined || frozen.capabilityRevision === current.capabilityRevision);
+
+/**
+ * 接受回合前校验前端冻结的连接身份。
+ *
+ * 解析时会自动迁移执行器版本并推进 `configRevision`；此时前端持有的仍是迁移前身份，
+ * 允许它匹配 `upgradedFrom`，本回合仍按迁移后身份冻结。
+ */
+const frozenConnectionAccepted = (
+  frozen: AgentConnectionBinding,
+  resolved: { binding: AgentConnectionBinding | null; upgradedFrom?: AgentConnectionBinding }
+) => Boolean(resolved.binding && sameConnectionBinding(frozen, resolved.binding))
+  || Boolean(resolved.upgradedFrom && sameConnectionBinding(frozen, resolved.upgradedFrom));
 
 export function createAgentConversationApiHandler(deps: AgentConversationApiDependencies): AgentConversationApiHandler {
   const log = deps.logger ?? (() => undefined);
@@ -455,7 +474,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (!allowed.ok) return respondError(res, allowed.error);
         const connection = await deps.service.resolveConnectionBinding({ owner, adapterId: conversation.snapshot.conversation.adapterId, connectionId: entry.connectionId, ...(entry.model ? { model: entry.model } : {}), ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
-        if (!connection.binding || (entry.connection && (entry.connection.connectionId !== connection.binding.connectionId || entry.connection.adapterId !== connection.binding.adapterId || entry.connection.configRevision !== connection.binding.configRevision || entry.connection.credentialEpoch !== connection.binding.credentialEpoch || entry.connection.capabilityRevision !== undefined && entry.connection.capabilityRevision !== connection.binding.capabilityRevision))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        if (!connection.binding || (entry.connection && !frozenConnectionAccepted(entry.connection, connection))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
         const accepted = await deps.imageDirectorScene.accept({ owner, canvasId: entry.canvasId, conversationId, entry, connection: connection.binding, request: { requestId: decoded.value.requestId, sourceNodeId: entry.nodeId, connectionId: entry.connectionId, model: entry.model, variant: entry.reasoningEffort ?? null, instructions: entry.prompt } });
         if (!accepted.ok) return respondError(res, accepted.error);
         sendJson(res, 200, accepted);
@@ -489,7 +508,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const connection = await deps.service.resolveConnectionBinding({ owner, adapterId, ...(decoded.value.entry.connectionId ? { connectionId: decoded.value.entry.connectionId } : {}), ...(decoded.value.entry.model ? { model: decoded.value.entry.model } : {}), ...(decoded.value.entry.reasoningEffort ? { reasoningEffort: decoded.value.entry.reasoningEffort } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
         const frozen = decoded.value.entry.connection;
-        if (frozen && (!connection.binding || frozen.connectionId !== connection.binding.connectionId || frozen.adapterId !== connection.binding.adapterId || frozen.configRevision !== connection.binding.configRevision || frozen.credentialEpoch !== connection.binding.credentialEpoch || frozen.capabilityRevision !== undefined && frozen.capabilityRevision !== connection.binding.capabilityRevision)) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        if (frozen && (!connection.binding || !frozenConnectionAccepted(frozen, connection))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
         // A version upgrade may archive the old target while resolving the binding.
         // Only that transition creates a fresh conversation; archived history stays immutable.
         let acceptedConversationId = conversationId;

@@ -33,6 +33,8 @@ it("只从能力事实产生思考强度：unknown / supported 无档位不制�
   expect(agentModelSelection(models, "a", "medium", true).invalidEffort).toBe(true);
   for (const id of ["b", "c", "d"]) expect(agentModelSelection(models, id, "", true).supportedEfforts).toEqual([]);
   expect(agentModelSelection(models, "missing", "", true)).toMatchObject({ invalidModel: true });
+  expect(agentModelSelection(models, "missing", "high", true)).toMatchObject({ invalidModel: true, invalidEffort: false });
+  expect(agentModelSelection([], "a", "high", true)).toMatchObject({ invalidModel: true, invalidEffort: false });
 });
 
 it("连接视图只有模型选择时，从同一 adapter 目录补齐能力", () => {

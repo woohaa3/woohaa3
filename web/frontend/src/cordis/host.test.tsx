@@ -500,8 +500,9 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
       findConversationForTarget: options.findConversationForTarget ?? (async () => ({ ok: true, value: { conversation: null } })),
       listConnections: async (adapterId?: string) => {
         listedAdapters.push(adapterId);
-        return { ok: true, value: (options.connectionsFor ?? (() => []))(adapterId).map((entry) => ({ ...entry, adapterId: entry.adapterId ?? options.contributions?.[0]?.sourceId ?? options.contributions?.[0]?.id })) };
+        return { ok: true, value: (options.connectionsFor ?? (() => []))(adapterId).map((entry) => ({ models: [], ...entry, adapterId: entry.adapterId ?? options.contributions?.[0]?.sourceId ?? options.contributions?.[0]?.id })) };
       },
+      catalog: async () => ({ ok: true, value: { models: [] } }),
       navigateToDetail: () => undefined,
       ...options.serviceOverrides
     };
@@ -535,7 +536,7 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
       connectionsFor: () => [{ connectionId: "first", name: "节点原助手", ready: true, authMode: "local-login" }, { connectionId: "second", name: "全局助手", ready: true, authMode: "local-login" }],
       serviceOverrides: { findConversationForTarget: async input => ({ ok: true, value: { conversation: hasHistory && !input.connectionId ? { connectionId: "first" } as never : null } }) }
     });
-    expect(el.querySelector('button[aria-label="选择助手"]')?.textContent).toContain(hasHistory ? "节点原助手" : "全局助手");
+    expect(el.querySelector('button[aria-label="来源与模型"]')?.textContent).toContain(hasHistory ? "节点原助手" : "全局助手");
   });
 
   it("无任何来源扩展时仍渲染内置面板并提示配置来源（MUST NOT 隐藏生成入口）", async () => {
@@ -559,8 +560,8 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
       connectionsFor: () => [{ connectionId: "c1", adapterId: "openai-responses", name: "OpenAI", ready: true }, { connectionId: "c2", adapterId: "chatgpt", name: "我的账号", ready: true }]
     });
     expect(el.querySelector('button[aria-label="来源"]')).toBeNull();
-    expect(el.querySelector('button[aria-label="选择助手"]')).not.toBeNull();
-    expect(listedAdapters).toEqual([undefined]);
+    expect(el.querySelector('button[aria-label="来源与模型"]')).not.toBeNull();
+    expect([...new Set(listedAdapters)]).toEqual([undefined]);
   });
 
   it("单连接隐式选定，API 仍要求明确选择模型", async () => {
@@ -607,13 +608,16 @@ describe("AuthoringGenerateHost 宿主内置生成面板（change 2026-10-16，�
     const switched: string[] = [];
     const { el, removeContributions } = await renderAuthoring({
       contributions: [{ id: "first", sourceId: "first", sourceLabel: "来源一" }, { id: "second", sourceId: "second", sourceLabel: "来源二" }],
-      connectionsFor: () => [{ connectionId: "first-connection", adapterId: "first", name: "连接一", ready: true }, { connectionId: "second-connection", adapterId: "second", name: "连接二", ready: true }],
+      connectionsFor: () => [
+        { connectionId: "first-connection", adapterId: "first", name: "连接一", ready: true, models: [{ id: "m1", label: "模型一" }] },
+        { connectionId: "second-connection", adapterId: "second", name: "连接二", ready: true, models: [{ id: "m2", label: "模型二" }] }
+      ],
       serviceOverrides: { switchConnection: async input => { switched.push(input.connectionId); return { ok: true, value: { cleared: 1 } }; } }
     });
     const field = el.querySelector<HTMLTextAreaElement>("textarea")!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "保留这段构思"); field.dispatchEvent(new Event("input", { bubbles: true })); });
-    await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="选择助手"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(option => option.textContent === "连接二")!.click());
+    await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.generation-directory__model')].find(option => option.textContent?.includes("连接二"))!.click());
     expect(switched).toEqual(["second-connection"]);
     expect(el.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("保留这段构思");
     await act(async () => removeContributions.get("second")!());

@@ -466,6 +466,36 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     expect(accepted).toEqual(["fresh", "old"]);
   });
 
+  it("接受回合允许执行器迁移前的冻结身份，仍按迁移后身份冻结", async () => {
+    const calls: Array<{ connection?: unknown }> = [];
+    const service = {
+      ...serviceStub(),
+      readConversation: () => ({ ok: true as const, snapshot: { conversation: { conversationId: "conv-1", canvasId: "cv", adapterId: "fake" } } }),
+      resolveConnectionBinding: async () => ({
+        ok: true as const,
+        binding: { connectionId: "c1", adapterId: "fake", configRevision: 2, credentialEpoch: 0 },
+        upgradedFrom: { connectionId: "c1", adapterId: "fake", configRevision: 1, credentialEpoch: 0 }
+      }),
+      acceptTurn: (input: { connection?: unknown }) => {
+        calls.push({ connection: input.connection });
+        return { ok: true as const, conversation: { conversationId: "conv-1", canvasId: "cv" }, turn: { turnId: "t1" }, reused: true };
+      }
+    } as unknown as AgentConversationService;
+    const { base } = await boot({ service });
+    const submit = (connection: { configRevision: number }) => fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: "req", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi", connectionId: "c1",
+        connection: { connectionId: "c1", adapterId: "fake", configRevision: connection.configRevision, credentialEpoch: 0 } } })
+    });
+    // 迁移前版本（1）仍接受，本回合按迁移后版本（2）冻结。
+    expect((await submit({ configRevision: 1 })).status).toBe(200);
+    expect(calls[0]?.connection).toEqual({ connectionId: "c1", adapterId: "fake", configRevision: 2, credentialEpoch: 0 });
+    // 既不是迁移前也不是迁移后的版本仍拒绝。
+    expect((await submit({ configRevision: 0 })).status).toBe(409);
+    expect(calls).toHaveLength(1);
+  });
+
   it("接受回合时解析连接并把绑定传给服务；连接不可用返回 409", async () => {
     const calls: Array<{ connection?: unknown }> = [];
     let connectionResult: unknown = { ok: true as const, binding: { connectionId: "c1", adapterId: "fake", configRevision: 1, credentialEpoch: 0 } };

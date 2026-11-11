@@ -24,7 +24,11 @@ export function createExtensionAssistants(extensionId: string, services: Applica
       const resolved = await service.resolveConnectionBinding({ owner: input.subject, adapterId: input.connection.adapterId, connectionId: input.connection.connectionId });
       if (!resolved.ok) return { ok: false, ...resolved.error };
       const binding = resolved.binding;
-      if (!binding || binding.configRevision !== input.connection.configRevision || binding.credentialEpoch !== input.connection.credentialEpoch) {
+      const frozenMatches = (candidate: typeof binding | undefined) => !!candidate
+        && candidate.connectionId === input.connection.connectionId && candidate.adapterId === input.connection.adapterId
+        && candidate.configRevision === input.connection.configRevision && candidate.credentialEpoch === input.connection.credentialEpoch;
+      // 解析时可能刚完成执行器版本迁移并推进了版本；迁移前冻结的选择仍然接受，本回合按迁移后身份冻结。
+      if (!binding || (!frozenMatches(binding) && !frozenMatches(resolved.upgradedFrom))) {
         return { ok: false, code: "connection-unavailable", message: "助手连接已更新，请重新选择助手。" };
       }
       const images = [];

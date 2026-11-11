@@ -37,7 +37,7 @@ export function assistantSelectionMemory(page: object, dataScopeId: string) {
 export function agentModelSelection(models: readonly AgentModelView[], model: string, effort: AgentReasoningEffort | "", explicit: boolean) {
   const selected = models.find(option => option.id === model);
   const supportedEfforts = selected ? reasoningEffortsOf(selected) : [];
-  return { supportedEfforts, invalidModel: model !== "" && !selected, missingRequiredModel: explicit && !model.trim(), invalidEffort: effort !== "" && !supportedEfforts.includes(effort) };
+  return { supportedEfforts, invalidModel: model !== "" && !selected, missingRequiredModel: explicit && !model.trim(), invalidEffort: Boolean(selected) && effort !== "" && !supportedEfforts.includes(effort) };
 }
 
 /** Preserve connection-specific catalogs; only fall back to the selected adapter. */
