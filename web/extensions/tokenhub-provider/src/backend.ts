@@ -13,7 +13,7 @@ import {
 import { discoverTokenHubModels, tokenHubModelDefinitions, type DiscoveredModel } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { describeTokenHubModel, createTokenHubProvider } from "./provider.js";
-import { DEFAULT_TOKENHUB_BASE_URL, TOKENHUB_PLUGIN_ID, TOKENHUB_PROVIDER_ID } from "./shared.js";
+import { DEFAULT_TOKENHUB_BASE_URL, TOKENHUB_PLUGIN_ID, TOKENHUB_PROVIDER_ID, tokenHubOrigin } from "./shared.js";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
@@ -81,7 +81,11 @@ export function createTokenHubRegistration(input: TokenHubRegistrationInput): { 
       available,
       provider,
       serviceConnectionFactory: {
-        protocols: [`provider:${TOKENHUB_PROVIDER_ID}`, "chat-completions"], assistantProtocol: "chat-completions",
+        protocols: [`provider:${TOKENHUB_PROVIDER_ID}`, "chat-completions"],
+        assistantProtocol: "chat-completions",
+        // TokenHub 网关配置项是 origin（`https://tokenhub.tencentmaas.com`），而 OpenAI 兼容
+        // 对话接口在 `/v1/chat/completions`；显式声明 `/v1` 入口供 Agent 侧直接拼接 `/chat/completions`。
+        ...(baseUrl ? { endpoints: { "chat-completions": `${tokenHubOrigin(baseUrl)}/v1` } } : {}),
         create: ({ secret, endpoint, validate, fetch: sourceFetch }) => createTokenHubProvider({
           apiKey: secret, baseURL: endpoint,
           ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
