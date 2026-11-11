@@ -23,7 +23,7 @@ export type SettingsApiDependencies = {
   directoryControl?: import("../extensions/manifest.js").LoadedExtensionHost["directoryControl"];
   settings: Pick<
     SettingsService,
-    "describe" | "plugins" | "update" | "configFile" | "secretsFile" | "extensionToggles" | "setExtensionToggle"
+    "describe" | "plugins" | "update" | "test" | "configFile" | "secretsFile" | "extensionToggles" | "setExtensionToggle"
   >;
   /**
    * 存储扩展点当前注册的后端；按请求现查（config 在基础层装载，storage 在核心层，构造时还拿不到）。
@@ -90,9 +90,10 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/+$/, "");
     const directoryWrite = pathname === `${basePath}/extensions`;
     const frontendPluginWrite = pathname === `${basePath}/extension-toggles`;
-    if (pathname !== basePath && !directoryWrite && !frontendPluginWrite) return false;
+    const testWrite = pathname === `${basePath}/test`;
+    if (pathname !== basePath && !directoryWrite && !frontendPluginWrite && !testWrite) return false;
 
-    if (req.method !== "GET" && req.method !== "PUT") {
+    if (req.method !== "GET" && req.method !== "PUT" && !(testWrite && req.method === "POST")) {
       sendJson(res, 405, { code: "unsupported", message: "仅支持 GET / PUT" });
       return true;
     }
@@ -102,8 +103,28 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
       sendJson(res, auth.status, { code: auth.code, message: "需要站点管理员授权" });
       return true;
     }
-    if (req.method === "GET" && !directoryWrite && !frontendPluginWrite) {
+    if (req.method === "GET" && !directoryWrite && !frontendPluginWrite && !testWrite) {
       sendJson(res, 200, snapshot());
+      return true;
+    }
+
+    if (testWrite) {
+      if (req.method !== "POST" && req.method !== "PUT") {
+        sendJson(res, 405, { code: "unsupported", message: "仅支持 POST / PUT" });
+        return true;
+      }
+      const body = await readJson(req).catch(() => null);
+      const decoded = decodeSettingsWrite(body);
+      if (!decoded.ok) {
+        sendJson(res, 400, { code: "malformed-request", message: decoded.message });
+        return true;
+      }
+      if (!deps.settings.test) {
+        sendJson(res, 200, { ok: true, message: "配置校验通过" });
+        return true;
+      }
+      const result = await deps.settings.test(decoded.value.values as SettingsPatch);
+      sendJson(res, 200, result);
       return true;
     }
 

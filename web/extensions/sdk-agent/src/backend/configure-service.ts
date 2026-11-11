@@ -21,6 +21,10 @@ export type ModelServiceInput = {
   expectedRevision?: number;
 };
 
+export type ModelServiceTestResult =
+  | { ok: true; models: string[]; message: string }
+  | { ok: false; message: string; code?: string };
+
 /** 从上游 `/models` 条目读取 reasoning 事实：只有精确可执行档位才进入 efforts。 */
 export function reasoningFromDirectoryItem(item: Record<string, unknown>): AgentReasoningCapability {
   const info = item.model_info && typeof item.model_info === "object" ? item.model_info as Record<string, unknown> : {};
@@ -38,14 +42,166 @@ export function reasoningFromDirectoryItem(item: Record<string, unknown>): Agent
     : { state: "unknown", source: "provider", revision };
 }
 
-export function normalizeModelBaseUrl(raw: string, defaultPath = "/v1"): string {  const url = new URL(raw.trim());
+export function normalizeModelBaseUrl(raw: string, defaultPath = ""): string {
+  const url = new URL(raw.trim());
   url.pathname = url.pathname
     .replace(/\/+$/, "")
     .replace(/\/(?:chat\/completions|responses|messages|models)$/, "");
-  if (!url.pathname || url.pathname === "/") url.pathname = defaultPath;
+  if ((!url.pathname || url.pathname === "/") && defaultPath) url.pathname = defaultPath;
   if (url.search || url.hash || url.username || url.password)
     throw new Error("请填写不含查询参数、账号或密码的 Base URL。");
   return url.toString().replace(/\/$/, "");
+}
+
+export async function testModelServiceConnection(
+  service: ConnectionService,
+  deployment: SdkAgentHandlerDeployment,
+  owner: string,
+  input: ModelServiceInput,
+): Promise<{ status: number; body: ModelServiceTestResult }> {
+  const fail = (status: number, code: string, message: string) => ({
+    status,
+    body: { ok: false as const, code, message },
+  });
+  const adapter = findSdkAgentAdapter(input.adapterId);
+  if (!adapter)
+    return fail(400, "connection-unsupported", "请选择支持的 API 协议。");
+  let baseUrl: string;
+  try {
+    const rawBaseUrl = input.baseUrl?.trim();
+    baseUrl = rawBaseUrl
+      ? normalizeModelBaseUrl(rawBaseUrl, adapter.adapterId === "gemini-agent-adk" ? new URL(adapter.officialBaseUrl).pathname : "")
+      : normalizeModelBaseUrl(adapter.officialBaseUrl, new URL(adapter.officialBaseUrl).pathname);
+  } catch {
+    return fail(
+      400,
+      "malformed-request",
+      "Base URL 无效，请填写服务地址，例如 https://api.openai.com/v1。",
+    );
+  }
+  if (!adapter.allowCustomBaseUrl && baseUrl !== adapter.officialBaseUrl)
+    return fail(400, "endpoint-not-allowed", "当前接入方式不支持自定义 Base URL。");
+  const policy = createEndpointPolicy({
+    allowedHosts: deployment.allowedHosts,
+    allowHttp: deployment.allowHttp,
+  });
+  const allowed = policy.check(baseUrl);
+  if (!allowed.ok) return fail(400, allowed.code, allowed.message);
+  const existing = input.connectionId ? await service.get(owner, input.connectionId) : null;
+  if (input.connectionId && !existing)
+    return fail(404, "not-found", "服务不存在或无权访问。");
+  let secret = input.secret?.trim() ?? "";
+  const endpointChanged = Boolean(
+    existing &&
+      (existing.adapterId !== adapter.adapterId ||
+        (existing.baseUrl ??
+          findSdkAgentAdapter(existing.adapterId)?.officialBaseUrl) !==
+          baseUrl),
+  );
+  if (!secret && existing && !endpointChanged) {
+    const stored = await service.readCredential<{ secret: string }>({
+      owner,
+      connectionId: existing.connectionId,
+      purpose: "model-api-key",
+    });
+    secret = stored?.secret ?? "";
+  }
+  if (!secret)
+    return fail(
+      400,
+      "credential-missing",
+      "请填写 API Key。修改地址或格式时需要重新填写 Key。",
+    );
+
+  const apiType = sdkEngineForAdapter(adapter.adapterId)!.apiType;
+  const headers: Record<string, string> =
+    apiType === "anthropic"
+      ? {
+          "x-api-key": secret,
+          "anthropic-version": "2023-06-01",
+        }
+      : apiType === "gemini"
+        ? { "x-goog-api-key": secret }
+        : { authorization: `Bearer ${secret}` };
+  let relay: Awaited<ReturnType<typeof createModelTransport>> | undefined;
+  try {
+    if (!deployment.fetchImpl)
+      relay = await createModelTransport({
+        apiType,
+        upstream: baseUrl,
+        apiKey: secret,
+        policy,
+        valid: () => true,
+      });
+    const client = createBoundedHttpClient({
+      policy: relay ? createEndpointPolicy({ allowedHosts: ["127.0.0.1"], allowHttp: true }) : policy,
+      fetchImpl: deployment.fetchImpl,
+      timeoutMs: 8000,
+    });
+    const result = await client.request<{ data?: unknown[]; models?: unknown[] }>({
+      method: "GET",
+      url: `${relay?.baseUrl ?? baseUrl}/models`,
+      headers: relay ? { authorization: `Bearer ${relay.token}` } : headers,
+      includeErrorBody: false,
+    });
+    const directory = result.ok ? (apiType === "gemini" ? result.value?.models : result.value?.data) : undefined;
+    const models: string[] = [];
+    if (Array.isArray(directory)) {
+      const seen = new Set<string>();
+      for (const item of directory) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        const rawId =
+          "id" in record && typeof record.id === "string"
+            ? record.id
+            : apiType === "gemini" && "name" in record && typeof record.name === "string"
+              ? record.name
+              : "";
+        const id = rawId.replace(/^models\//, "").trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        models.push(id);
+      }
+    }
+    const manualModels = (input.models ?? []).map((id) => id.trim()).filter(Boolean);
+    if (!result.ok) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          message: `连接测试未通过${result.status ? `（HTTP ${result.status}）` : ""}，请检查 Base URL 与 API Key。`,
+        },
+      };
+    }
+    if (models.length === 0 && manualModels.length === 0) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          message: "连接测试未返回可用模型列表，请检查 Base URL 或手动填写模型 ID。",
+        },
+      };
+    }
+    const effectiveModels = models.length > 0 ? models : manualModels;
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        models: effectiveModels,
+        message: `测试通过，已发现 ${effectiveModels.length} 个模型。`,
+      },
+    };
+  } catch {
+    return {
+      status: 200,
+      body: {
+        ok: false,
+        message: "连接测试超时或服务不可达，请检查 Base URL 与网络。",
+      },
+    };
+  } finally {
+    await relay?.close();
+  }
 }
 
 export async function configureModelService(
@@ -63,7 +219,10 @@ export async function configureModelService(
     return fail(400, "connection-unsupported", "请选择支持的 API 协议。");
   let baseUrl: string;
   try {
-    baseUrl = normalizeModelBaseUrl(input.baseUrl || adapter.officialBaseUrl, new URL(adapter.officialBaseUrl).pathname);
+    const rawBaseUrl = input.baseUrl?.trim();
+    baseUrl = rawBaseUrl
+      ? normalizeModelBaseUrl(rawBaseUrl, adapter.adapterId === "gemini-agent-adk" ? new URL(adapter.officialBaseUrl).pathname : "")
+      : normalizeModelBaseUrl(adapter.officialBaseUrl, new URL(adapter.officialBaseUrl).pathname);
   } catch {
     return fail(
       400,

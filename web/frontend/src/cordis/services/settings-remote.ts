@@ -10,12 +10,15 @@ import { SETTINGS_BASE_PATH } from "./paths.js";
 
 export type SettingsRemoteFailure = { ok: false; code: string; error: string; issues?: SettingsIssue[] };
 export type SettingsRemoteResult = { ok: true; snapshot: SettingsSnapshot } | SettingsRemoteFailure;
+export type SettingsTestRemoteResult = { ok: true; message: string } | { ok: false; error: string; issues?: SettingsIssue[] };
 
 export type SettingsRemote = {
   fetchSnapshot(): Promise<SettingsRemoteResult>;
   /** 安装/卸载一个扩展目录（改名，下一次启动生效）；与启停无关。 */
   setExtensionInstalled?(extensionId: string, installed: boolean): Promise<SettingsRemoteResult>;
   write(values: Record<string, SettingsWriteValue>): Promise<SettingsRemoteResult>;
+  /** 测试配置项（不落盘）。 */
+  test?(values: Record<string, SettingsWriteValue>): Promise<SettingsTestRemoteResult>;
   /**
    * 写一个 browser-local 插件的启停目标状态：宿主把
    * `extensions.frontend.<id>.enabled` 写进配置文件，并热生效。
@@ -61,6 +64,29 @@ export function createSettingsRemote(options: SettingsRemoteOptions = {}): Setti
     fetchSnapshot: () => request("GET"),
     setExtensionInstalled: (extensionId, installed) => request("PUT", { extensionId, installed }, "/extensions"),
     write: (values) => request("PUT", { values }),
+    async test(values) {
+      try {
+        const response = await fetchImpl(`${basePath}/test`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ values })
+        });
+        const parsed = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+        if (!response.ok || !parsed || parsed.ok !== true) {
+          return {
+            ok: false,
+            error: typeof parsed?.message === "string" && parsed.message !== "" ? parsed.message : "连接测试未通过",
+            ...(Array.isArray(parsed?.issues) ? { issues: parsed.issues as SettingsIssue[] } : {})
+          };
+        }
+        return {
+          ok: true,
+          message: typeof parsed.message === "string" && parsed.message !== "" ? parsed.message : "测试通过"
+        };
+      } catch {
+        return { ok: false, error: "无法连接配置服务" };
+      }
+    },
     setExtensionToggle: (extensionId, enabled) => request("PUT", { extensionId, enabled }, "/extension-toggles")
   };
 }

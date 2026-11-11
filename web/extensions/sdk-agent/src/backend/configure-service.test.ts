@@ -7,6 +7,7 @@ import {
 import {
   configureModelService,
   normalizeModelBaseUrl,
+  testModelServiceConnection,
 } from "./configure-service.js";
 
 function fixture() {
@@ -36,8 +37,11 @@ function fixture() {
   return { service, secrets, fetchImpl, deployment, input };
 }
 describe("地址与 Key 一步设置", () => {
-  it("接受主流 Base URL 与完整接口地址", () => {
+  it("接受主流 Base URL 与完整接口地址，不强制帮补 /v1", () => {
     expect(normalizeModelBaseUrl(" https://api.example/ ")).toBe(
+      "https://api.example",
+    );
+    expect(normalizeModelBaseUrl(" https://api.example/ ", "/v1")).toBe(
       "https://api.example/v1",
     );
     expect(normalizeModelBaseUrl("https://api.example/v1/responses/")).toBe(
@@ -259,5 +263,23 @@ describe("地址与 Key 一步设置", () => {
       secret: "sk-proxy-key",
     });
     expect(result.status).toBe(200);
+  });
+
+  it("testModelServiceConnection 探测目录成功或失败均不写入连接存储", async () => {
+    const { service, deployment, fetchImpl, input } = fixture();
+    const okResult = await testModelServiceConnection(service, deployment, "u1", input);
+    expect(okResult).toMatchObject({
+      status: 200,
+      body: { ok: true, models: ["model-a", "model-b"] },
+    });
+    expect(await service.list("u1")).toHaveLength(0);
+
+    fetchImpl.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    const failResult = await testModelServiceConnection(service, deployment, "u1", input);
+    expect(failResult).toMatchObject({
+      status: 200,
+      body: { ok: false, message: expect.stringContaining("HTTP 401") },
+    });
+    expect(await service.list("u1")).toHaveLength(0);
   });
 });

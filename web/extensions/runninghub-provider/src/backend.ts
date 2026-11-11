@@ -176,6 +176,18 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
             ]
           }
         : undefined,
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      if (!apiKey) return { ok: false, message: "请先填写 RunningHub API Key" };
+      const result = await fetchRunningHubBalance({
+        apiKey,
+        ...(deps.apiBaseURL ? { apiBaseURL: deps.apiBaseURL } : {}),
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!result.ok) return { ok: false, message: result.message };
+      return { ok: true, message: "RunningHub API Key 测试通过" };
+    },
     apply(ctx, config) {
       const log = ctx.log.scope(RUNNINGHUB_PLUGIN_ID);
       const apiKey = (config.apiKey ?? "").trim();

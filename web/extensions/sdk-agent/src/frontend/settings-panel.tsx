@@ -69,6 +69,7 @@ export function SdkAgentSettingsPanel({
     : null;
   const [testModel, setTestModel] = useState("");
   const [savedWithoutModels, setSavedWithoutModels] = useState<string | null>(null);
+  const [testFailed, setTestFailed] = useState(false);
 
   // dirty：地址与基线不同，或 Key / 手填模型有未保存输入；pending：写/测试请求进行中。
   // 基线只在「载入/保存成功」时重设，避免编辑过程中因列表刷新而误判为干净。
@@ -128,6 +129,7 @@ export function SdkAgentSettingsPanel({
   }, [connectionId, services]);
   const reset = (entry?: SdkAgentConnectionView) => {
     setSavedWithoutModels(null);
+    setTestFailed(false);
     setEditing(entry?.connectionId ?? null);
     setAdapterId(entry?.adapterId ?? "compat-chat");
     setBaseUrl(
@@ -165,12 +167,57 @@ export function SdkAgentSettingsPanel({
       setBusy(null);
     }
   };
-  const save = () =>
-    perform("save", async () => {
-      const models = modelsText
-        .split(/[,，\n]/)
-        .map((value) => value.trim())
-        .filter(Boolean);
+  const buildConfigureInput = () => {
+    const models = modelsText
+      .split(/[,，\n]/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return {
+      models,
+      payload: {
+        adapterId,
+        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+        ...(secret.trim() ? { secret: secret.trim() } : {}),
+        ...(models.length ? { models } : {}),
+        ...(current ? { connectionId: current.connectionId } : {}),
+      },
+    };
+  };
+  const runConnectionTest = () =>
+    perform("test-connection", async () => {
+      if (!remote.testConnection) return;
+      const { payload } = buildConfigureInput();
+      const result = await remote.testConnection(payload);
+      if (!result.ok) {
+        setTestFailed(true);
+        setNotice({ tone: "danger", text: configurationError(result.error) });
+        return;
+      }
+      if (!result.value.ok) {
+        setTestFailed(true);
+        setNotice({ tone: "danger", text: result.value.message || "测试未通过，请检查配置。" });
+        return;
+      }
+      setTestFailed(false);
+      setNotice({ tone: "success", text: result.value.message || "测试通过" });
+    });
+  const save = (force = false) =>
+    perform(force ? "save-anyway" : "save", async () => {
+      const { models, payload } = buildConfigureInput();
+      if (!force && remote.testConnection) {
+        const tested = await remote.testConnection(payload);
+        if (!tested.ok) {
+          setTestFailed(true);
+          setNotice({ tone: "danger", text: configurationError(tested.error) });
+          return;
+        }
+        if (!tested.value.ok) {
+          setTestFailed(true);
+          setNotice({ tone: "danger", text: tested.value.message || "测试未通过，请检查配置。" });
+          return;
+        }
+      }
+      setTestFailed(false);
       const content = JSON.stringify({ adapterId, baseUrl, secret, models, connectionId: current?.connectionId });
       if (saveOperation.current?.content !== content) saveOperation.current = { content, id: randomId(), expectedEpoch: current?.credentialEpoch, expectedRevision: current?.configRevision };
       const result = await remote.configure({
@@ -257,7 +304,7 @@ export function SdkAgentSettingsPanel({
         >
           <div className="settings-section__field">
             <span>API 协议</span>
-            <SelectInput label="API 协议" value={adapterId} disabled={Boolean(busy) || loading} onValueChange={(value) => { setAdapterId(value); setBaseUrl(""); setSecret(""); setModelsText(""); setConfirm(null); setNotice(null); }} options={adapters.filter(entry => entry.adapterId === adapterId || !["codex-agent-sdk", "claude-agent-sdk"].includes(entry.adapterId)).map(entry => ({ value: entry.adapterId, label: entry.label }))} />
+            <SelectInput label="API 协议" value={adapterId} disabled={Boolean(busy) || loading} onValueChange={(value) => { setAdapterId(value); setBaseUrl(""); setSecret(""); setModelsText(""); setConfirm(null); setNotice(null); setTestFailed(false); }} options={adapters.filter(entry => entry.adapterId === adapterId || !["codex-agent-sdk", "claude-agent-sdk"].includes(entry.adapterId)).map(entry => ({ value: entry.adapterId, label: entry.label }))} />
           </div>
           {adapter?.allowCustomBaseUrl ? <label className="settings-section__field">
             <span>Base URL</span>
@@ -271,7 +318,7 @@ export function SdkAgentSettingsPanel({
               disabled={
                 Boolean(busy) || loading || !adapter?.allowCustomBaseUrl
               }
-              onChange={(event) => setBaseUrl(event.target.value)}
+              onChange={(event) => { setBaseUrl(event.target.value); setTestFailed(false); }}
             />
           </label> : null}
           <label className="settings-section__field">
@@ -287,7 +334,7 @@ export function SdkAgentSettingsPanel({
                   : "粘贴服务提供的 API Key"
               }
               disabled={Boolean(busy) || loading}
-              onChange={(event) => setSecret(event.target.value)}
+              onChange={(event) => { setSecret(event.target.value); setTestFailed(false); }}
             />
           </label>
           <Collapsible
@@ -306,7 +353,7 @@ export function SdkAgentSettingsPanel({
                 aria-label="模型 ID"
                 value={modelsText}
                 disabled={Boolean(busy)}
-                onChange={(event) => setModelsText(event.target.value)}
+                onChange={(event) => { setModelsText(event.target.value); setTestFailed(false); }}
                 placeholder={
                   current?.models.join(", ") ||
                   "服务不提供模型列表时填写，多个用逗号分隔"
@@ -322,6 +369,35 @@ export function SdkAgentSettingsPanel({
                 onClick={() => reset()}
               >
                 配置其他服务
+              </Button>
+            ) : null}
+            <Button
+              tone="ghost"
+              loading={busy === "test-connection"}
+              disabled={
+                Boolean(busy) ||
+                loading ||
+                !adapter ||
+                (!secret.trim() && !canKeepKey)
+              }
+              onClick={() => void runConnectionTest()}
+            >
+              测试
+            </Button>
+            {testFailed ? (
+              <Button
+                size="sm"
+                tone="ghost"
+                loading={busy === "save-anyway"}
+                disabled={
+                  Boolean(busy) ||
+                  loading ||
+                  !adapter ||
+                  (!secret.trim() && !canKeepKey)
+                }
+                onClick={() => void save(true)}
+              >
+                仍然保存
               </Button>
             ) : null}
             <Button

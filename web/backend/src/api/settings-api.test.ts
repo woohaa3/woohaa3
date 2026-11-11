@@ -245,4 +245,44 @@ describe("settings API", () => {
     expect(((await get.json()) as SettingsSnapshot).extensionToggles).toEqual({ "prompt-snippets": false });
   });
 
+  it("POST /test 调用插件的 testConnection 进行内存态测试且不写入配置文件", async () => {
+    const { base, settings, dir } = await start(disabledAuth);
+    settings.register(
+      "providers.demo",
+      {
+        apiKey: { kind: "string", secret: true, reload: "hot", label: "API Key", description: "" },
+        baseUrl: { kind: "url", protocols: ["https:"], default: "https://api.demo.example", reload: "hot", label: "地址", description: "" }
+      },
+      "演示",
+      "demo-provider"
+    );
+    settings.registerPlugin({
+      id: "demo-provider",
+      label: "演示",
+      layer: "extension",
+      configPrefix: "providers.demo",
+      async testConnection(config) {
+        if (config.apiKey !== "good-key") return { ok: false, message: "Key 验证失败" };
+        return { ok: true, message: `已连接 ${String(config.baseUrl)}` };
+      }
+    });
+
+    const badResp = await fetch(`${base}/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ values: { "providers.demo.apiKey": "bad-key" } })
+    });
+    expect(badResp.status).toBe(200);
+    expect(await badResp.json()).toEqual({ ok: false, message: "Key 验证失败" });
+
+    const goodResp = await fetch(`${base}/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ values: { "providers.demo.apiKey": "good-key" } })
+    });
+    expect(goodResp.status).toBe(200);
+    expect(await goodResp.json()).toEqual({ ok: true, message: "已连接 https://api.demo.example" });
+    await expect(fsp.access(path.join(dir, "secrets.yml"))).rejects.toThrow();
+  });
+
 });

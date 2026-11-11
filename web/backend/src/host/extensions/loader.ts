@@ -80,6 +80,7 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
     ...(plugin.website ? { website: plugin.website } : {}),
     ...(plugin.setupOrder !== undefined ? { setupOrder: plugin.setupOrder } : {}),
     ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
+    ...(plugin.testConnection ? { testConnection: plugin.testConnection.bind(plugin) } : {}),
     configPrefix: prefix,
     siteManaged: gated
   });

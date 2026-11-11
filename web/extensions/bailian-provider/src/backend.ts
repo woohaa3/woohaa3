@@ -177,6 +177,25 @@ export function createBailianProviderPlugin(deps: BailianPluginDependencies = {}
       }
       return diagnostics.length > 0 ? { state: "degraded" as const, diagnostics } : undefined;
     },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      if (!apiKey) return { ok: false, message: "请先填写百炼 API Key" };
+      const workspaceId = (config.workspaceId ?? "").trim();
+      const region = (config.region ?? "").trim() || DEFAULT_BAILIAN_REGION;
+      if (workspaceId !== "" && bailianWorkspaceOrigin(workspaceId, region) === undefined) {
+        return { ok: false, message: `业务空间 ID「${workspaceId}」拼不出专属域名（只接受字母、数字与 -）` };
+      }
+      const origin = bailianResolvedOrigin({ workspaceId, region, baseUrl: config.baseUrl });
+      const result = await discoverBailianModels({
+        baseUrl: origin,
+        apiKey,
+        known: BAILIAN_IMAGE_MODELS.map((model) => model.id),
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!result.ok) return { ok: false, message: result.message };
+      return { ok: true, message: `测试通过，上游返回 ${result.models.length} 个生图模型` };
+    },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";
       const workspaceId = config.workspaceId?.trim() ?? "";

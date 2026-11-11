@@ -118,6 +118,10 @@ export type ExtensionPlugin<F extends HostConfigFields = HostConfigFields> = {
    * 方法签名保持双变（与 `apply` 一致），`AnyExtensionPlugin` 才继续成立。
    */
   health?(config: HostConfigValues<F>): ApplicationBackendExtensionHealth | undefined;
+  /**
+   * 连接与凭据测试（不落盘）：用候选配置验证 API Key 与服务地址是否可用。
+   */
+  testConnection?(config: HostConfigValues<F>): Promise<{ readonly ok: boolean; readonly message?: string }>;
   apply(ctx: HostExtensionContext, config: HostConfigValues<F>): void | Promise<void>;
 };
 

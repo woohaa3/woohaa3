@@ -37,6 +37,7 @@ import {
 } from "../shared.js";
 import {
   configureModelService,
+  testModelServiceConnection,
   type ModelServiceInput,
 } from "./configure-service.js";
 
@@ -133,6 +134,39 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
       : "";
     const method = (req.method ?? "GET").toUpperCase();
     const segments = suffix.split("/").filter((part) => part !== "");
+
+    // 测试连接配置（不落盘、不创建连接）
+    if (suffix === "test-connection" && method === "POST") {
+      const body = (await readBody(req)) as Record<string, unknown> | null;
+      if (
+        !body ||
+        typeof body.adapterId !== "string" ||
+        ["secret", "baseUrl", "connectionId"].some(
+          (key) => body[key] !== undefined && typeof body[key] !== "string",
+        )
+      )
+        return sendJson(res, 400, {
+          ok: false,
+          code: "malformed-request",
+          message: "服务配置格式无效",
+        });
+      const result = await testModelServiceConnection(service, deployment, owner, {
+        adapterId: body.adapterId,
+        ...(typeof body.connectionId === "string"
+          ? { connectionId: body.connectionId }
+          : {}),
+        ...(typeof body.baseUrl === "string" ? { baseUrl: body.baseUrl } : {}),
+        ...(typeof body.secret === "string" ? { secret: body.secret } : {}),
+        ...(Array.isArray(body.models)
+          ? {
+              models: body.models.filter(
+                (id): id is string => typeof id === "string",
+              ),
+            }
+          : {}),
+      });
+      return sendJson(res, result.status, result.body);
+    }
 
     // 一次保存地址、Key 与模型目录；同一用户的并发保存串行处理，避免重复创建。
     if (suffix === "configure" && method === "POST") {

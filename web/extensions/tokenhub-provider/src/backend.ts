@@ -126,6 +126,19 @@ export function createTokenHubProviderPlugin(deps: TokenHubPluginDependencies = 
         ]
       };
     },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      const baseUrl = (config.baseUrl ?? DEFAULT_TOKENHUB_BASE_URL).trim();
+      if (!apiKey || !baseUrl) return { ok: false, message: "请先填写 API Key 和网关地址" };
+      const result = await discoverTokenHubModels({
+        baseUrl,
+        apiKey,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!result.ok) return { ok: false, message: result.message };
+      return { ok: true, message: `测试通过，已发现 ${result.models.length} 个模型` };
+    },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";
       const baseUrl = config.baseUrl;

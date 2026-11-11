@@ -182,6 +182,27 @@ export function createArkProviderPlugin(deps: ArkPluginDependencies = {}): Exten
         ]
       };
     },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      const baseUrl = arkApiRoot(config.baseUrl ?? ARK_DEFAULT_BASE_URL);
+      if (!apiKey || !baseUrl) return { ok: false, message: "请先填写火山方舟 API Key 和地址" };
+      const { errors } = endpointsFromConfig(config);
+      if (errors.length > 0) return { ok: false, message: errors[0]! };
+      const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+      try {
+        const response = await fetchImpl(`${baseUrl}/contents/generations/tasks/cgt-00000000000000-00000`, {
+          method: "GET",
+          headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" },
+          signal: AbortSignal.timeout(10_000)
+        });
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, message: `火山方舟 API Key 验证失败（HTTP ${response.status}）` };
+        }
+        return { ok: true, message: "火山方舟 API Key 测试通过" };
+      } catch (error) {
+        return { ok: false, message: `火山方舟连接失败：${error instanceof Error ? error.message : String(error)}` };
+      }
+    },
     apply(ctx, config) {
       const log = ctx.log.scope(ARK_PLUGIN_ID);
       const assets = resolveArkAssetConfig(

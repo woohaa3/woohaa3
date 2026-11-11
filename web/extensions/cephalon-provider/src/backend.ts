@@ -138,6 +138,17 @@ export function createCephalonProviderPlugin(
         ]
       };
     },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      if (!apiKey) return { ok: false, message: "请先填写端脑云 API Key" };
+      const result = await discoverCephalonModels({
+        apiKey,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!result.ok) return { ok: false, message: result.message };
+      return { ok: true, message: `测试通过，已发现 ${result.models.length} 个模型` };
+    },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";
       const log = ctx.log.scope(CEPHALON_PLUGIN_ID);

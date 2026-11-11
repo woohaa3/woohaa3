@@ -20,6 +20,7 @@ import {
   diffSettings,
   extensionToggleKey,
   legacyEnvInUse,
+  parseSettingValue,
   providerIdFromConfigPrefix,
   resolveSettings,
   type HostConfigFields,
@@ -108,7 +109,13 @@ export type SettingsPluginRegistration = {
   siteManaged?: boolean;
   /** 插件声明的模型目录刷新入口（路径由插件自己注册）；设置面只透传。 */
   modelRefresh?: { path: string; hint: string };
+  /** 连接与凭据测试（不落盘）：用合并后的配置段验证 API Key 与地址是否可用。 */
+  testConnection?: (config: SettingsSection) => Promise<{ readonly ok: boolean; readonly message?: string }>;
 };
+
+export type SettingsTestResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string; issues?: SettingsIssue[] };
 
 export type SettingsService = SettingsReader & {
   readonly configFile: string;
@@ -133,6 +140,8 @@ export type SettingsService = SettingsReader & {
   reload(): Promise<SettingsUpdateResult>;
   /** 写配置项（普通项写配置文件、敏感项写密钥文件）；`null` 表示删除该项。 */
   update(patch: SettingsPatch): Promise<SettingsUpdateResult>;
+  /** 测试配置项（不落盘）：校验补丁并调用所属插件的 `testConnection`。 */
+  test?(patch: SettingsPatch): Promise<SettingsTestResult>;
   /**
    * 扩展的启停状态：`extensions.<id>.enabled`（**所有**扩展共用，不区分 site / host）。
    *
@@ -468,6 +477,76 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     return { ok: true, changed };
   };
 
+  const test = async (patch: SettingsPatch): Promise<SettingsTestResult> => {
+    const issues: SettingsIssue[] = [];
+    const parsedPatch: Record<string, SettingPrimitive | null> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      const definition = definitions[key];
+      if (!definition) {
+        issues.push({ key, layer: "file", message: "未知配置项" });
+        continue;
+      }
+      const layer = definition.secret ? "secrets" : "file";
+      if (latest.sources[key] === "env") {
+        issues.push({ key, layer, message: `由环境变量 ${definition.legacyEnv} 锁定，先移除该环境变量` });
+        continue;
+      }
+      if (value === null || value === undefined || value === "") {
+        parsedPatch[key] = null;
+        continue;
+      }
+      const parsed = parseSettingValue(definition, value);
+      if (!parsed.ok) {
+        issues.push({ key, layer, message: parsed.message });
+        continue;
+      }
+      parsedPatch[key] = parsed.value;
+    }
+    if (issues.length > 0) {
+      return {
+        ok: false,
+        message: issues.map((issue) => `${issue.key || "(根)"}：${issue.message}`).join("；"),
+        issues
+      };
+    }
+
+    const matchedPlugins = [...pluginRegistry.values()].filter(
+      (plugin) =>
+        plugin.configPrefix &&
+        Object.keys(patch).some((key) => key === plugin.configPrefix || key.startsWith(`${plugin.configPrefix!}.`))
+    );
+    for (const plugin of matchedPlugins) {
+      if (!plugin.testConnection || !plugin.configPrefix) continue;
+      const prefix = plugin.configPrefix;
+      const head = `${prefix}.`;
+      const mergedSection: SettingsSection = { ...section(prefix) };
+      for (const [key, value] of Object.entries(parsedPatch)) {
+        if (!key.startsWith(head)) continue;
+        const field = key.slice(head.length);
+        if (value === null) {
+          const def = definitions[key];
+          if (def?.default !== undefined) mergedSection[field] = def.default;
+          else delete mergedSection[field];
+        } else {
+          mergedSection[field] = value;
+        }
+      }
+      try {
+        const result = await plugin.testConnection(mergedSection);
+        if (!result.ok) {
+          return { ok: false, message: result.message || `${plugin.label} 连接测试未通过` };
+        }
+        return { ok: true, message: result.message || `${plugin.label} 测试通过` };
+      } catch (error) {
+        return {
+          ok: false,
+          message: `${plugin.label} 连接测试失败：${error instanceof Error ? error.message : String(error)}`
+        };
+      }
+    }
+    return { ok: true, message: "配置校验通过" };
+  };
+
   let watchers: fs.FSWatcher[] = [];
   let debounce: ReturnType<typeof setTimeout> | null = null;
   if (options.watch ?? true) {
@@ -518,6 +597,7 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     section,
     reload: () => serialize(reload),
     update: (patch) => serialize(() => update(patch)),
+    test: (patch) => test(patch),
     extensionToggles,
     setExtensionToggle: (extensionId, enabled) => serialize(() => setExtensionToggle(extensionId, enabled)),
     close() {
