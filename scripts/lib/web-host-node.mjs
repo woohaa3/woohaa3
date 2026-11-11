@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DESKTOP_NODE_VERSION } from './desktop-host-package.mjs';
+import { nodeDownloadArgs } from './node-download-args.mjs';
 import { systemTar, systemTarArgs } from './desktop-platform-commands.mjs';
 
 export const WEB_HOST_NODE_VERSION = DESKTOP_NODE_VERSION;
@@ -53,14 +54,8 @@ export async function prepareWebHostNode({ cacheDir, platform = process.platform
   const sums = path.join(cache, 'SHASUMS256.txt');
   const curl = platform === 'win32' ? 'curl.exe' : 'curl';
   const base = `https://nodejs.org/dist/v${artifact.version}`;
-  // 静默进度条并让传输中断也可重试：CI 会把 curl 的进度输出整体标成错误，
-  // 而 `--retry` 默认只管连接失败。`--continue-at -` 让重试从断点续传，配合下方的
-  // sha256 校验，续传出错时仍会因摘要不符而丢弃重来。
-  const download = (url, destination) => run(curl, [
-    '-sS', '--fail', '--location',
-    '--retry', '5', '--retry-delay', '2', '--retry-all-errors', '--continue-at', '-',
-    url, '-o', destination
-  ]);
+  // 参数按本机 curl 能力裁剪：Windows Server 自带 curl 不认 `--retry-all-errors`。
+  const download = (url, destination) => run(curl, nodeDownloadArgs(url, destination, { curl }));
   if (!fs.existsSync(sums)) download(`${base}/SHASUMS256.txt`, sums);
 
   const expected = fs

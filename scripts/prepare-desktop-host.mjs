@@ -17,14 +17,15 @@ import { assertRuntimeNpmLockCurrent, auditRuntimeNpmScripts } from './lib/runti
 import { scanExtensions } from './lib/extension-scan.mjs';
 import { loadBuildProfile } from './lib/build-profile.mjs';
 import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
+import { nodeDownloadArgs } from './lib/node-download-args.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true,...options});
 export async function prepareDesktopNode(){
  const artifact=nodeArtifact();const cache=path.join(root,'.local/desktop-node');fs.mkdirSync(cache,{recursive:true});
  const archive=path.join(cache,artifact.archive);const sums=path.join(cache,'SHASUMS256.txt');
- // 静默进度条 + 断点续传 + 传输中断重试：CI 会把 curl 进度整体标成错误，而 --retry 默认只管连接失败。
+ // 静默进度 + 断点续传 + 支持时重试传输中断；参数按本机 curl 能力裁剪（Windows 自带 curl 不认 --retry-all-errors）。
  const curlBin=process.platform==='win32'?'curl.exe':'curl';
- const fetchTo=(url,dest)=>run(curlBin,['-sS','--fail','--location','--retry','5','--retry-delay','2','--retry-all-errors','--continue-at','-',url,'-o',dest]);
+ const fetchTo=(url,dest)=>run(curlBin,nodeDownloadArgs(url,dest,{curl:curlBin}));
  if(!fs.existsSync(sums))fetchTo(`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/SHASUMS256.txt`,sums);
  if(!fs.existsSync(archive))fetchTo(`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/${artifact.archive}`,archive);
  const expected=fs.readFileSync(sums,'utf8').split('\n').find(line=>line.trim().endsWith(` ${artifact.archive}`))?.split(/\s+/)[0];
