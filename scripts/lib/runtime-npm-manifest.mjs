@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { normalizedTextSha256 } from './text-sha256.mjs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -382,7 +383,7 @@ export function buildRuntimeNpmLock({ clientRoot, platforms = RUNTIME_NPM_SUPPOR
   const body = {
     schemaVersion: RUNTIME_NPM_SCHEMA_VERSION,
     kind: 'woohaa-runtime-npm-lock',
-    generatedFrom: { lockfile: 'client/locks/web/pnpm-lock.yaml', lockfileSha256: createHash('sha256').update(text).digest('hex') },
+    generatedFrom: { lockfile: 'client/locks/web/pnpm-lock.yaml', lockfileSha256: normalizedTextSha256(text) },
     registry: { default: 'https://registry.npmjs.org/', mirrors: [] },
     node: { version: readDesktopNodeVersion(clientRoot) },
     platforms,
@@ -474,7 +475,8 @@ export function assertRuntimeNpmLockCurrent({ clientRoot, committed } = {}) {
   const { text } = loadRuntimeNpmLockfile(clientRoot);
   const { components } = JSON.parse(fs.readFileSync(path.join(clientRoot, 'desktop/runtime-components.lock.json'), 'utf8'));
 
-  const expectedLockfile = createHash('sha256').update(text).digest('hex');
+  // 行尾归一化后再求摘要：Windows checkout 的 CRLF 不应让指纹失效。
+  const expectedLockfile = normalizedTextSha256(text);
   if (actual.generatedFrom?.lockfileSha256 !== expectedLockfile) {
     fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 与 pnpm lockfile 不一致；先运行 node scripts/build-runtime-npm-manifest.mjs');
   }
