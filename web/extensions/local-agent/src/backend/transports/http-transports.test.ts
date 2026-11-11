@@ -132,11 +132,11 @@ describe("OpenCode v2 model catalog", () => {
   it("按 location 读取真实目录，身份用 providerID/modelID，Variant 只保留宿主认识的取值", async () => {
     const mock = openCodeMock("connected", catalog);
     const result = await createOpenCodeTransport(mock).models!(directory);
-    expect(result).toEqual({ models: [
+    expect(result.models).toMatchObject([
       { id: "openai/gpt-6", label: "GPT-6 (openai)", reasoningEfforts: ["low", "high"] },
       { id: "custom/gpt-6", label: "GPT-6 (custom)" },
       { id: "solo-provider/solo", label: "Solo (solo-provider)" }
-    ] });
+    ]);
     const request = mock.requests.find(entry => entry.path === "/api/model")!;
     expect(request.search).toBe("?location%5Bdirectory%5D=%2Fwork");
     expect(request.authorization).toBe("Basic process-auth");
@@ -156,7 +156,7 @@ describe("OpenCode v2 model catalog", () => {
       if (path === "/api/model") return json({ data: calls++ === 0 ? [] : [{ modelID: "m", providerID: "p", name: "M" }] });
       throw new Error(`Unexpected route ${path}`);
     });
-    expect(await createOpenCodeTransport({ fetchImpl, modelCatalogRetryMs: 0 }).models!(directory)).toEqual({ models: [{ id: "p/m", label: "M (p)" }] });
+    expect(await createOpenCodeTransport({ fetchImpl, modelCatalogRetryMs: 0 }).models!(directory)).toMatchObject({ models: [{ id: "p/m", label: "M (p)" }] });
     expect(calls).toBe(2);
   });
   it("目录读取失败如实返回原因，且 4xx 不重试", async () => {

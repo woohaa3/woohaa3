@@ -6,7 +6,7 @@
  * `language` → 文本、`picture` → 图片、`video` → 视频；`reader` / `search` 与任何未知值都不注册
  * （没有协议就不注册，也不按 id 猜测）。
  */
-import type { GenerationModelDefinition } from "@woohaa3/contracts";
+import { reasoningEffortsForModel, type GenerationModelDefinition } from "@woohaa3/contracts";
 import { CEPHALON_MODELS_PATH, CEPHALON_ORIGIN, CEPHALON_PROVIDER_ID } from "./shared.js";
 
 /** 本 Provider 实现了执行协议的三种模态。 */
@@ -92,7 +92,10 @@ export function cephalonModelDefinitions(models: readonly DiscoveredModel[]): Ge
     title: model.title,
     promptRequirement: "required" as const,
     // 平台没有取消端点：从模型定义就声明不支持，面板不显示无法兑现的取消。
-    cancel: "unsupported" as const
+    cancel: "unsupported" as const,
+    ...(model.modelType === "language" && reasoningEffortsForModel(model.id)
+      ? { capabilityFacts: { reasoning: { supported: true, efforts: reasoningEffortsForModel(model.id) } } }
+      : {})
   }));
 }
 

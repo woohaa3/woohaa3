@@ -1,6 +1,6 @@
 /** OpenCode 2.x /api API; MCP runtime config belongs to a dedicated location. */
 import { setTimeout as delay } from "node:timers/promises";
-import { isAgentReasoningEffort, type AgentModelView, type AgentReasoningEffort } from "@woohaa3/contracts";
+import { agentReasoningRevision, isAgentReasoningEffort, type AgentModelView, type AgentReasoningCapability, type AgentReasoningEffort } from "@woohaa3/contracts";
 import { canvasToolName, loopbackHttp, toolResultDetail, toolResultFailed } from "./loopback-http.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportModelInput, LocalAgentTransportResult } from "./transport.js";
 
@@ -53,7 +53,10 @@ function openCodeModelDirectory(entries: readonly OpenCodeModelEntry[]): AgentMo
       if (isAgentReasoningEffort(variantId) && !reasoningEfforts.includes(variantId)) reasoningEfforts.push(variantId);
     }
     const name = typeof entry.name === "string" && entry.name.trim() !== "" ? entry.name.trim() : modelID;
-    catalog.set(id, { id, label: `${name} (${providerID})`, ...(reasoningEfforts.length ? { reasoningEfforts } : {}) });
+    const reasoning: AgentReasoningCapability = reasoningEfforts.length
+      ? { state: "supported", source: "runtime", revision: agentReasoningRevision(id, reasoningEfforts.join(",")), efforts: reasoningEfforts.map((effortId) => ({ id: effortId })) }
+      : { state: "unknown", source: "runtime", revision: agentReasoningRevision(id, "unknown") };
+    catalog.set(id, { id, label: `${name} (${providerID})`, reasoning, ...(reasoningEfforts.length ? { reasoningEfforts } : {}) });
   }
   return [...catalog.values()];
 }

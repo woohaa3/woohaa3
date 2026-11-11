@@ -23,11 +23,21 @@ describe("dsh profile 补丁", () => {
     expect(patch).toContain('apiKeyEnv: "WOOHAA_MODEL_API_KEY"');
     expect(patch).toContain('"controlled-model"');
     expect(patch).toContain("          supportsReasoningEffort: true");
-    expect(patch).toContain("              off: none");
-    expect(patch).toContain("              minimal: none");
+    // 默认回合不写固定 off，也不声明档位表：交给上游默认语义。
+    expect(patch).not.toContain("        reasoning: off");
+    expect(patch).not.toContain("            reasoningEfforts:");
     expect(patch).not.toContain("reasoningEfforts: false");
     // 真实 API Key 不进入配置文件（只写变量名）。
     expect(patch).not.toMatch(/(?:sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9]{20,})/);
+  });
+
+  it("显式档位写入 wire 映射，未知档位不伪造", () => {
+    const patch = buildDshPatch({ modelBaseUrl: "http://127.0.0.1:1/v1", model: "m", apiKeyEnv: "K", reasoningEffort: "high", mcp: null });
+    expect(patch).toContain("        reasoning: high");
+    expect(patch).toContain("            reasoningEfforts:");
+    expect(patch).toContain('              high: "high"');
+    expect(patch).toContain('              off: "none"');
+    expect(buildDshPatch({ modelBaseUrl: "http://127.0.0.1:1/v1", model: "m", apiKeyEnv: "K", reasoningEffort: "ultra", mcp: null })).not.toContain("            reasoningEfforts:");
   });
 
   it("显式声明输出预算，并允许按部署调整", () => {

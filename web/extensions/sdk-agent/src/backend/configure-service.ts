@@ -3,8 +3,10 @@ import {
   createBoundedHttpClient,
   createEndpointPolicy,
   createModelTransport,
+  type ConnectionModelInput,
   type ConnectionService,
 } from "@woohaa3/agent-connections";
+import { agentReasoningRevision, isAgentReasoningEffort, reasoningEffortsForModel, type AgentReasoningCapability } from "@woohaa3/contracts";
 import { findSdkAgentAdapter, sdkEngineForAdapter } from "../shared.js";
 import type { SdkAgentHandlerDeployment } from "./handler.js";
 
@@ -19,8 +21,24 @@ export type ModelServiceInput = {
   expectedRevision?: number;
 };
 
-export function normalizeModelBaseUrl(raw: string, defaultPath = "/v1"): string {
-  const url = new URL(raw.trim());
+/** 从上游 `/models` 条目读取 reasoning 事实：只有精确可执行档位才进入 efforts。 */
+export function reasoningFromDirectoryItem(item: Record<string, unknown>): AgentReasoningCapability {
+  const info = item.model_info && typeof item.model_info === "object" ? item.model_info as Record<string, unknown> : {};
+  const capabilities = item.capabilities && typeof item.capabilities === "object" ? item.capabilities as Record<string, unknown> : {};
+  const rawEfforts = [info.reasoning_efforts, info.reasoningEfforts, item.reasoning_efforts, capabilities.reasoning_efforts,
+    Array.isArray(capabilities.efforts) ? capabilities.efforts : undefined]
+    .find((value) => Array.isArray(value)) as unknown[] | undefined;
+  const modelId = typeof item.id === "string" ? item.id : typeof item.name === "string" ? item.name : "";
+  const upstreamEfforts = [...new Set((rawEfforts ?? []).filter(isAgentReasoningEffort))];
+  const efforts = upstreamEfforts.length ? upstreamEfforts : reasoningEffortsForModel(modelId) ?? [];
+  const supported = info.supports_reasoning === true || capabilities.reasoning === true || capabilities.thinking === true || efforts.length > 0;
+  const revision = agentReasoningRevision("provider", modelId, supported, efforts.join(","));
+  return supported
+    ? { state: "supported", source: "provider", revision, ...(efforts.length ? { efforts: efforts.map((id) => ({ id })) } : {}) }
+    : { state: "unknown", source: "provider", revision };
+}
+
+export function normalizeModelBaseUrl(raw: string, defaultPath = "/v1"): string {  const url = new URL(raw.trim());
   url.pathname = url.pathname
     .replace(/\/+$/, "")
     .replace(/\/(?:chat\/completions|responses|messages|models)$/, "");
@@ -126,11 +144,11 @@ export async function configureModelService(
     if (!reset.ok) return fail(500, reset.error.code, reset.error.message);
   }
   const configured = await service.get(owner, connectionId);
-  let models = [
-    ...new Set((input.models ?? []).map((id) => id.trim()).filter(Boolean)),
+  let modelEntries: ConnectionModelInput[] = [
+    ...new Map((input.models ?? []).map((id) => id.trim()).filter(Boolean).map((id) => [id, { id }])).values(),
   ];
   let modelsError: string | undefined;
-  if (models.length === 0) {
+  if (modelEntries.length === 0) {
     const credential = await service.readCredential<{ secret: string }>({
       owner,
       connectionId,
@@ -165,19 +183,20 @@ export async function configureModelService(
       });
       const directory = result.ok ? (apiType === "gemini" ? result.value?.models : result.value?.data) : undefined;
       if (Array.isArray(directory)) {
-        models = [
-          ...new Set(
-            directory.flatMap((item) =>
-              item &&
-              typeof item === "object" &&
-              (("id" in item && typeof item.id === "string") || (apiType === "gemini" && "name" in item && typeof item.name === "string"))
-                ? [String("id" in item ? item.id : item.name).replace(/^models\//, "")]
-                : [],
-            ),
-          ),
-        ];
+        const seen = new Set<string>();
+        modelEntries = directory.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const record = item as Record<string, unknown>;
+          const rawId = "id" in record && typeof record.id === "string"
+            ? record.id
+            : apiType === "gemini" && "name" in record && typeof record.name === "string" ? record.name : "";
+          const id = rawId.replace(/^models\//, "").trim();
+          if (!id || seen.has(id)) return [];
+          seen.add(id);
+          return [{ id, reasoning: reasoningFromDirectoryItem(record) }];
+        });
       }
-      if (!result.ok || models.length === 0)
+      if (!result.ok || modelEntries.length === 0)
         modelsError = result.ok
           ? "服务没有返回模型列表，可在下方填写模型 ID。"
           : `模型列表读取失败${result.status ? `（HTTP ${result.status}）` : ""}，可填写模型 ID 后重试。`;
@@ -185,8 +204,8 @@ export async function configureModelService(
       modelsError = "模型列表读取超时或服务不可达，可填写模型 ID 后重试。";
     } finally { await relay?.close(); }
   }
-  if (models.length === 0)
-    models =
+  if (modelEntries.length === 0)
+    modelEntries =
       existing?.models?.length && !endpointChanged
         ? [...existing.models]
         : [];
@@ -201,10 +220,10 @@ export async function configureModelService(
       "version-conflict",
       "读取模型期间设置已变化，请重新读取后再保存。",
     );
-  const updated = await service.update(owner, connectionId, { models }, configured ?? undefined);
+  const updated = await service.update(owner, connectionId, { models: modelEntries, ...(modelsError ? { modelCatalogError: modelsError } : {}) }, configured ?? undefined);
   if (!updated.ok) return fail(updated.error.code === "version-conflict" ? 409 : 500, updated.error.code, updated.error.message);
   return {
     status: 200,
-    body: { connectionId, models, ...(modelsError ? { modelsError } : {}) },
+    body: { connectionId, models: modelEntries.map((entry) => typeof entry === "string" ? entry : entry.id), ...(modelsError ? { modelsError } : {}) },
   };
 }

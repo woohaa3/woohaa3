@@ -66,7 +66,7 @@ export function createGeminiTransport(): AgentSdkTransport {
             }
           }
         }
-        return { ok: true, assistantText, toolCalls, finishReason: "stop" };
+        return { ok: true, assistantText, toolCalls, finishReason: "stop", reasoning: input.reasoningEffort ? { requested: input.reasoningEffort, applied: true } : { applied: "provider-default" } };
       } catch {
         return { ok: false, code: input.signal.aborted ? "cancelled" : "transport-unavailable", message: input.signal.aborted ? "回合已停止" : "Gemini ADK 执行失败" };
       } finally {

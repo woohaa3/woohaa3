@@ -225,6 +225,8 @@ export type AssistantWorldIssueOutcome = ({ ok: true } & AssistantWorldIssued) |
 export interface AssistantWorldModelContent {
   modelScript: string;
   modelScriptVersion?: string;
+  /** 新建模型时画布上的卡片落点；缺省由画布按非重叠规则决定。 */
+  cardPosition?: { x: number; y: number };
 }
 
 export type AssistantWorldWriteOperation =

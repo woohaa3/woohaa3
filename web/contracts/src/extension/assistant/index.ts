@@ -5,6 +5,7 @@
  * 连接身份在 `agent-connection`。执行引用、文本生成、画布创建和受控改稿分别是后面几个模块。
  */
 export * from "./conversation.js";
+export * from "./reasoning-definitions.js";
 export * from "./conversation-codec.js";
 export * from "./conversation-mcp.js";
 export * from "./agent-connection.js";

@@ -151,6 +151,15 @@ describe("来源连接解析与冻结（任务 2.2）", () => {
     expect(controls.seen[0]?.connection).toEqual({ connectionId: "c1", adapterId: "fake", configRevision: 3, credentialEpoch: 5 });
   });
 
+  it("目录刷新后旧显式强度失效返回 capability-unsupported；有效值冻结能力修订", async () => {
+    const model = { id: "m", label: "m", source: "user-provided" as const, accountAuthorized: false,
+      reasoning: { state: "supported" as const, source: "provider" as const, revision: "r1", efforts: [{ id: "low" as const }] } };
+    const view = { ...conn({ connectionId: "c1", adapterId: "fake", extensionId: "sdk-agent" }), models: [model], capabilityRevision: "r1" };
+    const { service } = setup({ byOwner: { "user-a": [view] } });
+    expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "c1", model: "m", reasoningEffort: "high" })).toMatchObject({ ok: false, error: { code: "capability-unsupported" } });
+    expect(await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "c1", model: "m", reasoningEffort: "low" })).toMatchObject({ ok: true, binding: { capabilityRevision: "r1" } });
+  });
+
   it("未知连接或跨 owner 连接返回 connection-unavailable（不静默降级）", async () => {
     const { service } = setup({ byOwner: { "user-a": [conn({ connectionId: "c1", adapterId: "fake", extensionId: "sdk-agent" })] } });
     const unknown = await service.resolveConnectionBinding({ owner: "user-a", adapterId: "fake", connectionId: "nope" });

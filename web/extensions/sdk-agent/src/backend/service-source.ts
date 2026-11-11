@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ApplicationServiceConnectionFacade, ServiceConnectionProtocol, ServiceConnectionSourceAdapter, ServiceConnectionSourceSnapshot, ServiceConnectionPurpose } from "@woohaa3/contracts";
-import type { ConnectionService } from "@woohaa3/agent-connections";
+import { connectionModelCatalogRevision, modelCatalogForRecord, type ConnectionModelCapabilityRecord, type ConnectionService } from "@woohaa3/agent-connections";
 import { findSdkAgentAdapter, sdkEngineForAdapter } from "../shared.js";
 
 export function sdkSourceProtocol(adapterId: string): ServiceConnectionProtocol {
@@ -17,7 +17,7 @@ export function createSdkServiceSource(service: ConnectionService): ServiceConne
     const purposes: ServiceConnectionPurpose[] = ["text"];
     return { legacyId: id, scope: "personal", kind: "api", name: record.name,
       endpoints: [{ protocol, baseUrl: record.baseUrl ?? descriptor.officialBaseUrl }],
-      capabilities: (record.models ?? []).map(modelId => ({ purpose: "text" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const })),
+      capabilities: modelCatalogForRecord(record).models.map((model) => ({ purpose: "text" as const, protocol, modelId: model.id, imageInput: false, evidence: "adapter" as const, reasoning: model.reasoning })),
       bindings: [{ bindingId: `sdk:${id}`, extensionId: "sdk-agent", consumer: "agent", consumerId: id, purposes, modelKeys: record.models ?? [] }],
       enabled: true, removed: false, locked: false,
       credentialConfigured: await service.credentialConfigured({ owner, connectionId: id, purpose: "model-api-key" }),
@@ -63,7 +63,13 @@ export function withServiceSources(service: ConnectionService, port: Application
     // 所有文本模型都支持工具调用：来源里同一协议下的 text 能力直接就是可用的 Agent 模型。
     const textModels = source.capabilities.filter(capability => capability.purpose === "text" && capability.protocol === protocol);
     const revision = Number.parseInt(createHash("sha256").update(JSON.stringify([record.configRevision, source.serviceConnectionId, source.configRevision, source.credentialEpoch, source.enabled, source.removed])).digest("hex").slice(0, 12), 16);
-    const shared = record.serviceConnectionId ? { name: source.name, models: [...new Set(textModels.map(capability => capability.modelId))] } : {};
+    const sharedModels: ConnectionModelCapabilityRecord[] = [...new Map(textModels.map((capability) => [capability.modelId, capability])).values()].map((capability) => ({
+      id: capability.modelId,
+      reasoning: capability.reasoning
+        ? { state: capability.reasoning.state, source: capability.reasoning.source, revision: capability.reasoning.revision, ...(capability.reasoning.efforts ? { efforts: capability.reasoning.efforts.map((option) => ({ ...option })) } : {}) }
+        : { state: "unknown", source: "provider", revision: "source-unreported" }
+    }));
+    const shared = record.serviceConnectionId ? { name: source.name, models: sharedModels.map((model) => model.id), modelCatalog: { revision: connectionModelCatalogRevision(sharedModels), models: sharedModels, capturedAt: "" } } : {};
     const projected = {
       ...record,
       ...shared,

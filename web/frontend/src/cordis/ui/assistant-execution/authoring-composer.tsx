@@ -31,7 +31,7 @@ import type {
   AgentConversationSubmitInput,
   AgentConversationSubmitResult,
 } from "../../contract/agent-conversation.js";
-import type { AgentReasoningEffort } from "@woohaa3/contracts";
+import { reasoningEffortsOf, type AgentReasoningEffort } from "@woohaa3/contracts";
 import "../../plugins/task-execution/execution-panel/execution-panel.css";
 import "../../plugins/task-execution/authoring-generate-panel.css";
 
@@ -459,7 +459,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
           onSelect={(c, value) => {
             const key = `${c.adapterId}:${c.connectionId}`;
             const nextEffort = efforts[`${key}:${value}`] ?? "";
-            const nextOptions = agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === value)?.reasoningEfforts ?? [];
+            const nextOptions = agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === value) ? reasoningEffortsOf(agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === value)!) : [];
             setConfigurationNotice(effort && !nextEffort && !nextOptions.includes(effort) ? "新模型不支持原思考强度，已恢复默认" : "");
             controller.edit({ models: { ...models, [key]: value } });
             if (c.connectionId !== connectionId || (selectedConnection?.binding && (selectedConnection.binding.configRevision !== c.configRevision || selectedConnection.binding.credentialEpoch !== c.credentialEpoch))) selection?.onSelectConnection(c.connectionId);

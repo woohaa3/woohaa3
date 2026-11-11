@@ -187,6 +187,53 @@ describe("锁定框架经真实运行时访问可控上游（无真实 Key/计�
     }
   }, 40000);
 
+  it("dsh 默认省略 reasoning，显式档位写入真实请求并记录 applied", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "woohaa-dsh-reasoning-"));
+    const bodies: Array<Record<string, unknown>> = [];
+    const server = createServer(async (req, res) => {
+      let text = "";
+      for await (const chunk of req) text += String(chunk);
+      try { bodies.push(JSON.parse(text) as Record<string, unknown>); } catch { bodies.push({}); }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ id: "chat", object: "chat.completion.chunk", model: "controlled-model", choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null }] })}\n\n` + `data: ${JSON.stringify({ id: "chat", object: "chat.completion.chunk", model: "controlled-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const relay = await createModelTransport({ apiType: "chat-completions", apiKey: "reasoning", upstream: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, policy: createEndpointPolicy({ allowedHosts: ["127.0.0.1"], allowHttp: true }), valid: () => true });
+    try {
+      const transport = await createFixedEngineRuntime({ configDir: path.join(root, "config"), workspaceDir: path.join(root, "work") }).resolve("dsh-agent-sdk");
+      const input = (reasoningEffort?: "high") => ({ kind: "dsh-agent-sdk" as const, apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey: `reasoning-${reasoningEffort ?? "default"}`, model: "controlled-model", prompt: "reply", imagePaths: [], restrictions: buildAgentSdkRestrictions({ kind: "dsh-agent-sdk", workspaceDir: root, allowedTools: [] }), mcp: null, signal: AbortSignal.timeout(30000), onEvent: () => undefined, onNativeId: () => undefined, ...(reasoningEffort ? { reasoningEffort } : {}) });
+      const plain = await transport.run(input());
+      const explicit = await transport.run(input("high"));
+      expect(plain).toMatchObject({ ok: true, reasoning: { applied: "provider-default" } });
+      expect(explicit).toMatchObject({ ok: true, reasoning: { requested: "high", applied: true } });
+      expect(bodies[0]).not.toHaveProperty("reasoning_effort");
+      expect(bodies[1]).toMatchObject({ reasoning_effort: "high" });
+    } finally {
+      await relay.close();
+      server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 40000);
+
+  it("dsh 显式档位被上游拒绝时失败并记录 applied=false，不回退默认", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "woohaa-dsh-reasoning-reject-"));
+    const server = createServer(async (_req, res) => {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "unsupported reasoning_effort" } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const relay = await createModelTransport({ apiType: "chat-completions", apiKey: "reasoning", upstream: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, policy: createEndpointPolicy({ allowedHosts: ["127.0.0.1"], allowHttp: true }), valid: () => true });
+    try {
+      const transport = await createFixedEngineRuntime({ configDir: path.join(root, "config"), workspaceDir: path.join(root, "work") }).resolve("dsh-agent-sdk");
+      const result = await transport.run({ kind: "dsh-agent-sdk", apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey: "reasoning-reject", model: "controlled-model", prompt: "reply", reasoningEffort: "high", imagePaths: [], restrictions: buildAgentSdkRestrictions({ kind: "dsh-agent-sdk", workspaceDir: root, allowedTools: [] }), mcp: null, signal: AbortSignal.timeout(30000), onEvent: () => undefined, onNativeId: () => undefined });
+      expect(result).toMatchObject({ ok: false, reasoning: { requested: "high", applied: false } });
+    } finally {
+      await relay.close();
+      server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 40000);
+
   it("dsh 输出额度写满时透出 length，而不是伪装成正常结束", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "woohaa-dsh-truncated-"));
     const server = createServer(async (req, res) => {

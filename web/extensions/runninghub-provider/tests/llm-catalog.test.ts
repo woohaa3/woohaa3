@@ -35,7 +35,7 @@ describe("RunningHub 文字目录", () => {
       "llm/glm/glm-5.2",
       "llm/openai/vision"
     ]);
-    expect(runningHubLanguageDefinitions(parsed.models)[0]!.capabilityFacts).toEqual({ reasoning: { supported: true } });
+    expect(runningHubLanguageDefinitions(parsed.models)[0]!.capabilityFacts).toEqual({ reasoning: { supported: true, efforts: ["low", "medium", "high"] } });
   });
 
   it("结构非法或空目录整份拒绝", () => {
@@ -60,5 +60,18 @@ describe("RunningHub 文字目录", () => {
     expect(runningHubLanguageCapabilities("llm/openai/vision")).toEqual({ tools: false, imageInput: true, streaming: true });
     expect(runningHubLanguageCapabilities("llm/missing")).toBeUndefined();
     resetRunningHubLanguageModels();
+  });
+});
+
+describe("RunningHub 精确思考档位", () => {
+  it("只投影上游返回的 canonical 档位，布尔能力不猜档", () => {
+    const parsed = parseRunningHubLanguageCatalog({ data: [
+      { id: "glm/exact", capabilities: { chat: true, reasoning: true, reasoning_efforts: ["low", "high", "bogus"] } },
+      { id: "glm/boolean", capabilities: { chat: true, reasoning: true } }
+    ] });
+    if (!parsed.ok) throw new Error(parsed.message);
+    const definitions = runningHubLanguageDefinitions(parsed.models);
+    expect(definitions.find((model) => model.providerModelId === "llm/glm/exact")?.capabilityFacts).toEqual({ reasoning: { supported: true, efforts: ["low", "high"] } });
+    expect(definitions.find((model) => model.providerModelId === "llm/glm/boolean")?.capabilityFacts).toEqual({ reasoning: { supported: true } });
   });
 });

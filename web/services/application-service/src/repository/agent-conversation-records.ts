@@ -55,6 +55,8 @@ export type ConversationTurnRecord = {
   connectionAdapterId: string | null;
   connectionConfigRevision: number | null;
   connectionCredentialEpoch: number | null;
+  /** 受理时冻结的模型 reasoning 能力修订号（旧数据 null）。 */
+  connectionCapabilityRevision?: string | null;
   /**
    * 受理时冻结的历史基准（消息 sequence 上界；change: 2026-10-22-remove-agent-execution-limits，
    * 任务 3.1 / design D3）。
@@ -83,6 +85,8 @@ export type ConversationTurnRecord = {
   runId: string | null;
   taskId: string | null;
   receiptJson: string | null;
+  /** 请求/应用结果（不保存隐藏推理内容）。旧数据缺省。 */
+  reasoningJson?: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   createdAt: string;
@@ -156,6 +160,7 @@ export type TurnRow = {
   connection_adapter_id: string | null;
   connection_config_revision: number | null;
   connection_credential_epoch: number | null;
+  connection_capability_revision?: string | null;
   /** 受理时冻结的历史基准（change: 2026-10-22-remove-agent-execution-limits，任务 3.1）。 */
   history_sequence: number | null;
   role_ref_json?: string | null;
@@ -168,6 +173,7 @@ export type TurnRow = {
   run_id: string | null;
   task_id: string | null;
   receipt_json: string | null;
+  reasoning_json?: string | null;
   error_code: string | null;
   error_message: string | null;
   created_at: string;
@@ -249,6 +255,7 @@ export function turnFromRow(row: TurnRow): ConversationTurnRecord {
     connectionAdapterId: row.connection_adapter_id ?? null,
     connectionConfigRevision: row.connection_config_revision ?? null,
     connectionCredentialEpoch: row.connection_credential_epoch ?? null,
+    connectionCapabilityRevision: row.connection_capability_revision ?? null,
     historySequence: row.history_sequence ?? null,
     roleRefJson: row.role_ref_json ?? null,
     preparedJson: row.prepared_json ?? null,
@@ -260,6 +267,7 @@ export function turnFromRow(row: TurnRow): ConversationTurnRecord {
     runId: row.run_id,
     taskId: row.task_id,
     receiptJson: row.receipt_json,
+    reasoningJson: row.reasoning_json ?? null,
     errorCode: row.error_code,
     errorMessage: row.error_message,
     createdAt: row.created_at,

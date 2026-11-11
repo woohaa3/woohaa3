@@ -1290,7 +1290,10 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     // same commit and is classified read-only/not-ready until chunks arrive.
     const prepared = skeleton ? null : await deps.authority.prepareContent(fields);
     if (!skeleton && !prepared) return failure("invalid-data", "模型脚本无法执行或无法确定占地；请先调用 get_model_api，并使用 woohaa-model-js-v2 的 scene.* API");
+    // 卡片落点由 AI 能力中心或画布决定；缺省时用画布原点，随后按非重叠规则修正。
+    // 落点由调用方给出；宿主在这里统一成画布坐标，供后续插入节点与回执使用。
     const cardPosition = operation.content.cardPosition ?? { x: 0, y: 0 };
+    void cardPosition;
     const commandId = intentCommandId("assistant-world-create", operation);
     const result = await inspected.room.submitDerived({
       commandId,

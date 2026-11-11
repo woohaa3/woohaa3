@@ -14,6 +14,8 @@ import { nativeContextFor, nativeContextKey } from "@woohaa3/agent-connections";
  */
 import {
   AGENT_READ_ONLY_TOOLS,
+  agentReasoningRevision,
+  reasoningCapabilityOf,
   type AgentAdapterAuthState,
   type AgentAdapterRunInput,
   type AgentAdapterRunOutcome,
@@ -121,6 +123,18 @@ async function issueToolGrant(
 
 const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" };
 
+/** 旧目录只有 reasoningEfforts 时补齐统一能力对象；修订号覆盖目录事实。 */
+function catalogSnapshot(models: AgentModelView[]): AgentCatalogSnapshot {
+  const normalized = models.map((model) => {
+    const reasoning = model.reasoning ?? reasoningCapabilityOf(model);
+    return { ...model, reasoning };
+  });
+  return {
+    models: normalized,
+    capabilityRevision: agentReasoningRevision(...normalized.map((model) => `${model.id}:${model.reasoning?.revision ?? ""}`))
+  };
+}
+
 export function createLocalAgentDescriptors(): Record<string, ConnectionDescriptor> {
   const descriptors: Record<string, ConnectionDescriptor> = {};
   for (const adapter of LOCAL_AGENT_ADAPTERS) {
@@ -161,7 +175,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
   const models = async (input: { owner: string }): Promise<AgentCatalogSnapshot> => {
     const connections = await options.service.list(input.owner);
     const mine = connections.filter((record) => record.adapterId === adapter.adapterId);
-    if (mine.length === 0) return { models: [] };
+    if (mine.length === 0) return catalogSnapshot([]);
 
     // 手填/历史模型先进入目录；真实上游目录成功时按 id 覆盖展示名，失败仍保留原选择。
     const catalog = new Map<string, AgentModelView>();
@@ -170,14 +184,14 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
     }
 
     const transport = options.transports[adapter.adapterId];
-    if (!transport?.models) return { models: [...catalog.values()] };
+    if (!transport?.models) return catalogSnapshot([...catalog.values()]);
 
     // 目录读取使用该来源的第一条连接；模型目录属于工具/账号而不是某条 UI 连接，
     // 启动的仍是专用进程，不读取或修改用户现有工具配置。
     const record = mine[0]!;
     try {
       const probe = await options.processManager.probe(adapter.adapterId);
-      if (!probe.ok) return { models: [...catalog.values()], error: probe.message };
+      if (!probe.ok) return { ...catalogSnapshot([...catalog.values()]), error: probe.message };
       const identity = { adapterId: adapter.adapterId, owner: input.owner, connectionId: record.connectionId };
       const ensureCatalog = () => options.processManager.ensure({
         adapterId: adapter.adapterId,
@@ -208,12 +222,12 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
           .catch(() => undefined);
       }
       return {
-        models: [...catalog.values()],
+        ...catalogSnapshot([...catalog.values()]),
         ...(snapshot.error && catalog.size === 0 ? { error: snapshot.error } : {})
       };
     } catch (error) {
       return {
-        models: [...catalog.values()],
+        ...catalogSnapshot([...catalog.values()]),
         error: error instanceof Error ? error.message : "本机来源模型目录读取失败"
       };
     }
@@ -402,7 +416,10 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
   const run = async (input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome> => {
     let outcome;
     try { outcome = await runInner(input); } finally { options.tools?.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" }); }
-    return outcome;
+    const reasoning = input.intent.reasoningEffort
+      ? { requested: input.intent.reasoningEffort, applied: outcome.status === "succeeded" || outcome.status === "partial" }
+      : { applied: "provider-default" as const };
+    return { ...outcome, reasoning: outcome.reasoning ?? reasoning };
   };
 
   return {

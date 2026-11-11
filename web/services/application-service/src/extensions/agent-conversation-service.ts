@@ -35,6 +35,7 @@ import {
   agentRoleRefEquals,
   decodePreparedAgentRoleTurn,
   decodeAgentRoleDefinition,
+  reasoningCapabilityOf,
   UNCONFIRMED_RESULT_ERROR_CODE,
   UNCONFIRMED_RESULT_MESSAGE,
   UNCONFIRMED_WRITE_ERROR_CODE,
@@ -257,7 +258,7 @@ export type AgentConversationService = {
    * 显式选择必须经连接注册表校验属于该 owner；缺失时拒绝。API 在接受回合前调用，
    * 把结果作为 `connection` 传入 `acceptTurn`（保持后者同步，便于复用/测试）。
    */
-  resolveConnectionBinding(input: { owner: string; adapterId: string; connectionId?: string }):
+  resolveConnectionBinding(input: { owner: string; adapterId: string; connectionId?: string; model?: string; reasoningEffort?: string }):
     Promise<{ ok: true; binding: AgentConnectionBinding | null } | { ok: false; error: AgentConversationServiceError }>;
   /** 异步 dispatch（accept 后调用）；幂等，同一 turn 只运行一次。 */
   dispatchTurn(turnId: string): Promise<void>;
@@ -277,7 +278,7 @@ export type AgentConversationService = {
     | { ok: false; error: AgentConversationServiceError };
   /** 由宿主领域链在 run/task 接受后显式关联（不从节点 active run 反推）。 */
   linkRun(input: { owner: string; requestId: string; runId?: string; taskId?: string }): { ok: true; turn: ConversationTurn } | { ok: false; error: AgentConversationServiceError };
-  catalog(input: { owner: string; adapterId?: string }): Promise<{ ok: true; models: AgentCatalogSnapshot["models"]; error?: string; authState: AgentAdapterAuthState; capabilities: AgentAdapterCapabilities } | { ok: false; error: AgentConversationServiceError }>;
+  catalog(input: { owner: string; adapterId?: string }): Promise<{ ok: true; models: AgentCatalogSnapshot["models"]; capabilityRevision?: string; error?: string; authState: AgentAdapterAuthState; capabilities: AgentAdapterCapabilities } | { ok: false; error: AgentConversationServiceError }>;
   /**
    * 只读角色目录与能力匹配投影（change: 2026-11-07-add-pluggable-agent-roles）。
    *
@@ -343,7 +344,8 @@ export function createAgentConversationService(options: AgentConversationService
   const resolveTurnConnection = async (
     owner: string,
     adapterId: string,
-    requestedId: string | undefined
+    requestedId: string | undefined,
+    reasoning?: { model?: string; effort?: string }
   ): Promise<{ ok: true; binding: AgentConnectionBinding | null } | { ok: false; error: { code: AgentConversationServiceError["code"]; message: string } }> => {
     if (requestedId) {
       if (!connections) return { ok: false, error: { code: "connection-unavailable", message: "连接服务未配置" } };
@@ -353,9 +355,22 @@ export function createAgentConversationService(options: AgentConversationService
       const view = await connections.getConnection({ owner, connectionId: requestedId });
       if (!view) return { ok: false, error: { code: "connection-unavailable", message: "连接不存在或无权访问" } };
       if (view.adapterId !== adapterId) return { ok: false, error: { code: "connection-unavailable", message: "连接与来源不一致" } };
+      if (reasoning?.effort) {
+        const model = reasoning.model ? view.models.find((candidate) => candidate.id === reasoning.model) : undefined;
+        const capability = model ? reasoningCapabilityOf(model) : undefined;
+        if (!capability || capability.state !== "supported" || !(capability.efforts ?? []).some((option) => option.id === reasoning.effort)) {
+          return { ok: false, error: { code: "capability-unsupported", message: "当前模型未开放此思考强度，请清除强度或重新选择模型" } };
+        }
+      }
       return {
         ok: true,
-        binding: { connectionId: view.connectionId, adapterId: view.adapterId, configRevision: view.configRevision, credentialEpoch: view.credentialEpoch }
+        binding: {
+          connectionId: view.connectionId,
+          adapterId: view.adapterId,
+          configRevision: view.configRevision,
+          credentialEpoch: view.credentialEpoch,
+          ...(view.capabilityRevision ? { capabilityRevision: view.capabilityRevision } : {})
+        }
       };
     }
     return { ok: false, error: { code: "connection-unavailable", message: "请求必须明确选择助手连接" } };
@@ -671,6 +686,7 @@ export function createAgentConversationService(options: AgentConversationService
       ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
       ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
       ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
+      ...(outcome.reasoning !== undefined ? { reasoningJson: safeJson(outcome.reasoning) } : {}),
       ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
     }, now()), true) : store.updateTurnIfActive(
       turn.turnId,
@@ -681,6 +697,7 @@ export function createAgentConversationService(options: AgentConversationService
         ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
         ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
         ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
+        ...(outcome.reasoning !== undefined ? { reasoningJson: safeJson(outcome.reasoning) } : {}),
         ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
       },
       now()
@@ -944,7 +961,10 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     resolveConnectionBinding(input) {
-      return resolveTurnConnection(input.owner, input.adapterId, input.connectionId);
+      return resolveTurnConnection(input.owner, input.adapterId, input.connectionId, {
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {})
+      });
     },
 
     acceptStructuredTurn(input) {
@@ -1118,6 +1138,7 @@ export function createAgentConversationService(options: AgentConversationService
         ...(input.entry.itemId !== undefined ? { itemId: input.entry.itemId } : {}),
         ...(input.entry.model !== undefined ? { model: input.entry.model } : {}),
         ...(input.entry.reasoningEffort !== undefined ? { reasoningEffort: input.entry.reasoningEffort } : {}),
+        ...(connection?.capabilityRevision !== undefined ? { capabilityRevision: connection.capabilityRevision } : {}),
         ...(connection ? { connectionId: connection.connectionId } : {}),
         ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {}),
         ...(roleResolved.ref ? { role: roleResolved.ref } : {})
@@ -1138,6 +1159,7 @@ export function createAgentConversationService(options: AgentConversationService
         connectionAdapterId: connection?.adapterId ?? null,
         connectionConfigRevision: connection?.configRevision ?? null,
         connectionCredentialEpoch: connection?.credentialEpoch ?? null,
+        connectionCapabilityRevision: connection?.capabilityRevision ?? null,
         ...(roleResolved.ref ? { roleRefJson: safeJson(roleResolved.ref) } : {}),
         ...(trustedPrepared ? { preparedJson: safeJson(trustedPrepared) } : {}),
         roleInputDigest: trustedRoleInputDigest ?? createHash("sha256").update(JSON.stringify(roleInput(input.entry))).digest("hex"),
@@ -1251,7 +1273,7 @@ export function createAgentConversationService(options: AgentConversationService
           error = cause instanceof Error ? cause.message : "目录读取失败";
         }
       }
-      return { ok: true, models: snapshot.models, authState, capabilities, ...(error ? { error } : {}) };
+      return { ok: true, models: snapshot.models, ...(snapshot.capabilityRevision ? { capabilityRevision: snapshot.capabilityRevision } : {}), authState, capabilities, ...(error ? { error } : {}) };
     },
 
     listRoles(input) {

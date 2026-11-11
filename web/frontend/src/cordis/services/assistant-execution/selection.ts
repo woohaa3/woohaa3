@@ -1,4 +1,4 @@
-import type { AgentModelView, AgentReasoningEffort } from "@woohaa3/contracts";
+import { reasoningCapabilityOf, reasoningEffortsOf, type AgentModelView, type AgentReasoningEffort } from "@woohaa3/contracts";
 
 export type AssistantPreference = { sourceId: string; connectionId: string; model?: string; reasoningEffort?: AgentReasoningEffort | "" };
 const preferences = new Map<string, AssistantPreference>();
@@ -36,13 +36,24 @@ export function assistantSelectionMemory(page: object, dataScopeId: string) {
 /** Shared by node authoring and blank-canvas creation. Never substitutes a model. */
 export function agentModelSelection(models: readonly AgentModelView[], model: string, effort: AgentReasoningEffort | "", explicit: boolean) {
   const selected = models.find(option => option.id === model);
-  const supportedEfforts = selected?.reasoningEfforts ?? [];
+  const supportedEfforts = selected ? reasoningEffortsOf(selected) : [];
   return { supportedEfforts, invalidModel: model !== "" && !selected, missingRequiredModel: explicit && !model.trim(), invalidEffort: effort !== "" && !supportedEfforts.includes(effort) };
 }
 
 /** Preserve connection-specific catalogs; only fall back to the selected adapter. */
 export function agentDirectoryModels(connectionModels: readonly AgentModelView[] | undefined, catalogModels: readonly AgentModelView[] | undefined): readonly AgentModelView[] {
-  return connectionModels?.length ? connectionModels : catalogModels ?? [];
+  if (!connectionModels?.length) return catalogModels ?? [];
+  if (!catalogModels?.length) return connectionModels;
+  const catalog = new Map(catalogModels.map((model) => [model.id, model]));
+  return connectionModels.map((model) => {
+    const fromCatalog = catalog.get(model.id);
+    if (!fromCatalog) return model;
+    // 连接视图只保存用户的模型选择；能力事实由同一 adapter 的目录补齐。
+    const reasoning = model.reasoning && model.reasoning.state !== "unknown"
+      ? model.reasoning
+      : fromCatalog.reasoning ?? reasoningCapabilityOf(fromCatalog);
+    return { ...model, reasoning };
+  });
 }
 
 export async function readAgentCatalog(service: Pick<import("../../contract/agent-conversation.js").AgentConversationService, "catalog">, adapterId: string) {

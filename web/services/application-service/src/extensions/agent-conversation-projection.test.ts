@@ -11,6 +11,7 @@ import {
 } from "@woohaa3/contracts";
 import {
   conversationStatusFor,
+  hashIntent,
   toSummary,
   toTurn,
 } from "./agent-conversation-projection.js";
@@ -113,5 +114,26 @@ describe("legacy unknown normalization", () => {
       error: { code: "outcome-unknown", message: "外部工作日志无法确认" },
       receipt: { kind: "canvas-group", actions: [] },
     });
+  });
+});
+
+describe("reasoning 冻结与幂等指纹", () => {
+  const entry = { action: "generate" as const, canvasId: "canvas", nodeId: "node", model: "m", prompt: "p" };
+  const binding = { connectionId: "c", adapterId: "a", configRevision: 1, credentialEpoch: 1, capabilityRevision: "rev-1" };
+
+  it("同一 requestId 改变思考强度会得到不同指纹", () => {
+    const base = hashIntent({ ...entry, reasoningEffort: "low" }, binding);
+    expect(hashIntent({ ...entry, reasoningEffort: "high" }, binding)).not.toBe(base);
+    expect(hashIntent({ ...entry }, binding)).not.toBe(base);
+  });
+
+  it("能力修订号参与指纹；旧绑定缺省仍兼容", () => {
+    expect(hashIntent(entry, { ...binding, capabilityRevision: "rev-2" })).not.toBe(hashIntent(entry, binding));
+    expect(hashIntent(entry, { connectionId: "c", adapterId: "a", configRevision: 1, credentialEpoch: 1 })).toHaveLength(64);
+  });
+
+  it("旧回合读取 reasoning 时缺失保持缺省", () => {
+    expect(toTurn(store, turn())).not.toHaveProperty("reasoning");
+    expect(toTurn(store, turn({ reasoningJson: JSON.stringify({ requested: "high", applied: true }) }))).toMatchObject({ reasoning: { requested: "high", applied: true } });
   });
 });

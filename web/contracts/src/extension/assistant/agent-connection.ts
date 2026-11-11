@@ -14,7 +14,7 @@
  * 连接元数据/凭据由贡献方扩展按扩展、owner、connectionId 隔离保存；宿主只认识连接引用与能力。
  */
 
-import { isAgentReasoningEffort, isAgentTargetMode, type AgentTargetMode } from "./conversation.js";
+import { isAgentReasoningCapability, isAgentReasoningEffort, isAgentTargetMode, type AgentTargetMode } from "./conversation.js";
 
 /** 固定 API 引擎映射；历史 adapter ID 不作为引擎选择项。 */
 export const AGENT_API_ENGINES = {
@@ -132,6 +132,7 @@ export type AgentConnectionCapabilities = {
 /** 连接可见模型：能力、来源与账号授权分离。 */
 export type AgentConnectionModel = {
   reasoningEfforts?: readonly import("./conversation.js").AgentReasoningEffort[];
+  reasoning?: import("./conversation.js").AgentReasoningCapability;
   id: string;
   label: string;
   source: AgentModelCapabilitySource;
@@ -174,6 +175,8 @@ export type AgentConnectionView = {
   ready: boolean;
   capabilities: AgentConnectionCapabilities;
   models: readonly AgentConnectionModel[];
+  /** 当前模型目录 reasoning 能力快照的修订号；旧记录缺省。 */
+  capabilityRevision?: string;
   /** 目录读取失败原因（保留原选择，不自动换模型）。 */
   modelsError?: string;
   /** 是否已保存凭据（不返回明文）。 */
@@ -226,7 +229,8 @@ export function isAgentConnectionModel(value: unknown): value is AgentConnection
     typeof candidate.label === "string" &&
     isAgentModelCapabilitySource(candidate.source) &&
     typeof candidate.accountAuthorized === "boolean" &&
-    (candidate.reasoningEfforts === undefined || (Array.isArray(candidate.reasoningEfforts) && candidate.reasoningEfforts.every(isAgentReasoningEffort)))
+    (candidate.reasoningEfforts === undefined || (Array.isArray(candidate.reasoningEfforts) && candidate.reasoningEfforts.every(isAgentReasoningEffort))) &&
+    (candidate.reasoning === undefined || isAgentReasoningCapability(candidate.reasoning))
   );
 }
 
@@ -246,6 +250,7 @@ export function isAgentConnectionView(value: unknown): value is AgentConnectionV
   if (typeof candidate.ready !== "boolean") return false;
   if (!isAgentConnectionCapabilities(candidate.capabilities)) return false;
   if (!Array.isArray(candidate.models) || !candidate.models.every(isAgentConnectionModel)) return false;
+  if (candidate.capabilityRevision !== undefined && (typeof candidate.capabilityRevision !== "string" || candidate.capabilityRevision.length === 0 || candidate.capabilityRevision.length > 128)) return false;
   if (typeof candidate.credentialConfigured !== "boolean") return false;
   return true;
 }

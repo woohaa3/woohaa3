@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import type { ConnectionMetadataRecord, ConnectionService } from "@woohaa3/agent-connections";
 import { findSdkAgentAdapter } from "../shared.js";
-import { capabilitiesFor, createSdkAgentConversationAdapter, sdkReasoningEfforts, unwrittenError } from "./sdk-agent-connections.js";
+import { capabilitiesFor, createSdkAgentConversationAdapter, sdkModelViews, unwrittenError } from "./sdk-agent-connections.js";
 import type { AgentSdkTransport } from "./adapters/agent-sdk-adapter.js";
 import { buildTestPreparedTurn, toolsForTestIntent } from "@woohaa3/test-fixtures-agent-role-turns";
 
 function fixture(runtimeVersion: string | undefined = "codex-agent-sdk@0.161.0:1") {
-  const record: ConnectionMetadataRecord = { owner: "owner", connectionId: "connection", adapterId: "openai-responses", name: "API", runCategory: "agent-sdk", authMode: "api-key", configRevision: 1, credentialEpoch: 1, createdAt: "now", updatedAt: "now", runtimeVersion, models: ["fixture"] };
+  const record: ConnectionMetadataRecord = { owner: "owner", connectionId: "connection", adapterId: "openai-responses", name: "API", runCategory: "agent-sdk", authMode: "api-key", configRevision: 1, credentialEpoch: 1, createdAt: "now", updatedAt: "now", runtimeVersion, models: ["fixture", "gpt-6.1-sol"], modelCatalog: { revision: "test", capturedAt: "now", models: [{ id: "fixture", reasoning: { state: "unknown", source: "provider", revision: "test" } }, { id: "gpt-6.1-sol", reasoning: { state: "supported", source: "provider", revision: "test", efforts: [{ id: "low" }, { id: "medium" }, { id: "high" }] } }] } };
   const service = { get: vi.fn(async (owner: string) => owner === "owner" ? record : null), readCredential: vi.fn(async () => ({ secret: "real-key-never-given-to-sdk" })), setRuntimeProbe: vi.fn(), setStatus: vi.fn(), resolveNativeBinding: vi.fn(async () => null), setNativeBinding: vi.fn() } as unknown as ConnectionService;
   const run = vi.fn<AgentSdkTransport["run"]>(async () => ({ ok: true, assistantText: "reply", toolCalls: [], finishReason: "stop" }));
   const create = (available = true, inFlight?: Set<Promise<unknown>>, allowedHosts = ["api.openai.com"]) => createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, { service, inFlight, allowedHosts, allowHttp: false, ...(available ? { transports: { "codex-agent-sdk": { run } } } : {}) });
@@ -148,8 +148,13 @@ it("选择的思考强度传入 SDK，未开放的模型在启动前拒绝", asy
   f.run.mockClear();
   expect(await f.create().run({ ...input, requestId: "other", intent: { ...input.intent, model: "fixture" } })).toMatchObject({ status: "failed", error: { code: "capability-unsupported" } });
   expect(f.run).not.toHaveBeenCalled();
-  expect(sdkReasoningEfforts("compat-chat", "unknown")).toEqual([]);
-  expect(sdkReasoningEfforts("gemini-agent-adk", "gemini-3-pro-preview")).toEqual(["low", "high"]);
+  const record = fixture().record;
+  const catalog = { revision: "r", capturedAt: "now", models: [
+    { id: "unknown", reasoning: { state: "unknown" as const, source: "provider" as const, revision: "r" } },
+    { id: "gemini-3-pro-preview", reasoning: { state: "supported" as const, source: "provider" as const, revision: "r", efforts: [{ id: "low" as const }, { id: "high" as const }] } }
+  ] };
+  expect(sdkModelViews("compat-chat", { ...record, modelCatalog: catalog })[0]?.reasoningEfforts).toBeUndefined();
+  expect(sdkModelViews("gemini-agent-adk", { ...record, modelCatalog: catalog })[1]?.reasoningEfforts).toEqual(["low", "high"]);
 });
 
 

@@ -160,7 +160,7 @@ export function createCodexTransport(options: CodexTransportOptions): AgentSdkTr
       const nativeId = thread.id ?? input.resumeNativeId ?? undefined;
       if (nativeId) input.onNativeId(nativeId);
       log({ event: "codex-agent-turn-complete", toolCount: toolCalls.length });
-      return { ok: true, assistantText, toolCalls, finishReason, ...(nativeId ? { nativeId } : {}) };
+      return { ok: true, assistantText, toolCalls, finishReason, reasoning: input.reasoningEffort ? { requested: input.reasoningEffort, applied: true } : { applied: "provider-default" }, ...(nativeId ? { nativeId } : {}) };
       });
     }
   };

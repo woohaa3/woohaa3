@@ -9,7 +9,7 @@ import { AssistantComposer, AssistantToolbar } from "@woohaa3/ui/assistant";
 import { Dialog } from "@woohaa3/ui/dialogs";
 import { Button } from "@woohaa3/ui/primitives";
 import { ImageIcon, SparklesIcon } from "@woohaa3/ui/icons";
-import { createHighEntropyId, IMAGE_DIRECTOR_SCENE_DEFAULT_PROMPT, type AgentReasoningEffort } from "@woohaa3/contracts";
+import { createHighEntropyId, IMAGE_DIRECTOR_SCENE_DEFAULT_PROMPT, reasoningEffortsOf, type AgentReasoningEffort } from "@woohaa3/contracts";
 import { definePlugin } from "../../plugin.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
@@ -57,10 +57,10 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
   const connection = connections.find(item => item.connectionId === draft.connectionId);
   const models = agentDirectoryModels(connection?.models, connection ? directoryView?.catalogs[connection.adapterId]?.models : undefined);
   const model = models.find(item => item.id === draft.model);
-  useEffect(() => { if (model && draft.variant && !model.reasoningEfforts?.includes(draft.variant as AgentReasoningEffort)) { update({ variant: "" }); setError("新模型不支持原思考强度，已恢复默认"); } }, [model, draft.variant]);
+  useEffect(() => { if (model && draft.variant && !reasoningEffortsOf(model).includes(draft.variant as AgentReasoningEffort)) { update({ variant: "" }); setError("新模型不支持原思考强度，已恢复默认"); } }, [model, draft.variant]);
   const modelCapabilities = connection?.models.find(item => item.id === draft.model)?.capabilities;
   const candidateCapability = modelCapabilities?.textDelivery ?? connection?.capabilities.textDelivery;
-  const selectionInvalid = !connection?.ready || !connection.capabilities.tools || !connection.capabilities.targets?.includes("world") || !candidateCapability?.imageInput || candidateCapability.maxImages < 1 || !model || (!!draft.variant && !model.reasoningEfforts?.includes(draft.variant as AgentReasoningEffort));
+  const selectionInvalid = !connection?.ready || !connection.capabilities.tools || !connection.capabilities.targets?.includes("world") || !candidateCapability?.imageInput || candidateCapability.maxImages < 1 || !model || (!!draft.variant && !reasoningEffortsOf(model).includes(draft.variant as AgentReasoningEffort));
   const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
   const asset = canvas?.assets.find(item => item.id === canvas.nodeData[nodeId]?.outputAssetId);
   const thumbnail = resolveCanonicalMediaUrl(asset, canvasId);
@@ -102,11 +102,11 @@ export function ImageDirectorPanel({ ctx, canvasId, nodeId, visible, onClose, be
         reasonFor={(c, id) => { const capability = c.models?.find(m => m.id === id)?.capabilities?.textDelivery ?? c.capabilities.textDelivery; return !c.capabilities.tools || !c.capabilities.targets?.includes("world") ? "此连接不支持场景创作" : !capability?.imageInput ? "此模型不支持参考图片" : undefined; }}
         onSelect={(c, id) => {
           const variant = c.connectionId === draft.connectionId && id === draft.model ? draft.variant : draft.efforts?.[generationIdentity(c.connectionId, id)] ?? "";
-          const options = agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === id)?.reasoningEfforts ?? [];
+          const options = agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === id) ? reasoningEffortsOf(agentDirectoryModels(c.models, directoryView?.catalogs[c.adapterId]?.models).find(m => m.id === id)!) : [];
           setError(draft.variant && !variant && !options.includes(draft.variant as AgentReasoningEffort) ? "新模型不支持原思考强度，已恢复默认" : null);
           update({ connectionId: c.connectionId, model: id, variant });
         }} /> : null}
-      parameters={<ReasoningParameters value={draft.variant} options={model?.reasoningEfforts ?? []} open={open === "model"} onOpenChange={value => setOpen(value ? "model" : null)} disabled={busy} onChange={value => update({ variant: value })} />}
+      parameters={<ReasoningParameters value={draft.variant} options={model ? reasoningEffortsOf(model) : []} open={open === "model"} onOpenChange={value => setOpen(value ? "model" : null)} disabled={busy} onChange={value => update({ variant: value })} />}
 
     />
     <p className="image-director-hint">Enter 生成，Shift+Enter 换行</p>

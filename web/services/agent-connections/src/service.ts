@@ -14,14 +14,19 @@ import { nativeContextKey, type NativeContext } from "./native-context.js";
  * 不含任何厂商 SDK 或网络调用：调用方（扩展）只经本服务读写连接；协议检查在扩展适配器内。
  */
 import type { ExtensionDocumentStore, ApplicationExtensionSecretStore, ExtensionDocumentValue } from "@woohaa3/contracts";
-import type { AgentConnectionAuthMode, AgentConnectionRunCategory, AgentConnectionStatus, AgentCredentialPurpose } from "@woohaa3/contracts";
+import type { AgentConnectionAuthMode, AgentConnectionRunCategory, AgentConnectionStatus, AgentCredentialPurpose, AgentReasoningCapability } from "@woohaa3/contracts";
 import {
   connectionMetadataKey,
   connectionMetadataPrefix,
+  connectionModelCatalogRevision,
   isConnectionMetadataRecord,
+  mergeModelCapabilities,
   type ConnectionMetadataRecord,
+  type ConnectionModelCatalogRecord,
   type ConnectionNativeBinding
 } from "./metadata.js";
+
+export type ConnectionModelInput = string | { id: string; label?: string; reasoning?: AgentReasoningCapability };
 
 export type ConnectionConfigInput = {
   serviceConnectionId?: string;
@@ -30,7 +35,9 @@ export type ConnectionConfigInput = {
   runCategory: AgentConnectionRunCategory;
   authMode: AgentConnectionAuthMode;
   baseUrl?: string;
-  models?: readonly string[];
+  models?: readonly ConnectionModelInput[];
+  /** 目录读取失败原因；保留上一次成功快照。 */
+  modelCatalogError?: string;
 };
 
 export type ConnectionServiceError = {
@@ -110,6 +117,21 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
   const toDocumentValue = (record: ConnectionMetadataRecord): ExtensionDocumentValue =>
     JSON.parse(JSON.stringify(record)) as ExtensionDocumentValue;
 
+  /** 目录输入 → 持久快照；纯 id 保留同 id 的已知能力，错误只贴在本快照上。 */
+  const catalogFromInput = (
+    entries: readonly ConnectionModelInput[] | undefined,
+    previous: ConnectionModelCatalogRecord | undefined,
+    timestamp: string,
+    error?: string
+  ): { models: string[]; modelCatalog?: ConnectionModelCatalogRecord } => {
+    if (entries === undefined) return { models: previous?.models.map((model) => model.id) ?? [] };
+    const models = mergeModelCapabilities(entries, previous);
+    return {
+      models: models.map((model) => model.id),
+      modelCatalog: { revision: connectionModelCatalogRevision(models), models, capturedAt: timestamp, ...(error ? { error } : {}) }
+    };
+  };
+
   const readRecord = async (owner: string, connectionId: string): Promise<{ record: ConnectionMetadataRecord; revision: number } | null> => {
     const read = await documents.get(connectionMetadataKey(connectionId));
     if (!read.found) return null;
@@ -171,6 +193,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       if (!owner) return { ok: false, error: { code: "malformed-request", message: "缺少可信 owner" } };
       if (!input.adapterId || input.name.trim() === "") return { ok: false, error: { code: "malformed-request", message: "adapterId/name 非法" } };
       const timestamp = now();
+      const catalog = catalogFromInput(input.models, undefined, timestamp, input.modelCatalogError);
       const record: ConnectionMetadataRecord = {
         connectionId: createId("conn"),
         ...(input.serviceConnectionId ? { serviceConnectionId: input.serviceConnectionId } : {}),
@@ -183,7 +206,8 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
         configRevision: 1,
         credentialEpoch: 0,
         ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
-        ...(input.models ? { models: [...input.models] } : {}),
+        ...(catalog.models.length ? { models: catalog.models } : {}),
+        ...(catalog.modelCatalog ? { modelCatalog: catalog.modelCatalog } : {}),
         createdAt: timestamp,
         updatedAt: timestamp
       };
@@ -195,6 +219,10 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
       const found = await readRecord(owner, connectionId);
       if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
       if (expected && (expected.configRevision !== found.record.configRevision || expected.credentialEpoch !== found.record.credentialEpoch)) return { ok: false, error: { code: "version-conflict", message: "拒绝旧代次配置结果" } };
+      const timestamp = now();
+      const catalog = patch.models !== undefined
+        ? catalogFromInput(patch.models, found.record.modelCatalog, timestamp, patch.modelCatalogError)
+        : { models: found.record.models ?? [], modelCatalog: found.record.modelCatalog };
       const next: ConnectionMetadataRecord = {
         ...found.record,
         ...(patch.adapterId !== undefined ? { adapterId: patch.adapterId } : {}),
@@ -202,7 +230,7 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
         ...(patch.runCategory !== undefined ? { runCategory: patch.runCategory } : {}),
         ...(patch.authMode !== undefined ? { authMode: patch.authMode } : {}),
         ...(patch.baseUrl !== undefined ? { baseUrl: patch.baseUrl } : {}),
-        ...(patch.models !== undefined ? { models: [...patch.models] } : {}),
+        ...(patch.models !== undefined ? { models: catalog.models, ...(catalog.modelCatalog ? { modelCatalog: catalog.modelCatalog } : {}) } : {}),
         // 配置变化推进 revision；切换接入方式使原生会话绑定失效（design D4）。
         configRevision: found.record.configRevision + 1,
         ...(patch.adapterId !== undefined || patch.authMode !== undefined || patch.baseUrl !== undefined ? { native: undefined, nativeBindings: undefined, lastStatus: undefined } : {}),
@@ -243,10 +271,14 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
         }
       }
       const timestamp = now();
+      const catalog = input.models !== undefined
+        ? catalogFromInput(input.models, found?.record.modelCatalog, timestamp, input.modelCatalogError)
+        : { models: found?.record.models ?? [], modelCatalog: found?.record.modelCatalog };
       const record: ConnectionMetadataRecord = {
         ...found?.record, ...(input.serviceConnectionId ? { serviceConnectionId: input.serviceConnectionId } : {}), connectionId: id, owner, adapterId: input.adapterId, name: input.name.trim(),
         runCategory: input.runCategory, authMode: input.authMode, baseUrl: input.baseUrl,
-        models: input.models ? [...input.models] : found?.record.models,
+        ...(input.models !== undefined ? { models: catalog.models } : {}),
+        ...(input.models !== undefined && catalog.modelCatalog ? { modelCatalog: catalog.modelCatalog } : {}),
         ...(options.runtimeVersionFor?.(input.adapterId) ? { runtimeVersion: options.runtimeVersionFor(input.adapterId) } : {}),
         configRevision: (found?.record.configRevision ?? 0) + 1,
         credentialEpoch: (found?.record.credentialEpoch ?? 0) + (secret ? 1 : 0),

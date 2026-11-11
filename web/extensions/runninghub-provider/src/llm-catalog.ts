@@ -8,7 +8,7 @@
  * 目录只发布有证据的能力：`capabilities.chat` 为真才进入目录，工具／视觉／流式逐模型读取，
  * 缺少证据时按不支持处理。刷新失败不会清空已发布目录；完整成功后才原子替换。
  */
-import type { GenerationModelDefinition } from "@woohaa3/contracts";
+import { isAgentReasoningEffort, reasoningEffortsForModel, type AgentReasoningEffort, type GenerationModelDefinition } from "@woohaa3/contracts";
 import fixture from "../data/llm-models.json";
 import { RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
 
@@ -32,6 +32,8 @@ export type RunningHubLanguageModel = {
     reasoning: boolean;
     webSearch: boolean;
   };
+  /** 上游返回的精确档位；布尔能力不扩展成档位。 */
+  reasoningEfforts?: readonly AgentReasoningEffort[];
 };
 
 export type RunningHubLanguageCatalogResult =
@@ -60,15 +62,19 @@ export function runningHubLanguageCapabilities(providerModelId: string) {
 }
 
 export function runningHubLanguageDefinitions(models: readonly RunningHubLanguageModel[] = languageCatalog()): GenerationModelDefinition[] {
-  return models.map(model => ({
-    providerId: RUNNINGHUB_PROVIDER_ID,
-    providerModelId: runningHubLanguageModelId(model),
-    modelType: "language",
-    title: model.id,
-    promptRequirement: "required",
-    cancel: "local",
-    ...(model.capabilities.reasoning ? { capabilityFacts: { reasoning: { supported: true } } } : {})
-  }));
+  return models.map(model => {
+    const efforts = model.reasoningEfforts?.length ? model.reasoningEfforts : reasoningEffortsForModel(model.id);
+    const supported = model.capabilities.reasoning || !!efforts?.length;
+    return {
+      providerId: RUNNINGHUB_PROVIDER_ID,
+      providerModelId: runningHubLanguageModelId(model),
+      modelType: "language",
+      title: model.id,
+      promptRequirement: "required",
+      cancel: "local",
+      ...(supported ? { capabilityFacts: { reasoning: { supported: true, ...(efforts?.length ? { efforts } : {}) } } } : {})
+    };
+  });
 }
 
 /** 原始结构校验失败即拒绝整份目录：宁可保留上一次成功快照，也不发布半份。 */
@@ -98,6 +104,8 @@ export function parseRunningHubLanguageCatalog(payload: unknown): RunningHubLang
     const contextLength = typeof record.context_length === "number" && Number.isFinite(record.context_length) && record.context_length > 0
       ? record.context_length
       : undefined;
+    const rawEfforts = [capabilities.reasoning_efforts, capabilities.reasoningEfforts].find((value) => Array.isArray(value)) as unknown[] | undefined;
+    const reasoningEfforts = [...new Set((rawEfforts ?? []).filter(isAgentReasoningEffort))];
     models.push({
       id,
       ...(contextLength === undefined ? {} : { contextLength }),
@@ -105,9 +113,10 @@ export function parseRunningHubLanguageCatalog(payload: unknown): RunningHubLang
         tools: capabilities.tools === true,
         vision: capabilities.vision === true,
         streaming: capabilities.streaming === true,
-        reasoning: capabilities.reasoning === true || capabilities.thinking === true,
+        reasoning: capabilities.reasoning === true || capabilities.thinking === true || reasoningEfforts.length > 0,
         webSearch: capabilities.webSearch === true || capabilities.web_search !== undefined && capabilities.web_search !== null
-      }
+      },
+      ...(reasoningEfforts.length ? { reasoningEfforts } : {})
     });
   }
   if (models.length === 0) return { ok: false, message: "RunningHub 文字目录没有可用模型" };

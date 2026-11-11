@@ -62,6 +62,7 @@ export type ConnectionProjectionInput = {
   extensionId: string;
   capabilities: AgentConnectionCapabilities;
   models: readonly AgentConnectionModel[];
+  capabilityRevision?: string;
   modelsError?: string;
   status: AgentConnectionStatus;
   /** 当前动作要求的证据；缺省只要求 transport。 */
@@ -92,6 +93,7 @@ export function projectConnectionView(input: ConnectionProjectionInput): AgentCo
     ready,
     capabilities: input.capabilities,
     models: input.models,
+    ...(input.capabilityRevision ? { capabilityRevision: input.capabilityRevision } : {}),
     ...(input.modelsError ? { modelsError: input.modelsError } : {}),
     credentialConfigured: input.credentialConfigured,
     ...(input.endpointAllowed !== undefined ? { endpointAllowed: input.endpointAllowed } : {}),

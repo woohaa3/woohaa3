@@ -18,6 +18,7 @@ import {
 } from "react";
 import {
   UNCONFIRMED_WRITE_ERROR_CODE,
+  reasoningEffortsOf,
   type AgentEntryIntent,
   type ConversationSnapshot,
   type ConversationTurn,
@@ -197,7 +198,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
     if (!connection || input.busy || switchingConnection || snapshot.detail?.turns.some(turn => !isTurnSettled(turn.status))) return;
     if (id === replyConnectionId) {
       const nextEffort = input.draft.efforts[`${id}:${model}`] ?? "";
-      const options = replyModels.find(m => m.id === model)?.reasoningEfforts ?? [];
+      const options = replyModels.find(m => m.id === model) ? reasoningEffortsOf(replyModels.find(m => m.id === model)!) : [];
       if (replyEffort && !nextEffort && !options.includes(replyEffort)) setReplyError("新模型不支持原思考强度，已恢复默认");
       controller.edit({ connection: { connectionId: id, adapterId: connection.adapterId, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch } });
       controller.edit({ models: { ...input.draft.models, [modelKey]: model } });

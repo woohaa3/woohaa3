@@ -45,8 +45,8 @@ export type AgentSdkRunInput = {
 };
 
 export type AgentSdkRunResult =
-  | { ok: true; outcome: ModelTurnOutcome; nativeId?: string }
-  | { ok: false; code: string; message: string; nativeId?: string };
+  | { ok: true; outcome: ModelTurnOutcome; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication }
+  | { ok: false; code: string; message: string; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication };
 
 /** 运行时探测结果（缺 CLI/子进程时明确报错，不假装可用）。 */
 export type AgentSdkRuntimeProbe = { ok: true } | { ok: false; code: "runtime-missing"; message: string };
@@ -102,8 +102,8 @@ export type AgentSdkTransportInput = {
 };
 
 export type AgentSdkTransportResult =
-  | { ok: true; assistantText: string; toolCalls: readonly ModelToolCall[]; finishReason: ModelTurnOutcome["finishReason"]; nativeId?: string }
-  | { ok: false; code: string; message: string; nativeId?: string };
+  | { ok: true; assistantText: string; toolCalls: readonly ModelToolCall[]; finishReason: ModelTurnOutcome["finishReason"]; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication }
+  | { ok: false; code: string; message: string; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication };
 
 export type AgentSdkRestrictions = {
   /** 只读沙箱（禁止任意文件写）。 */
@@ -291,11 +291,15 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
     const denied = toolViolation ?? normalizedToolCalls.find(call => !acceptedToolNames.includes(call.name))?.name;
     if (denied !== undefined && denied !== null) return { ok: false, code: "capability-unsupported", message: `助手调用了本轮未授权的工具：${denied}` };
     if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
-    if (!result.ok) return { ok: false, code: result.code, message: result.message, ...(result.nativeId ? { nativeId: result.nativeId } : {}) };
+    const reasoning = result.reasoning ?? (input.reasoningEffort
+      ? { requested: input.reasoningEffort, applied: result.ok }
+      : { applied: "provider-default" as const });
+    if (!result.ok) return { ok: false, code: result.code, message: result.message, reasoning, ...(result.nativeId ? { nativeId: result.nativeId } : {}) };
     toolCalls = normalizedToolCalls;
     return {
       ok: true,
       outcome: { assistantText: result.assistantText || assistantText, toolCalls, finishReason: result.finishReason },
+      reasoning,
       ...(result.nativeId ? { nativeId: result.nativeId } : {})
     };
     } finally {

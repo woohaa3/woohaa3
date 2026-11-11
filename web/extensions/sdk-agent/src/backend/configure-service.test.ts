@@ -158,6 +158,23 @@ describe("地址与 Key 一步设置", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+  it("目录保留模型级 reasoning 元数据；失败时保留上次成功快照", async () => {
+    const { service, deployment, fetchImpl, input } = fixture();
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ data: [
+      { id: "deepseek-exact", model_info: { supports_reasoning: true, reasoning_efforts: ["low", "high"] } },
+      { id: "deepseek-boolean", model_info: { supports_reasoning: true } }
+    ] })));
+    await configureModelService(service, deployment, "u1", input);
+    const saved = (await service.list("u1"))[0];
+    expect(saved?.modelCatalog?.models).toEqual([
+      expect.objectContaining({ id: "deepseek-exact", reasoning: expect.objectContaining({ state: "supported", efforts: [{ id: "low" }, { id: "high" }] }) }),
+      expect.objectContaining({ id: "deepseek-boolean", reasoning: expect.objectContaining({ state: "supported", efforts: [{ id: "low" }, { id: "medium" }, { id: "high" }] }) })
+    ]);
+    fetchImpl.mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const refreshed = await configureModelService(service, deployment, "u1", { ...input, connectionId: saved!.connectionId });
+    expect(refreshed).toMatchObject({ status: 200, body: { models: ["deepseek-exact", "deepseek-boolean"], modelsError: expect.any(String) } });
+    expect((await service.list("u1"))[0]?.modelCatalog?.models[0]?.reasoning).toMatchObject({ state: "supported", efforts: [{ id: "low" }, { id: "high" }] });
+  });
   it("换地址不得复用旧 Key；其他用户无法编辑，旧版本不能覆盖", async () => {
     const { service, deployment, input } = fixture();
     await configureModelService(service, deployment, "u1", input);

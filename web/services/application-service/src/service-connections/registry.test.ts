@@ -235,3 +235,25 @@ it("only explicitly merges drained compatible sources, atomically rebinds and re
     await expect(restarted.merge(alice, { ...merge, retained: { ...merge.retained, configRevision: merge.retained.configRevision + 1 } })).rejects.toMatchObject({ code: "conflict" });
   } finally { f.close(); }
 });
+
+it("configured site provider revives its removed source after the key is added", async () => {
+  const f = fixture();
+  let configured = false;
+  const snapshot = () => ({
+    legacyId: "runninghub", scope: "site" as const, kind: "api" as const, name: "RunningHub", endpoints: input.endpoints,
+    capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+    bindings: [{ ...binding, bindingId: "provider", consumerId: "runninghub" }],
+    enabled: configured, removed: false, locked: false, credentialConfigured: configured, configRevision: 1, credentialEpoch: 1,
+    credentialFingerprint: configured ? "key" : undefined
+  });
+  const adapter = { id: "site:runninghub", scope: "site" as const, get: async () => snapshot(), list: async () => [snapshot()] };
+  try {
+    f.registry.forExtension("provider").registerSource(adapter);
+    const [disabled] = await f.registry.list(admin);
+    const removed = await f.registry.remove(admin, disabled!.serviceConnectionId, disabled!);
+    expect(removed.removed).toBe(true);
+    configured = true;
+    // Provider 恢复可用且 Key 已配置：下一次读取自动恢复，而不是永久 tombstone。
+    expect(await f.registry.list(admin)).toContainEqual(expect.objectContaining({ serviceConnectionId: disabled!.serviceConnectionId, removed: false, name: "RunningHub" }));
+  } finally { f.close(); }
+});

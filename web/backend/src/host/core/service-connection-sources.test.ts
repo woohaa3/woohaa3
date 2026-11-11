@@ -40,7 +40,7 @@ it("excludes models the site policy does not enable from the assistant directory
     const assistant = source.bindings.find(binding => binding.bindingId === "provider-assistant:demo");
     // 只有策略里启用且未 tombstone 的语言模型能当助手；策略里没有该行的模型同样不算启用。
     expect(assistant?.modelKeys).toEqual(["llm/enabled"]);
-    expect(source.capabilities.filter(capability => capability.purpose === "discussion").map(capability => capability.modelId)).toEqual(["llm/enabled"]);
+    expect(source.capabilities.filter(capability => capability.purpose === "text" && capability.protocol === "chat-completions").map(capability => capability.modelId)).toEqual(["llm/enabled"]);
 
     // 策略未初始化时与任务目录一致：全开。
     const open = enabledAssistantModels(provider(), { initialized: false, revision: 0, models: [] });
@@ -244,6 +244,30 @@ it("maps catalog model identities to the upstream model id for assistant turns",
     expect(view.capabilities).toContainEqual(expect.objectContaining({ purpose: "text", protocol: "chat-completions", modelId: "deepseek/deepseek-v4-flash" }));
     // 授权按上游 ID 匹配：能力与 binding 必须同一口径，否则取凭据会被判「缺少能力证据」。
     expect(view.bindings.find(binding => binding.extensionId === "sdk-agent")?.modelKeys).toEqual(["deepseek/deepseek-v4-flash"]);
+  } finally {
+    settings.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("provider 的 reasoning 能力事实与 Agent 目录使用同一投影", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-reasoning-"));
+  const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
+  const fields = { apiKey: { kind: "string", secret: true, reload: "hot", label: "Key", description: "Key" } } as const;
+  const settings = await createSettingsService({ ...files, env: {} });
+  settings.register("providers.demo", fields, "Demo", "demo");
+  const models = [
+    { providerModelId: "exact", modelType: "language", capabilityFacts: { reasoning: { supported: true, efforts: ["low", "high"] } } },
+    { providerModelId: "boolean", modelType: "language", capabilityFacts: { reasoning: { supported: true } } },
+    { providerModelId: "off", modelType: "language", capabilityFacts: { reasoning: { supported: false } } }
+  ];
+  const provider = () => ({ providerId: "demo", extensionId: "demo", available: true, models, languageCapabilities: () => undefined,
+    serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } } as unknown as GenerationProvider);
+  try {
+    const snapshot = (await createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider }).get("admin", "demo"))!;
+    expect(snapshot.capabilities.find((capability) => capability.modelId === "exact")?.reasoning).toMatchObject({ state: "supported", source: "provider", efforts: [{ id: "low" }, { id: "high" }] });
+    expect(snapshot.capabilities.find((capability) => capability.modelId === "boolean")?.reasoning).toEqual({ state: "supported", source: "provider", revision: expect.any(String) });
+    expect(snapshot.capabilities.find((capability) => capability.modelId === "off")?.reasoning).toMatchObject({ state: "unsupported" });
   } finally {
     settings.close();
     fs.rmSync(directory, { recursive: true, force: true });

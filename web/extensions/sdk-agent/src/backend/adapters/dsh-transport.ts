@@ -23,6 +23,8 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { AgentSdkTransport } from "./agent-sdk-adapter.js";
 import type { ModelToolCall } from "../protocol/model-turn.js";
+import type { AgentReasoningEffort } from "@woohaa3/contracts";
+import { adapterSupportsReasoningEffort, resolveReasoningEffort, type DshReasoningMapping } from "./reasoning.js";
 
 const require = createRequire(import.meta.url);
 
@@ -155,8 +157,11 @@ export function buildDshPatch(input: {
   apiKeyEnv: string;
   maxTokens?: number;
   contextWindow?: number;
+  reasoningEffort?: AgentReasoningEffort;
   mcp: { name: string; url: string; bearerToken: string } | null;
 }): string {
+  const mapping = input.reasoningEffort ? resolveReasoningEffort("dsh-agent-sdk", input.reasoningEffort) : null;
+  const reasoning = input.reasoningEffort && mapping && typeof mapping !== "string" ? mapping : null;
   const lines = [
     "- id: llm-pi-ai",
     "  config:",
@@ -165,9 +170,9 @@ export function buildDshPatch(input: {
     "        api: openai-completions",
     `        baseURL: ${JSON.stringify(input.modelBaseUrl)}`,
     `        apiKeyEnv: ${JSON.stringify(input.apiKeyEnv)}`,
-    // Target execution must reach an authorized tool call promptly. The
-    // provider default can spend the whole turn reasoning before it emits one.
-    "        reasoning: off",
+    // 默认回合不写 reasoning 设置：省略时由上游使用自己的默认语义。
+    // 显式档位才写入本轮映射，绝不用固定 off 冒充默认。
+    ...(reasoning ? [`        reasoning: ${reasoning.level}`] : []),
     "        compat:",
     "          supportsReasoningEffort: true",
     "        models:",
@@ -175,14 +180,11 @@ export function buildDshPatch(input: {
     `            name: ${JSON.stringify(input.model)}`,
     "            input: [text, image]",
     `            contextWindow: ${input.contextWindow ?? DSH_DEFAULT_CONTEXT_WINDOW}`,
-    // `off` is otherwise encoded by omitting the field.  The gateway used by
-    // Woohaa treats omission as its own default (reasoning enabled), so keep
-    // the model reasoning-capable and map the off level to an explicit wire
-    // value.  A non-off level is required by dsh's config schema even though
-    // this profile always selects off.
-    "            reasoningEfforts:",
-    "              off: none",
-    "              minimal: none",
+    // 只有显式档位才声明档位表；默认回合保持手填模型的事实（不推理、不伪造档位）。
+    ...(reasoning ? [
+      "            reasoningEfforts:",
+      ...dshReasoningRows()
+    ] : []),
     `            maxTokens: ${input.maxTokens ?? DSH_DEFAULT_MAX_OUTPUT_TOKENS}`
   ];
   for (const id of DSH_DISABLED_PLUGINS) lines.push(`- id: ${id}`, "  disabled: true");
@@ -201,6 +203,16 @@ export function buildDshPatch(input: {
     );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** 显式档位的 wire 表：只声明 adapter 能映射的 canonical 值。 */
+function dshReasoningRows(): string[] {
+  return (["none", "low", "medium", "high"] as const)
+    .filter((effort) => adapterSupportsReasoningEffort("dsh-agent-sdk", effort))
+    .map((effort) => {
+      const mapped = resolveReasoningEffort("dsh-agent-sdk", effort) as DshReasoningMapping;
+      return `              ${mapped.level}: ${JSON.stringify(mapped.wire)}`;
+    });
 }
 
 type SessionEvent = { type?: unknown; data?: Record<string, unknown> };
@@ -399,6 +411,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
       const key = input.resourceKey;
       if (active.has(key)) return { ok: false, code: "capability-unsupported", message: "前轮尚未排空" };
       active.add(key);
+      const appliedReasoning = (applied: boolean) => input.reasoningEffort ? { requested: input.reasoningEffort, applied } : { applied: "provider-default" as const };
       // 每轮独立 home/work：配置、凭据与 MCP grant 都不跨轮保留。
       const home = path.join(options.configDir, key);
       const work = path.join(options.workspaceDir, key);
@@ -427,10 +440,13 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           apiKeyEnv: credentialEnv,
           maxTokens: readDshMaxOutputTokens(),
           contextWindow: readDshContextWindow(),
+          ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
           mcp: input.mcp
         }), { mode: 0o600 });
 
         const { DeepSeekHarness } = await import("@deepseek-ai/dsh-sdk-client");
+        const mappedReasoning = input.reasoningEffort ? resolveReasoningEffort("dsh-agent-sdk", input.reasoningEffort) : null;
+        const dshReasoning = mappedReasoning && typeof mappedReasoning !== "string" ? mappedReasoning : null;
         harness = new DeepSeekHarness({
           // 显式启动器绕过 `import.meta.main`（Node 22/23 没有该属性，bin 会静默退出）。
           dshBin: launcher,
@@ -441,10 +457,11 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           cwd: work,
           env,
           provider: "woohaa",
-          model: input.model
+          model: input.model,
+          ...(dshReasoning ? { reasoningEffort: dshReasoning.level as never } : {})
         });
 
-        if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
+        if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止", reasoning: appliedReasoning(false) };
         let cancelled = false;
         // dsh 没有回合级 cancel：中断只能关闭 runtime；随后一律以 cancelled 结束。
         const onAbort = () => { cancelled = true; void harness?.close().catch(() => undefined); };
@@ -452,7 +469,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
         try {
           const promptInput = input.images?.length ? [{ type: "text" as const, text: input.prompt }, ...input.images.map(image => ({ type: "image" as const, mimeType: image.contentType as "image/png" | "image/jpeg" | "image/webp" | "image/gif", data: Buffer.from(image.bytes).toString("base64") }))] : input.prompt;
           let result = await harness.run(promptInput, { onNotification: () => undefined });
-          if (cancelled || input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
+          if (cancelled || input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止", reasoning: appliedReasoning(false) };
           let projected = projectDshEvents(
             sessionEvents(result.notifications),
             input.mcp?.name ?? null,
@@ -464,7 +481,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           if (shouldContinueAfterReadOnlyTurn(projected)) {
             continued = true;
             const continuation = await harness.run(READ_ONLY_CONTINUATION_PROMPT, { sessionId: result.sessionId, onNotification: () => undefined });
-            if (cancelled || input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
+            if (cancelled || input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止", reasoning: appliedReasoning(false) };
             const next = projectDshEvents(sessionEvents(continuation.notifications), input.mcp?.name ?? null, (event) => input.onEvent(event));
             projected = {
               assistantText: projected.assistantText + next.assistantText,
@@ -494,36 +511,37 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
             finalResponse: String(result.finalResponse ?? "").slice(-4000)
           }, null, 1), { mode: 0o600 }).catch(() => undefined);
           // dsh 只有「正常结束」才会 resolve；`blocked`/`error` 不是模型完成，必须如实报错。
-          if (projected.turnEnd === "blocked") return { ok: false, code: "turn-blocked", message: "回合被运行时阻塞，未执行写入；请重试" };
+          if (projected.turnEnd === "blocked") return { ok: false, code: "turn-blocked", message: "回合被运行时阻塞，未执行写入；请重试", reasoning: appliedReasoning(false) };
           if (projected.turnEnd === "error") {
             // 保留上游终止原因：`turn/end` 的 reason 是唯一能区分「上游拒绝」「限流」「协议错误」的证据。
             const detail = projected.turnEndReason;
             void writeFile(path.join(os.tmpdir(), "woohaa-dsh-last-turn.json"), JSON.stringify({ at: new Date().toISOString(), model: input.model, turnEnd: projected.turnEnd, reason: detail ?? null, calls: projected.toolCalls.map((call) => call.name) }, null, 1), { mode: 0o600 }).catch(() => undefined);
-            return { ok: false, code: "execution-failed", message: detail ? `模型回合以错误结束（${detail}），未提交写入；请重试` : "模型回合以错误结束，未提交写入；请重试" };
+            return { ok: false, code: "execution-failed", message: detail ? `模型回合以错误结束（${detail}），未提交写入；请重试` : "模型回合以错误结束，未提交写入；请重试", reasoning: appliedReasoning(false) };
           }
           // 模型自称以工具调用结束，却没有留下任何完整调用：分片被丢弃，本轮不可能写入。
           if (projected.toolCalls.length === 0 && modelFinish === "tool-calls")
-            return { ok: false, code: "tool-call-incomplete", message: "模型生成的工具调用不完整，本轮未提交写入；请拆分需求后重试" };
+            return { ok: false, code: "tool-call-incomplete", message: "模型生成的工具调用不完整，本轮未提交写入；请拆分需求后重试", reasoning: appliedReasoning(false) };
           return {
             ok: true,
             assistantText,
             toolCalls: projected.toolCalls,
             // `max-tokens` 表示输出额度写满：末尾的工具调用通常已被截断，交给宿主按截断归因。
             finishReason: projected.turnEnd === "max-tokens" || modelFinish === "max-tokens" ? "length" : "stop",
+            reasoning: input.reasoningEffort ? { requested: input.reasoningEffort, applied: true } : { applied: "provider-default" },
             ...(result.sessionId ? { nativeId: result.sessionId } : {})
           };
         } finally {
           input.signal.removeEventListener("abort", onAbort);
         }
       } catch (error) {
-        if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
+        if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止", reasoning: appliedReasoning(false) };
         const message = error instanceof Error ? error.message : String(error);
         const code = (error as { code?: unknown } | null)?.code;
         // 只有确实缺依赖才报 runtime-missing；启动/协议失败单独报告，不吞掉原因。
         if (code === "ERR_MODULE_NOT_FOUND" || /^Cannot find (module|package) /.test(message)) {
           return { ok: false, code: "runtime-missing", message: "缺少 DeepSeek Harness 运行时，请在设置 → 运行时组件中准备并重试" };
         }
-        return { ok: false, code: "transport-unavailable", message: `DeepSeek Harness 执行失败：${message.slice(0, 200)}` };
+        return { ok: false, code: "transport-unavailable", message: `DeepSeek Harness 执行失败：${message.slice(0, 200)}`, reasoning: appliedReasoning(false) };
       } finally {
         await harness?.close().catch(() => undefined);
         // 不保留短期 MCP grant 与模型 token。

@@ -36,6 +36,8 @@ export type ConnectionDescribeResult = {
   runtime?: AgentConnectionRuntime;
   capabilities: AgentConnectionCapabilities;
   models: readonly AgentConnectionModel[];
+  /** 模型目录 reasoning 能力快照修订号（目录与回合冻结共用）。 */
+  capabilityRevision?: string;
   modelsError?: string;
   /** 若返回，作为真实证据快照；否则用连接记录中的 `lastStatus`。 */
   status?: AgentConnectionStatus;
@@ -99,6 +101,7 @@ export function createConnectionProvider(options: ConnectionProviderOptions): Ag
       extensionId: options.extensionId,
       capabilities: described.capabilities,
       models: described.models,
+      ...(described.capabilityRevision ? { capabilityRevision: described.capabilityRevision } : {}),
       ...(described.modelsError ? { modelsError: described.modelsError } : {}),
       status,
       ...(described.required ? { required: described.required } : {}),

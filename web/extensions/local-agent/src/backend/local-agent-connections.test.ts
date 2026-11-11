@@ -521,7 +521,7 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
       run: async () => ({ ok: true, outcome: { status: "succeeded", assistantText: "unused" } })
     };
     const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => ["app-server", "--stdio"] });
-    expect(await adapter.models({ owner: "u1" })).toEqual({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }] });
+    expect(await adapter.models({ owner: "u1" })).toMatchObject({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }] });
     expect(ensureCalls).toEqual([{ adapterId: "codex-appserver", owner: "u1", connectionId: "c1" }]);
     expect(patches.at(-1)?.transport?.state).toBe("ready");
 
@@ -540,7 +540,7 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     const models = vi.fn().mockResolvedValueOnce({ models: [], error: "Already initialized" }).mockResolvedValueOnce({ models: [{ id: "model", label: "Model" }] });
     const transport: LocalAgentTransport = { id: "codex-appserver", probe: async () => ({ ok: true }), models, run: async () => ({ ok: true, outcome: { status: "succeeded" } }) };
     const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [] });
-    expect(await adapter.models({ owner: "u1" })).toEqual({ models: [{ id: "model", label: "Model" }] });
+    expect(await adapter.models({ owner: "u1" })).toMatchObject({ models: [{ id: "model", label: "Model" }] });
     expect(stop).toHaveBeenCalledWith({ adapterId: "codex-appserver", owner: "u1", connectionId: "c1" });
     expect(ensureCalls).toHaveLength(2);
   });

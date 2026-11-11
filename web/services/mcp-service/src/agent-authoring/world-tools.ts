@@ -344,12 +344,14 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         nodeId: z.string().min(1).optional(),
         // 兼容旧客户端传入；实际版本由宿主固定为当前支持的脚本版本。
         modelScriptVersion: z.string().min(1).optional(),
+        // 新建模型的卡片落点；缺省由画布按非重叠规则决定。
+        cardPosition: z.strictObject({ x: z.number().finite(), y: z.number().finite() }).optional(),
         transform
       }),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
     },
-    async ({ instanceId, modelScript, transform: pose }) =>
+    async ({ instanceId, modelScript, cardPosition, transform: pose }) =>
       auditWrap(deps, "create_world_model", { requestId: deps.grant?.workId }, async () => {
         const bound = worldGrant(deps);
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };

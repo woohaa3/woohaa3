@@ -1,6 +1,6 @@
 import { AssistantConfiguration, ReasoningParameters } from "../../ui/assistant-execution/configuration.js";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { AgentConnectionBinding, AgentReasoningEffort } from "@woohaa3/contracts";
+import { reasoningEffortsOf, type AgentConnectionBinding, type AgentReasoningEffort } from "@woohaa3/contracts";
 import type { AgentConversationService } from "../../contract/agent-conversation.js";
 import type { CurrentUserService } from "../../services/current-user.js";
 import { agentDirectory } from "../../services/agent-directory.js";
@@ -53,9 +53,9 @@ export function AssistantConnectionPicker(props: {
     assistant={<AssistantConfiguration service={props.service} connectionId={value?.connection.connectionId ?? ""} model={value?.model ?? ""} purpose="world" open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} disabled={props.disabled || !namespace} onManage={props.onManage}
       onSelect={(c, model) => {
         const saved = efforts.current.values[effortKey(c.connectionId, model)];
-        const options = agentDirectoryModels(c.models, state.catalogs[c.adapterId]?.models).find(m => m.id === model)?.reasoningEfforts ?? [];
+        const options = agentDirectoryModels(c.models, state.catalogs[c.adapterId]?.models).find(m => m.id === model) ? reasoningEffortsOf(agentDirectoryModels(c.models, state.catalogs[c.adapterId]?.models).find(m => m.id === model)!) : [];
         setNotice(value?.reasoningEffort && !options.includes(value.reasoningEffort) && !saved ? "新模型不支持原思考强度，已恢复默认" : "");
-        props.onChange({ connection: { connectionId: c.connectionId, adapterId: c.adapterId, configRevision: c.configRevision, credentialEpoch: c.credentialEpoch }, ...(model ? { model } : {}), ...(saved && options.includes(saved) ? { reasoningEffort: saved } : {}) });
+        props.onChange({ connection: { connectionId: c.connectionId, adapterId: c.adapterId, configRevision: c.configRevision, credentialEpoch: c.credentialEpoch, ...(c.capabilityRevision ? { capabilityRevision: c.capabilityRevision } : {}) }, ...(model ? { model } : {}), ...(saved && options.includes(saved) ? { reasoningEffort: saved } : {}) });
       }} />}
     parameters={<ReasoningParameters value={value?.reasoningEffort ?? ""} options={selection.supportedEfforts} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={props.disabled} onChange={effort => { if (value) props.onChange({ ...value, reasoningEffort: effort ? effort as AgentReasoningEffort : undefined }); }} />}
     notice={!props.compact && (reason || state.error || connection?.modelsError || notice) ? <p className="mc-panel__notice">{reason || state.error || connection?.modelsError || notice}</p> : null} />;

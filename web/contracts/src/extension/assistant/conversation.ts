@@ -144,6 +144,8 @@ export type AgentConnectionBinding = {
   configRevision: number;
   /** 冻结时的凭据 epoch（替换/清除密钥使旧运行失效）。 */
   credentialEpoch: number;
+  /** 冻结时该模型 reasoning 能力快照的修订号；旧回合缺省表示能力未知。 */
+  capabilityRevision?: string;
 };
 
 /** 仅开放运行时或模型目录明确支持的思考强度；省略时沿用模型默认。 */
@@ -151,6 +153,84 @@ export const AGENT_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "hig
 export type AgentReasoningEffort = (typeof AGENT_REASONING_EFFORTS)[number];
 export function isAgentReasoningEffort(value: unknown): value is AgentReasoningEffort {
   return typeof value === "string" && (AGENT_REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
+/** 模型级 reasoning 事实：unknown / unsupported / 带可执行档位的 supported。 */
+export const AGENT_REASONING_CAPABILITY_STATES = ["unknown", "unsupported", "supported"] as const;
+export type AgentReasoningCapabilityState = (typeof AGENT_REASONING_CAPABILITY_STATES)[number];
+export function isAgentReasoningCapabilityState(value: unknown): value is AgentReasoningCapabilityState {
+  return typeof value === "string" && (AGENT_REASONING_CAPABILITY_STATES as readonly string[]).includes(value);
+}
+
+/** 能力事实来源：上游目录、运行时发现或经过验证的测试。 */
+export const AGENT_REASONING_CAPABILITY_SOURCES = ["provider", "runtime", "tested"] as const;
+export type AgentReasoningCapabilitySource = (typeof AGENT_REASONING_CAPABILITY_SOURCES)[number];
+export function isAgentReasoningCapabilitySource(value: unknown): value is AgentReasoningCapabilitySource {
+  return typeof value === "string" && (AGENT_REASONING_CAPABILITY_SOURCES as readonly string[]).includes(value);
+}
+
+export type AgentReasoningOption = { id: AgentReasoningEffort; label?: string };
+
+/**
+ * 可追溯的模型 reasoning 能力。
+ *
+ * `supported` 但没有 `efforts` 表示上游确认支持推理、却没有给出可安全展示的精确档位；
+ * 此时界面只保留默认语义。能力修订号用于回合冻结与目录刷新后的失效判断。
+ */
+export type AgentReasoningCapability = {
+  state: AgentReasoningCapabilityState;
+  efforts?: readonly AgentReasoningOption[];
+  source: AgentReasoningCapabilitySource;
+  revision: string;
+};
+
+/** 严格校验：未知状态/来源、重复档位、空 id 与非法修订号均不接受。 */
+export function isAgentReasoningCapability(value: unknown): value is AgentReasoningCapability {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  if (!isAgentReasoningCapabilityState(candidate.state) || !isAgentReasoningCapabilitySource(candidate.source)) return false;
+  if (typeof candidate.revision !== "string" || candidate.revision.length === 0 || candidate.revision.length > 128) return false;
+  if (candidate.efforts === undefined) return true;
+  if (!Array.isArray(candidate.efforts)) return false;
+  if (candidate.state !== "supported" && candidate.efforts.length > 0) return false;
+  const seen = new Set<string>();
+  for (const option of candidate.efforts) {
+    if (typeof option !== "object" || option === null) return false;
+    const entry = option as Record<string, unknown>;
+    if (!isAgentReasoningEffort(entry.id)) return false;
+    if (entry.label !== undefined && (typeof entry.label !== "string" || entry.label.length === 0 || entry.label.length > 80)) return false;
+    if (seen.has(entry.id)) return false;
+    seen.add(entry.id);
+  }
+  return true;
+}
+
+/** 旧模型的 `reasoningEfforts` 解码兼容：缺失/空数组归一为 unknown，非空视为 supported。 */
+export function reasoningCapabilityOf(model: { reasoning?: AgentReasoningCapability; reasoningEfforts?: readonly AgentReasoningEffort[] }): AgentReasoningCapability {
+  if (model.reasoning) return model.reasoning;
+  const efforts = model.reasoningEfforts ?? [];
+  return efforts.length > 0
+    ? { state: "supported", source: "provider", revision: "legacy", efforts: efforts.map((id) => ({ id })) }
+    : { state: "unknown", source: "provider", revision: "legacy" };
+}
+
+/** 仅返回可安全展示、可执行的 canonical 档位。 */
+export function reasoningEffortsOf(model: { reasoning?: AgentReasoningCapability; reasoningEfforts?: readonly AgentReasoningEffort[] }): readonly AgentReasoningEffort[] {
+  const capability = reasoningCapabilityOf(model);
+  return capability.state === "supported" ? (capability.efforts ?? []).map((option) => option.id) : [];
+}
+
+/** 稳定的能力修订号（短字符串；只用于失效判断，不是安全摘要）。 */
+export function agentReasoningRevision(...parts: readonly (string | number | boolean | undefined)[]): string {
+  const text = parts.map((part) => part === undefined ? "" : String(part)).join("\u0000");
+  let first = 5381;
+  let second = 52711;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    first = ((first << 5) + first + code) >>> 0;
+    second = ((second << 5) + second ^ code) >>> 0;
+  }
+  return `${first.toString(36)}${second.toString(36)}`.slice(0, 24);
 }
 
 /** 一次回合的显式目标快照（camera/clip/item 使用稳定 id，不用索引）。 */
@@ -177,6 +257,8 @@ export type AgentTargetSnapshot = {
    */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
+  /** 受理时冻结的模型 reasoning 能力修订号（旧回合缺省）。 */
+  capabilityRevision?: string;
   /** 冻结的显式来源连接 id。 */
   connectionId?: string;
   /** 领域并发 precondition（模型内容哈希 / 片场 snapshotHash，按模式）。 */
@@ -261,13 +343,20 @@ export function isAgentAdapterAuthState(value: unknown): value is AgentAdapterAu
 }
 
 /** 账户模型目录项（使用账户实际返回的 slug/displayName）。 */
-export type AgentModelView = { id: string; label: string; reasoningEfforts?: readonly AgentReasoningEffort[] };
+export type AgentModelView = {
+  id: string;
+  label: string;
+  /** 旧版兼容字段；新投影同时携带 `reasoning`。 */
+  reasoningEfforts?: readonly AgentReasoningEffort[];
+  reasoning?: AgentReasoningCapability;
+};
 
-export type AgentCatalogSnapshot = { models: AgentModelView[]; error?: string };
+export type AgentCatalogSnapshot = { models: AgentModelView[]; capabilityRevision?: string; error?: string };
 
 /** 目录/授权/能力查询响应（`GET /catalog`）。 */
 export type AgentCatalogResponse = {
   models: AgentModelView[];
+  capabilityRevision?: string;
   error?: string;
   authState: AgentAdapterAuthState;
   capabilities: AgentAdapterCapabilities;
@@ -317,6 +406,14 @@ export type ConversationToolActivity = {
   createdAt?: string;
 };
 
+/** 一个回合请求与传输的 reasoning 事实；不保存隐藏推理文本。 */
+export type AgentReasoningApplication = {
+  requested?: AgentReasoningEffort;
+  /** true=已按显式值应用；false=传输拒绝；provider-default=省略字段交由上游默认。 */
+  applied: true | false | "provider-default";
+  code?: string;
+};
+
 /** 一个回合的权威投影。 */
 export type ConversationTurn = {
   turnId: string;
@@ -326,6 +423,8 @@ export type ConversationTurn = {
   status: ConversationTurnStatus;
   stage: string;
   target: AgentTargetSnapshot;
+  /** 请求的思考强度与实际传输应用结果（不包含隐藏推理内容）。 */
+  reasoning?: AgentReasoningApplication;
   /** 助手文本（来自真实 adapter 输出；不是权威终态）。 */
   assistantText?: string;
   /** 工具过程（按 sequence 有界记录）。 */
@@ -451,6 +550,8 @@ export type AgentAdapterRunOutcome = {
   runId?: string;
   taskId?: string;
   receipt?: unknown;
+  /** 本回合请求的思考强度与实际传输结果；不含隐藏推理内容。 */
+  reasoning?: AgentReasoningApplication;
   error?: { code: string; message: string };
 };
 

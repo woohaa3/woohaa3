@@ -86,7 +86,13 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       // (a new snapshot fingerprint) is an explicit new intent and may republish the same identity.
       const oauthRefresh = snapshot.kind === "oauth" && found.source.origin?.version.credentialEpoch !== snapshot.credentialEpoch;
       const reconfigured = !!found.source.origin && !!found.source.removedFingerprint && found.source.removedFingerprint !== fingerprint;
-      if (!oauthRefresh && !reconfigured) return found.source;
+      // Site provider sources are configuration-derived (key + catalog), so a configured provider
+      // must reappear even if an old removal tombstone exists. A personal source additionally
+      // requires a new credential fingerprint, so an explicit remove still sticks until reconfigured.
+      const configuredSite = snapshot.scope === "site" && snapshot.enabled && snapshot.credentialConfigured;
+      const credentialRestored = snapshot.scope === "personal" && snapshot.enabled && snapshot.credentialConfigured &&
+        found.source.originCredentialFingerprint !== snapshot.credentialFingerprint;
+      if (!oauthRefresh && !reconfigured && !configuredSite && !credentialRestored) return found.source;
     }
     // The fingerprint covers the adapter snapshot, including model identities. Stored
     // metadata also contains host-added bindings/endpoints: comparing it directly to

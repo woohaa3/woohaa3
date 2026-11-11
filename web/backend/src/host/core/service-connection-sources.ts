@@ -1,6 +1,7 @@
 /** Site Providers retain SettingsService as their single authority, including env locks and advanced fields. */
 import { createHash } from "node:crypto";
 import type {
+  AgentReasoningCapability,
   GenerationModelDefinition,
   GenerationProvider,
   ServiceConnectionCapability,
@@ -11,6 +12,7 @@ import type {
   ServiceConnectionPurpose
 } from "@woohaa3/contracts";
 import type { GenerationModelStoreSnapshot } from "@woohaa3/application-service";
+import { agentReasoningRevision, isAgentReasoningEffort } from "@woohaa3/contracts";
 import type { SettingsService } from "../../settings/settings-service.js";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -56,6 +58,17 @@ export function enabledAssistantModels(
   });
 }
 
+/** Provider 的能力事实 → Agent 目录同一份 reasoning 事实；布尔能力不扩展档位。 */
+function reasoningOf(model: GenerationModelDefinition): AgentReasoningCapability | undefined {
+  const facts = model.capabilityFacts?.reasoning;
+  if (!facts) return undefined;
+  const efforts = (facts.efforts ?? []).filter(isAgentReasoningEffort);
+  const revision = agentReasoningRevision(model.providerModelId, facts.supported, efforts.join(","));
+  return facts.supported
+    ? { state: "supported", source: "provider", revision, ...(efforts.length ? { efforts: efforts.map((id) => ({ id })) } : {}) }
+    : { state: "unsupported", source: "provider", revision };
+}
+
 /** 目录身份 → 上游模型 ID；Provider 未声明映射时两者相同。 */
 function toUpstreamModelId(mapper: ((modelId: string) => string) | undefined, modelId: string): string {
   return mapper ? mapper(modelId) : modelId;
@@ -86,7 +99,7 @@ export function createSiteProviderSource(options: {
     const capabilities = (provider?.models ?? []).map(model => {
       const purpose: ServiceConnectionPurpose = model.modelType === "language" ? "text" : model.modelType;
       purposes.add(purpose);
-      return { purpose, protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const };
+      return { purpose, protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const, ...(reasoningOf(model) ? { reasoning: reasoningOf(model) } : {}) };
     });
     const baseUrl = typeof values.baseUrl === "string" ? values.baseUrl : typeof values.baseURL === "string" ? values.baseURL : undefined;
     const assistantProtocol = factory?.assistantProtocol;
@@ -100,7 +113,7 @@ export function createSiteProviderSource(options: {
         // 助手通道把模型名原样发给上游：目录身份若带来源前缀（如 RunningHub 的 `llm/`），
         // 必须换成上游认识的 ID，否则上游 404 拒绝本轮。
         purpose: "text", protocol: assistantProtocol!, modelId: toUpstreamModelId(factory?.upstreamModelId, model.providerModelId),
-        imageInput: evidence?.imageInput === true, evidence: "adapter"
+        imageInput: evidence?.imageInput === true, evidence: "adapter", ...(reasoningOf(model) ? { reasoning: reasoningOf(model) } : {})
       };
     });
     // 带可信 assistant 协议的来源可直接被 SDK Agent 桥接投影，无需管理员逐模型开启。

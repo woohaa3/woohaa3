@@ -19,6 +19,8 @@ export type ServiceConnectionCapability = {
   modelId: string;
   imageInput: boolean;
   evidence: "adapter" | "model-directory" | "tested";
+  /** 与 Agent 目录同一份 reasoning 事实；缺省表示该来源未声明。 */
+  reasoning?: import("../assistant/conversation.js").AgentReasoningCapability;
 };
 export type ServiceConsumerBinding = {
   bindingId: string;

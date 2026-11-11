@@ -174,7 +174,7 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
       }
       if (nativeId) input.onNativeId(nativeId);
       log({ event: "claude-agent-turn-complete", toolCount: toolCalls.length });
-      return { ok: true, assistantText, toolCalls, finishReason, ...(nativeId ? { nativeId } : {}) };
+      return { ok: true, assistantText, toolCalls, finishReason, reasoning: input.reasoningEffort ? { requested: input.reasoningEffort, applied: true } : { applied: "provider-default" }, ...(nativeId ? { nativeId } : {}) };
     }
   };
 }

@@ -62,7 +62,8 @@ function turnConnectionBinding(record: ConversationTurnRecord): ConversationTurn
     connectionId: record.connectionId,
     adapterId: record.connectionAdapterId,
     configRevision: record.connectionConfigRevision ?? 0,
-    credentialEpoch: record.connectionCredentialEpoch ?? 0
+    credentialEpoch: record.connectionCredentialEpoch ?? 0,
+    ...(record.connectionCapabilityRevision ? { capabilityRevision: record.connectionCapabilityRevision } : {})
   };
 }
 
@@ -91,6 +92,7 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
     ...(record.runId !== null ? { runId: record.runId } : {}),
     ...(record.taskId !== null ? { taskId: record.taskId } : {}),
     ...(record.receiptJson !== null ? { receipt: JSON.parse(record.receiptJson) } : {}),
+    ...(typeof record.reasoningJson === "string" ? { reasoning: JSON.parse(record.reasoningJson) as ConversationTurn["reasoning"] } : {}),
     ...(connection ? { connection } : {}),
     ...(turnRoleBinding(record) ? { role: turnRoleBinding(record)! } : {}),
     ...(record.executorCursor !== null ? { executorCursor: record.executorCursor } : {}),
@@ -298,10 +300,12 @@ export function hashIntent(entry: AgentEntryIntent, connection?: AgentConnection
     clipId: entry.clipId ?? null,
     itemId: entry.itemId ?? null,
     model: entry.model ?? null,
+    reasoningEffort: entry.reasoningEffort ?? null,
     connectionId: typeof binding === "string" ? binding : binding?.connectionId ?? null,
     connectionAdapterId: typeof binding === "string" ? null : binding?.adapterId ?? null,
     connectionConfigRevision: typeof binding === "string" ? null : binding?.configRevision ?? null,
     connectionCredentialEpoch: typeof binding === "string" ? null : binding?.credentialEpoch ?? null,
+    connectionCapabilityRevision: typeof binding === "string" ? null : binding?.capabilityRevision ?? null,
     roleId: entry.roleId ?? null,
     expectedContentHash: entry.expectedContentHash ?? null,
     prompt: entry.prompt,
@@ -325,6 +329,9 @@ export function entryFromTurn(record: ConversationTurnRecord): AgentEntryIntent 
     ...(target.cameraId !== undefined ? { cameraId: target.cameraId } : {}),
     ...(target.clipId !== undefined ? { clipId: target.clipId } : {}),
     ...(target.itemId !== undefined ? { itemId: target.itemId } : {}),
+    ...(target.model !== undefined ? { model: target.model } : {}),
+    ...(target.reasoningEffort !== undefined ? { reasoningEffort: target.reasoningEffort } : {}),
+    ...(target.connectionId !== undefined ? { connectionId: target.connectionId } : {}),
     ...(target.expectedContentHash !== undefined ? { expectedContentHash: target.expectedContentHash } : {}),
     ...(target.role ? { roleId: target.role.namespacedId } : {}),
     prompt: ""

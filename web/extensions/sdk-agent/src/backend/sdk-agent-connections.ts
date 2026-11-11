@@ -1,18 +1,17 @@
 import { sdkSourceFor, sdkSourceProtocol } from "./service-source.js";
 /** Fixed framework dispatch. The host ledger owns idempotency; frameworks own inference loops. */
-import type {
-  AgentConnectionCapabilities, AgentConnectionModel, AgentConnectionStatus, AgentConversationAdapter, AgentAdapterRunInput,
-  AgentAdapterRunOutcome, AgentConnectionRuntime, AgentEngineId, ApplicationToolDelegationFacade,
-  ApplicationCanvasAuthoringFacade, ApplicationUserDelegation
-} from "@woohaa3/contracts";
 import {
-  createEndpointPolicy, createModelTransport, nativeContextFor, nativeContextKey, preflightInput,
-  preparedPromptText, type ConnectionService, type ConnectionDescriptor
-} from "@woohaa3/agent-connections";
+  agentReasoningRevision,
+  type AgentConnectionCapabilities, type AgentConnectionModel, type AgentConnectionStatus, type AgentConversationAdapter, type AgentAdapterRunInput,
+  type AgentAdapterRunOutcome, type AgentConnectionRuntime, type AgentEngineId, type ApplicationToolDelegationFacade,
+  type ApplicationCanvasAuthoringFacade, type ApplicationUserDelegation
+} from "@woohaa3/contracts";
+import { createEndpointPolicy, createModelTransport, modelCatalogForRecord, nativeContextFor, nativeContextKey, preflightInput, preparedPromptText, type ConnectionService, type ConnectionDescriptor } from "@woohaa3/agent-connections";
 import { SDK_AGENT_ADAPTERS, SDK_AGENT_PLUGIN_ID, findSdkAgentAdapter, sdkEngineForAdapter, type SdkAgentAdapterDescriptor } from "../shared.js";
 import { createAgentSdkAdapter, type AgentSdkTransport } from "./adapters/agent-sdk-adapter.js";
 import { createFixedEngineRuntime, type FixedEngineRuntime } from "./fixed-engine-runtime.js";
 import { createMcpTurnGateway } from "./mcp-turn-gateway.js";
+import { projectReasoningCapability } from "./adapters/reasoning.js";
 import { ASSISTANT_CANDIDATE_CAPABILITIES } from "@woohaa3/agent-connections";
 
 export type SdkAgentRuntimeOptions = {
@@ -36,13 +35,23 @@ export type SdkAgentRuntimeOptions = {
   logger?: (event: Record<string, unknown>) => void;
 };
 
-/** 仅声明固定引擎已接线且模型家族明确支持的设置。兼容服务未知时沿用默认。 */
-export function sdkReasoningEfforts(adapterId: string, model: string): readonly import("@woohaa3/contracts").AgentReasoningEffort[] {
+/** 目录与执行共用的模型能力投影：只保留 adapter 能映射的档位。 */
+export function sdkModelViews(adapterId: string, record: Parameters<typeof modelCatalogForRecord>[0]): AgentConnectionModel[] {
   const engine = sdkEngineForAdapter(adapterId)?.engine;
-  if (engine === "codex-agent-sdk" && /^(gpt-[56]|o[134])/.test(model)) return ["low", "medium", "high"];
-  if (engine === "claude-agent-sdk" && /^claude-(opus|sonnet)-(4-[6-9]|[5-9])/.test(model)) return ["low", "medium", "high"];
-  if (engine === "gemini-agent-adk" && /^gemini-3/.test(model)) return ["low", "high"];
-  return [];
+  if (!engine) return [];
+  const catalog = modelCatalogForRecord(record);
+  return catalog.models.map((model) => {
+    const reasoning = projectReasoningCapability(engine, model.reasoning);
+    const efforts = reasoning.state === "supported" ? (reasoning.efforts ?? []).map((option) => option.id) : [];
+    return {
+      id: model.id,
+      label: model.label ?? model.id,
+      source: "user-provided" as const,
+      accountAuthorized: false,
+      reasoning,
+      ...(efforts.length ? { reasoningEfforts: efforts } : {})
+    };
+  });
 }
 
 /**
@@ -86,7 +95,9 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
           targetExecution: record.lastStatus?.tools ?? unknown
         }
       };
-      const models: AgentConnectionModel[] = (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id), source: "user-provided", accountAuthorized: false }));
+      const models: AgentConnectionModel[] = sdkModelViews(adapter.adapterId, record);
+      const catalog = modelCatalogForRecord(record);
+      const catalogRevision = catalog.revision;
       // A saved Key on an allowed endpoint makes the HTTP transport attemptable. This is not a model
       // probe: modelAccess stays unknown, and an explicit failed/unavailable evidence is preserved.
       const transport = record.lastStatus?.transport;
@@ -103,7 +114,7 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
         : !credentialConfigured ? "尚未保存 API Key"
         : runtime.dependency.state === "unavailable" || runtime.dependency.state === "failed" ? runtime.dependency.reason
         : undefined);
-      return { runtime, status, capabilities: capabilitiesFor(adapter), models, required: ["credential", "transport"], endpointAllowed,
+      return { runtime, status, capabilities: capabilitiesFor(adapter), models, capabilityRevision: catalogRevision, ...(catalog.error ? { modelsError: catalog.error } : {}), required: ["credential", "transport"], endpointAllowed,
         ...(blockedReason ? { reason: blockedReason } : {}) };
     }
   } satisfies ConnectionDescriptor]));
@@ -130,7 +141,8 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     if (!endpointCheck.ok) return fail(endpointCheck.code, endpointCheck.message);
     const model = input.intent.model ?? record.models?.[0];
     if (!model) return fail("malformed-request", "请明确选择模型");
-    if (input.intent.reasoningEffort && !sdkReasoningEfforts(adapter.adapterId, model).includes(input.intent.reasoningEffort)) return fail("capability-unsupported", "当前模型未开放此思考强度，请使用默认设置");
+    const reasoning = sdkModelViews(adapter.adapterId, record).find((entry) => entry.id === model)?.reasoning;
+    if (input.intent.reasoningEffort && (reasoning?.state !== "supported" || !(reasoning.efforts ?? []).some((option) => option.id === input.intent.reasoningEffort))) return fail("capability-unsupported", "当前模型未开放此思考强度，请使用默认设置");
     // 通道只消费宿主准备好的角色回合；缺失即拒绝，不从 mode/用户文字推断业务职责。
     const prepared = input.prepared;
     if (!prepared) return fail("role-not-found", "本回合没有宿主准备的角色请求");
@@ -257,7 +269,8 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const receipts = gateway?.receipts ?? [];
       trace("sdk-done", { ok: result.ok, finishReason: result.ok ? result.outcome.finishReason : result.code, textLength: result.ok ? result.outcome.assistantText.length : 0, toolCalls: gateway?.receivedTools ?? [], receipts: receipts.length });
       const receipt = { kind: "canvas-commands", commands: receipts };
-      if (!result.ok) return { status: receipts.length ? "partial" : result.code === "cancelled" ? "cancelled" : "failed", error: { code: result.code, message: result.message }, ...(receipts.length ? { receipt } : {}) };
+      const reasoning = result.reasoning;
+      if (!result.ok) return { status: receipts.length ? "partial" : result.code === "cancelled" ? "cancelled" : "failed", error: { code: result.code, message: result.message }, ...(reasoning ? { reasoning } : {}), ...(receipts.length ? { receipt } : {}) };
       if (input.candidate && !await valid()) return controller.signal.aborted ? { status: "cancelled" } : fail("version-conflict", "助手连接已变更，结果未采用");
       await options.service.setStatus({ owner: input.owner, connectionId: record.connectionId, patch: { transport: { state: "ready", checkedAt: new Date().toISOString() }, modelAccess: { state: "ready", checkedAt: new Date().toISOString() }, ...(receipts.length ? { tools: { state: "ready" as const, checkedAt: new Date().toISOString() } } : {}) } });
       const rememberNative = async () => {
@@ -270,7 +283,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       };
       if (input.intent.action === "discuss") {
         await rememberNative();
-        return { status: "succeeded", assistantText: result.outcome.assistantText };
+        return { status: "succeeded", assistantText: result.outcome.assistantText, ...(reasoning ? { reasoning } : {}) };
       }
       // 截断不能冒充成功；已确认的分段回执也不能被说成没有写入。
       const attemptedWrites = gateway?.attemptedWrites ?? 0;
@@ -279,15 +292,15 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const lostTools = [...new Set(suggestedTools)].filter((name) => !delivered.has(name));
       if (!receipts.length) options.logger?.({ event: "sdk-agent-turn-unwritten", connectionId: record.connectionId, action: input.intent.action, model, finishReason: result.outcome.finishReason, suggestedTools: [...new Set(suggestedTools)], deliveredTools: [...delivered], lostTools, attemptedWrites });
       const unwritten = unwrittenError(result.outcome.finishReason, receipts.length > 0);
-      if (unwritten) return { status: receipts.length ? "partial" : "failed", assistantText: result.outcome.assistantText, ...(receipts.length ? { receipt } : {}), error: unwritten };
+      if (unwritten) return { status: receipts.length ? "partial" : "failed", assistantText: result.outcome.assistantText, ...(reasoning ? { reasoning } : {}), ...(receipts.length ? { receipt } : {}), error: unwritten };
       if (receipts.length) {
         await rememberNative();
-        return { status: "succeeded", assistantText: result.outcome.assistantText, receipt };
+        return { status: "succeeded", assistantText: result.outcome.assistantText, ...(reasoning ? { reasoning } : {}), receipt };
       }
       // 没有回执时按真实动作分类：模型自己发过调用却没送达网关，是运行时丢调用，不是「未确认」。
-      if (attemptedWrites > 0) return { status: "failed", assistantText: result.outcome.assistantText, error: { code: "write-rejected", message: "本轮写入没有成功（被拒绝或未完成）；请核对失败原因后重试" } };
-      if (lostTools.length > 0) return { status: "failed", assistantText: result.outcome.assistantText, error: { code: "tool-call-lost", message: `模型生成的工具调用（${lostTools.join("、")}）没有送达执行端，本轮未提交写入；请重试` } };
-      return { status: "failed", assistantText: result.outcome.assistantText, error: { code: "no-write-attempted", message: "模型只读取了上下文，没有提交任何写入；请重试，或把需求拆成更小的步骤" } };
+      if (attemptedWrites > 0) return { status: "failed", assistantText: result.outcome.assistantText, ...(reasoning ? { reasoning } : {}), error: { code: "write-rejected", message: "本轮写入没有成功（被拒绝或未完成）；请核对失败原因后重试" } };
+      if (lostTools.length > 0) return { status: "failed", assistantText: result.outcome.assistantText, ...(reasoning ? { reasoning } : {}), error: { code: "tool-call-lost", message: `模型生成的工具调用（${lostTools.join("、")}）没有送达执行端，本轮未提交写入；请重试` } };
+      return { status: "failed", assistantText: result.outcome.assistantText, ...(reasoning ? { reasoning } : {}), error: { code: "no-write-attempted", message: "模型只读取了上下文，没有提交任何写入；请重试，或把需求拆成更小的步骤" } };
     } catch (error) {
       await gateway?.drain();
       const receipts = gateway?.receipts ?? [];
@@ -321,11 +334,12 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       return "disconnected";
     },
     // 目录与连接描述必须给同一份档位：只返回 { id, label } 会让选择器看不到 Variant。
-    models: async ({ owner }) => ({
-      models: (await options.service.list(owner))
-        .filter((record) => record.adapterId === adapter.adapterId)
-        .flatMap((record) => (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id) })))
-    }),
+    models: async ({ owner }) => {
+      const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
+      const models = records.flatMap((record) => sdkModelViews(adapter.adapterId, record));
+      const capabilityRevision = agentReasoningRevision(...records.map((record) => modelCatalogForRecord(record).revision));
+      return { models, capabilityRevision };
+    },
     run: async (input) => {
       const controller = input.candidate ? new AbortController() : null;
       const abort = () => controller?.abort();

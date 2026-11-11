@@ -10,6 +10,7 @@ import { isBoundedId, isJsonObject, isNonEmptyString } from "../../validation.js
 import { decodeAssistantWorldScope } from "../../canvas/assistant-world-authority.js";
 import {
   isAgentEntryAction,
+  isAgentReasoningCapability,
   isAgentReasoningEffort,
   type AgentReasoningEffort,
   isAgentTargetMode,
@@ -111,7 +112,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
     if (!scope.ok) return fail("malformed-request", scope.message);
   }
   const binding = entryRaw.connection;
-  if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0))) return fail("malformed-request", "connection 非法");
+  if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch", "capabilityRevision"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0) || (binding.capabilityRevision !== undefined && !isBoundedId(binding.capabilityRevision)))) return fail("malformed-request", "connection 非法");
   const action = entryRaw.action;
   if (!isAgentEntryAction(action)) return fail("malformed-request", "action 必须是 discuss / generate / modify");
   const canvasId = readId(entryRaw.canvasId, "canvasId");
@@ -218,8 +219,9 @@ export function decodeAdapterQuery(value: string | null | undefined): string | u
 export function isAgentCatalogSnapshot(value: unknown): value is AgentCatalogSnapshot {
   if (!isJsonObject(value)) return false;
   if (!Array.isArray(value.models)) return false;
-  const shapeOk = value.models.every((entry) => isJsonObject(entry) && isBoundedId(entry.id) && typeof entry.label === "string" && (entry.reasoningEfforts === undefined || (Array.isArray(entry.reasoningEfforts) && entry.reasoningEfforts.every(isAgentReasoningEffort))));
+  const shapeOk = value.models.every((entry) => isJsonObject(entry) && isBoundedId(entry.id) && typeof entry.label === "string" && (entry.reasoningEfforts === undefined || (Array.isArray(entry.reasoningEfforts) && entry.reasoningEfforts.every(isAgentReasoningEffort))) && (entry.reasoning === undefined || isAgentReasoningCapability(entry.reasoning)));
   if (!shapeOk) return false;
+  if (value.capabilityRevision !== undefined && !isBoundedId(value.capabilityRevision)) return false;
   return value.error === undefined || typeof value.error === "string";
 }
 

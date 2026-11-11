@@ -240,3 +240,32 @@ it("模型目录拒绝非法思考强度，缺省字段仍兼容旧目录", () =
     expect(validate({ ...model, reasoningEfforts: "high" })).toBe(false);
   }
 });
+
+it("reasoning 能力事实严格校验并兼容旧 reasoningEfforts", async () => {
+  const { isAgentReasoningCapability, reasoningCapabilityOf, reasoningEffortsOf } = await import("./conversation.js");
+  const capability = { state: "supported", source: "provider", revision: "r1", efforts: [{ id: "low" }, { id: "high", label: "高" }] };
+  expect(isAgentReasoningCapability(capability)).toBe(true);
+  expect(isAgentReasoningCapability({ ...capability, state: "maybe" })).toBe(false);
+  expect(isAgentReasoningCapability({ ...capability, source: "guess" })).toBe(false);
+  expect(isAgentReasoningCapability({ ...capability, revision: "" })).toBe(false);
+  expect(isAgentReasoningCapability({ ...capability, efforts: [{ id: "low" }, { id: "low" }] })).toBe(false);
+  expect(isAgentReasoningCapability({ ...capability, efforts: [{ id: "" }] })).toBe(false);
+  expect(isAgentReasoningCapability({ ...capability, state: "unknown" })).toBe(false);
+  expect(reasoningCapabilityOf({})).toMatchObject({ state: "unknown" });
+  expect(reasoningCapabilityOf({ reasoningEfforts: [] })).toMatchObject({ state: "unknown" });
+  expect(reasoningEffortsOf({ reasoningEfforts: ["low"] })).toEqual(["low"]);
+  expect(reasoningEffortsOf({ reasoning: { state: "supported", source: "provider", revision: "r", efforts: [{ id: "medium" }] } })).toEqual(["medium"]);
+  expect(reasoningEffortsOf({ reasoning: { state: "supported", source: "provider", revision: "r" } })).toEqual([]);
+});
+
+it("目录与回合绑定接受 capabilityRevision 但拒绝非法值", () => {
+  const model = { id: "m", label: "Model", source: "user-provided" as const, accountAuthorized: false,
+    reasoning: { state: "supported" as const, source: "provider" as const, revision: "r", efforts: [{ id: "low" as const }] } };
+  expect(isAgentConnectionModel(model)).toBe(true);
+  expect(isAgentCatalogSnapshot({ models: [model], capabilityRevision: "rev" })).toBe(true);
+  expect(isAgentCatalogSnapshot({ models: [{ ...model, reasoning: { ...model.reasoning, state: "bad" } }] })).toBe(false);
+  const entry = { roleId: "test/role", action: "generate", canvasId: "canvas", nodeId: "node", model: "model", prompt: "modify",
+    connection: { connectionId: "c", adapterId: "a", configRevision: 1, credentialEpoch: 1, capabilityRevision: "rev" } };
+  expect(decodeAcceptTurnRequest({ requestId: "r", entry })).toMatchObject({ ok: true });
+  expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, connection: { ...entry.connection, capabilityRevision: "" } } })).toMatchObject({ ok: false });
+});

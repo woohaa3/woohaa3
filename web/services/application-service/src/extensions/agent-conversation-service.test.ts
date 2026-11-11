@@ -452,6 +452,33 @@ describe("agent conversation service", () => {
     expect(conflict.error.code).toBe("request-id-reused");
   });
 
+  it("相同 requestId 改变思考强度也返回 request-id-reused", () => {
+    const { service } = setup();
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const convId = created.conversation.conversationId;
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-effort", entry: entry({ reasoningEffort: "low" }) })).toMatchObject({ ok: true });
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-effort", entry: entry({ reasoningEffort: "high" }) })).toMatchObject({ ok: false, error: { code: "request-id-reused" } });
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-effort", entry: entry({ reasoningEffort: "low" }) })).toMatchObject({ ok: true, reused: true });
+  });
+
+  it("回合冻结 capabilityRevision 并记录 reasoning 请求/应用结果", async () => {
+    const { service, controls } = setup();
+    const binding = { connectionId: "c", adapterId: "fake", configRevision: 2, credentialEpoch: 1, capabilityRevision: "rev-9" };
+    vi.spyOn(service, "resolveConnectionBinding").mockResolvedValue({ ok: true, binding });
+    controls.outcomes.push({ status: "succeeded", assistantText: "ok", receipt: { commandId: "cmd" }, reasoning: { requested: "high", applied: true } });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "req-reasoning", entry: entry({ model: "m", reasoningEffort: "high" }), connection: binding });
+    if (!accepted.ok) throw new Error(accepted.error.message);
+    expect(accepted.turn.target.capabilityRevision).toBe("rev-9");
+    await service.dispatchTurn(accepted.turn.turnId);
+    await service.whenSettled(accepted.turn.turnId);
+    const queried = service.queryTurn({ owner: "user-a", requestId: "req-reasoning" });
+    expect(queried).toMatchObject({ ok: true, turn: { reasoning: { requested: "high", applied: true }, connection: { capabilityRevision: "rev-9" } } });
+    expect(JSON.stringify(queried)).not.toContain("chain-of-thought");
+  });
+
   it("同会话可以受理多个独立回合（不再有单活动回合门禁）", () => {
     const { service } = setup();
     const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });

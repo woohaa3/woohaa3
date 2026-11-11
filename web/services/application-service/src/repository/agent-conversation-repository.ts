@@ -183,6 +183,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         connection_adapter_id TEXT,
         connection_config_revision INTEGER,
         connection_credential_epoch INTEGER,
+        connection_capability_revision TEXT,
         history_sequence INTEGER,
         role_ref_json TEXT,
         prepared_json TEXT,
@@ -191,6 +192,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         run_id TEXT,
         task_id TEXT,
         receipt_json TEXT,
+        reasoning_json TEXT,
         error_code TEXT,
         error_message TEXT,
         created_at TEXT NOT NULL,
@@ -275,6 +277,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversation_turns", "connection_adapter_id", "TEXT");
     this.ensureColumn("agent_conversation_turns", "connection_config_revision", "INTEGER");
     this.ensureColumn("agent_conversation_turns", "connection_credential_epoch", "INTEGER");
+    this.ensureColumn("agent_conversation_turns", "connection_capability_revision", "TEXT");
     // 受理时冻结的历史基准（change: 2026-10-22-remove-agent-execution-limits，任务 3.1）。
     this.ensureColumn("agent_conversation_turns", "history_sequence", "INTEGER");
     // 角色冻结身份与准备内容（change: 2026-11-07-add-pluggable-agent-roles）：旧数据保持 NULL（legacy）。
@@ -285,6 +288,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
     this.ensureColumn("agent_conversation_turns", "executor_cursor", "INTEGER");
     this.ensureColumn("agent_conversation_turns", "adoption_owner", "TEXT");
     this.ensureColumn("agent_conversation_turns", "adoption_lease_until", "INTEGER");
+    this.ensureColumn("agent_conversation_turns", "reasoning_json", "TEXT");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target ON agent_conversations(owner, canvas_id, node_id, updated_at DESC);");
     this.db.exec("CREATE INDEX IF NOT EXISTS agent_conversations_target_connection ON agent_conversations(owner, canvas_id, node_id, connection_id, updated_at DESC);");
     // 旧版本把无法确认写成 `unknown`；迁移后统一按 failed 终态保留证据与已有错误码。
@@ -435,9 +439,9 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       .prepare(
         `INSERT INTO agent_conversation_turns
            (turn_id, conversation_id, owner, canvas_id, request_id, action, status, stage, input_hash, target_json, intent_json,
-            connection_id, connection_adapter_id, connection_config_revision, connection_credential_epoch, history_sequence,
+            connection_id, connection_adapter_id, connection_config_revision, connection_credential_epoch, connection_capability_revision, history_sequence,
             role_ref_json, prepared_json, role_input_digest, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         turn.turnId,
@@ -455,6 +459,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
         turn.connectionAdapterId,
         turn.connectionConfigRevision,
         turn.connectionCredentialEpoch,
+        turn.connectionCapabilityRevision ?? null,
         turn.historySequence,
         turn.roleRefJson ?? null,
         turn.preparedJson ?? null,
@@ -472,6 +477,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       runId: "run_id",
       taskId: "task_id",
       receiptJson: "receipt_json",
+      reasoningJson: "reasoning_json",
       errorCode: "error_code",
       errorMessage: "error_message",
       inputHash: "input_hash",
@@ -481,6 +487,7 @@ export class SqliteAgentConversationStore implements AgentConversationStore {
       connectionAdapterId: "connection_adapter_id",
       connectionConfigRevision: "connection_config_revision",
       connectionCredentialEpoch: "connection_credential_epoch",
+      connectionCapabilityRevision: "connection_capability_revision",
       historySequence: "history_sequence",
       roleRefJson: "role_ref_json",
       preparedJson: "prepared_json",

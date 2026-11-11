@@ -453,9 +453,9 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (conversation.snapshot.conversation.canvasId !== entry.canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
         const allowed = await authorizeCanvas(deps, owner, entry.canvasId, "write");
         if (!allowed.ok) return respondError(res, allowed.error);
-        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId: conversation.snapshot.conversation.adapterId, connectionId: entry.connectionId });
+        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId: conversation.snapshot.conversation.adapterId, connectionId: entry.connectionId, ...(entry.model ? { model: entry.model } : {}), ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
-        if (!connection.binding || (entry.connection && (entry.connection.connectionId !== connection.binding.connectionId || entry.connection.adapterId !== connection.binding.adapterId || entry.connection.configRevision !== connection.binding.configRevision || entry.connection.credentialEpoch !== connection.binding.credentialEpoch))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        if (!connection.binding || (entry.connection && (entry.connection.connectionId !== connection.binding.connectionId || entry.connection.adapterId !== connection.binding.adapterId || entry.connection.configRevision !== connection.binding.configRevision || entry.connection.credentialEpoch !== connection.binding.credentialEpoch || entry.connection.capabilityRevision !== undefined && entry.connection.capabilityRevision !== connection.binding.capabilityRevision))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
         const accepted = await deps.imageDirectorScene.accept({ owner, canvasId: entry.canvasId, conversationId, entry, connection: connection.binding, request: { requestId: decoded.value.requestId, sourceNodeId: entry.nodeId, connectionId: entry.connectionId, model: entry.model, variant: entry.reasoningEffort ?? null, instructions: entry.prompt } });
         if (!accepted.ok) return respondError(res, accepted.error);
         sendJson(res, 200, accepted);
@@ -486,10 +486,10 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (!allowed.ok) return respondError(res, allowed.error);
         if (decoded.value.entry.canvasId !== canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
         // 冻结本回合连接身份：显式选择校验归属，缺失时直接拒绝（change: 2026-10-16-...，任务 2.2）。
-        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId, ...(decoded.value.entry.connectionId ? { connectionId: decoded.value.entry.connectionId } : {}) });
+        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId, ...(decoded.value.entry.connectionId ? { connectionId: decoded.value.entry.connectionId } : {}), ...(decoded.value.entry.model ? { model: decoded.value.entry.model } : {}), ...(decoded.value.entry.reasoningEffort ? { reasoningEffort: decoded.value.entry.reasoningEffort } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
         const frozen = decoded.value.entry.connection;
-        if (frozen && (!connection.binding || frozen.connectionId !== connection.binding.connectionId || frozen.adapterId !== connection.binding.adapterId || frozen.configRevision !== connection.binding.configRevision || frozen.credentialEpoch !== connection.binding.credentialEpoch)) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        if (frozen && (!connection.binding || frozen.connectionId !== connection.binding.connectionId || frozen.adapterId !== connection.binding.adapterId || frozen.configRevision !== connection.binding.configRevision || frozen.credentialEpoch !== connection.binding.credentialEpoch || frozen.capabilityRevision !== undefined && frozen.capabilityRevision !== connection.binding.capabilityRevision)) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
         // A version upgrade may archive the old target while resolving the binding.
         // Only that transition creates a fresh conversation; archived history stays immutable.
         let acceptedConversationId = conversationId;
