@@ -455,12 +455,51 @@ function directoryBytes(root) {
   return total;
 }
 
-/** 校验已提交 lock 与当前 lockfile 一致（`--check`）。 */
+/**
+ * 校验已提交 lock 与仓库输入一致（`--check`）。
+ *
+ * 不做「重新推导 + 全量 JSON 比较」：`platforms` 里的包集合按构建机实际平台裁剪，
+ * 不同 OS 的构建机重算出的对象本来就可能不同（2026-11-12 Windows 分发现场：
+ * Linux 上生成、Windows 上校验被判 STALE_LOCK）。这里只校验**与平台无关**的事实：
+ *
+ * - `generatedFrom.lockfileSha256` 与当前 pnpm lockfile 一致（依赖变了没重新生成）；
+ * - 每个引擎的版本与 `desktop/runtime-components.lock.json` 一致（引擎升级没同步）；
+ * - 平台集合覆盖声明的全部平台，且每个平台的包集合非空、integrity 齐全；
+ * - `registry` 与 Node 版本存在。
+ *
+ * 返回**已提交**的 lock（运行期消费的就是它），而不是本机重新推导的结果。
+ */
 export function assertRuntimeNpmLockCurrent({ clientRoot, committed } = {}) {
-  const expected = buildRuntimeNpmLock({ clientRoot });
   const actual = committed ?? JSON.parse(fs.readFileSync(path.join(clientRoot, 'desktop/runtime-npm-lock.json'), 'utf8'));
-  const left = JSON.stringify(actual);
-  const right = JSON.stringify(expected);
-  if (left !== right) fail('STALE_LOCK', 'desktop/runtime-npm-lock.json is stale; run node scripts/build-runtime-npm-manifest.mjs');
-  return expected;
+  const { text } = loadRuntimeNpmLockfile(clientRoot);
+  const { components } = JSON.parse(fs.readFileSync(path.join(clientRoot, 'desktop/runtime-components.lock.json'), 'utf8'));
+
+  const expectedLockfile = createHash('sha256').update(text).digest('hex');
+  if (actual.generatedFrom?.lockfileSha256 !== expectedLockfile) {
+    fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 与 pnpm lockfile 不一致；先运行 node scripts/build-runtime-npm-manifest.mjs');
+  }
+
+  for (const engineId of ['dsh', 'claude', 'codex']) {
+    const engine = actual.engines?.[engineId];
+    if (!engine) fail('STALE_LOCK', `desktop/runtime-npm-lock.json 缺少引擎 ${engineId}；先运行 node scripts/build-runtime-npm-manifest.mjs`);
+    const declared = components[engineId]?.version;
+    if (declared && engine.version !== declared) {
+      fail(
+        'STALE_LOCK',
+        `desktop/runtime-npm-lock.json 里 ${engineId} 是 ${engine.version}，runtime-components.lock.json 已声明 ${declared}；先运行 node scripts/build-runtime-npm-manifest.mjs`
+      );
+    }
+    for (const platformKey of actual.platforms ?? []) {
+      const platform = engine.platforms?.[platformKey];
+      if (!platform || !Array.isArray(platform.packages) || platform.packages.length === 0) {
+        fail('STALE_LOCK', `desktop/runtime-npm-lock.json 缺少 ${engineId} 在 ${platformKey} 的包集合；先运行 node scripts/build-runtime-npm-manifest.mjs`);
+      }
+      for (const id of platform.packages) {
+        if (!engine.packages?.[id]) fail('STALE_LOCK', `desktop/runtime-npm-lock.json 缺少 ${id} 的完整条目；先运行 node scripts/build-runtime-npm-manifest.mjs`);
+      }
+    }
+  }
+  if (!actual.registry?.default) fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 缺少 registry 声明');
+  if (!actual.node?.version) fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 缺少 Node 版本');
+  return actual;
 }
