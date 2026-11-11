@@ -3,6 +3,7 @@ import {
   createDefaultWorldCameraData,
   createEmptyWoohaa3ServerCanvas,
   decodeWorldCamera,
+  defaultWorldCameraProjection,
   type CanvasNodeData,
   type ServerCanvas,
   type WorldCameraData
@@ -52,7 +53,10 @@ it("moves a camera on the ground without changing its height, rotation or settin
 
 it("snaps an isometric camera to a valid 90-degree yaw when rotating", () => {
   const { canvas } = canvasWithCamera();
-  const camera = (canvas.nodeData["camera-node"] as unknown as { worldCamera: WorldCameraData }).worldCamera;
+  const base = (canvas.nodeData["camera-node"] as unknown as { worldCamera: WorldCameraData }).worldCamera;
+  // 默认镜头是透视投影；本用例针对等距镜头的 90° 吸附，必须显式声明等距投影。
+  const camera: WorldCameraData = { ...base, projection: defaultWorldCameraProjection("isometric") };
+  canvas.nodeData["camera-node"] = { worldCamera: camera } as unknown as CanvasNodeData;
   const start = beginWorldCameraDrag(canvas, "camera-node", { u: 0, v: 0 }, "rotate")!;
   const pose = planWorldCameraMove(start, { u: 1, v: 0 })!;
   expect(pose.rotation).not.toEqual(camera.rotation);

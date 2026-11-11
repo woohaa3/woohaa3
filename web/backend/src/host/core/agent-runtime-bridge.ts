@@ -141,7 +141,11 @@ function writeBridgeIdentity(runtimeDir: string, identity: BridgeIdentity): void
 function reply(socket: net.Socket, id: number, result: unknown, error?: unknown): void {
   if (socket.destroyed) return;
   const message = error instanceof Error ? error.message : error === undefined ? undefined : String(error);
-  socket.write(`${JSON.stringify(error ? { id, ok: false, error: message } : { id, ok: true, result })}\n`);
+  // 领域错误码必须跨进程保留：调用方按 code 决定可读诊断，只有 message 会退化成
+  // 「目标准备失败」这类无法行动的通用文案。
+  const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code : undefined;
+  socket.write(`${JSON.stringify(error ? { id, ok: false, error: message, ...(code ? { code } : {}) } : { id, ok: true, result })}\n`);
 }
 
 export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOptions): Promise<AgentRuntimeBridge> {

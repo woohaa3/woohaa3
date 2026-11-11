@@ -168,6 +168,11 @@ export function poseFor(
     ? (Math.abs(delta.u) < 0.35 ? 0 : (delta.u > 0 ? -1 : 1) * Math.PI / 2)
     : -delta.u * YAW_PER_METER;
   const pitch = isometric ? 0 : clamp(delta.v * PITCH_PER_METER, MIN_PITCH, MAX_PITCH);
+  // 没有偏航/俯仰时原样返回：等距镜头默认四元数是有限位小数，重新归一化会产生
+  // 1e-9 级漂移，足以把「没动」误判成一次位姿更新（点击一下就推进 revision）。
+  if (yaw === 0 && pitch === 0) {
+    return { position: { ...camera.position }, rotation: [...camera.rotation] as unknown as WorldRotation };
+  }
   // World basis is (u, v, h); the vertical axis is h, not Bevy's Y.
   const rotation = multiply(
     multiply(axisAngle([0, 0, 1], yaw), camera.rotation as unknown as WorldRotation),

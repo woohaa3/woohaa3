@@ -52,12 +52,16 @@ class SocketClient implements ExecutorClient {
       });
     }
     const timeoutMs = this.options.timeoutMs ?? 10_000;
+    const transport = (message: string) => Object.assign(
+      new Error(message),
+      this.options.transportErrorCode ? { code: this.options.transportErrorCode } : {}
+    );
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(this.options.socketPath);
       let buffer = "";
       const timer = setTimeout(() => {
         socket.destroy();
-        reject(new Error(`Executor 请求超时（${request.method}）`));
+        reject(transport(`Executor 请求超时（${request.method}）`));
       }, timeoutMs);
       const finish = (error: unknown, value?: unknown) => {
         clearTimeout(timer);
@@ -73,16 +77,23 @@ class SocketClient implements ExecutorClient {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const response = JSON.parse(line) as { id: number; ok: boolean; result?: unknown; error?: string };
+            const response = JSON.parse(line) as { id: number; ok: boolean; result?: unknown; error?: string; code?: string };
             if (response.ok) finish(null, response.result);
-            else finish(new Error(response.error ?? "Executor 请求失败"));
+            // 宿主保留的领域错误码要还原到 Error 上；没有 code 才是纯通道/未知错误。
+            else finish(Object.assign(
+              new Error(response.error ?? "Executor 请求失败"),
+              typeof response.code === "string" && response.code ? { code: response.code } : {}
+            ));
             return;
           } catch {
             // 等待完整 JSON 行
           }
         }
       });
-      socket.once("error", (error) => finish(error));
+      socket.once("error", (error) => finish(Object.assign(
+        error instanceof Error ? error : new Error(String(error)),
+        this.options.transportErrorCode ? { code: this.options.transportErrorCode } : {}
+      )));
       socket.once("connect", () => {
         socket.write(JSON.stringify({
           id: 1,

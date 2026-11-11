@@ -69,6 +69,14 @@ describe("Agent runtime host bridge", () => {
     lease.release();
     expect(await invoke()).toMatchObject({ ok: false, error: expect.stringContaining("lease") });
 
+    // 领域错误码必须原样回到执行端，否则目标准备失败只能显示通用文案。
+    const coded = bridge.registerCall(async () => {
+      throw Object.assign(new Error("导演区不存在"), { code: "outside-scope" });
+    });
+    const failed = await call(socketPath, { token: "secret", workspaceKey: "ws", method: "extension.call", params: { leaseId: coded.leaseId, method: "tools.issue", params: {} } });
+    expect(failed).toMatchObject({ ok: false, error: "导演区不存在", code: "outside-scope" });
+    coded.release();
+
     const unknown = await call(socketPath, { id: 4, token: "secret", workspaceKey: "ws", method: "shell.exec", params: {} });
     expect(unknown).toMatchObject({ ok: false, error: expect.stringContaining("未知 Host bridge 方法") });
   });

@@ -92,6 +92,25 @@ export function create2dInputFamily(core: InteractionCore) {
     }
     return cursorAreas;
   };
+  /**
+   * 指针落在导演区边框容差内时返回 resize 指针，否则 `null`。
+   *
+   * hover 反馈与按下优先级共用这一判定：边框之外仍由世界模型拾取优先，边框之内让
+   * 导演区缩放优先，否则贴着边界的模型会把「拖边框改范围」吞成「拖模型」。
+   */
+  const sceneAreaEdgeAt = (event: PointerEvent): string | null => {
+    const areas = sceneAreaTargets();
+    if (areas.length === 0) return null;
+    const point = { x: event.clientX, y: event.clientY };
+    const ground = core.queryWorldGround(point);
+    if (!ground) return null;
+    const near = core.queryWorldGround({ x: point.x + 12, y: point.y });
+    const tolerance = near
+      ? Math.max(0.06, Math.hypot(near.u - ground.u, near.v - ground.v))
+      : 0.18;
+    const preferredNodeId = state.selected.length === 1 ? state.selected[0]! : null;
+    return sceneAreaEdgeCursor({ areas, ground, tolerance, preferredNodeId });
+  };
   const updateHoverCursor = (event: PointerEvent, world: Point, hit: import("./hit-test.js").HitTarget | null) => {
     if (!writable()) return setCursor("");
     const areas = sceneAreaTargets();
@@ -103,15 +122,7 @@ export function create2dInputFamily(core: InteractionCore) {
     if (hit?.kind === "edge" || hit?.kind === "edge-delete" || hit?.kind === "port") return setCursor("pointer");
     if (hit) return setCursor("");
     if (areas.length === 0) return setCursor("");
-    const point = { x: event.clientX, y: event.clientY };
-    const ground = core.queryWorldGround(point);
-    if (!ground) return setCursor("");
-    const near = core.queryWorldGround({ x: point.x + 12, y: point.y });
-    const tolerance = near
-      ? Math.max(0.06, Math.hypot(near.u - ground.u, near.v - ground.v))
-      : 0.18;
-    const preferredNodeId = state.selected.length === 1 ? state.selected[0]! : null;
-    setCursor(sceneAreaEdgeCursor({ areas, ground, tolerance, preferredNodeId }) ?? "");
+    setCursor(sceneAreaEdgeAt(event) ?? "");
   };
 
   const drag = createDragGestureFamily(core);
@@ -299,6 +310,13 @@ export function create2dInputFamily(core: InteractionCore) {
       return true;
     };
     if (sceneAreaFirst && trySceneAreaGesture()) return;
+
+    // 导演区边框优先于渲染器补拾取：模型常贴着边界摆放，否则在边框上按下会变成拖动
+    // 模型（表现为「导演区无法缩放」）。只在空白命中且指针确实在边框容差内时生效，
+    // 卡片、端口与模型内部的命中顺序不变。
+    if (!hit && !isRight && !event.shiftKey && sceneAreaEdgeAt(event)) {
+      if (trySceneAreaGesture()) return;
+    }
 
     // 先把卡片/模型预览归一成节点目标；容器优先级只读一次选择规则，后面 2D/3D 共用。
     const pressedCanvas = workingCanvasOf(woohaa3CanvasStore.getState());

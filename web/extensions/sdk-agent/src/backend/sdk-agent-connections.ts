@@ -293,16 +293,19 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const receipts = gateway?.receipts ?? [];
       // Only the host's target preparation errors carry public domain diagnostics.
       // SDK exceptions can contain credentials/endpoints and must never be echoed.
-      const domainCode = stage === "target" && error && typeof error === "object" && "code" in error && typeof error.code === "string"
-        && /^(invalid-data|malformed-request|not-ready|not-found|unsupported-version|spatial-rejected|write-forbidden|operation-conflict|outside-scope|unknown-footprint|lease-conflict|version-conflict|stale-epoch|target-unavailable|capability-unsupported|group-target-missing|unauthorized|unavailable|request-conflict|unverified-run|unverified-stop)$/.test(error.code) ? error.code : null;
-      const message = domainCode && error instanceof Error
+      const failureCode = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : null;
+      // 宿主桥断线/超时是通道问题：既不是目标无效，也不该复用凭据脱敏后的原始文案。
+      const bridgeUnavailable = stage === "target" && (failureCode === "host-bridge-unavailable" || failureCode === "executor-unavailable");
+      const domainCode = stage === "target" && failureCode
+        && /^(invalid-data|malformed-request|not-ready|not-found|unsupported-version|spatial-rejected|write-forbidden|read-forbidden|operation-conflict|outside-scope|unknown-footprint|lease-conflict|version-conflict|stale-epoch|target-unavailable|capability-unsupported|group-target-missing|scene-empty|reservation-conflict|receipt-unavailable|receipt-not-found|unauthorized|unavailable|request-conflict|unverified-run|unverified-stop)$/.test(failureCode) ? failureCode : null;
+      const message = bridgeUnavailable ? "执行通道暂不可用，请稍后重试" : domainCode && error instanceof Error
         ? error.message.split(credential.secret).join("[凭据已隐藏]")
           .replace(/https?:\/\/[^\s，。；]+/gi, "[服务地址已隐藏]")
           .replace(/(?:bearer\s+|(?:api[_-]?key|token|authorization)\s*[:=]\s*)[^\s，。；]+/gi, "[凭据已隐藏]").slice(0, 1200)
         : stage === "target" ? "目标准备失败，请重新打开目标并检查范围与权限"
         : stage === "connection" ? "执行连接暂不可用，请检查连接后重试"
         : "执行未完成，请核对回合记录与运行依赖";
-      return { status: receipts.length ? "partial" : controller.signal.aborted ? "cancelled" : "failed", error: { code: controller.signal.aborted ? "cancelled" : domainCode ?? (stage === "target" ? "target-unavailable" : stage === "connection" ? "transport-unavailable" : "execution-failed"), message: controller.signal.aborted ? "回合已停止，已提交结果保留" : message }, ...(receipts.length ? { receipt: { kind: "canvas-commands", commands: receipts } } : {}) };
+      return { status: receipts.length ? "partial" : controller.signal.aborted ? "cancelled" : "failed", error: { code: controller.signal.aborted ? "cancelled" : bridgeUnavailable ? "transport-unavailable" : domainCode ?? (stage === "target" ? "target-unavailable" : stage === "connection" ? "transport-unavailable" : "execution-failed"), message: controller.signal.aborted ? "回合已停止，已提交结果保留" : message }, ...(receipts.length ? { receipt: { kind: "canvas-commands", commands: receipts } } : {}) };
     } finally {
       options.tools?.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" });
       await gateway?.close(); await relay?.close();

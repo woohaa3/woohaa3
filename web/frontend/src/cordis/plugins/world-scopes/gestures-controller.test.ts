@@ -286,7 +286,7 @@ describe("interaction controller wiring regressions", () => {
     controller.dispose();
   });
 
-  it("keeps world-model picking ahead of auto scene-area edges", () => {
+  it("prefers the director-area edge over world-model picking", () => {
     const port = fakePort({ areaNodeId: "area", intent: "resize" });
     const model = modelNode("m1", "i1");
     const { dom, controller } = setup({
@@ -296,7 +296,23 @@ describe("interaction controller wiring regressions", () => {
       port,
       modelPick: () => ({ nodeId: "m1", target: [0, 0, 0], radius: 1 })
     });
+    // 区域 0..10 映射到客户端 0..1000；(1,1) 落在左下边缘容差内。
     dom.fire("pointerdown", { clientX: 1, clientY: 1, button: 0 });
+    expect(port.begin).toHaveBeenCalledWith(expect.objectContaining({ card: false, areaNodeId: null }));
+    controller.dispose();
+  });
+
+  it("keeps world-model picking ahead of the director-area interior", () => {
+    const port = fakePort({ areaNodeId: "area", intent: "resize" });
+    const model = modelNode("m1", "i1");
+    const { dom, controller } = setup({
+      nodes: [areaNode(), model],
+      nodeData: { ...areaData, m1: model.nodeData as never },
+      pointHit: () => null,
+      port,
+      modelPick: () => ({ nodeId: "m1", target: [0, 0, 0], radius: 1 })
+    });
+    dom.fire("pointerdown", { clientX: 500, clientY: 500, button: 0 });
     expect(port.begin).not.toHaveBeenCalled();
     controller.dispose();
   });
@@ -320,9 +336,10 @@ describe("interaction controller wiring regressions", () => {
     dom.fire("pointerdown", { clientX: 100, clientY: 100, button: 0, shiftKey: true });
     dom.fire("pointerup", { clientX: 100, clientY: 100, button: 0, shiftKey: true });
     target = "g";
-    dom.fire("pointerdown", { clientX: 100, clientY: 100, button: 0 });
-    dom.fire("pointermove", { clientX: 160, clientY: 140, button: 0 });
-    dom.fire("pointerup", { clientX: 160, clientY: 140, button: 0 });
+    // 容器内部拖动现在是框选：搬组要从标题开始（与 interaction-scope-edges 的口径一致）。
+    dom.fire("pointerdown", { clientX: 100, clientY: 4, button: 0 });
+    dom.fire("pointermove", { clientX: 160, clientY: 44, button: 0 });
+    dom.fire("pointerup", { clientX: 160, clientY: 44, button: 0 });
     const moved = submitted.filter(command => command.type === "node.update") as Array<{ nodeId: string }>;
     expect(moved.map(command => command.nodeId).sort()).toEqual(["a", "b", "g"]);
     controller.dispose();

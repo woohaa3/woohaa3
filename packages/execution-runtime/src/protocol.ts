@@ -194,6 +194,13 @@ export type ExecutorClientOptions = {
   workspaceKey: string;
   /** 单次 RPC 超时；事件跟随不使用这个值。 */
   timeoutMs?: number;
+  /**
+   * 连接层失败（超时 / socket 错误）的稳定错误码。
+   *
+   * 宿主桥（daemon → host）与执行器（host → daemon）共用本客户端：调用方按用途注入，
+   * 让上层能把「通道不可用」和领域拒绝分开，而不是都退化成同一条通用文案。
+   */
+  transportErrorCode?: string;
   /** 测试/嵌入时可注入 RPC 实现。 */
   request?: (request: ExecutorRequest) => Promise<unknown>;
 };

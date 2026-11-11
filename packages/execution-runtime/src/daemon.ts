@@ -181,7 +181,8 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
           processes,
           hostFor: (input) => {
             if (!input.host) return null;
-            const client = createExecutorClient(input.host);
+            // 宿主桥断线/超时是通道问题，不能伪装成目标或领域拒绝。
+            const client = createExecutorClient({ ...input.host, transportErrorCode: "host-bridge-unavailable" });
             return input.host.leaseId ? { call: <T>(method: string, params?: unknown) => client.call<T>("extension.call", { leaseId: input.host!.leaseId, method, params }) } : client;
           }
         });
