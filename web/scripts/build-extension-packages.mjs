@@ -62,8 +62,47 @@ const filters = local.flatMap((extension) => {
   return ["--filter", pkg.name];
 });
 const invocation = packageManagerInvocation(["-r", ...filters, "run", "build"]);
-if (local.length) execFileSync(invocation.command, invocation.args, { stdio: "inherit", cwd: webRoot, windowsHide: true });
+
+/**
+ * 递归构建失败时逐个重试，把失败归因到具体扩展。
+ *
+ * `pnpm -r` 一次失败只回一个非零退出码；在 CI 里输出被折叠成 `##[error]` 后，调用方拿到的
+ * 异常里 `stdout/stderr` 都是 null，看不出是哪个扩展坏了（2026-11-11 分发流水线现场）。
+ * 这里按单个包重跑，第一次失败即抛出带包名与目录的错误；成功过的不重复构建。
+ */
+function rebuildToLocateFailure(command, args, failure) {
+  console.error("递归构建失败，逐个重试以定位失败的扩展…");
+  for (const extension of local) {
+    const pkg = readPackageJson(path.join(extension.dir, "package.json"));
+    const single = packageManagerInvocation(["-r", "--filter", pkg.name, "run", "build"]);
+    try {
+      execFileSync(single.command, single.args, { stdio: "inherit", cwd: webRoot, windowsHide: true });
+    } catch {
+      throw new Error(
+        `扩展构建失败：${pkg.name}（${path.relative(repoRoot, extension.dir)}）\n` +
+        `上方是该包的完整输出；原始递归构建错误：${failure instanceof Error ? failure.message.split("\n")[0] : String(failure)}`
+      );
+    }
+  }
+  throw failure;
+}
+
+if (local.length) {
+  try {
+    execFileSync(invocation.command, invocation.args, { stdio: "inherit", cwd: webRoot, windowsHide: true });
+  } catch (failure) {
+    rebuildToLocateFailure(invocation.command, invocation.args, failure);
+  }
+}
 for (const extension of external) {
   const build = packageManagerInvocation(["run", "build"]);
-  execFileSync(build.command, build.args, { stdio: "inherit", cwd: extension.dir, windowsHide: true });
+  try {
+    execFileSync(build.command, build.args, { stdio: "inherit", cwd: extension.dir, windowsHide: true });
+  } catch (failure) {
+    const pkg = readPackageJson(path.join(extension.dir, "package.json"));
+    throw new Error(
+      `扩展构建失败：${pkg?.name ?? path.basename(extension.dir)}（${path.relative(repoRoot, extension.dir)}）\n` +
+      `原始错误：${failure instanceof Error ? failure.message.split("\n")[0] : String(failure)}`
+    );
+  }
 }
