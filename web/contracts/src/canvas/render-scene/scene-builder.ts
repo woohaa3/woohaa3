@@ -204,7 +204,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       const sample = sampleWorldAnimationInArea(
         ir,
         input.sceneAnimationTimes.get(node.id) ?? 0,
-        animationOriginForPreview(area.value, input.sceneAreaPreviews?.get(node.id))
+        animationOriginForPreview(area.value, input.sceneAreaPreviews?.get(node.id)),
+        area.value.animationQuarterTurns
       );
       for (const [instanceId, transform] of sample.instances) {
         const current = animationSamples.get(instanceId) ?? {};

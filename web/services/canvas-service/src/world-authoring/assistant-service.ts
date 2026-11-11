@@ -922,6 +922,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           revision: inspected.canvas.revision,
           scopeVersion: decoded.value.scopeVersion,
           animationOrigin: sceneAreaAnimationOrigin(decoded.value),
+          ...(decoded.value.animationQuarterTurns !== undefined ? { animationQuarterTurns: decoded.value.animationQuarterTurns } : {}),
           animationScript
         };
         break;

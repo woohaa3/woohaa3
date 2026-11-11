@@ -35,9 +35,11 @@ function publicAddress(address: string): boolean {
 function routeAllowed(apiType: AgentApiType, method: string | undefined, path: string): boolean {
   if (apiType === "openai") return (method === "POST" && path === "/responses") || (method === "GET" && path === "/models");
   if (apiType === "anthropic") return (method === "POST" && (path === "/messages" || path === "/messages/count_tokens")) || (method === "GET" && path === "/models");
-  if (apiType === "chat-completions") return (method === "POST" && path === "/chat/completions") || (method === "GET" && path === "/models");
-  return (method === "POST" && /^\/models\/[a-zA-Z0-9._-]+:(?:generateContent|streamGenerateContent|countTokens)$/.test(path)) ||
-    (method === "GET" && path === "/models");
+  // OpenCode 的 OpenAI 兼容运行时按 `baseURL` 拼 `/v1/chat/completions`（不认裸 `/chat/completions`）。
+  if (apiType === "chat-completions") return (method === "POST" && (path === "/chat/completions" || path === "/v1/chat/completions")) || (method === "GET" && (path === "/models" || path === "/v1/models"));
+  // `baseURL` 自带版本段（`.../v1beta`）时客户端会再拼一次版本前缀：两种拼法都要放行。
+  return (method === "POST" && /^(?:\/v1beta)?\/models\/[a-zA-Z0-9._-]+:(?:generateContent|streamGenerateContent|countTokens)$/.test(path)) ||
+    (method === "GET" && (path === "/models" || path === "/v1beta/models"));
 }
 
 export async function createModelTransport(options: ModelTransportOptions) {

@@ -40,7 +40,7 @@ describe("Cordis 依赖边界审计", () => {
   it("manifest 只固定 @deepseek-ai/cordis，不含 Loader/Include/HMR", () => {
     const pkg = JSON.parse(readFileSync(path.join(FRONTEND_ROOT, "package.json"), "utf8"));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    expect(deps["@deepseek-ai/cordis"]).toBe("4.0.5");
+    expect(deps["@deepseek-ai/cordis"]).toBe("4.1.0");
     for (const forbidden of FORBIDDEN_PACKAGES) {
       expect(deps[forbidden]).toBeUndefined();
     }

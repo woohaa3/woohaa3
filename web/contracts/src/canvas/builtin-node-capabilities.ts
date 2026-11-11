@@ -84,6 +84,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     resize: rectangularNodeResize
   });
   entries.set('scene-area', {
+    actions: nodeActionContributions,
     appearance: { palette: 'node', defaultSize: { width: 260, height: 195 }, cardLabel: '导演区' }
   });
   entries.set('world-camera', {

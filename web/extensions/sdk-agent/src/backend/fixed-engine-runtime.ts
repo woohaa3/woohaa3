@@ -66,7 +66,7 @@ export function createFixedEngineRuntime(dirs: { configDir: string; workspaceDir
         transport = module.createDshTransport(dirs);
         break;
       }
-      case "gemini-agent-adk":
+      default:
         transport = (await import("./adapters/gemini-transport.js")).createGeminiTransport();
     }
     transports.set(engine, transport);

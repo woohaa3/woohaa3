@@ -6,6 +6,7 @@ import { applyCanvasCommands } from "../../../../../../test-support/managed-shot
  */
 import { describe, expect, it } from "vitest";
 import {
+  canvasPointToGround,
   executeWorldAnimationScript,
   createEmptyWoohaa3ServerCanvas,
   createWoohaa3CanvasNode,
@@ -97,6 +98,92 @@ it.each(["same-canvas", "cross-canvas"])("copies a complete animated collection 
   expect(refusals[0]).toContain("动画对象");
 });
 
+it("pastes a world-only film set under the pointer instead of offsetting by its original ground position", () => {
+  const created = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("world", NOW), [
+    { type: "node.add", node: { id: "actor", type: "model3d" }, nodeData: { sharedWorldInstance: {
+      kind: "world-instance", version: "shared-world-v1", instanceId: "actor-instance",
+      transform: { version: "shared-world-v1", position: { u: 101, v: 52, h: 3 }, rotation: [0, 0, 0, 1], scale: 1 }
+    } } },
+    { type: "node.add", node: { id: "area", type: "scene-area" }, nodeData: { sceneArea: {
+      kind: "scene-area", version: "shared-world-v1", areaId: "area-id", scopeVersion: "1",
+      bounds: { min: { u: 100, v: 50 }, max: { u: 104, v: 54 } }
+    } } }
+  ] as never, { now: NOW });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  const payload = buildCanvasCopyPayload(created.canvas, ["actor", "area"])!;
+  const anchor = { x: 640, y: 360 };
+  const target = canvasPointToGround(anchor);
+  const plan = planCanvasPaste({ canvas: created.canvas, payload, viewport: { x: 0, y: 0, zoom: 1 },
+    anchor: { kind: "point", position: anchor }, createId: (prefix, index) => `${prefix}-copy-${index}` })!;
+  const pasted = applyCanvasCommands(created.canvas, plan.commands, { now: NOW });
+  expect(pasted.ok).toBe(true);
+  if (!pasted.ok) return;
+  const areaNode = pasted.canvas.document.nodes.find(node => plan.newNodeIds.includes(node.id) && node.type === "scene-area")!;
+  const actorNode = pasted.canvas.document.nodes.find(node => plan.newNodeIds.includes(node.id) && node.type === "model3d")!;
+  const area = pasted.canvas.nodeData[areaNode.id]!.sceneArea as unknown as SceneAreaData;
+  const actor = pasted.canvas.nodeData[actorNode.id]!.sharedWorldInstance as unknown as WorldInstanceData;
+  // 导演区中心正好落在鼠标下的地面点；模型保持相对导演区中心的偏移与高度。
+  expect((area.bounds.min.u + area.bounds.max.u) / 2).toBeCloseTo(target.u, 10);
+  expect((area.bounds.min.v + area.bounds.max.v) / 2).toBeCloseTo(target.v, 10);
+  expect(actor.transform.position.u).toBeCloseTo(target.u - 1, 10);
+  expect(actor.transform.position.v).toBeCloseTo(target.v, 10);
+  expect(actor.transform.position.h).toBe(3);
+  expect(area.bounds.max.u - area.bounds.min.u).toBe(4);
+  expect(area.bounds.max.v - area.bounds.min.v).toBe(4);
+});
+
+it("pastes a standalone world model at the pointer ground position", () => {
+  const created = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("world", NOW), [
+    { type: "node.add", node: { id: "actor", type: "model3d" }, nodeData: { sharedWorldInstance: {
+      kind: "world-instance", version: "shared-world-v1", instanceId: "actor-instance",
+      transform: { version: "shared-world-v1", position: { u: 5, v: 7, h: 1.5 }, rotation: [0, 0, 0, 1], scale: 1 }
+    } } }
+  ] as never, { now: NOW });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  const payload = buildCanvasCopyPayload(created.canvas, ["actor"])!;
+  const anchor = { x: 320, y: 240 };
+  const target = canvasPointToGround(anchor);
+  const plan = planCanvasPaste({ canvas: created.canvas, payload, viewport: { x: 0, y: 0, zoom: 1 },
+    anchor: { kind: "point", position: anchor }, createId: (prefix, index) => `${prefix}-copy-${index}` })!;
+  const pasted = applyCanvasCommands(created.canvas, plan.commands, { now: NOW });
+  expect(pasted.ok).toBe(true);
+  if (!pasted.ok) return;
+  const actor = pasted.canvas.nodeData[plan.newNodeIds[0]!]!.sharedWorldInstance as unknown as WorldInstanceData;
+  expect(actor.transform.position.u).toBeCloseTo(target.u, 10);
+  expect(actor.transform.position.v).toBeCloseTo(target.v, 10);
+  expect(actor.transform.position.h).toBe(1.5);
+});
+
+it("keeps a standalone camera pose while its card lands at the pointer", () => {
+  const camera = {
+    kind: "world-camera", version: "shared-world-v1", cameraId: "c", settingsVersion: "1",
+    position: { u: 10, v: 20, h: 1 }, rotation: [0, 0, 0, 1],
+    projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 100 },
+    captureMode: { kind: "static" }, aspect: { width: 16, height: 9 }, boundInstanceId: null
+  };
+  const created = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("world", NOW), [
+    { type: "node.add", node: { id: "cam", type: "world-camera", position: { x: 0, y: 0 } }, nodeData: { worldCamera: camera } }
+  ] as never, { now: NOW });
+  expect(created.ok).toBe(true);
+  if (!created.ok) return;
+  const payload = buildCanvasCopyPayload(created.canvas, ["cam"])!;
+  const anchor = { x: 500, y: 400 };
+  const plan = planCanvasPaste({ canvas: created.canvas, payload, viewport: { x: 0, y: 0, zoom: 1 },
+    anchor: { kind: "point", position: anchor }, createId: (prefix, index) => `${prefix}-copy-${index}` })!;
+  const pasted = applyCanvasCommands(created.canvas, plan.commands, { now: NOW });
+  expect(pasted.ok).toBe(true);
+  if (!pasted.ok) return;
+  const pastedNode = pasted.canvas.document.nodes.find(node => plan.newNodeIds.includes(node.id))!;
+  const pastedCamera = pasted.canvas.nodeData[pastedNode.id]!.worldCamera as unknown as typeof camera;
+  // 镜头卡片中心对齐鼠标；没有随世界集合复制时姿态保持原值。
+  expect(pastedNode.position!.x + pastedNode.width! / 2).toBe(anchor.x);
+  expect(pastedNode.position!.y + pastedNode.height! / 2).toBe(anchor.y);
+  expect(pastedCamera.position).toEqual(camera.position);
+  expect(pastedCamera.cameraId).toBe("cameraId-copy-0");
+});
+
 it("remaps a world collection in the actual paste batch", () => {
   const base = createEmptyWoohaa3ServerCanvas("world", NOW);
   const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "i", transform: { version: "shared-world-v1", position: { u: 1, v: 2, h: 3 }, rotation: [0, 0, 0, 1], scale: 2 } };
@@ -115,7 +202,7 @@ it("remaps a world collection in the actual paste batch", () => {
   expect(result.ok, JSON.stringify(result)).toBe(true);
   if (!result.ok) return;
   const model = result.canvas.nodeData["new-model3d-0"].sharedWorldInstance as typeof instance;
-  const copiedCamera = result.canvas.nodeData["new-world-camera-3"].worldCamera!;
+  const copiedCamera = result.canvas.nodeData["new-world-camera-3"].worldCamera as unknown as typeof camera;
   expect(model.instanceId).toBe("new-instanceId-0");
   expect(model.transform.rotation).toEqual(instance.transform.rotation);
   expect(model.transform.scale).toEqual(instance.transform.scale);
@@ -124,7 +211,11 @@ it("remaps a world collection in the actual paste batch", () => {
   expect(pastedNode.position).toBeUndefined();
   expect(model.transform.position.h).toBe(instance.transform.position.h);
   expect(model.transform.position).not.toEqual(instance.transform.position);
-  expect(copiedCamera).toEqual({ ...camera, cameraId: "new-cameraId-3", boundInstanceId: model.instanceId });
+  // 镜头随世界集合一起平移，保持原来的相对取景与高度；只有身份和绑定被重写。
+  expect({ u: copiedCamera.position.u - camera.position.u, v: copiedCamera.position.v - camera.position.v })
+    .toEqual({ u: model.transform.position.u - instance.transform.position.u, v: model.transform.position.v - instance.transform.position.v });
+  expect(copiedCamera.position.h).toBe(camera.position.h);
+  expect({ ...copiedCamera, position: camera.position }).toEqual({ ...camera, cameraId: "new-cameraId-3", boundInstanceId: model.instanceId });
   expect(result.canvas.nodeData["new-workflow-group-2d-1"].workflowGroup2d).toMatchObject({ groupId: "new-groupId-1", scopeVersion: "new-scopeVersion-1", memberNodeIds: ["new-model3d-0"] });
   expect(result.canvas.nodeData["new-scene-area-2"].sceneArea).toMatchObject({ areaId: "new-areaId-2", scopeVersion: "new-scopeVersion-2" });
   expect(result.canvas.nodeData.m.sharedWorldInstance).toEqual(instance);

@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 import {
   SCENE_AREA_PLAN_CONTRACT_VERSION,
   createEmptyWoohaa3ServerCanvas,
+  createWorldAnimationScript,
+  executeWorldAnimationScript,
+  sampleWorldAnimationInArea,
+  sceneAreaAnimationOrigin,
   normalizeModelDefinition,
   parseCanvasAggregate,
   type SceneAreaPlanRequest,
@@ -210,6 +214,67 @@ async function stopContext(harness: Harness, requestId: string, outcome: { run: 
 }
 
 describe("scene-area authority integration", () => {
+  it("rotates the whole stage atomically, keeps animation in its frame, and restores it through undo/redo", async () => {
+    const seed = canvasFixture();
+    const sourceArea = nodeDataOf(seed, "area").sceneArea;
+    sourceArea.bounds.max.v = 6;
+    sourceArea.animationOrigin = { u: 2, v: 1 };
+    sourceArea.animationScript = createWorldAnimationScript({ duration: 4, loop: true,
+      script: 'motion.instance.tween("complete-a", { property: "position", startTime: 0, endTime: 4, from: [0,0,0], to: [1,1,0] });' });
+    const harness = await openHarness({ canvas: seed });
+    try {
+      const prepared = await harness.service.worldAuthoring!.prepare({ canvasId: seed.id, areaId: "area-main" });
+      if (!prepared.ok) throw new Error(prepared.message);
+      const request: SceneAreaPlanRequest = { contractVersion: SCENE_AREA_PLAN_CONTRACT_VERSION,
+        canvasId: seed.id, operationId: "rotate-1", intent: "rotate", area: prepared.snapshot.area, members: prepared.snapshot.members };
+      const before = await canonical(harness);
+      expect(await harness.service.worldAuthoring!.execute({ canvasId: seed.id, request: { ...request,
+        operationId: "rotate-incomplete", members: { ...request.members, cameras: [] } } }))
+        .toMatchObject({ ok: false, code: "version-conflict" });
+      expect(await canonical(harness)).toEqual(before);
+      const result = await harness.service.worldAuthoring!.execute({ canvasId: seed.id, request });
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) return;
+      const rotated = await canonical(harness);
+      const area = nodeDataOf(rotated, "area").sceneArea;
+      expect(area.bounds).toEqual({ min: { u: 2, v: -2 }, max: { u: 8, v: 8 } });
+      expect(area.animationOrigin).toEqual({ u: 3, v: 6 });
+      expect(area.animationQuarterTurns).toBe(1);
+      expect(area.animationScript).toEqual(sourceArea.animationScript);
+      expect(nodeDataOf(rotated, "complete").sharedWorldInstance.transform.position).toEqual({ u: 3, v: 7, h: 0 });
+      expect(nodeDataOf(rotated, "camera-card").worldCamera.position).toEqual({ u: 7, v: 3, h: 1.5 });
+      expect(nodeDataOf(rotated, "outside")).toEqual(nodeDataOf(seed, "outside"));
+      const compiled = executeWorldAnimationScript(area.animationScript.script, area.animationScript);
+      if (!compiled.ok) throw new Error(compiled.message);
+      expect(sampleWorldAnimationInArea(compiled.ir, 4, sceneAreaAnimationOrigin(area), area.animationQuarterTurns).instances.get("complete-a")?.position)
+        .toEqual({ u: 4, v: 5, h: 0 });
+      expect(await harness.service.worldAuthoring!.execute({ canvasId: seed.id, request })).toMatchObject({ ok: true, duplicate: true });
+      expect(await harness.service.worldAuthoring!.undo({ canvasId: seed.id, operationId: "rotate-1" })).toMatchObject({ ok: true });
+      expect(nodeDataOf(await canonical(harness), "area").sceneArea).toEqual(sourceArea);
+      expect(await harness.service.worldAuthoring!.redo({ canvasId: seed.id, operationId: "rotate-1" })).toMatchObject({ ok: true });
+      for (let turn = 2; turn <= 4; turn++) {
+        const ready = await harness.service.worldAuthoring!.prepare({ canvasId: seed.id, areaId: "area-main" });
+        if (!ready.ok) throw new Error(ready.message);
+        expect(await harness.service.worldAuthoring!.execute({ canvasId: seed.id, request: { ...request,
+          operationId: `rotate-${turn}`, area: ready.snapshot.area, members: ready.snapshot.members } })).toMatchObject({ ok: true });
+      }
+      const restored = await canonical(harness);
+      expect(nodeDataOf(restored, "area").sceneArea).toMatchObject({ bounds: sourceArea.bounds, animationOrigin: sourceArea.animationOrigin, animationQuarterTurns: 0 });
+      expect(nodeDataOf(restored, "complete").sharedWorldInstance.transform.position).toEqual(nodeDataOf(seed, "complete").sharedWorldInstance.transform.position);
+      const ready = await harness.service.worldAuthoring!.prepare({ canvasId: seed.id, areaId: "area-main" });
+      if (!ready.ok) throw new Error(ready.message);
+      const occupied = await harness.service.worldAuthoring!.issueContext({ canvasId: seed.id, requestId: "rotate-lock",
+        runId: "rotate-run", epoch: 1, executionId: "rotate-exec", scope: { kind: "scene-area", areaId: "area-main" } });
+      if (!occupied.ok) throw new Error(occupied.message);
+      expect(await harness.service.worldAuthoring!.execute({ canvasId: seed.id, request: { ...request,
+        operationId: "rotate-occupied", area: ready.snapshot.area, members: ready.snapshot.members } }))
+        .toMatchObject({ ok: false, code: "lease-conflict" });
+      expect(await canonical(harness)).toEqual(restored);
+      await harness.service.worldAuthoring!.revokeContext({ canvasId: seed.id, contextId: occupied.context.contextId });
+      await stopContext(harness, "rotate-lock", occupied);
+    } finally { await closeHarness(harness); }
+  });
+
   it("prepares complete/partial/outside eligibility and rejects forged scope, targets and contexts", async () => {
     const harness = await openHarness();
     try {

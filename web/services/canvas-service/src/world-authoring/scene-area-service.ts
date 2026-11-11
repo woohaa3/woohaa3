@@ -15,6 +15,8 @@
  */
 import {
   planSceneAreaOperation,
+  decodeSceneAreaData,
+  executeWorldAnimationScript,
   stableStringify,
   type SceneAreaPlan,
   type ServerCanvas,
@@ -152,6 +154,10 @@ function validatePlanSource(
     if (readOnly.has(key)) return failure("outside-scope", "只读镜头不能写入");
     if (!writable.has(key)) return failure("outside-scope", "镜头不在可写范围内");
     if (writable.get(key) !== member.version) return failure("version-conflict", "镜头源版本或资格已变化");
+  }
+
+  if (plan.intent === "rotate" && (seen.size !== writable.size || [...writable.keys()].some(key => !seen.has(key)))) {
+    return failure("version-conflict", "片场成员已变化，请重试旋转");
   }
 
   if (context) {
@@ -444,6 +450,20 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
         if (!prepared.ok) return { ok: false as const, code: prepared.code, message: prepared.message };
         const invalid = validatePlanSource(prepared.snapshot, plan, context && "context" in context ? context.context : null);
         if (invalid) return { ok: false as const, code: invalid.code, message: invalid.message };
+        if (plan.intent === "rotate") {
+          const area = decodeSceneAreaData(canvas.nodeData[prepared.snapshot.areaNodeId]?.sceneArea);
+          const script = area.ok ? area.value.animationScript : undefined;
+          if (script) {
+            const compiled = executeWorldAnimationScript(script.script, script);
+            if (!compiled.ok) return { ok: false as const, code: "not-ready" as const, message: "片场动画无法读取，暂时无法旋转" };
+            const instances = new Set(plan.source.members.instances.map(member => member.identity.instanceId));
+            const cameras = new Set(plan.source.members.cameras.map(member => member.identity.cameraId));
+            if ([...compiled.ir.instanceTracks, ...(compiled.ir.partTracks ?? []), ...(compiled.ir.walkTracks ?? [])].some(track => !instances.has(track.targetId))
+              || compiled.ir.cameraTracks.some(track => !cameras.has(track.targetId))) {
+              return { ok: false as const, code: "outside-scope" as const, message: "动画包含片场范围外的对象，暂时无法整体旋转" };
+            }
+          }
+        }
         const mapped = buildForwardCommands(canvas, plan);
         if (!mapped.ok) return { ok: false as const, code: mapped.code, message: mapped.message };
         const receipt: WorldAuthoringCommandReceipt = {

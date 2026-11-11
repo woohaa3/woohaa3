@@ -204,7 +204,7 @@ export function createWorldCaptureProducer(options: {
         for (let index = 0; index < frameCount; index += 1) {
           if (signal?.aborted) return;
           const time = worldCaptureFrameTime(request.key, index);
-          const sample = sampleWorldAnimationInArea(compiled.ir, time, animation.origin);
+          const sample = sampleWorldAnimationInArea(compiled.ir, time, animation.origin, animation.quarterTurns);
           const cameraSample = sample.cameras.get(request.key.cameraId);
           const camera = cameraSample
             ? {

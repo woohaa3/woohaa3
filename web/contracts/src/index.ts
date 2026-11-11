@@ -123,6 +123,7 @@ export * from "./canvas/ground-anchor.js";
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
+export * from "./canvas/world-quarter-turn.js";
 export * from "./canvas/world-animation-script.js";
 export * from "./canvas/world-walk.js";
 export * from "./canvas/world-animation-spatial.js";

@@ -10,11 +10,14 @@ export function createGeminiTransport(): AgentSdkTransport {
   return {
     async run(input) {
       if (!input.modelBaseUrl) return { ok: false, code: "runtime-missing", message: "缺少受控 Gemini 模型传输入口" };
+      // `baseURL` 自带版本段（`.../v1beta`）时清空 apiVersion，避免拼成 `/v1beta/v1beta/...`；
+      // 不带版本段时保留 ADK 缺省的 `v1beta`。
+      const versioned = /\/(?:v\d+[a-z0-9.]*)$/i.test(input.modelBaseUrl.replace(/\/$/, ""));
       const baseUrl = input.modelBaseUrl;
       // ADK's supported protected hook configures *all* requests from its GenAI client.
       class ControlledGemini extends Gemini {
         protected override getHttpOptions() {
-          return { ...super.getHttpOptions(), baseUrl, apiVersion: "" };
+          return { ...super.getHttpOptions(), baseUrl, ...(versioned ? { apiVersion: "" } : {}) };
         }
       }
       const model = new ControlledGemini({ model: input.model, apiKey: input.apiKey, vertexai: false, useInteractionsApi: false });

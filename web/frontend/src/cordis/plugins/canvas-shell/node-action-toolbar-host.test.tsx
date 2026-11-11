@@ -124,3 +124,37 @@ it("keeps the canvas offset, falls below a top-edge node and clamps a huge targe
   expect(huge.bar.x + huge.bar.width).toBeLessThanOrEqual(1092);
   expect(nodeActionToolbarScreenLayout({ ...initialNode, left: 1200 }, bounds, initialPresentation)).toBeNull();
 });
+
+it("shows download beside one rotation button and keeps download usable when rotation is disabled", async () => {
+  const { host, slots, activate, setPresentation } = await mount();
+  setPresentation({ actions: [
+    { id: "download", label: "下载", enabled: true, icon: "download", iconOnly: true },
+    { id: "rotate", label: "旋转 90°", enabled: false, icon: "rotate-clockwise", iconOnly: true }
+  ] });
+  await act(async () => slots.emit());
+  const buttons = [...host.querySelectorAll<HTMLButtonElement>("button")];
+  expect(buttons.map(button => button.title)).toEqual(["下载", "旋转 90°"]);
+  expect(buttons[0]!.disabled).toBe(false);
+  expect(buttons[1]!.disabled).toBe(true);
+  expect(buttons.every(button => button.querySelector("svg") !== null)).toBe(true);
+  await act(async () => { buttons[0]!.click(); buttons[1]!.click(); });
+  expect(activate).toHaveBeenCalledTimes(1);
+  expect(activate).toHaveBeenCalledWith({ nodeId: "a", actionId: "download", menu: false });
+});
+
+it("holds its screen anchor through rotation while hovered, then repositions on leave or viewport movement", async () => {
+  const { host, frame, viewport, setNode } = await mount();
+  const bar = host.querySelector<HTMLElement>(".node-action-toolbar")!;
+  const enter = () => bar.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+  const leave = () => bar.dispatchEvent(new MouseEvent("pointerout", { bubbles: true }));
+  await act(async () => enter());
+  setNode({ ...initialNode, top: 400 });
+  await act(async () => frame.emit());
+  expect(bar.style.top).toBe("252px");
+  await act(async () => leave());
+  expect(bar.style.top).toBe("352px");
+  await act(async () => enter());
+  setNode({ ...initialNode, top: 500 });
+  await act(async () => viewport.emit());
+  expect(bar.style.top).toBe("452px");
+});

@@ -11,6 +11,7 @@
  * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
 import {validateHumanoidWalk,sampleHumanoidWalk,HUMANOID_WALK_PART_IDS,type HumanoidWalkTrack} from "./world-walk.js";
+import { rotateGroundQuarterTurns, rotateWorldQuarterTurn } from "./world-quarter-turn.js";
 import { fnv1a64Hex } from "./content-hash.js";
 import { easingProgress } from "./motion-ir.js";
 import { quatFromEulerYXZDegrees } from "./model-transform.js";
@@ -447,20 +448,27 @@ export function sampleWorldAnimation(
 export function sampleWorldAnimationInArea(
   ir: WorldAnimationIr,
   time: number,
-  origin: GroundPoint
+  origin: GroundPoint,
+  quarterTurns = 0
 ): { instances: Map<string, SampledInstanceMotion>; cameras: Map<string, SampledCameraMotion> } {
   const sample = sampleWorldAnimation(ir, time);
   const shift = <T extends { position?: WorldPoint }>(motions: Map<string, T>) => {
     for (const motion of motions.values()) {
-      if (motion.position) motion.position = {
-        u: motion.position.u + origin.u,
-        v: motion.position.v + origin.v,
-        h: motion.position.h
-      };
+      if (motion.position) {
+        const point = rotateGroundQuarterTurns(motion.position, { u: 0, v: 0 }, quarterTurns);
+        motion.position = { u: point.u + origin.u, v: point.v + origin.v, h: motion.position.h };
+      }
     }
   };
   shift(sample.instances);
   shift(sample.cameras);
+  // Camera tracks contain absolute world orientations; instance tracks are
+  // local deltas composed with the already rotated base transform.
+  for (const motion of sample.cameras.values()) {
+    if (motion.rotation) {
+      for (let i = 0; i < (quarterTurns % 4 + 4) % 4; i++) motion.rotation = rotateWorldQuarterTurn(motion.rotation);
+    }
+  }
   return sample;
 }
 

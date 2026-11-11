@@ -70,7 +70,7 @@ import {
 
 export const SCENE_AREA_PLAN_CONTRACT_VERSION = "scene-area-plan-v1" as const;
 
-export type SceneAreaPlanIntent = "move" | "resize" | "delete-area" | "delete-area-with-contents";
+export type SceneAreaPlanIntent = "move" | "rotate" | "resize" | "delete-area" | "delete-area-with-contents";
 
 export type SceneAreaPlanInstanceIdentity = Extract<WorldObjectIdentity, { kind: "instance" }>;
 export type SceneAreaPlanCameraIdentity = Extract<WorldObjectIdentity, { kind: "camera" }>;
@@ -115,11 +115,12 @@ interface SceneAreaPlanRequestBase {
   members: SceneAreaPlanMemberSet;
 }
 
-/** Four supported intents. `move` preserves height and relative pose; `resize`
+/** Supported intents. `rotate` turns the fixed member set clockwise by 90 degrees; `move` preserves height and relative pose; `resize`
  * is the edge drag / explicit range mode and changes bounds only; the two delete
  * intents differ only in whether the fixed member set is deleted too. */
 export type SceneAreaPlanRequest =
   | (SceneAreaPlanRequestBase & { intent: "move"; delta: GroundPoint })
+  | (SceneAreaPlanRequestBase & { intent: "rotate" })
   | (SceneAreaPlanRequestBase & { intent: "resize"; bounds: GroundAabb })
   | (SceneAreaPlanRequestBase & { intent: "delete-area" })
   | (SceneAreaPlanRequestBase & { intent: "delete-area-with-contents" });
@@ -380,6 +381,7 @@ const REQUEST_BASE_KEYS = ["contractVersion", "canvasId", "operationId", "intent
 
 export const SCENE_AREA_PLAN_REQUEST_KEYS: Readonly<Record<SceneAreaPlanIntent, readonly string[]>> = {
   move: [...REQUEST_BASE_KEYS, "delta"],
+  rotate: REQUEST_BASE_KEYS,
   resize: [...REQUEST_BASE_KEYS, "bounds"],
   "delete-area": REQUEST_BASE_KEYS,
   "delete-area-with-contents": REQUEST_BASE_KEYS

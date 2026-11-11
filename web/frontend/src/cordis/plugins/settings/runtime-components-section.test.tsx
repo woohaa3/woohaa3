@@ -45,7 +45,7 @@ it("shows the npm registry source, progress and the administrator-disabled reaso
     installEnabled: false,
     policy: { installEnabled: false, sources: ["managed", "local"], registry: "https://registry.npmjs.org/" },
     message: "管理员未启用运行时安装",
-    components: [{ id: "dsh", version: "0.2.1-rc.2", status: "unavailable", source: "npm-registry", engine: "dsh-agent-sdk", registry: "https://registry.npmjs.org/", requests: 624, error: "管理员未启用运行时安装", progress: { received: 12, total: 624 } }]
+    components: [{ id: "dsh", version: "0.2.2-rc.1", status: "unavailable", source: "npm-registry", engine: "dsh-agent-sdk", registry: "https://registry.npmjs.org/", requests: 624, error: "管理员未启用运行时安装", progress: { received: 12, total: 624 } }]
   })));
   vi.stubGlobal("fetch", fetcher);
   const element = document.createElement("div");

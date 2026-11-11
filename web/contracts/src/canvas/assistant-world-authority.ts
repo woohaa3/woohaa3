@@ -949,6 +949,7 @@ export type AssistantWorldContextView = {
     scopeVersion: WorldVersion;
     /** Stable origin for position tracks; u/v are offsets from it, h is absolute. */
     animationOrigin: import("./shared-world.js").GroundPoint;
+    animationQuarterTurns?: number;
     /** An explicit null means the current director area has no animation script. */
     animationScript: WorldAnimationScript | null;
   };

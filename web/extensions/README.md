@@ -75,7 +75,10 @@ DashScope 的 `/api/v1/models` 与 OpenAI 兼容 `/compatible-mode/v1/models` �
 （避免凭据被改写到任意主机）；模型目录完全来自 `GET /user-center/v1/models`，代码里没有内置 id 清单，模态只看平台的
 `model_type`（`language` / `picture` / `video`，其余跳过），发现失败时保留上一次成功目录。视频是平台私有的异步任务协议
 （请求头 `Model-Name` + PascalCase 的 `Prompt` / `FileInfos` / `OutputConfig`），所以它在 `routes.ts` 里自己翻译，
-不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。
+不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。文本模型另外以
+`serviceConnectionFactory.assistantProtocol: "chat-completions"` 接入助手：固定端点是
+`https://cephalon.cloud/user-center/v1/model`，宿主据此把站点来源投影成 `sdk-agent` 的共享助手连接；
+该 `create` 只换来源 Key，不读取来源端点，凭据不会发往别的主机。
 
 [bailian-provider](bailian-provider)（阿里云百炼 / DashScope）是**单模态 + 手写目录 + 同步接口**的变体：
 `modelTypes: ["image"]`，文生图与参考图编辑共用一个同步接口，参考图直接放进

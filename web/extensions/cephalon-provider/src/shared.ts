@@ -18,6 +18,13 @@ export const CEPHALON_ORIGIN = "https://cephalon.cloud";
 export const CEPHALON_MODEL_PREFIX = "/user-center/v1/model";
 
 /**
+ * 对话协议的 base：sdk-agent 的 `chat-completions` 协议会在末尾追加 `/chat/completions`。
+ *
+ * 助手的来源端点必须指向这一层，而不是完整的对话 URL。
+ */
+export const CEPHALON_CHAT_BASE = `${CEPHALON_ORIGIN}${CEPHALON_MODEL_PREFIX}`;
+
+/**
  * 平台模型列表。匿名请求当下也能返回模型，但那是公开子集、且随平台上下架变化
  * （2026-11-02 实测：同一时刻匿名 34 条、带 Key 37 条；隔日两侧同为 35 条）。
  * 账号可用的集合以带凭据的响应为准，所以发现一律带 Bearer，不依赖匿名结果。

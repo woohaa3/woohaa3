@@ -90,6 +90,8 @@ export interface SceneAreaData {
    * center (the same point new areas are created with).
    */
   animationOrigin?: GroundPoint;
+  /** Clockwise quarter turns of area-relative animation position tracks; absent means zero. */
+  animationQuarterTurns?: number;
   /** 导演区统一动画脚本（模型实例 + 镜头）；位置轨道相对 `animationOrigin`，播放时钟属于浏览器本地，不写回规范数据。 */
   animationScript?: WorldAnimationScript;
 }

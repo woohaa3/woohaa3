@@ -89,7 +89,7 @@ export interface CanvasRuntimeService {
    * （change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.1）。
    *
    * 使用唯一本地视口与 working 拖动/改尺寸预览；未挂载控制器或节点不存在返回 null。
-   * `part: "action-toolbar"` 返回 accepted 卡片矩形，世界对象/隐藏节点为空；
+   * `part: "action-toolbar"` 返回 accepted 卡片矩形或世界模型/导演区真实投影，隐藏节点为空；
    * Web 动作栏据此锚定，不持久化横条位置、不建第二相机。
    */
   nodeScreenRect(nodeId: string, part?: "scope-title" | "panel" | "action-toolbar"): import("@woohaa3/contracts").ScreenRect | null;

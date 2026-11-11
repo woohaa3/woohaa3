@@ -78,7 +78,13 @@ export const DSH_DISABLED_PLUGINS: readonly string[] = [
   "commands",
   "command-feedback",
   "command-compact",
-  "command-goal"
+  "command-goal",
+  // sdk profile 0.2.2 adds these model-facing built-ins. Keep the transport
+  // surface limited to the host-controlled MCP gateway.
+  "schedule",
+  "tool-schedule",
+  "tool-ask-user",
+  "present"
 ];
 
 /** dsh 运行时入口（绝对文件路径）；缺依赖时由调用方报 runtime-missing。 */
@@ -123,6 +129,21 @@ export function readDshMaxOutputTokens(env: NodeJS.ProcessEnv = process.env): nu
 }
 
 /**
+ * 模型上下文窗口（输入 + 输出的总预算）。
+ *
+ * dsh 用它做容量判断、压缩触发与溢出识别；缺省是 262144。声明得偏小会让运行时低估容量，
+ * 也会让压缩的 `W − O − B` 直接变成负数（例如 128000 配 65536 输出预留时压缩失效）。
+ * 部署可用 `WOOHAA3_SDK_AGENT_CONTEXT_WINDOW` 按实际接入的模型调整。
+ */
+export const DSH_DEFAULT_CONTEXT_WINDOW = 262144;
+
+export function readDshContextWindow(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.WOOHAA3_SDK_AGENT_CONTEXT_WINDOW ?? "").trim();
+  const parsed = Number(raw);
+  return raw !== "" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DSH_DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
  * 本轮 profile 补丁。
  *
  * 只复用 base 已挂载的 `llm-pi-ai` 适配器（再插一个实例会让 route 注册冲突），
@@ -133,6 +154,7 @@ export function buildDshPatch(input: {
   model: string;
   apiKeyEnv: string;
   maxTokens?: number;
+  contextWindow?: number;
   mcp: { name: string; url: string; bearerToken: string } | null;
 }): string {
   const lines = [
@@ -143,11 +165,24 @@ export function buildDshPatch(input: {
     "        api: openai-completions",
     `        baseURL: ${JSON.stringify(input.modelBaseUrl)}`,
     `        apiKeyEnv: ${JSON.stringify(input.apiKeyEnv)}`,
+    // Target execution must reach an authorized tool call promptly. The
+    // provider default can spend the whole turn reasoning before it emits one.
+    "        reasoning: off",
+    "        compat:",
+    "          supportsReasoningEffort: true",
     "        models:",
     `          - id: ${JSON.stringify(input.model)}`,
     `            name: ${JSON.stringify(input.model)}`,
     "            input: [text, image]",
-    "            contextWindow: 128000",
+    `            contextWindow: ${input.contextWindow ?? DSH_DEFAULT_CONTEXT_WINDOW}`,
+    // `off` is otherwise encoded by omitting the field.  The gateway used by
+    // Woohaa treats omission as its own default (reasoning enabled), so keep
+    // the model reasoning-capable and map the off level to an explicit wire
+    // value.  A non-off level is required by dsh's config schema even though
+    // this profile always selects off.
+    "            reasoningEfforts:",
+    "              off: none",
+    "              minimal: none",
     `            maxTokens: ${input.maxTokens ?? DSH_DEFAULT_MAX_OUTPUT_TOKENS}`
   ];
   for (const id of DSH_DISABLED_PLUGINS) lines.push(`- id: ${id}`, "  disabled: true");
@@ -198,7 +233,12 @@ function assistantTextOf(data: Record<string, unknown> | undefined): string {
  * `stream` 是这条消息的完整分片快照，末尾的 `finish` 分片带模型级终止原因。输出额度写满时
  * dsh 会把 tool-call 块整个丢弃，只剩「正常结束」——所以必须从原始原因才能判断是不是截断。
  */
-function assistantBlocksOf(data: Record<string, unknown> | undefined): { blocks: string[]; finish?: string } {
+function assistantBlocksOf(data: Record<string, unknown> | undefined): {
+  blocks: string[];
+  finish?: string;
+  /** 本次请求的真实用量：推理 token 也计入输出帽，必须能看见是谁吃掉了额度。 */
+  usage?: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number };
+} {
   const message = data?.message as Record<string, unknown> | undefined;
   const content = Array.isArray(message?.content) ? message.content : [];
   const blocks = content.map((block) => {
@@ -217,7 +257,14 @@ function assistantBlocksOf(data: Record<string, unknown> | undefined): { blocks:
       break;
     }
   }
-  return { blocks, ...(finish !== undefined ? { finish } : {}) };
+  const raw = data?.usage as Record<string, unknown> | undefined;
+  const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const usage = raw && count(raw.outputTokens) !== undefined ? {
+    ...(count(raw.inputTokens) !== undefined ? { inputTokens: count(raw.inputTokens) } : {}),
+    outputTokens: count(raw.outputTokens)!,
+    ...(count(raw.reasoningTokens) !== undefined ? { reasoningTokens: count(raw.reasoningTokens) } : {})
+  } : undefined;
+  return { blocks, ...(finish !== undefined ? { finish } : {}), ...(usage ? { usage } : {}) };
 }
 
 /**
@@ -247,14 +294,14 @@ export function projectDshEvents(
   /** `turn/end` 的原始 reason 文本（诊断用；不参与业务判断）。 */
   turnEndReason?: string;
   /** 每条助手消息的块类型与模型级终止原因（诊断与截断归因用）。 */
-  assistantMessages: Array<{ blocks: string[]; finish?: string }>;
+  assistantMessages: Array<{ blocks: string[]; finish?: string; usage?: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number } }>;
 } {
   let assistantText = "";
   let turnEndReason: string | undefined;
   const toolCalls: ModelToolCall[] = [];
   const seen = new Set<string>();
   let turnEnd: string | undefined;
-  const assistantMessages: Array<{ blocks: string[]; finish?: string }> = [];
+  const assistantMessages: Array<{ blocks: string[]; finish?: string; usage?: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number } }> = [];
   // 无稳定 message id 时，每个完整 `assistant/message` 各成一条消息。
   let messageSequence = 0;
   const strip = (name: string): string =>
@@ -317,6 +364,29 @@ export function projectDshEvents(
   return { assistantText, toolCalls, assistantMessages, ...(turnEnd !== undefined ? { turnEnd } : {}), ...(turnEndReason !== undefined ? { turnEndReason } : {}) };
 }
 
+/**
+ * A common DeepSeek failure mode is a normal stop immediately after the
+ * preparatory reads. The model has the right context in the Harness session,
+ * but ends the turn before issuing a write. One continuation on that same
+ * session is safe: the gateway still owns the grant and de-duplicates calls,
+ * while a second continuation is deliberately not attempted.
+ */
+export function shouldContinueAfterReadOnlyTurn(projected: ReturnType<typeof projectDshEvents>): boolean {
+  return projected.toolCalls.length > 0
+    && projected.toolCalls.every(call => call.name.startsWith("get_") || call.name === "sample_scene_animation" || call.name === "read_mcp_resource" || call.name === "list_mcp_resources" || call.name === "list_mcp_resource_templates")
+    && projected.turnEnd !== "max-tokens"
+    && projected.turnEnd !== "blocked"
+    && projected.turnEnd !== "error"
+    && projected.turnEnd !== "aborted";
+}
+
+const READ_ONLY_CONTINUATION_PROMPT = [
+  "继续完成用户刚才要求的画布创作。",
+  "你上一轮已经成功读取了权威上下文和模型 API；读取只是准备阶段，不能结束目标回合。",
+  "现在必须立即调用至少一个本轮已授权的写工具（例如 create_world_model、replace_world_model_content、move_world_model、create_world_camera、set_world_camera 或 set_scene_animation_script），并等待工具成功回执。",
+  "不要再次只发送计划、确认或说明文字；如果确实缺少一个关键字段，可以读取一次后立刻写入。"
+].join("\n");
+
 type DshHarness = import("@deepseek-ai/dsh-sdk-client").DeepSeekHarness;
 
 export function createDshTransport(options: { configDir: string; workspaceDir: string; runtimeEntry?: string }): AgentSdkTransport {
@@ -356,6 +426,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           model: input.model,
           apiKeyEnv: credentialEnv,
           maxTokens: readDshMaxOutputTokens(),
+          contextWindow: readDshContextWindow(),
           mcp: input.mcp
         }), { mode: 0o600 });
 
@@ -379,30 +450,49 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
         const onAbort = () => { cancelled = true; void harness?.close().catch(() => undefined); };
         input.signal.addEventListener("abort", onAbort, { once: true });
         try {
-          const result = await harness.run(input.images?.length ? [{ type: "text", text: input.prompt }, ...input.images.map(image => ({ type: "image" as const, mimeType: image.contentType as "image/png" | "image/jpeg" | "image/webp" | "image/gif", data: Buffer.from(image.bytes).toString("base64") }))] : input.prompt, { onNotification: () => undefined });
+          const promptInput = input.images?.length ? [{ type: "text" as const, text: input.prompt }, ...input.images.map(image => ({ type: "image" as const, mimeType: image.contentType as "image/png" | "image/jpeg" | "image/webp" | "image/gif", data: Buffer.from(image.bytes).toString("base64") }))] : input.prompt;
+          let result = await harness.run(promptInput, { onNotification: () => undefined });
           if (cancelled || input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
-          const projected = projectDshEvents(
+          let projected = projectDshEvents(
             sessionEvents(result.notifications),
             input.mcp?.name ?? null,
             (event) => input.onEvent(event)
           );
+          // Keep the continuation in the same Harness session so the model can
+          // see the read-tool results instead of starting a contextless retry.
+          let continued = false;
+          if (shouldContinueAfterReadOnlyTurn(projected)) {
+            continued = true;
+            const continuation = await harness.run(READ_ONLY_CONTINUATION_PROMPT, { sessionId: result.sessionId, onNotification: () => undefined });
+            if (cancelled || input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
+            const next = projectDshEvents(sessionEvents(continuation.notifications), input.mcp?.name ?? null, (event) => input.onEvent(event));
+            projected = {
+              assistantText: projected.assistantText + next.assistantText,
+              toolCalls: [...projected.toolCalls, ...next.toolCalls],
+              assistantMessages: [...projected.assistantMessages, ...next.assistantMessages],
+              ...(next.turnEnd !== undefined ? { turnEnd: next.turnEnd } : projected.turnEnd !== undefined ? { turnEnd: projected.turnEnd } : {})
+            };
+            result = { ...continuation, finalResponse: continuation.finalResponse || result.finalResponse };
+          }
           // `finalResponse` 只是区间内最后一条助手文本，不与 prompt 因果绑定：
           // 只在事件投影为空时回落到它。
           const assistantText = projected.assistantText !== "" ? projected.assistantText : result.finalResponse;
           const modelFinish = projected.assistantMessages.at(-1)?.finish;
           // 结构性诊断：dsh 对「写满额度」「工具调用块被丢弃」都只记一条 turn/end，宿主无法区分。
-          // 执行器进程的 stdout/stderr 被 supervisor 丢弃，所以只读回合把块类型与终止原因落到本地文件。
-          if (projected.toolCalls.every((call) => call.name.startsWith("get_"))) {
-            void writeFile(path.join(os.tmpdir(), "woohaa-dsh-last-turn.json"), JSON.stringify({
-              at: new Date().toISOString(),
-              model: input.model,
-              turnEnd: projected.turnEnd ?? null,
-              modelFinish: modelFinish ?? null,
-              calls: projected.toolCalls.map((call) => call.name),
-              messages: projected.assistantMessages,
-              assistantTextLength: assistantText.length
-            }, null, 1), { mode: 0o600 }).catch(() => undefined);
-          }
+          // 执行器进程的 stdout/stderr 被 supervisor 丢弃，所以每轮都保留一个有界、0600 的本地摘要；
+          // 这不进入会话账本，也不保存凭据或完整工具参数，但能核对原始结束原因和隐藏资源工具。
+          void writeFile(path.join(os.tmpdir(), "woohaa-dsh-last-turn.json"), JSON.stringify({
+            at: new Date().toISOString(),
+            model: input.model,
+            continued,
+            turnEnd: projected.turnEnd ?? null,
+            modelFinish: modelFinish ?? null,
+            calls: projected.toolCalls.map((call) => call.name),
+            messages: projected.assistantMessages,
+            assistantText: assistantText.slice(-4000),
+            assistantTextLength: assistantText.length,
+            finalResponse: String(result.finalResponse ?? "").slice(-4000)
+          }, null, 1), { mode: 0o600 }).catch(() => undefined);
           // dsh 只有「正常结束」才会 resolve；`blocked`/`error` 不是模型完成，必须如实报错。
           if (projected.turnEnd === "blocked") return { ok: false, code: "turn-blocked", message: "回合被运行时阻塞，未执行写入；请重试" };
           if (projected.turnEnd === "error") {

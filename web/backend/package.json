@@ -26,7 +26,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis": "4.1.0",
     "@sdppp/pptask": "workspace:*",
     "@woohaa3/application-service": "workspace:*",
     "@woohaa3/canvas-service": "workspace:*",

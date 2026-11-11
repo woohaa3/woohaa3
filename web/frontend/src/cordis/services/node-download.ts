@@ -4,6 +4,8 @@ import {
   isGlbModelNodeData,
   randomId,
   readGlbModelAssetId,
+  decodeSceneAreaData,
+  type WorldAuthoringPrepareOutcome,
   type ServerCanvas,
   type StoredAsset
 } from "@woohaa3/contracts";
@@ -13,10 +15,12 @@ import { downloadFilename, saveDownload } from "./file-download.js";
 type DownloadSnapshot = { busy: boolean; error: boolean; text: string } | null;
 type DownloadOptions = {
   getCanvas(): ServerCanvas | null;
+  getCanonicalCanvas?(): ServerCanvas | null;
   mediaContent?: Pick<import("../../extension-api/media-content.js").MediaContentService, "resolve">;
   /** 第三参数是画布身份：浏览器读画布媒体时带 `?canvas=` 提示。 */
   readMedia?: (asset: StoredAsset, signal: AbortSignal, canvasId?: string) => Promise<Blob>;
   exportModel?: (source: string, version: unknown, signal: AbortSignal, modelRig?: unknown) => Promise<Blob>;
+  prepareSceneArea?: (input: { canvasId: string; areaId: string }, signal: AbortSignal) => Promise<WorldAuthoringPrepareOutcome>;
   save?: (blob: Blob, filename: string) => void;
 };
 
@@ -52,7 +56,17 @@ export class NodeDownloadService {
       if (!canvas || !node) throw new Error("作品已不存在，无法下载");
       const data = canvas.nodeData[nodeId];
       let blob: Blob;
-      if (node.type === "model3d") {
+      if (node.type === "scene-area") {
+        const area = decodeSceneAreaData(data?.sceneArea);
+        if (!area.ok || !this.options.prepareSceneArea) throw new Error("片场尚未就绪，暂时无法下载");
+        const ready = await this.options.prepareSceneArea({ canvasId: canvas.id, areaId: area.value.areaId }, abort.signal);
+        if (!ready.ok) throw new Error(ready.message);
+        abort.signal.throwIfAborted();
+        const current = this.options.getCanonicalCanvas?.() ?? this.options.getCanvas();
+        if (!current || current.id !== canvas.id) throw new Error("画布已切换，请重新下载");
+        const { downloadSceneAreaBlob } = await import("./scene-area-download.js");
+        blob = await downloadSceneAreaBlob(current, nodeId, ready.snapshot, abort.signal, this.options.readMedia ?? readCanonicalMedia);
+      } else if (node.type === "model3d") {
         if (isGlbModelNodeData(data)) {
           // 文件模型：下载**原始 GLB 字节**（change: 2026-10-28-support-glb-model-nodes）。
           const assetId = readGlbModelAssetId(data);
@@ -77,7 +91,7 @@ export class NodeDownloadService {
         if (!blob.type.startsWith(`${node.type}/`)) throw new Error("资源返回的文件类型不正确，请重试");
       } else throw new Error("此类节点暂不支持下载");
       abort.signal.throwIfAborted();
-      const fallback = node.type === "model3d" ? "3D 模型" : node.type === "video" ? "视频" : "图片";
+      const fallback = node.type === "scene-area" ? "片场" : node.type === "model3d" ? "3D 模型" : node.type === "video" ? "视频" : "图片";
       const filename = downloadFilename(typeof data?.title === "string" ? data.title : fallback, blob.type);
       (this.options.save ?? saveDownload)(blob, filename);
       this.publish({ busy: false, error: false, text: "已交给浏览器下载" });

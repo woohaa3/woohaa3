@@ -1,3 +1,4 @@
+import { projectWorldRotationPreview } from "../../services/world-rotation-preview.js";
 import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnostics.js";
 /**
  * 浏览器画布交互控制器：共享输入路由、瞬时态、渲染调度和生命周期。
@@ -764,15 +765,18 @@ export function installInteractionController(options: InteractionControllerOptio
       setSelection([nodeId]); return true;
     },
     nodeScreenRect: (nodeId, part) => {
-      if (part === "action-toolbar") {
+      const canvas = projectWorldRotationPreview(workingCanvasOf(woohaa3CanvasStore.getState()));
+      const area = decodeSceneAreaData(canvas?.nodeData[nodeId]?.sceneArea);
+      if (part === "action-toolbar" && !area.ok) {
         // Match the old renderer toolbar eligibility and anchor using the accepted card projection.
         const node = frameSubmission.renderedNode(nodeId);
-        if (!node || node.chrome?.kind === "none") return null;
-        const point = worldToClient({ x: node.x, y: node.y });
-        const zoom = activeViewport().zoom;
-        return { left: point.x, top: point.y, width: node.width * zoom, height: node.height * zoom };
+        if (!node) return null;
+        if (node.chrome?.kind !== "none") {
+          const point = worldToClient({ x: node.x, y: node.y });
+          const zoom = activeViewport().zoom;
+          return { left: point.x, top: point.y, width: node.width * zoom, height: node.height * zoom };
+        }
       }
-      const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
       // 面板锚点必须跟随**当前渲染姿态**：导演区动画会覆盖镜头/实例位姿，权威 nodeData 是动画前
       // 的基准；直接用规范位姿会把面板留在动画前的位置。
       const rendered = frameSubmission.renderedNode(nodeId);
@@ -782,7 +786,6 @@ export function installInteractionController(options: InteractionControllerOptio
         return worldToClient({ x: point.x, y: point.y });
       };
       // 导演区没有卡片：用地面范围投影后的屏幕包围盒定位底部面板。
-      const area = decodeSceneAreaData(canvas?.nodeData[nodeId]?.sceneArea);
       if (area.ok) {
         const bounds = sceneAreaPreviews.get(nodeId) ?? area.value.bounds;
         return part === "scope-title" ? sceneAreaTitleRect(bounds, project, activeViewport().zoom) : sceneAreaPanelRect(bounds, project);
@@ -793,7 +796,7 @@ export function installInteractionController(options: InteractionControllerOptio
       if (instance.ok) {
         // 动画/拖动预览后的实例位姿优先；没有已提交场景时退回权威位姿。
         const transform = rendered?.sharedWorldInstance?.transform ?? instance.value.transform;
-        if (part === "panel") {
+        if (part === "panel" || part === "action-toolbar") {
           const localAabb = options.getModelResources?.().get(nodeId)?.aabb;
           const worldAabb = worldInstanceAabb(transform, localAabb);
           if (worldAabb) {

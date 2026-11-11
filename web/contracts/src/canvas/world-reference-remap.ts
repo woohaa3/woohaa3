@@ -514,6 +514,7 @@ function remapWorldPayload(
           areaId,
           scopeVersion: world.value.scopeVersion,
           animationOrigin: sceneAreaAnimationOrigin(world.value),
+          ...(world.value.animationQuarterTurns !== undefined ? { animationQuarterTurns: world.value.animationQuarterTurns } : {}),
           bounds: { min: world.value.bounds.min, max: world.value.bounds.max },
           ...(animationScript ? { animationScript } : {})
         }

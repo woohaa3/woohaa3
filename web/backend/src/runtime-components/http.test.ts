@@ -80,12 +80,12 @@ it("explains a disabled install policy instead of claiming desktop-only", async 
 });
 
 it("exposes the npm registry policy and accepts switching a component to it", async () => {
-  const configure = vi.fn(async () => ({ id: "dsh", version: "0.2.1-rc.2", source: "npm-registry", configured: true, status: "missing" }));
+  const configure = vi.fn(async () => ({ id: "dsh", version: "0.2.2-rc.1", source: "npm-registry", configured: true, status: "missing" }));
   const url = await serve({
     configPath: "/tmp/config.json",
     inspect: vi.fn(),
     configure,
-    list: vi.fn(async () => [{ id: "dsh", version: "0.2.1-rc.2", source: "npm-registry", configured: true, status: "missing", engine: "dsh-agent-sdk", registry: "https://registry.npmjs.org/" }]),
+    list: vi.fn(async () => [{ id: "dsh", version: "0.2.2-rc.1", source: "npm-registry", configured: true, status: "missing", engine: "dsh-agent-sdk", registry: "https://registry.npmjs.org/" }]),
     policy: () => ({ installEnabled: true, sources: ["npm-registry", "managed", "local"], registry: "https://registry.npmjs.org/" })
   });
   const snapshot = await (await fetch(url)).json();

@@ -5,7 +5,7 @@
  * 补丁生成（隔离面）与事件投影（工具名去掉 MCP 前缀、去重、不读推理）两处易回归点。
  */
 import { describe, expect, it, vi } from "vitest";
-import { buildDshPatch, DSH_DEFAULT_MAX_OUTPUT_TOKENS, DSH_DISABLED_PLUGINS, projectDshEvents, readDshMaxOutputTokens } from "./dsh-transport.js";
+import { buildDshPatch, DSH_DEFAULT_CONTEXT_WINDOW, DSH_DEFAULT_MAX_OUTPUT_TOKENS, DSH_DISABLED_PLUGINS, projectDshEvents, readDshContextWindow, readDshMaxOutputTokens, shouldContinueAfterReadOnlyTurn } from "./dsh-transport.js";
 
 describe("dsh profile 补丁", () => {
   it("模型只走给定 baseURL 与短期凭据变量，不启用官方账号插件", () => {
@@ -22,8 +22,12 @@ describe("dsh profile 补丁", () => {
     expect(patch).toContain('baseURL: "http://127.0.0.1:1234/v1"');
     expect(patch).toContain('apiKeyEnv: "WOOHAA_MODEL_API_KEY"');
     expect(patch).toContain('"controlled-model"');
+    expect(patch).toContain("          supportsReasoningEffort: true");
+    expect(patch).toContain("              off: none");
+    expect(patch).toContain("              minimal: none");
+    expect(patch).not.toContain("reasoningEfforts: false");
     // 真实 API Key 不进入配置文件（只写变量名）。
-    expect(patch).not.toMatch(/sk-|Bearer /);
+    expect(patch).not.toMatch(/(?:sk-[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9]{20,})/);
   });
 
   it("显式声明输出预算，并允许按部署调整", () => {
@@ -40,6 +44,20 @@ describe("dsh profile 补丁", () => {
     expect(read()).toBe(DSH_DEFAULT_MAX_OUTPUT_TOKENS);
     expect(read("48000")).toBe(48000);
     for (const invalid of ["", "0", "-1", "many", "1.5"]) expect(read(invalid)).toBe(DSH_DEFAULT_MAX_OUTPUT_TOKENS);
+  });
+
+  it("上下文窗口按模型真实容量声明，并满足压缩预留公式", () => {
+    const patch = buildDshPatch({ modelBaseUrl: "http://127.0.0.1:1/v1", model: "m", apiKeyEnv: "K", mcp: null });
+    expect(patch).toContain(`            contextWindow: ${DSH_DEFAULT_CONTEXT_WINDOW}`);
+    // 256K 窗口是当前接入模型的真实容量；声明成 128K 会把压缩预留算成负数。
+    expect(DSH_DEFAULT_CONTEXT_WINDOW).toBe(262144);
+    expect(DSH_DEFAULT_CONTEXT_WINDOW - DSH_DEFAULT_MAX_OUTPUT_TOKENS - 65536).toBeGreaterThan(0);
+    const custom = buildDshPatch({ modelBaseUrl: "http://127.0.0.1:1/v1", model: "m", apiKeyEnv: "K", contextWindow: 128000, mcp: null });
+    expect(custom).toContain("            contextWindow: 128000");
+    const read = (value?: string) => readDshContextWindow((value === undefined ? {} : { WOOHAA3_SDK_AGENT_CONTEXT_WINDOW: value }) as NodeJS.ProcessEnv);
+    expect(read()).toBe(DSH_DEFAULT_CONTEXT_WINDOW);
+    expect(read("131072")).toBe(131072);
+    for (const invalid of ["", "0", "-5", "lots"]) expect(read(invalid)).toBe(DSH_DEFAULT_CONTEXT_WINDOW);
   });
 
   it("关闭全部内建工具与 plan-mode，讨论回合不挂 MCP", () => {
@@ -160,5 +178,29 @@ describe("dsh 事件投影", () => {
       () => undefined
     );
     expect(result.toolCalls).toEqual([{ id: "call_2", name: "submit_model_script", argumentsJson: '{"size":2}' }]);
+  });
+
+  it("只读工具正常结束时允许同一 Harness 会话续回合", () => {
+    expect(shouldContinueAfterReadOnlyTurn({
+      assistantText: "我先读取上下文",
+      toolCalls: [
+        { id: "1", name: "get_world_context", argumentsJson: "{}" },
+        { id: "2", name: "get_model_api", argumentsJson: "{}" }
+      ],
+      assistantMessages: [],
+      turnEnd: "completed"
+    })).toBe(true);
+    expect(shouldContinueAfterReadOnlyTurn({
+      assistantText: "已写入",
+      toolCalls: [{ id: "1", name: "create_world_model", argumentsJson: "{}" }],
+      assistantMessages: [],
+      turnEnd: "completed"
+    })).toBe(false);
+    expect(shouldContinueAfterReadOnlyTurn({
+      assistantText: "截断",
+      toolCalls: [{ id: "1", name: "get_world_context", argumentsJson: "{}" }],
+      assistantMessages: [],
+      turnEnd: "max-tokens"
+    })).toBe(false);
   });
 });

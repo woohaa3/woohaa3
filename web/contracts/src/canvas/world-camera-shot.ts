@@ -38,6 +38,7 @@ export type WorldCameraShotAnimation = {
   readonly duration: number;
   readonly loop: boolean;
   readonly origin: GroundPoint;
+  readonly quarterTurns?: number;
 };
 
 export type WorldCameraShotContext = {
@@ -134,6 +135,7 @@ type AreaEntry = {
   areaId: WorldId;
   bounds: { min: GroundPoint; max: GroundPoint };
   origin: GroundPoint;
+  quarterTurns?: number;
   script: WorldAnimationScript;
   ir: WorldAnimationIr;
 };
@@ -151,6 +153,7 @@ function animatedAreas(canvas: ServerCanvas): AreaEntry[] {
       areaId: decoded.value.areaId,
       bounds: decoded.value.bounds,
       origin: sceneAreaAnimationOrigin(decoded.value),
+      quarterTurns: decoded.value.animationQuarterTurns,
       script: decoded.value.animationScript,
       ir
     });
@@ -166,7 +169,8 @@ function animationOf(area: AreaEntry): WorldCameraShotAnimation {
     sourceHash: area.script.sourceHash,
     duration: area.script.duration,
     loop: area.script.loop,
-    origin: { ...area.origin }
+    origin: { ...area.origin },
+    ...(area.quarterTurns !== undefined ? { quarterTurns: area.quarterTurns } : {})
   };
 }
 

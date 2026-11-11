@@ -181,6 +181,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const sourceValid = !source || !!currentSource && currentSource.enabled && !currentSource.removed && currentSource.configRevision === source.configRevision && currentSource.credentialEpoch === source.credentialEpoch;
       return sourceValid && !controller.signal.aborted && (!options.admission || options.admission()) && current?.configRevision === frozen.configRevision && current.credentialEpoch === frozen.credentialEpoch;
     };
+    const trace = (step: string, extra: Record<string, unknown> = {}) => options.logger?.({ event: "sdk-agent-turn-trace", step, connectionId: record.connectionId, action: input.intent.action, model, ...extra });
     let relay: Awaited<ReturnType<typeof createModelTransport>> | undefined;
     let gateway: Awaited<ReturnType<typeof createMcpTurnGateway>> | undefined;
     let stage: "connection" | "target" | "execution" = "connection";
@@ -225,7 +226,9 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         }
       }
       stage = "execution";
+      trace("gateway-ready", { tools: toolNames.length });
       const native = input.candidate || engine.engine === "dsh-agent-sdk" ? null : await options.service.resolveNativeBinding({ owner: input.owner, connectionId: record.connectionId, context });
+      const engineModel = model;
       const sdk = createAgentSdkAdapter({ kind: engine.engine, apiKey: relay.token, modelBaseUrl: relay.baseUrl, resourceKey,
         configDir: options.agentSdkDirs?.configDir ?? "", workspaceDir: options.agentSdkDirs?.workspaceDir ?? "", transport,
         probeRuntime: async () => ({ ok: true }) });
@@ -234,12 +237,13 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       const prompt = (history ? `会话历史：\n${history}\n\n` : "") + preparedPromptText(prepared);
       // 模型自己声明过的工具调用：与网关实际收到的写入次数对比，能区分「模型没写」和「调用没送达」。
       const suggestedTools: string[] = [];
-      const result = await sdk.run({ model, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
+      trace("sdk-start", { engine: engine.engine, engineModel, effort: input.intent.reasoningEffort ?? null, tools: gateway?.tools?.length ?? 0 });
+      const result = await sdk.run({ model: engineModel, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
         ...(input.candidate
           ? { images: input.candidate.images, outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : input.candidate.outputSchema }
           : input.images?.length ? { images: input.images }
           : {}),
-        ...(gateway ? { toolToken: gateway.token, mcpEndpoint: { name: "woohaa", url: gateway.url } } : {}),
+        ...(gateway ? { toolToken: gateway.token, mcpEndpoint: { name: "woohaa", url: gateway.url, bearerToken: gateway.token } } : {}),
         // Discussion cannot resurrect a thread carrying a previous target grant.
         ...(native && input.intent.action !== "discuss" ? { resumeNativeId: native.nativeId } : {}),
         onText: (content, meta) => input.emit({
@@ -251,6 +255,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         }) });
       await gateway?.drain();
       const receipts = gateway?.receipts ?? [];
+      trace("sdk-done", { ok: result.ok, finishReason: result.ok ? result.outcome.finishReason : result.code, textLength: result.ok ? result.outcome.assistantText.length : 0, toolCalls: gateway?.receivedTools ?? [], receipts: receipts.length });
       const receipt = { kind: "canvas-commands", commands: receipts };
       if (!result.ok) return { status: receipts.length ? "partial" : result.code === "cancelled" ? "cancelled" : "failed", error: { code: result.code, message: result.message }, ...(receipts.length ? { receipt } : {}) };
       if (input.candidate && !await valid()) return controller.signal.aborted ? { status: "cancelled" } : fail("version-conflict", "助手连接已变更，结果未采用");
@@ -312,7 +317,12 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";
       return "disconnected";
     },
-    models: async ({ owner }) => ({ models: (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId).flatMap((record) => (record.models ?? []).map((id) => ({ id, label: id }))) }),
+    // 目录与连接描述必须给同一份档位：只返回 { id, label } 会让选择器看不到 Variant。
+    models: async ({ owner }) => ({
+      models: (await options.service.list(owner))
+        .filter((record) => record.adapterId === adapter.adapterId)
+        .flatMap((record) => (record.models ?? []).map((id) => ({ id, label: id, reasoningEfforts: sdkReasoningEfforts(adapter.adapterId, id) })))
+    }),
     run: async (input) => {
       const controller = input.candidate ? new AbortController() : null;
       const abort = () => controller?.abort();

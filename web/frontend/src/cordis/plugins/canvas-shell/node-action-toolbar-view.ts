@@ -7,7 +7,7 @@ import { nodeCapabilityContext, type NodeCapabilityResolver } from "@woohaa3/con
  * 的纯数据判定，不测量 DOM、不触发布局、不写画布。几何定位由 contracts 的
  * `nodeActionToolbarLayout` 负责。
  */
-import { isGlbModelNodeData, readGlbModelAssetId } from "@woohaa3/contracts";
+import { decodeSceneAreaData, isGlbModelNodeData, readGlbModelAssetId } from "@woohaa3/contracts";
 import type { ServerCanvas } from "@woohaa3/contracts";
 import { resolveNodeActionToolbarTarget } from "@woohaa3/contracts";
 
@@ -57,6 +57,10 @@ export function resolveNodeDownloadAvailability(input: {
   const { canvas, nodeId, nodeType } = input;
   if (!canvas) return { available: false, reason: "作品尚未加载，暂时无法下载" };
   const data = canvas.nodeData[nodeId];
+  if (nodeType === "scene-area") {
+    return decodeSceneAreaData(data?.sceneArea).ok ? { available: true }
+      : { available: false, reason: "片场尚未就绪，暂时无法下载" };
+  }
   if (nodeType === "model3d") {
     if (isGlbModelNodeData(data)) {
       const assetId = readGlbModelAssetId(data);

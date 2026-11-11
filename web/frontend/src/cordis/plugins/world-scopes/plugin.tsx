@@ -1,6 +1,8 @@
+import { installWorldRotationControls } from "./rotation-controls.js";
 import type { Context, Plugin } from "@deepseek-ai/cordis";
 import { canvasGroupAcceptsMember, decodeWorkflowGroupData } from "@woohaa3/contracts";
 import { definePlugin } from "../../plugin.js";
+import { MODEL_SCENES_SERVICE } from "../service-keys.js";
 import { installWorldScopeGestureControls } from "./gesture-controls.js";
 import { SceneAreaTimeline } from "./scene-area-timeline.js";
 import { currentGroupActions, type GroupArrangeMode } from "./group-actions.js";
@@ -23,6 +25,9 @@ export function worldScopesExtension(canvasId: string | undefined): Plugin.Funct
     // gestures package; this plugin only installs and disposes them with the page scope.
     const disposeGestures = installWorldScopeGestureControls(ctx, canvasId);
     ctx.effect(() => disposeGestures, "world-scope-gesture-controls");
+
+    const disposeRotation = installWorldRotationControls(ctx, canvasId);
+    ctx.effect(() => disposeRotation, "world-rotation-controls");
 
     /** 组卡片的顶部栏：宫格 / 竖排 / 横排，全部纯图标。 */
     const groupView = (nodeId: string) => {
@@ -75,6 +80,6 @@ export function worldScopesExtension(canvasId: string | undefined): Plugin.Funct
     ctx.effect(() => removeDrop, "world-scopes-group-drop");
   }, {
     name: WORLD_SCOPES_PLUGIN_ID,
-    inject: ["slots", "canvasRemote", "canvasRuntime", "canvasSession", "canvasEdit"]
+    inject: ["slots", "canvasRemote", "canvasRuntime", "canvasSession", "canvasEdit", MODEL_SCENES_SERVICE]
   });
 }

@@ -50,13 +50,6 @@ export type CephalonProviderOptions = CommonProviderOptions & {
    * 传数组引用而不是快照：刷新后目录会原地替换，provider 必须看到新集合。
    */
   models?: readonly DiscoveredModel[];
-  /**
-   * 文本请求的完整地址（OpenAI 兼容 chat/completions）。
-   *
-   * 站点连接经 `serviceConnectionFactory` 传入时使用它；缺省走平台固定地址。
-   * 只有这一个端点可被覆盖——图片与视频仍固定发往平台 origin，凭据不会被改写到别的主机。
-   */
-  chatEndpoint?: string;
 };
 
 const VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
@@ -75,8 +68,6 @@ export function createCephalonProvider(options: CephalonProviderOptions): Pptask
     { ...options, baseURL: CEPHALON_ORIGIN },
     CEPHALON_ORIGIN
   );
-  // 站点连接会传入完整 chat 地址；未传时走平台固定路径。只影响文本，图片/视频仍固定 origin。
-  const chatUrl = (options.chatEndpoint ?? "").trim() || `${CEPHALON_ORIGIN}${CHAT_PATH}`;
   const catalog = options.models ?? [];
   const findModel = (id: string): DiscoveredModel | undefined =>
     catalog.find((model) => model.id === id.trim());
@@ -100,7 +91,7 @@ export function createCephalonProvider(options: CephalonProviderOptions): Pptask
       if (!isSupportedType(modelType)) throw new Error(`端脑云不支持 ${modelType} 模型`);
     },
     async execute(context) {
-      if (context.modelType === "language") return executeText(context, config, findModel, chatUrl);
+      if (context.modelType === "language") return executeText(context, config, findModel);
       if (context.modelType === "image") return executeImage(context, config);
       throw new Error(`端脑云不支持同步执行 ${context.modelType} 模型`);
     },
@@ -155,13 +146,12 @@ export function describeCephalonModel(
 async function executeText(
   context: HttpExecutionContext,
   config: { apiKey?: string; fetch: typeof globalThis.fetch },
-  findModel: (id: string) => DiscoveredModel | undefined,
-  chatUrl: string
+  findModel: (id: string) => DiscoveredModel | undefined
 ): Promise<unknown> {
   // 视觉能力取平台声明：未声明 `supports_vision` 的模型不带图片，避免上游 400。
   const supportsVision = findModel(context.modelId)?.supportsVision === true;
   const body = buildChatBody(context.modelId, context.input, { supportsVision });
-  return postJsonAt(config, chatUrl, body, context);
+  return postJson(config, CHAT_PATH, body, context);
 }
 
 async function executeImage(
@@ -188,21 +178,14 @@ async function postJson(
   context: HttpExecutionContext,
   extra?: Record<string, string>
 ): Promise<unknown> {
-  return postJsonAt(config, `${CEPHALON_ORIGIN}${path}`, body, context, extra);
-}
-
-/** 直接向已解析的完整地址 POST（文本连接可被来源 endpoint 覆盖时使用）。 */
-async function postJsonAt(
-  config: { apiKey?: string; fetch: typeof globalThis.fetch },
-  url: string,
-  body: unknown,
-  context: HttpExecutionContext,
-  extra?: Record<string, string>
-): Promise<unknown> {
   return requestJson(
     config.fetch,
     CEPHALON_PROVIDER_ID,
-    jsonRequest(url, body, mergeHeaders(authHeaders(config.apiKey ?? ""), extra, context.headers)),
+    jsonRequest(
+      `${CEPHALON_ORIGIN}${path}`,
+      body,
+      mergeHeaders(authHeaders(config.apiKey ?? ""), extra, context.headers)
+    ),
     context.signal
   );
 }

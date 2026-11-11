@@ -117,7 +117,11 @@ export class DiagnosticsService implements RuntimeDiagnostics {
         id: entry.id,
         required: entry.required,
         status: fiberStatus(entry.fiber),
-        missingServices: Object.keys(entry.fiber.inject).filter((name) => !entry.fiber.store?.[name]),
+        // Cordis 4.1 keeps the resolved service implementations in the
+        // public `committed` snapshot; the old `fiber.store` accessor was
+        // removed. A pending/failed fiber has no committed snapshot, so all
+        // required injections are correctly reported as missing.
+        missingServices: Object.keys(entry.fiber.inject).filter((name) => !entry.fiber.committed?.[name]),
         ...(entry.fiber.state === FIBER_FAILED ? { error: "插件启动失败" } : {}),
         contributions: [...(this.contributions.get(entry.id) ?? [])].sort()
       });

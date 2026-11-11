@@ -1,3 +1,4 @@
+import { projectWorldRotationPreview } from "../../services/world-rotation-preview.js";
 /**
  * 画布快照合成
  * （change: 2026-09-28-split-frontend-god-plugins，task 3；
@@ -71,7 +72,7 @@ export function buildSceneWithResources(
   input: SceneBuildInput
 ): { scene: CanvasRenderScene; resources: Map<string, PreparedModelResource> } | null {
   // Bevy/hit test 使用 working projection：立即反映本页 pending 命令（design D11）。
-  const source = workingCanvasOf(woohaa3CanvasStore.getState());
+  const source = projectWorldRotationPreview(workingCanvasOf(woohaa3CanvasStore.getState()));
   const working = options.projectHistoryCanvas?.(source) ?? source;
   if (!working) return null;
   // Provider-backed media resolves asynchronously. Project the ready runtime asset into

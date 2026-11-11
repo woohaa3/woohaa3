@@ -4,14 +4,15 @@
  * 纯步骤：
  * 1. 为全部节点和边预分配新 ID；
  * 2. 重写 parent、内部边和**仍然有效**的入边引用；
- * 3. 以锚点逻辑位置为中心摆放（缺失时用视口中心）；
+ * 3. 卡片以锚点逻辑位置为中心摆放，世界对象（模型 / 导演区 / 镜头）按同一锚点下的
+ *    地面点整体平移（锚点缺失时用视口中心）；
  * 4. 生成按依赖排序的 `node.add` / `nodeData.patch` / `edge.add` 命令。
  *
  * 输出是**一个** `CanvasCommand[]`，由调用方作为一个服务端批次原子提交。这里不做任何
  * 本地 Store/Y.Doc 更新，也不做 optimistic 状态。
  */
 import type { CanvasCommand, ServerCanvas, Woohaa3CanvasJsonObject, Woohaa3CanvasPosition } from "@woohaa3/contracts";
-import { canvasPointToGround, createHighEntropyId, decodeSceneAreaData, managedNodeRelationOf, newWorldInstance, remapWorldCopyReferences, sceneAreaAnimationOrigin, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
+import { canvasPointToGround, createHighEntropyId, decodeSceneAreaData, decodeWorldInstanceData, managedNodeRelationOf, newWorldInstance, remapWorldCopyReferences, sceneAreaAnimationOrigin, type ManagedNodeLifecycleResolver } from "@woohaa3/contracts";
 import type { CanvasCopyPayload, CopyNode } from "./payload.js";
 import { imageEditAssetIdsOf, imageEditProjectObjectOf } from "./payload.js";
 
@@ -200,14 +201,21 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
   //    直接对它们加偏移会把子树整体推走（change: add-canvas-node-grouping，design D6）。
   //    预览节点排在源节点之后：`node.add` 校验源片场已存在（design D2/D3）。
   const placed = toAbsoluteNodes(payload.nodes, payload.nodeData);
-  // 每个节点换算到**载荷根坐标系**再算包围盒：group 成员的 `position` 是相对父级的局部坐标，
+  const anchor = resolveAnchorPosition(options.anchor, options.viewport);
+  // 世界对象（模型 / 导演区）没有卡片：`position` 只是结构占位，拖动范围时不会跟着更新，
+  // 用它算落点会把粘贴位置带偏。卡片与世界对象各自以自己在载荷内的中心对齐鼠标。
+  const dataOf = (nodeId: string) => remappedData.get(nodeId) ?? payload.nodeData[nodeId];
+  // 每个卡片换算到**载荷根坐标系**再算包围盒：group 成员的 `position` 是相对父级的局部坐标，
   // 与 group 自身的画布坐标混在一个包围盒里会把中心算到组外，粘贴落点随之偏离鼠标
   // （change: add-canvas-node-grouping，design D6）。
-  const bounds = boundingBox(placed.map((entry) => ({ position: entry.absolute, width: entry.node.width, height: entry.node.height })));
-  const anchor = resolveAnchorPosition(options.anchor, options.viewport);
-  const dx = anchor.x - (bounds.minX + bounds.maxX) / 2;
-  const dy = anchor.y - (bounds.minY + bounds.maxY) / 2;
-  const groundDelta = canvasPointToGround({ x: dx, y: dy });
+  const cardEntries = placed.filter(({ node }) => !isWorldPlacedNode(node, dataOf(node.id)));
+  const cardBounds = cardEntries.length > 0
+    ? boundingBox(cardEntries.map((entry) => ({ position: entry.absolute, width: entry.node.width, height: entry.node.height })))
+    : null;
+  const dx = cardBounds ? anchor.x - (cardBounds.minX + cardBounds.maxX) / 2 : 0;
+  const dy = cardBounds ? anchor.y - (cardBounds.minY + cardBounds.maxY) / 2 : 0;
+  // 世界对象按地面坐标平移：贴合鼠标下的地面点，而不是沿用卡片包围盒的差值。
+  const worldDelta = placeWorldAtAnchor(placed, dataOf, anchor);
 
   const commands: CanvasCommand[] = [];
   for (const asset of payload.assets ?? []) {
@@ -233,8 +241,8 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
         placedInstance.transform = {
           ...existing.transform,
           position: {
-            u: existing.transform.position.u + groundDelta.u,
-            v: existing.transform.position.v + groundDelta.v,
+            u: existing.transform.position.u + (worldDelta?.u ?? 0),
+            v: existing.transform.position.v + (worldDelta?.v ?? 0),
             h: existing.transform.position.h
           }
         };
@@ -246,17 +254,32 @@ export function planCanvasPaste(options: PlanPasteOptions): PastePlan | null {
       const area = decodeSceneAreaData(source.sceneArea);
       if (!area.ok) return null;
       const origin = sceneAreaAnimationOrigin(area.value);
+      const delta = worldDelta ?? { u: 0, v: 0 };
       mappedData = { ...source, sceneArea: {
         ...area.value,
         bounds: {
-          min: { u: area.value.bounds.min.u + groundDelta.u, v: area.value.bounds.min.v + groundDelta.v },
-          max: { u: area.value.bounds.max.u + groundDelta.u, v: area.value.bounds.max.v + groundDelta.v }
+          min: { u: area.value.bounds.min.u + delta.u, v: area.value.bounds.min.v + delta.v },
+          max: { u: area.value.bounds.max.u + delta.u, v: area.value.bounds.max.v + delta.v }
         },
         // Position tracks are relative to the area origin; moving the copy's
         // origin carries the whole authored shot without rewriting the script.
-        animationOrigin: { u: origin.u + groundDelta.u, v: origin.v + groundDelta.v }
+        animationOrigin: { u: origin.u + delta.u, v: origin.v + delta.v }
       } };
       remappedData.set(node.id, mappedData);
+    } else if (node.type === "world-camera" && worldDelta) {
+      // 镜头随所属世界集合一起落到鼠标处，保持相对取景；单独复制镜头卡片时
+      // worldDelta 为空，姿态保持不变（卡片偏移不改变镜头姿态）。
+      const source = mappedData ?? payload.nodeData[node.id] ?? {};
+      const camera = source.worldCamera;
+      if (isWorldPoint(camera && (camera as Record<string, unknown>).position)) {
+        const record = camera as Record<string, unknown>;
+        const position = record.position as { u: number; v: number; h: number };
+        mappedData = { ...source, worldCamera: {
+          ...record,
+          position: { u: position.u + worldDelta.u, v: position.v + worldDelta.v, h: position.h }
+        } };
+        remappedData.set(node.id, mappedData);
+      }
     }
     commands.push({
       type: "node.add",
@@ -348,6 +371,80 @@ function resolveAnchorPosition(
     x: (host.width / 2 - viewport.x) / viewport.zoom,
     y: (host.height / 2 - viewport.y) / viewport.zoom
   };
+}
+
+/** 世界对象（模型 / 导演区）没有卡片，`position` 只是结构占位，不参与卡片落点。 */
+function isWorldPlacedNode(
+  node: CopyNode,
+  data: CanvasCopyPayload["nodeData"][string] | undefined
+): boolean {
+  if (!data) return false;
+  if (node.type === "scene-area") return decodeSceneAreaData(data.sceneArea).ok;
+  if (node.type === "model3d") return decodeWorldInstanceData(data.sharedWorldInstance).ok;
+  return false;
+}
+
+type GroundRange = { minU: number; minV: number; maxU: number; maxV: number };
+
+/**
+ * 让复制集合的世界内容整体贴合鼠标下的地面点。
+ *
+ * 卡片用画布逻辑坐标包围盒对齐鼠标；世界对象用 `u`/`v` 米制地面坐标，二者不能混算。
+ * 返回值为世界平移量（保持高度 `h` 与相对构图不变）；没有世界对象时返回 `null`。
+ */
+function placeWorldAtAnchor(
+  placed: readonly { node: CopyNode }[],
+  dataOf: (nodeId: string) => CanvasCopyPayload["nodeData"][string] | undefined,
+  anchor: Woohaa3CanvasPosition
+): { u: number; v: number } | null {
+  const range = worldGroundRange(placed, dataOf);
+  if (!range) return null;
+  const target = canvasPointToGround(anchor);
+  return {
+    u: target.u - (range.minU + range.maxU) / 2,
+    v: target.v - (range.minV + range.maxV) / 2
+  };
+}
+
+function worldGroundRange(
+  placed: readonly { node: CopyNode }[],
+  dataOf: (nodeId: string) => CanvasCopyPayload["nodeData"][string] | undefined
+): GroundRange | null {
+  let range: GroundRange | null = null;
+  const extend = (u: number, v: number): void => {
+    if (!range) {
+      range = { minU: u, minV: v, maxU: u, maxV: v };
+      return;
+    }
+    range.minU = Math.min(range.minU, u);
+    range.minV = Math.min(range.minV, v);
+    range.maxU = Math.max(range.maxU, u);
+    range.maxV = Math.max(range.maxV, v);
+  };
+  for (const { node } of placed) {
+    const data = dataOf(node.id);
+    if (!data) continue;
+    if (node.type === "model3d") {
+      const instance = decodeWorldInstanceData(data.sharedWorldInstance);
+      if (!instance.ok) continue;
+      const { u, v } = instance.value.transform.position;
+      extend(u, v);
+    } else if (node.type === "scene-area") {
+      const area = decodeSceneAreaData(data.sceneArea);
+      if (!area.ok) continue;
+      extend(area.value.bounds.min.u, area.value.bounds.min.v);
+      extend(area.value.bounds.max.u, area.value.bounds.max.v);
+    }
+  }
+  return range;
+}
+
+function isWorldPoint(value: unknown): value is { u: number; v: number; h: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const point = value as Record<string, unknown>;
+  return typeof point.u === "number" && Number.isFinite(point.u)
+    && typeof point.v === "number" && Number.isFinite(point.v)
+    && typeof point.h === "number" && Number.isFinite(point.h);
 }
 
 function boundingBox(nodes: readonly {

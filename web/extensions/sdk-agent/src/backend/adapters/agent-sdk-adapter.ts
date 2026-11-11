@@ -33,7 +33,7 @@ export type AgentSdkRunInput = {
   toolToken?: string;
   toolFacade?: ApplicationToolDelegationFacade;
   /** Woohaa 受控 MCP 工具 endpoint（仅本机回环）。 */
-  mcpEndpoint?: { name: string; url: string };
+  mcpEndpoint?: { name: string; url: string; bearerToken?: string };
   signal: AbortSignal;
   /** 公开文本投递（`delivery`/`streamId` 原样来自传输，宿主据此聚合分片）。 */
   onText?: (text: string, meta?: { delivery: "append" | "replace"; streamId?: string }) => void;
@@ -122,7 +122,7 @@ export type AgentSdkRestrictions = {
   /** 显式 API Key 注入变量名（每连接隔离）。 */
   credentialEnvVar: "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "WOOHAA_MODEL_API_KEY";
   /** 隔离配置目录变量（Codex HOME / Claude config / Harness home）。 */
-  configDirEnvVar: "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "XDG_CONFIG_HOME" | "DSH_HOME";
+  configDirEnvVar: "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "XDG_CONFIG_HOME" | "DSH_HOME" | "OPENCODE_HOME";
 };
 
 /**

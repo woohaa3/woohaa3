@@ -11,6 +11,7 @@ import {
   decodeWorldCamera,
   decodeWorldInstanceData,
   sceneAreaAnimationOrigin,
+  rotateGroundQuarterTurns,
   type CanvasCommand,
   type CanvasNodeData,
   type SceneAreaPlan,
@@ -206,7 +207,11 @@ export function buildForwardCommands(
       case "set-scene-area-bounds": {
         const ref = findArea(canvas, command.areaId);
         if (!ref) return { ok: false, code: "not-found", message: "导演区不存在" };
-        const scopeVersion = nextSceneAreaScopeVersion(command.areaId, command.bounds);
+        const rotating = plan.intent === "rotate";
+        const frozenArea = (base.source.area.nodeData as JsonRecord).sceneArea as JsonRecord;
+        const scopeVersion = rotating
+          ? stableAuthorityVersion("scene-area-rotation", { operationId: plan.operationId, source: plan.source.area.scopeVersion })
+          : nextSceneAreaScopeVersion(command.areaId, command.bounds);
         const current = ref.data.sceneArea as JsonRecord;
         const decoded = decodeSceneAreaData(current);
         const currentBounds = decoded.ok ? decoded.value.bounds : plan.source.area.bounds;
@@ -222,13 +227,17 @@ export function buildForwardCommands(
         const dv = command.bounds.min.v - currentBounds.min.v;
         const translated = Math.abs(du - (command.bounds.max.u - currentBounds.max.u)) < 1e-9
           && Math.abs(dv - (command.bounds.max.v - currentBounds.max.v)) < 1e-9;
-        const animationOrigin = translated ? { u: origin.u + du, v: origin.v + dv } : origin;
+        const animationOrigin = rotating
+          ? rotateGroundQuarterTurns(origin, { u: (currentBounds.min.u + currentBounds.max.u) / 2, v: (currentBounds.min.v + currentBounds.max.v) / 2 })
+          : translated ? { u: origin.u + du, v: origin.v + dv } : origin;
+        const animationQuarterTurns = ((typeof frozenArea.animationQuarterTurns === "number" ? frozenArea.animationQuarterTurns : 0) + 1) % 4;
         commands.push(patch(ref, asNodeData({
           ...ref.data,
           sceneArea: {
             ...current,
             bounds: clone(command.bounds),
             scopeVersion,
+            ...(rotating ? { animationQuarterTurns } : {}),
             animationOrigin
           }
         })));
@@ -385,6 +394,8 @@ export function buildInverseCommands(
         if (sourceArea) {
           if (sourceArea.animationOrigin !== undefined) restored.animationOrigin = clone(sourceArea.animationOrigin);
           else delete restored.animationOrigin;
+          if (sourceArea.animationQuarterTurns !== undefined) restored.animationQuarterTurns = sourceArea.animationQuarterTurns;
+          else delete restored.animationQuarterTurns;
         }
         commands.push(patch(ref, asNodeData({ ...ref.data, sceneArea: restored })));
         areaScopeVersion = command.scopeVersion;
