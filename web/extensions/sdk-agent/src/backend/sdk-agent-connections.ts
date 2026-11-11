@@ -46,14 +46,15 @@ export function sdkReasoningEfforts(adapterId: string, model: string): readonly 
 }
 
 /**
- * 没有写入回执时，把「模型输出被截断/中止」归因成可证明的失败。
+ * 按真实结束原因报告截断/中止，并保留已经确认的分段写入事实。
  *
- * 这类结束在运行时协议里不是错误（dsh 的 `turn/end: max-tokens`），但也不会有完整写入；
+ * 这类结束在运行时协议里不是错误（dsh 的 `turn/end: max-tokens`），但可能已有部分写入；
  * 不单独识别就只能落到「作品更新未确认」，用户看不到真实原因。
  */
-export function unwrittenError(finishReason: import("./protocol/model-turn.js").ModelTurnOutcome["finishReason"]): { code: string; message: string } | undefined {
-  if (finishReason === "length") return { code: "output-truncated", message: "模型输出达到长度上限被截断，本轮没有完成写入；请拆分需求或减少单次生成的模型数量后重试" };
-  if (finishReason === "content_filter") return { code: "content-filtered", message: "模型输出被安全策略中止，本轮没有完成写入；请调整描述后重试" };
+export function unwrittenError(finishReason: import("./protocol/model-turn.js").ModelTurnOutcome["finishReason"], hasWrites = false): { code: string; message: string } | undefined {
+  const progress = hasWrites ? "已成功提交的修改已保留，请先回读核对，再继续未完成部分" : "本轮没有完成写入，请拆分需求后重试";
+  if (finishReason === "length") return { code: "output-truncated", message: `模型输出达到长度上限被截断；${progress}` };
+  if (finishReason === "content_filter") return { code: "content-filtered", message: `模型输出被安全策略中止；${progress}` };
   return undefined;
 }
 
@@ -94,11 +95,14 @@ export function createSdkAgentDescriptors(options: Pick<SdkAgentRuntimeOptions, 
         : endpointAllowed && credentialConfigured ? { state: "ready" as const, checkedAt: transport?.checkedAt ?? null } : transport ?? unknown;
       const status: AgentConnectionStatus = { transport: transportEvidence, credential: record.lastStatus?.credential ?? unknown,
         modelAccess: record.lastStatus?.modelAccess ?? unknown, tools: record.lastStatus?.tools ?? unknown };
-      const blockedReason = !endpointAllowed ? runtime.dependency.reason
+      // The source projection can reject a saved credential (disabled source or missing
+      // protocol binding). Preserve that cause instead of reporting a missing API Key.
+      const sourceReason = "reason" in record && typeof record.reason === "string" ? record.reason : undefined;
+      const blockedReason = sourceReason ?? (!endpointAllowed ? runtime.dependency.reason
         : runtime.dependency.state === "pending" ? runtime.dependency.reason ?? "正在准备固定 Agent 运行时…"
         : !credentialConfigured ? "尚未保存 API Key"
         : runtime.dependency.state === "unavailable" || runtime.dependency.state === "failed" ? runtime.dependency.reason
-        : undefined;
+        : undefined);
       return { runtime, status, capabilities: capabilitiesFor(adapter), models, required: ["credential", "transport"], endpointAllowed,
         ...(blockedReason ? { reason: blockedReason } : {}) };
     }
@@ -263,13 +267,13 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
         await rememberNative();
         return { status: "succeeded", assistantText: result.outcome.assistantText };
       }
-      // 先按真实结束原因归因：被截断的输出不会有完整写入，不能报成「未确认」。
+      // 截断不能冒充成功；已确认的分段回执也不能被说成没有写入。
       const attemptedWrites = gateway?.attemptedWrites ?? 0;
       // 只有「模型声明过、网关却从未收到」的调用才算丢失；读工具成功送达不算。
       const delivered = new Set(gateway?.receivedTools ?? []);
       const lostTools = [...new Set(suggestedTools)].filter((name) => !delivered.has(name));
       if (!receipts.length) options.logger?.({ event: "sdk-agent-turn-unwritten", connectionId: record.connectionId, action: input.intent.action, model, finishReason: result.outcome.finishReason, suggestedTools: [...new Set(suggestedTools)], deliveredTools: [...delivered], lostTools, attemptedWrites });
-      const unwritten = unwrittenError(result.outcome.finishReason);
+      const unwritten = unwrittenError(result.outcome.finishReason, receipts.length > 0);
       if (unwritten) return { status: receipts.length ? "partial" : "failed", assistantText: result.outcome.assistantText, ...(receipts.length ? { receipt } : {}), error: unwritten };
       if (receipts.length) {
         await rememberNative();

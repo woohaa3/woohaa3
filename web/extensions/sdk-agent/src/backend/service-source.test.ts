@@ -47,19 +47,27 @@ it("projects declared provider sources from both scopes into stable Agent connec
   const again = await bridged.list("alice");
   expect(again.map(record => record.connectionId + ":" + record.configRevision).sort()).toEqual(revisions);
 
-  // Source disable removes the projected connection from the usable list; conversation history is untouched.
+  // A disabled source keeps its projected connection visible but unusable, with a reason:
+  // hiding it is what made "not configured" indistinguishable from "misconfigured".
   site = declaredSource("demo", "site", { enabled: false });
-  expect((await bridged.list("alice")).map(record => record.name)).toEqual(["Relay me"]);
+  const siteDisabled = (await bridged.list("alice")).filter(record => record.name === "Relay demo");
+  expect(siteDisabled).toHaveLength(1);
+  expect(siteDisabled[0]).toMatchObject({ enabled: false, reason: "该服务连接已停用，重新启用后可用于助手" });
+  const provider = createConnectionProvider({ id: "sdk-agent", extensionId: "sdk-agent", service: bridged,
+    descriptors: createSdkAgentDescriptors({ allowedHosts: ["relay.example"], allowHttp: false }) });
+  expect((await provider.listConnections({ owner: "alice" })).find(record => record.name === "Relay demo"))
+    .toMatchObject({ ready: false, reason: "该服务连接已停用，重新启用后可用于助手" });
 
   // Revoking the source credential makes the connection unavailable without deleting its identity.
   personal = declaredSource("me", "personal", { credentialConfigured: false });
-  const siteOff = await bridged.list("alice");
-  expect(siteOff.map(record => record.name)).toEqual(["Relay me"]);
-  expect(await bridged.credentialConfigured({ owner: "alice", connectionId: siteOff[0]!.connectionId, purpose: "model-api-key" })).toBe(false);
+  site = declaredSource("demo", "site");
+  const personalOff = (await bridged.list("alice")).filter(record => record.name === "Relay me");
+  expect(personalOff).toHaveLength(1);
+  expect(await bridged.credentialConfigured({ owner: "alice", connectionId: personalOff[0]!.connectionId, purpose: "model-api-key" })).toBe(false);
 
-  // Removing the source drops the projection entirely.
+  // Removing the source drops the projection entirely (only that source's connection).
   personal = declaredSource("me", "personal", { removed: true, credentialConfigured: false });
-  expect(await bridged.list("alice")).toEqual([]);
+  expect((await bridged.list("alice")).map(record => record.name)).toEqual(["Relay demo"]);
 });
 
 it("makes an auto connection attemptable before the first model run and surfaces a real runtime blocker", async () => {
@@ -82,18 +90,30 @@ it("makes an auto connection attemptable before the first model run and surfaces
   expect(blocked).toMatchObject({ ready: false, reason: "缺少配套运行时" });
 });
 
-it("does not project self-filled API sources without a provider assistant declaration", async () => {
+it("keeps a source whose assistant binding is missing visible but unusable", async () => {
   const documents = createInMemoryDocumentStore(["sdk", "sources"]);
   const raw = createConnectionService({ documents: documents.forExtension("sdk")!, secrets: createInMemorySecretStore() });
   const registry = createServiceConnectionRegistry({ documents: documents.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
   const sdk = registry.forExtension("sdk-agent");
   sdk.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
+  // The provider only registered its own consumer, so this source has no assistant binding:
+  // exactly the shape that made the provider vanish from assistant panels without a trace.
   const source = declaredSource("manual", "personal", {
-    bindings: [{ bindingId: "protocol:manual:chat-completions", extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: [], modelKeys: [] }],
+    bindings: [{ bindingId: "provider:manual", extensionId: "demo", consumer: "provider", consumerId: "manual", purposes: ["text"], modelKeys: ["manual:model"] }],
   });
-  registry.forExtension("manual").registerSource({ id: "manual", scope: "personal", get: async () => source, list: async () => [source] });
+  registry.forExtension("demo").registerSource({ id: "manual", scope: "personal", get: async () => source, list: async () => [source] });
   const bridged = withServiceSources(raw, sdk);
-  expect(await bridged.list("alice")).toEqual([]);
+  const [sourceView] = await sdk.list("alice");
+  // 连接绑定在这条来源上，但来源没有声明助手协议。
+  const configured = await raw.configure("alice", { operationId: "create", adapterId: "compat-chat", name: "Manual", authMode: "api-key", runCategory: "agent-sdk",
+    serviceConnectionId: sourceView!.serviceConnectionId, baseUrl: "https://relay.example/v1", models: ["model"], secret: "key", expectedEpoch: 0, expectedRevision: 0 });
+  if (!configured.ok) throw new Error(configured.error.message);
+
+  const [record] = await bridged.list("alice");
+  expect(record).toBeDefined();
+  expect(record).toMatchObject({ enabled: false, reason: "该服务连接没有声明助手可用的文本协议，无法在助手面板中使用" });
+  // It must never be treated as usable: no credential is handed out for it.
+  expect(await bridged.credentialConfigured({ owner: "alice", connectionId: record!.connectionId, purpose: "model-api-key" })).toBe(false);
 });
 
 it("bridges the original authority, isolates owners and freezes Agent/Provider versions without copying keys", async () => {
@@ -116,6 +136,10 @@ it("bridges the original authority, isolates owners and freezes Agent/Provider v
   const bound = await registry.bind(actor, source.serviceConnectionId, { bindingId: "provider:text", extensionId: "text-provider", consumer: "provider", consumerId: "text", purposes: ["text"], modelKeys: ["text:model"] }, source,
     [...source.capabilities, { purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
   const call = { ...bound, bindingId: "provider:text", purpose: "text" as const, protocol: "chat-completions", modelId: "model", endpoint: source.endpoints[0].baseUrl };
+  // Host-added bindings are part of the stored source, not the adapter snapshot.
+  // Repeated discovery must keep this frozen version usable by the ongoing turn.
+  expect((await sdk.list("alice"))[0]!.configRevision).toBe(bound.configRevision);
+  expect((await sdk.get("alice", bound.serviceConnectionId))!.configRevision).toBe(bound.configRevision);
   expect(await provider.resolve("alice", call)).toMatchObject({ secret: "original-key" });
   await expect(provider.resolve("bob", call)).rejects.toMatchObject({ code: "forbidden" });
   await expect(provider.resolve("alice", { ...call, modelId: "unbound" })).rejects.toMatchObject({ code: "forbidden" });

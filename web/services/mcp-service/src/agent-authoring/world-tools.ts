@@ -191,6 +191,8 @@ type HostFailure = {
   message: string;
   conflicts?: unknown;
   spatialReason?: string;
+  patchDiagnostic?: unknown;
+  currentVersion?: string;
 };
 
 const versionUnknownReason = "version-unknown";
@@ -205,16 +207,20 @@ const kindRemedies: Record<string, string> = {
   "outside-scope": "目标不在本轮宿主签发范围内：不要填写其他范围，也不要猜测版本；改动范围须用户明确要求后再用 resize_scene_area 并重新 get_world_context。",
   "version-conflict": "目标的版本已变化：重新 get_world_context（或使用上一条写入回执的 version）取得真实版本后重试，不要复用旧版本或换对象绕过。",
   "version-unknown": "宿主无法确认目标的当前版本（通常是旧宿主或模型资源未就绪）：不要伪造版本、不要换对象绕过；如实说明无法验证该项，必要时重新 get_world_context 后再尝试。",
+  "invalid-data": "内容被拒绝：编译、引用或占地校验没有通过，既有内容未被修改。修正脚本或参数后重试，不要原样重发；追加失败的段可在后续重试同一段。",
   "lease-conflict": "目标正被其他运行占用：如实报告占用，不要换对象绕过或伪造版本。",
   "stale-epoch": "写能力已失效：本轮不能继续写入，如实报告并等待宿主重新签发。",
-  "not-ready": "目标尚未就绪：如实报告现状，不要猜测版本或伪造诊断。"
+  "not-ready": "目标尚未就绪：如实报告现状，不要猜测版本或伪造诊断。",
+  "patch-not-found": "oldString 没有命中：用 patchDiagnostic.closest.excerpt 与 line 核对真实文本后带上更长的上下文重试；也可以 get_world_model_script 重新读取脚本。",
+  "patch-ambiguous": "oldString 命中多处：按 patchDiagnostic.matches 的行号把上下文加长到唯一，不要改写成全部替换。",
+  "patch-noop": "oldString 与 newString 相同：内容与版本都没变化，不要重复提交，也不要换个写法掩盖。"
 };
 
 /**
  * Assistant-visible failure receipt. Keeps every host field (structured `code`,
- * `message`, `conflicts`, `spatialReason`) so the caller can tell outside-scope
- * and version-conflict/version-unknown apart, and adds an action hint without
- * inventing diagnostics the host did not report.
+ * `message`, `conflicts`, `spatialReason`, patch diagnostics, current version) so
+ * the caller can tell outside-scope and version-conflict/version-unknown apart,
+ * and adds an action hint without inventing diagnostics the host did not report.
  */
 function worldFailure(failure: HostFailure) {
   const kind = failureKind(failure);
@@ -222,10 +228,14 @@ function worldFailure(failure: HostFailure) {
   const remedy = kindRemedies[kind];
   const reasonLine = failure.spatialReason ? `（宿主原因：${failure.spatialReason}）` : "";
   const conflictLine = failure.conflicts ? `\n占用/冲突信息：${JSON.stringify(failure.conflicts)}` : "";
-  const text = `[${kind}] ${failure.message}${reasonLine}${conflictLine}${remedy ? `\n处理建议：${remedy}` : ""}`;
+  const versionLine = failure.currentVersion ? `\n当前真实版本：${failure.currentVersion}` : "";
+  const patchLine = failure.patchDiagnostic ? `\n修补诊断：${JSON.stringify(failure.patchDiagnostic)}` : "";
+  const text = `[${kind}] ${failure.message}${reasonLine}${conflictLine}${versionLine}${patchLine}${remedy ? `\n处理建议：${remedy}` : ""}`;
   const payload: Record<string, unknown> = { code, message: failure.message, failureKind: kind };
   if (failure.spatialReason !== undefined) payload.spatialReason = failure.spatialReason;
   if (failure.conflicts !== undefined) payload.conflicts = failure.conflicts;
+  if (failure.patchDiagnostic !== undefined) payload.patchDiagnostic = failure.patchDiagnostic;
+  if (failure.currentVersion !== undefined) payload.currentVersion = failure.currentVersion;
   if (remedy) payload.remedy = remedy;
   return { content: [{ type: "text" as const, text }], structuredContent: { ok: false, ...payload }, isError: true as const };
 }
@@ -328,7 +338,8 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         "在宿主签发的导演区内创建新模型实例。transform.position 是模型根的世界 u/v/h，不等于脚底；变换后的稳定地面锚点须落在 get_world_context.bounds 内（边线算内部）；" + defaultAreaNote + "节点身份由宿主生成，传入的 nodeId 会被忽略。人形使用绑定姿态脚底锚点，其他已准备模型使用几何底部中心；身体越界不影响归属，2D 组范围没有此能力。失败回执会带 code/失败类别（如 outside-scope、version-conflict、version-unknown）与处理建议：outside-scope 表示超出本轮 bounds，version-conflict/version-unknown 表示版本已变化或无法确认，需重新 get_world_context 取真实版本后重试，不要伪造版本。",
       inputSchema: z.strictObject({
         instanceId: z.string().min(1).optional(),
-        modelScript: z.string().min(1),
+        // 省略或传空串 = 只建骨架：先拿到稳定身份与版本，再分段追加。
+        modelScript: z.string().optional(),
         // 节点身份由宿主生成；保留字段仅为兼容旧客户端，传入值被忽略。
         nodeId: z.string().min(1).optional(),
         // 兼容旧客户端传入；实际版本由宿主固定为当前支持的脚本版本。
@@ -342,11 +353,12 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
       auditWrap(deps, "create_world_model", { requestId: deps.grant?.workId }, async () => {
         const bound = worldGrant(deps);
         if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
+        const script = modelScript ?? "";
         const scriptVersion = PREFERRED_MODEL_SCRIPT_VERSION;
         const contentHash = hashText(JSON.stringify({
           workId: deps.grant!.workId,
           instanceId: instanceId ?? null,
-          modelScript,
+          modelScript: script,
           modelScriptVersion: scriptVersion,
           transform: pose
         }));
@@ -358,7 +370,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           operationId: `${deps.grant!.workId}:create:${resolvedNodeId}:${contentHash}`,
           nodeId: resolvedNodeId,
           ...(instanceId ? { instanceId } : {}),
-          content: { modelScript, modelScriptVersion: scriptVersion },
+          content: { modelScript: script, modelScriptVersion: scriptVersion, ...(cardPosition ? { cardPosition } : {}) },
           transform: pose as WorldTransform
         };
         const outcome = await bound.client.write({
@@ -366,7 +378,11 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
           operation
         });
         if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
-        return { result: structured({ ...outcome, ok: true }, `已创建模型 ${outcome.instanceId ?? resolvedNodeId}`), code: undefined };
+        return {
+          result: structured({ ...outcome, ok: true, modelScriptLength: script.length },
+            script === "" ? `已创建骨架模型 ${outcome.instanceId ?? resolvedNodeId}，脚本为空，待分段填充` : `已创建模型 ${outcome.instanceId ?? resolvedNodeId}`),
+          code: undefined
+        };
       })
   );
 
@@ -404,6 +420,119 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
         });
         if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
         return { result: structured({ ...outcome, ok: true }, `已替换模型 ${instanceId}`), code: undefined };
+      })
+  );
+
+  server.registerTool(
+    "get_world_model_script",
+    {
+      title: "读取导演区模型脚本",
+      description:
+        "读取宿主受控范围内某个模型的当前权威脚本、modelContentVersion 与字节长度。includeSource=false 时只返回版本与长度（分批写入前取版本、确认是否还是骨架时用），为 true 时返回完整脚本文本。本轮只读或区外的对象同样可以读取，但读取不授予写权限；追加与修补仍须目标在可写集合内。目标不存在时返回 not-found，不要猜测脚本内容。",
+      inputSchema: z.strictObject({
+        instanceId: z.string().min(1),
+        includeSource: z.boolean().optional()
+      }),
+      outputSchema: z.looseObject({ ok: z.boolean() }),
+      annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ instanceId, includeSource }) =>
+      auditWrap(deps, "get_world_model_script", { requestId: deps.grant?.workId }, async () => {
+        const bound = worldGrant(deps);
+        if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
+        const result = await bound.client.read({ canvasId: bound.canvasId, contextId: bound.world.contextId });
+        if (!result.ok) return { result: worldFailure(result) };
+        const view = result.view;
+        const object = view.objects.find(entry => entry.identity.kind === "instance" && entry.identity.instanceId === instanceId);
+        const listed = view.writable.some(entry => entry.kind === "instance" && entry.instanceId === instanceId)
+          || view.readOnly.some(entry => entry.kind === "instance" && entry.instanceId === instanceId);
+        if (!listed && !object) return { result: worldFailure({ code: "outside-scope", message: `模型 ${instanceId} 不在本轮可见范围` }) };
+        const summary = view.sceneModels?.find(model => model.instanceId === instanceId);
+        const version = object?.version ?? null;
+        const writable = view.writable.some(entry => entry.kind === "instance" && entry.instanceId === instanceId);
+        const script = typeof view.modelScripts?.[instanceId] === "string" ? view.modelScripts[instanceId] : null;
+        const payload = {
+          ok: true,
+          instanceId,
+          ...(summary?.nodeId ? { nodeId: summary.nodeId } : {}),
+          ...(version ? { modelContentVersion: version } : {}),
+          writable,
+          scriptLength: script === null ? null : script.length,
+          ...(includeSource ? { modelScript: script, includeSource: true } : { includeSource: false })
+        };
+        return {
+          result: structured(payload, `模型 ${instanceId}${version ? ` 版本 ${version}` : ""}${script === null ? "；脚本不可读" : `；长度 ${script.length}`}`)
+        };
+      })
+  );
+
+  server.registerTool(
+    "append_world_model_script",
+    {
+      title: "追加导演区模型脚本",
+      description:
+        "把一段脚本片段追加到宿主可写集合中某个模型权威内容的末尾，等价于在文件尾部续写：回读脚本等于「原脚本 + 各次有效片段按顺序拼接」，不插入分隔符也不重排。每次追加都必须携带上一次回执（或 get_world_model_script / get_world_context）给出的 expectedVersion；版本不匹配返回 version-conflict 与当前真实版本，内容不变。拼接后的完整脚本会重新编译与校验，片段语法不完整或占地未知时整段被拒绝、已提交内容保持不变。每次追加必须是可在尾部拼接的完整语句块（括号与语句闭合）。同一 requestId 同参数重试返回首次回执，不会重复拼接；同 requestId 不同参数返回 request-id-reused。目标不在本轮可写集合返回 outside-scope。",
+      inputSchema: z.strictObject({
+        instanceId: z.string().min(1),
+        expectedVersion: z.string().min(1),
+        chunk: z.string().min(1)
+      }),
+      outputSchema: z.looseObject({ ok: z.boolean() }),
+      annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ instanceId, expectedVersion, chunk }) =>
+      auditWrap(deps, "append_world_model_script", { requestId: deps.grant?.workId }, async () => {
+        const bound = worldGrant(deps);
+        if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
+        const outcome = await bound.client.write({
+          contextId: bound.world.contextId,
+          operation: {
+            kind: "append-model-script",
+            // 片段内容进入 identity：同一 requestId 换片段必须报 request-id-reused，
+            // 同参数重传才命中冻结回执而不重复拼接。
+            operationId: `${deps.grant!.workId}:append:${instanceId}:${hashText(JSON.stringify({ expectedVersion, chunk }))}`,
+            instanceId,
+            expectedVersion,
+            chunk
+          }
+        });
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
+        return { result: structured({ ...outcome, ok: true }, `已追加模型 ${instanceId} 的脚本，当前长度 ${outcome.scriptLength ?? "?"}，版本 ${outcome.version ?? "?"}`), code: undefined };
+      })
+  );
+
+  server.registerTool(
+    "patch_world_model_script",
+    {
+      title: "修补导演区模型脚本",
+      description:
+        "用精确文本替换修补宿主可写集合中某个模型脚本的一处内容（oldString → newString），语义与编辑器 edit 一致。oldString 必须在当前脚本中恰好命中一次：未命中返回 patch-not-found 并附带脚本长度与最近相似片段，命中多处返回 patch-ambiguous 并附带命中次数与每处行号，oldString 等于 newString 返回 patch-noop（不推进版本）。携带 expectedVersion，版本不匹配返回 version-conflict 与当前真实版本。只做精确文本替换，不做重排、格式化或结构化改写；回执 replaced 表示替换处数（成功恒为 1）。",
+      inputSchema: z.strictObject({
+        instanceId: z.string().min(1),
+        expectedVersion: z.string().min(1),
+        oldString: z.string().min(1),
+        newString: z.string()
+      }),
+      outputSchema: z.looseObject({ ok: z.boolean() }),
+      annotations: { readOnlyHint: false, idempotentHint: true, destructiveHint: false, openWorldHint: false }
+    },
+    async ({ instanceId, expectedVersion, oldString, newString }) =>
+      auditWrap(deps, "patch_world_model_script", { requestId: deps.grant?.workId }, async () => {
+        const bound = worldGrant(deps);
+        if (!bound) return { result: denied("本轮没有宿主签发的世界创作上下文") };
+        const outcome = await bound.client.write({
+          contextId: bound.world.contextId,
+          operation: {
+            kind: "patch-model-script",
+            operationId: `${deps.grant!.workId}:patch:${instanceId}:${hashText(JSON.stringify({ expectedVersion, oldString, newString }))}`,
+            instanceId,
+            expectedVersion,
+            oldString,
+            newString
+          }
+        });
+        if (!outcome.ok) return { result: worldFailure(outcome), code: outcome.code };
+        return { result: structured({ ...outcome, ok: true }, `已修补模型 ${instanceId} 的脚本，替换 ${outcome.replaced ?? 1} 处，版本 ${outcome.version ?? "?"}`), code: undefined };
       })
   );
 

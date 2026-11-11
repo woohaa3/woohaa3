@@ -192,6 +192,8 @@ const GRANTED_TOOLS = new Set([
   "set_node_prompt",
   "create_world_model",
   "replace_world_model_content",
+  "append_world_model_script",
+  "patch_world_model_script",
   "move_world_model",
   "create_world_camera",
   "set_world_camera",

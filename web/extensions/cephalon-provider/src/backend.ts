@@ -16,6 +16,7 @@ import {
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { cephalonModelDefinitions, discoverCephalonModels, type DiscoveredModel } from "./discovery.js";
 import { createCephalonProvider, describeCephalonModel } from "./provider.js";
+import { CHAT_PATH } from "./routes.js";
 import { CEPHALON_ORIGIN, CEPHALON_PLUGIN_ID, CEPHALON_PROVIDER_ID } from "./shared.js";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -55,21 +56,21 @@ export function createCephalonRegistration(input: CephalonRegistrationInput): { 
   const apiKey = (input.apiKey ?? "").trim();
   const available = apiKey !== "";
   const models: DiscoveredModel[] = [...(input.models ?? [])];
-  const provider = available
-    ? createCephalonProvider({
-        apiKey,
-        models,
-        ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
-        fetch: createGuardedFetch({
-          baseUrl: CEPHALON_ORIGIN,
-          maxBytes: input.maxBytes ?? DEFAULT_MAX_BYTES,
-          timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          // 图片结果由 Provider 自己下载成字节；视频只回地址，交给宿主入库流程。
-          allowedContentTypes: ["image/", "video/"],
-          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
-        })
-      })
-    : undefined;
+  const buildProvider = (key: string, chatEndpoint?: string) => createCephalonProvider({
+    apiKey: key,
+    models,
+    ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
+    ...(chatEndpoint ? { chatEndpoint } : {}),
+    fetch: createGuardedFetch({
+      baseUrl: CEPHALON_ORIGIN,
+      maxBytes: input.maxBytes ?? DEFAULT_MAX_BYTES,
+      timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      // 图片结果由 Provider 自己下载成字节；视频只回地址，交给宿主入库流程。
+      allowedContentTypes: ["image/", "video/"],
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+    })
+  });
+  const provider = available ? buildProvider(apiKey) : undefined;
   return {
     registration: {
       extensionId: CEPHALON_PLUGIN_ID,
@@ -77,6 +78,20 @@ export function createCephalonRegistration(input: CephalonRegistrationInput): { 
       available,
       provider,
       models: cephalonModelDefinitions(models),
+      // 端脑的文本是 OpenAI 兼容 chat/completions，且地址固定、不由用户填写。
+      // 声明它才能让宿主生成「助手可用」的端点与 sdk-agent binding；
+      // 否则这条连接只能被生成侧使用，导演区等助手面板看不到它。
+      serviceConnectionFactory: {
+        protocols: ["chat-completions"],
+        assistantProtocol: "chat-completions",
+        endpoints: { "chat-completions": `${CEPHALON_ORIGIN}${CHAT_PATH}` },
+        create: ({ secret, endpoint }) => buildProvider(secret, endpoint || `${CEPHALON_ORIGIN}${CHAT_PATH}`)
+      },
+      languageCapabilities: (providerModelId) => {
+        const model = models.find(item => item.id === providerModelId);
+        // 视觉能力取平台声明的 supports_vision，不按模型名推测。
+        return { imageInput: model?.supportsVision === true };
+      },
       describeModel: (model) =>
         describeCephalonModel(
           model.providerModelId,

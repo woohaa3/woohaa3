@@ -199,14 +199,23 @@ describe("world authoring authority", () => {
     expect(worldObjectVersion(canvas, { kind: "instance", instanceId: "solo-a" })).not.toBe(oldVersion);
   });
 
-  it("fails closed when authoritative instance bounds are unknown", async () => {
+  it("keeps an unknown-geometry instance non-writable without locking the whole area", async () => {
     const canvas = canvasFixture();
+    // A design skeleton (empty script, no geometry yet) is exactly what a chunked
+    // author leaves between create_world_model and the first append.
     canvas.nodeData.broken = instance("broken", 2, 2, { modelScript: "" });
     canvas.document.nodes.push({ id: "broken", type: "model3d", position: { x: 0, y: 0 } });
     const authority = createWorldAuthoringAuthority({ executeScene });
     const prepared = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
-    expect(prepared).toMatchObject({ ok: false, code: "not-ready",
-      message: "无法准备场景模型。模型「broken」：模型脚本为空，请修复模型内容" });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    // The unknown target never authorizes, and the other instances keep working.
+    const identityOf = (target: { kind: string; instanceId?: string; cameraId?: string }) => target.kind === "instance" ? target.instanceId : target.cameraId;
+    expect(prepared.snapshot.writable.map(identityOf)).not.toContain("broken");
+    expect(prepared.snapshot.objects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ identity: { kind: "instance", instanceId: "broken" }, containment: "unknown" })
+    ]));
+    expect(prepared.snapshot.writable.map(identityOf).sort()).toEqual(expect.arrayContaining(["camera-in", "complete-a"]));
   });
 
   it("recovers after a transient bounds preparation failure without authorizing unknown", async () => {
@@ -218,8 +227,10 @@ describe("world authoring authority", () => {
     };
     const authority = createWorldAuthoringAuthority({ executeScene: flaky });
     const canvas = canvasFixture();
+    // A transient failure only makes that instance unknown for this revision; the
+    // scope still opens and the next prepare restores its real classification.
     const first = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
-    expect(first).toMatchObject({ ok: false, code: "not-ready" });
+    expect(first.ok).toBe(true);
     const second = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
@@ -237,12 +248,12 @@ describe("world authoring authority", () => {
     const canvas = canvasFixture();
     const first = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
     const second = await authority.prepareCanvas(canvas, { kind: "scene-area", areaId: "area-main" });
-    expect(first).toMatchObject({ ok: false, code: "not-ready" });
-    expect(second).toMatchObject({ ok: false, code: "not-ready" });
-    expect(authority.cacheFor(canvas.id, {
-      scope: { kind: "scene-area", areaId: "area-main" },
-      scopeVersion: "area-scope-1"
-    })).toBeNull();
+    for (const prepared of [first, second]) {
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) continue;
+      expect(prepared.snapshot.writable.filter(target => target.kind === "instance")).toEqual([]);
+      expect(prepared.snapshot.objects.every(entry => entry.identity.kind === "camera" || entry.containment === "unknown")).toBe(true);
+    }
   });
 
   it("grants no world write through 2D group membership", async () => {
@@ -317,7 +328,9 @@ describe("world authoring authority", () => {
     const scopeRef = { kind: "scene-area" as const, areaId: "area-main" };
 
     const first = await authority.prepareCanvas(canvas, scopeRef);
-    expect(first).toMatchObject({ ok: false, code: "not-ready" });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.snapshot.writable).toEqual([]);
 
     // A failed preparation leaves no grant: unknown never authorizes, even when
     // the caller supplies a plausible version.
@@ -375,7 +388,8 @@ describe("world authoring authority", () => {
     const canvas = singleInstanceCanvas();
     const scopeRef = { kind: "scene-area" as const, areaId: "area-main" };
 
-    expect(await authority.prepareCanvas(canvas, scopeRef)).toMatchObject({ ok: false, code: "not-ready" });
+    const unknown = await authority.prepareCanvas(canvas, scopeRef);
+    expect(unknown.ok && unknown.snapshot.writable).toEqual([]);
     const prepared = await authority.prepareCanvas(canvas, scopeRef);
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;

@@ -88,6 +88,9 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       const reconfigured = !!found.source.origin && !!found.source.removedFingerprint && found.source.removedFingerprint !== fingerprint;
       if (!oauthRefresh && !reconfigured) return found.source;
     }
+    // The fingerprint covers the adapter snapshot, including model identities. Stored
+    // metadata also contains host-added bindings/endpoints: comparing it directly to
+    // the snapshot would republish every read and invalidate active turns.
     if (found?.source.originFingerprint === fingerprint) return found.source;
     const { legacyId, credentialFingerprint, ...data } = snapshot;
     const extraCapabilities = (found?.source.extraCapabilities ?? []).map(normalizeExtraCapability);

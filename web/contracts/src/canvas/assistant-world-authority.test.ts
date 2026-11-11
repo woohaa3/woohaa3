@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_WORLD_CAMERA_TOOLS,
   ASSISTANT_WORLD_TOOL,
+  appendWorldModelChunk,
   assistantWorldSourceCapability,
   assistantWorldToolsForScope,
   decodeAssistantWorldModelContent,
   decodeAssistantWorldScope,
-  decodeAssistantWorldWriteOperation
+  decodeAssistantWorldWriteOperation,
+  planWorldModelScriptPatch
 } from "./assistant-world-authority.js";
 
 const transform = {
@@ -128,12 +130,108 @@ describe("assistant world write decoding", () => {
     }).ok).toBe(false);
   });
 
-  it("requires non-empty model script but keeps card layout optional", () => {
-    expect(decodeAssistantWorldModelContent({ modelScript: " ", cardPosition: { x: 0, y: 0 } }).ok).toBe(false);
+  it("allows an empty skeleton script but keeps card layout optional", () => {
+    // 空脚本 = 骨架：身份与版本照常派生，内容在追加前不参与渲染。
+    expect(decodeAssistantWorldModelContent({ modelScript: "", cardPosition: { x: 0, y: 0 } })).toEqual({
+      ok: true,
+      value: { modelScript: "", cardPosition: { x: 0, y: 0 } }
+    });
     expect(decodeAssistantWorldModelContent({ modelScript: "scene.box({});" })).toEqual({
       ok: true,
       value: { modelScript: "scene.box({});" }
     });
+    expect(decodeAssistantWorldModelContent({ modelScript: undefined }).ok).toBe(false);
+  });
+});
+
+describe("chunked script authoring helpers", () => {
+  const script = "scene.box({ id: 'roof', color: 'red' });\nscene.box({ id: 'wall', color: 'gray' });";
+
+  it("appends chunks by plain tail concatenation", () => {
+    expect(appendWorldModelChunk("", "a")).toBe("a");
+    expect(appendWorldModelChunk(script, "scene.sphere({});")).toBe(`${script}scene.sphere({});`);
+  });
+
+  it("plans an exact-text patch that occurs once", () => {
+    expect(planWorldModelScriptPatch(script, "'red'", "'blue'")).toEqual({
+      ok: true,
+      script: script.replace("'red'", "'blue'"),
+      replaced: 1
+    });
+  });
+
+  it("reports patch-not-found with a closest excerpt and the script length", () => {
+    const planned = planWorldModelScriptPatch(script, "color: 'green'", "'x'");
+    expect(planned.ok).toBe(false);
+    if (planned.ok) return;
+    expect(planned.code).toBe("patch-not-found");
+    expect(planned.diagnostic.occurrences).toBe(0);
+    expect(planned.diagnostic.scriptLength).toBe(script.length);
+    expect(planned.diagnostic.closest?.line).toBe(1);
+    expect(planned.diagnostic.closest?.excerpt).toContain("scene.box");
+  });
+
+  it("reports patch-ambiguous with every occurrence line", () => {
+    const planned = planWorldModelScriptPatch(script, "color", "'x'");
+    expect(planned.ok).toBe(false);
+    if (planned.ok) return;
+    expect(planned.code).toBe("patch-ambiguous");
+    expect(planned.diagnostic.occurrences).toBe(2);
+    expect(planned.diagnostic.matches?.map(match => match.line)).toEqual([1, 2]);
+  });
+
+  it("reports patch-noop without a replacement", () => {
+    expect(planWorldModelScriptPatch(script, "'red'", "'red'")).toEqual({
+      ok: false,
+      code: "patch-noop",
+      diagnostic: { occurrences: 1, scriptLength: script.length }
+    });
+  });
+});
+
+describe("chunked write operation decoding", () => {
+  it("accepts append and patch operations", () => {
+    expect(decodeAssistantWorldWriteOperation({
+      kind: "append-model-script",
+      operationId: "op-append",
+      instanceId: "instance-1",
+      expectedVersion: "v1",
+      chunk: "scene.box({});"
+    })).toEqual({
+      ok: true,
+      value: { kind: "append-model-script", operationId: "op-append", instanceId: "instance-1", expectedVersion: "v1", chunk: "scene.box({});" }
+    });
+    expect(decodeAssistantWorldWriteOperation({
+      kind: "patch-model-script",
+      operationId: "op-patch",
+      instanceId: "instance-1",
+      expectedVersion: "v1",
+      oldString: "a",
+      newString: "b"
+    }).ok).toBe(true);
+  });
+
+  it("rejects empty chunks, empty oldString and unknown fields", () => {
+    const base = { operationId: "op", instanceId: "instance-1", expectedVersion: "v1" };
+    expect(decodeAssistantWorldWriteOperation({ kind: "append-model-script", ...base, chunk: "" }).ok).toBe(false);
+    expect(decodeAssistantWorldWriteOperation({ kind: "append-model-script", ...base, chunk: "x", extra: 1 }).ok).toBe(false);
+    expect(decodeAssistantWorldWriteOperation({ kind: "patch-model-script", ...base, oldString: "", newString: "b" }).ok).toBe(false);
+  });
+
+  it("keeps the new tools in the scene-area surface only", () => {
+    // 写入口只在导演区；2D 组与镜头范围都拿不到。
+    for (const name of [ASSISTANT_WORLD_TOOL.appendModelScript, ASSISTANT_WORLD_TOOL.patchModelScript]) {
+      expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" }), name).toContain(name);
+      expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" }), name).not.toContain(name);
+    }
+    // 读取入口随导演区读写面提供，镜头范围没有脚本编辑能力。
+    expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" })).toContain(ASSISTANT_WORLD_TOOL.readModelScript);
+    expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" })).not.toContain(ASSISTANT_WORLD_TOOL.readModelScript);
+    expect(assistantWorldSourceCapability({ targets: ["scene-area"] }).tools).toEqual(expect.arrayContaining([
+      ASSISTANT_WORLD_TOOL.readModelScript,
+      ASSISTANT_WORLD_TOOL.appendModelScript,
+      ASSISTANT_WORLD_TOOL.patchModelScript
+    ]));
   });
 });
 

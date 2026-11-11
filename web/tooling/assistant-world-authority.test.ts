@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSISTANT_WORLD_READ_TOOLS,
   ASSISTANT_WORLD_TOOL,
   assistantWorldToolsForScope,
   decodeAssistantWorldWriteInput
@@ -20,9 +21,15 @@ const context: WorldToolContext = {
 };
 
 describe("scoped assistant world authority across packages", () => {
-  it("exposes exactly one read-only group tool and the full scene-area catalog", () => {
-    expect(assistantWorldToolsForScope({ kind: "workflow-group-2d", groupId: "group-1" })).toEqual([ASSISTANT_WORLD_TOOL.readContext]);
-    expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "area-1" })).toContain(ASSISTANT_WORLD_TOOL.createModel);
+  it("exposes the read-only group surface and the full scene-area catalog", () => {
+    // 2D 组不是世界范围：世界工具面只覆盖导演区与镜头，组只能拿到只读上下文。
+    expect(ASSISTANT_WORLD_READ_TOOLS).toEqual([ASSISTANT_WORLD_TOOL.readContext]);
+    const sceneArea = assistantWorldToolsForScope({ kind: "scene-area", areaId: "area-1" });
+    expect(sceneArea).toContain(ASSISTANT_WORLD_TOOL.createModel);
+    // 分段写入入口随导演区工具面一起提供。
+    for (const tool of [ASSISTANT_WORLD_TOOL.readModelScript, ASSISTANT_WORLD_TOOL.appendModelScript, ASSISTANT_WORLD_TOOL.patchModelScript]) {
+      expect(sceneArea, tool).toContain(tool);
+    }
   });
 
   it("denies world writes from the group context even when the caller supplies a write operation", async () => {

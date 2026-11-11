@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PptaskProvider } from "@sdppp/pptask";
 import { createCephalonProviderPlugin, createCephalonRegistration, CEPHALON_CONFIG } from "../src/backend.js";
+import { createCephalonProvider } from "../src/provider.js";
 import { cephalonModelDefinitions, parseModelList } from "../src/discovery.js";
 import MODELS from "./fixtures/models.json";
 
@@ -173,5 +174,48 @@ describe("端脑云插件装配", () => {
     const provider = registration.provider as PptaskProvider;
     const result = await provider.imageModel("NanoBanana2").doGenerate?.({ prompt: "一只猫" } as never);
     expect(result && "images" in result ? result.images[0] : undefined).toEqual(imageBytes);
+  });
+});
+
+describe("端脑云作为助手来源", () => {
+  it("声明可信 assistant 协议，宿主才会生成 sdk-agent 绑定", () => {
+    const { registration } = createCephalonRegistration({ apiKey: SECRET, models: parseModelList(MODELS) });
+    const factory = registration.serviceConnectionFactory;
+    // 没有这段声明时，这条连接只能给生成侧用，导演区等助手面板看不到它。
+    expect(factory).toBeDefined();
+    expect(factory?.protocols).toEqual(["chat-completions"]);
+    expect(factory?.assistantProtocol).toBe("chat-completions");
+    expect(factory?.endpoints?.["chat-completions"]).toBe("https://cephalon.cloud/user-center/v1/model/chat/completions");
+  });
+
+  it("语言模型的图片能力取平台声明，不按名字推测", () => {
+    const models = parseModelList(MODELS);
+    const { registration } = createCephalonRegistration({ apiKey: SECRET, models });
+    const language = models.filter(model => model.modelType === "language");
+    const vision = language.find(model => model.supportsVision === true);
+    const textOnly = language.find(model => model.supportsVision !== true);
+    if (vision) expect(registration.languageCapabilities?.(vision.id)?.imageInput).toBe(true);
+    if (textOnly) expect(registration.languageCapabilities?.(textOnly.id)?.imageInput).toBe(false);
+    expect(registration.languageCapabilities?.("不存在的模型")?.imageInput).toBe(false);
+  });
+
+  it("来源传入的 chat 地址覆盖文本请求，图片仍固定平台 origin", async () => {
+    const models = parseModelList(MODELS);
+    const language = models.find(model => model.modelType === "language");
+    const image = models.find(model => model.modelType === "image");
+    if (!language || !image) return;
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return Response.json({ choices: [{ message: { content: "ok" } }], data: [{ url: "https://cdn.example/out.png" }] });
+    }) as unknown as typeof globalThis.fetch;
+    const endpoint = "https://relay.example/v1/chat/completions";
+    const handle = createCephalonProvider({ apiKey: SECRET, models, chatEndpoint: endpoint, fetch: fetchImpl });
+    await handle.languageModel(language.id).doGenerate?.({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } as never);
+    expect(urls[0]).toBe(endpoint);
+    urls.length = 0;
+    await handle.imageModel(image.id).doGenerate?.({ prompt: "hi" } as never);
+    // 图片路径不跟随来源 endpoint：凭据只发往声明的平台主机。
+    expect(urls[0]?.startsWith("https://cephalon.cloud/")).toBe(true);
   });
 });

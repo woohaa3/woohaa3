@@ -51,8 +51,6 @@ it("excludes models the site policy does not enable from the assistant directory
   }
 });
 
-it("turns a declared assistant protocol into a discussion Agent binding only with language models", async () => {
-
 it("turns a declared assistant protocol into a text Agent binding only with language models", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-assistant-source-"));
   const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
@@ -73,6 +71,10 @@ it("turns a declared assistant protocol into a text Agent binding only with lang
     const undeclared = (await make([{ providerModelId: "model", modelType: "language" }]).get("admin", "demo"))!;
     expect(undeclared.bindings.map(binding => binding.bindingId)).toEqual(["provider:demo"]);
     expect(undeclared.capabilities.some(capability => capability.purpose === "text" && capability.protocol === "chat-completions")).toBe(false);
+
+    // 目录身份带来源前缀时，助手能力必须换成上游认识的 ID，否则上游会 404 拒绝整轮。
+    const prefixed = (await make([{ providerModelId: "llm/deepseek/deepseek-v4-flash", modelType: "language" }], "chat-completions").get("admin", "demo"))!;
+    expect(prefixed.capabilities).toContainEqual(expect.objectContaining({ purpose: "text", protocol: "chat-completions", modelId: "llm/deepseek/deepseek-v4-flash" }));
 
     const mediaOnly = (await make([{ providerModelId: "image-model", modelType: "image" }], "chat-completions").get("admin", "demo"))!;
     expect(mediaOnly.bindings.map(binding => binding.bindingId)).toEqual(["provider:demo"]);
@@ -210,4 +212,33 @@ it("projects one settings authority, rotates all bindings, preserves advanced fi
       expect((await locked.update({ "providers.demo.apiKey": null })).ok).toBe(false);
     } finally { locked.close(); }
   } finally { settings.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+it("maps catalog model identities to the upstream model id for assistant turns", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-upstream-model-"));
+  const files = { configFile: path.join(directory, "config.yml"), secretsFile: path.join(directory, "secrets.yml"), watch: false };
+  const fields = { apiKey: { kind: "string", secret: true, reload: "hot", label: "Key", description: "Key" } } as const;
+  const settings = await createSettingsService({ ...files, env: {} });
+  settings.register("providers.prefixed", fields, "Prefixed", "prefixed");
+  const provider = () => ({
+    providerId: "prefixed", extensionId: "prefixed", available: true,
+    models: [{ providerModelId: "llm/deepseek/deepseek-v4-flash", modelType: "language" }],
+    serviceConnectionFactory: {
+      protocols: ["chat-completions"],
+      assistantProtocol: "chat-completions",
+      // 画布身份是 `llm/<原始 id>`；上游只认去前缀的原始 id。
+      upstreamModelId: (modelId: string) => modelId.startsWith("llm/") ? modelId.slice(4) : modelId
+    }
+  } as unknown as GenerationProvider);
+  const source = createSiteProviderSource({ providerId: "prefixed", extensionId: "prefixed", label: "Prefixed", prefix: "providers.prefixed", settings, provider });
+  try {
+    const view = (await source.get("admin", "prefixed"))!;
+    // 助手能力用上游 ID，绑定仍按画布身份登记。
+    expect(view.capabilities).toContainEqual(expect.objectContaining({ purpose: "text", protocol: "chat-completions", modelId: "deepseek/deepseek-v4-flash" }));
+    // 授权按上游 ID 匹配：能力与 binding 必须同一口径，否则取凭据会被判「缺少能力证据」。
+    expect(view.bindings.find(binding => binding.extensionId === "sdk-agent")?.modelKeys).toEqual(["deepseek/deepseek-v4-flash"]);
+  } finally {
+    settings.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

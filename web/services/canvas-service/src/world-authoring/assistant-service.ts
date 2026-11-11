@@ -57,6 +57,8 @@ import {
   WORLD_CAMERA_CARD_SIZE,
   createWorldAnimationScript,
   executeWorldAnimationScript,
+  appendWorldModelChunk,
+  planWorldModelScriptPatch,
   mergeWorldCameraSettings,
   serializeWorldAnimationScript,
   worldCameraView
@@ -119,6 +121,12 @@ type RunLedger = {
   executionId: string;
   completionId: string;
   writes: Map<string, { identity: WorldObjectIdentity; version: string; snapshot?: WorldCameraData }>;
+  /**
+   * `operationId → intent hash` for chunk writes. Reusing one operation id for a
+   * different chunk is a reused identity (request-id-reused), not a retry; the
+   * mapping is per run so a completed run releases it with its ledger.
+   */
+  chunkIntents: Map<string, string>;
   cancelled: boolean;
   /**
    * Set only after the host confirmed the exact execution stopped. A settled
@@ -290,6 +298,34 @@ function contentFields(content: AssistantWorldModelContent, previousRig?: unknow
     modelPlacement: definition.value.placement,
     ...(definition.value.rig ? { modelRig: definition.value.rig } : {})
   };
+}
+
+/**
+ * Skeleton model content: an empty script with a real identity and a real
+ * content version. It carries no geometry (the authority reports it as
+ * not-ready) and renders nothing until the first chunk arrives.
+ */
+function skeletonContentFields(content: AssistantWorldModelContent): Record<string, unknown> {
+  const definition = normalizeModelDefinition({
+    modelScript: "",
+    modelScriptLanguage: "javascript",
+    modelScriptVersion: content.modelScriptVersion ?? "woohaa-model-js-v2",
+    placement: DEFAULT_MODEL_PLACEMENT,
+    rig: null
+  });
+  if (!definition.ok) throw new Error(definition.reason);
+  return {
+    modelScript: "",
+    modelScriptLanguage: definition.value.modelScriptLanguage,
+    modelScriptVersion: definition.value.modelScriptVersion,
+    modelContentVersion: definition.value.contentVersion,
+    modelPlacement: definition.value.placement
+  };
+}
+
+/** Read the authoritative script of one world instance, or `null` when absent. */
+function scriptOfNode(fields: Record<string, unknown>): string | null {
+  return typeof fields.modelScript === "string" ? fields.modelScript : null;
 }
 
 function instanceFields(fields: Record<string, unknown>, instanceId: string, transform: WorldTransform): Record<string, unknown> {
@@ -793,6 +829,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       executionId: issued.run.executionId,
       completionId,
       writes: new Map(),
+      chunkIntents: new Map(),
       cancelled: false,
       settled: false
     };
@@ -891,7 +928,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       }
       if (!sceneArea) return failure("outside-scope", "导演区不存在");
     }
-    let cameraView: Pick<import("@woohaa3/contracts").AssistantWorldContextView, "camera" | "sceneModels"> = {};
+    let cameraView: Pick<import("@woohaa3/contracts").AssistantWorldContextView, "camera" | "sceneModels" | "modelScripts"> = {};
     if (context.scope.scope.kind === "scene-area" && deps.authority.cacheFor) {
       // 助手需要书架等模型的世界变换、朝向与本地包围盒来推导倒下支点和镜头取景。
       const cache = deps.authority.cacheFor(ledger.canvasId, context.scope);
@@ -941,6 +978,18 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       }
       const stillIssued = resolve(input.contextId);
       if ("ok" in stillIssued) return stillIssued;
+    }
+    // Authoritative scripts for chunked authoring: `get_world_model_script` serves
+    // `includeSource` from here so a caller can verify the real tail before appending.
+    {
+      const modelScripts: Record<string, string> = {};
+      for (const target of [...context.writableTargets.map(entry => entry.target), ...context.readOnlyReferences]) {
+        if (target.kind !== "instance") continue;
+        const located = findInstanceNode(inspected.canvas, target.instanceId);
+        const script = located ? scriptOfNode(located.fields) : null;
+        if (script !== null) modelScripts[target.instanceId] = script;
+      }
+      if (Object.keys(modelScripts).length > 0) cameraView = { ...cameraView, modelScripts };
     }
     return {
       ok: true,
@@ -1003,6 +1052,12 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     }
     if (operation.kind === "replace-model-content") {
       return replaceContent(ledger, context, capability, operation, inspected);
+    }
+    if (operation.kind === "append-model-script") {
+      return appendModelScript(ledger, context, capability, operation, inspected);
+    }
+    if (operation.kind === "patch-model-script") {
+      return patchModelScript(ledger, context, capability, operation, inspected);
     }
     if (operation.kind === "set-model-transform") {
       return moveModel(ledger, context, capability, operation, inspected);
@@ -1223,14 +1278,18 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       return failure("operation-conflict", `新模型身份已存在（nodeId=${operation.nodeId}, instanceId=${instanceId}）`);
     }
     let definition: Record<string, unknown>;
+    const skeleton = operation.content.modelScript === "";
     try {
-      definition = contentFields(operation.content);
+      definition = skeleton ? skeletonContentFields(operation.content) : contentFields(operation.content);
     } catch (error) {
       return failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效");
     }
     const fields = instanceFields(definition, instanceId, operation.transform);
-    const prepared = await deps.authority.prepareContent(fields);
-    if (!prepared) return failure("invalid-data", "模型脚本无法执行或无法确定占地；请先调用 get_model_api，并使用 woohaa-model-js-v2 的 scene.* API");
+    // A skeleton has no geometry yet; it still gets its canonical identity in the
+    // same commit and is classified read-only/not-ready until chunks arrive.
+    const prepared = skeleton ? null : await deps.authority.prepareContent(fields);
+    if (!skeleton && !prepared) return failure("invalid-data", "模型脚本无法执行或无法确定占地；请先调用 get_model_api，并使用 woohaa-model-js-v2 的 scene.* API");
+    const cardPosition = operation.content.cardPosition ?? { x: 0, y: 0 };
     const commandId = intentCommandId("assistant-world-create", operation);
     const result = await inspected.room.submitDerived({
       commandId,
@@ -1359,6 +1418,303 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       nodeId: current.nodeId,
       ...(version ? { version } : {})
     };
+  }
+
+  /** Current authoritative version for a version-conflict receipt, when readable. */
+  function versionConflict(current: string | null): AssistantWorldFailure {
+    return failure("version-conflict", current
+      ? `模型内容版本已变化（当前 ${current}），请使用该版本重试，不要复用旧版本`
+      : "模型内容版本已变化；请重新 get_world_model_script 取真实版本后重试",
+    current ? { currentVersion: current } : {});
+  }
+
+  /**
+   * Compose the post-state content fields of a chunk or patch result.
+   *
+   * Skeleton → first chunk and chunk → next chunk both need a fresh rig decision
+   * (a chunk may introduce `rig.joint`), a fresh content version, an atomic pose
+   * and a re-derived footprint. Every failure is reported before the commit, so
+   * a rejected chunk never leaves partial content behind.
+   */
+  async function composeContent(input: {
+    previousFields: Record<string, unknown>;
+    script: string;
+    identity: WorldObjectIdentity;
+  }): Promise<{ composed: true; fields: Record<string, unknown> } | AssistantWorldFailure> {
+    const previous = input.previousFields.modelContentVersion as { revision?: number; contentHash?: string; sourceHash?: string } | undefined;
+    // An empty skeleton contributes no rig, so its first chunk may still introduce one.
+    const hadScript = typeof input.previousFields.modelScript === "string" && input.previousFields.modelScript !== "";
+    let definition: Record<string, unknown>;
+    try {
+      definition = contentFields({ modelScript: input.script }, hadScript ? input.previousFields.modelRig : undefined);
+    } catch (error) {
+      return failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效");
+    }
+    const nextDefinition = normalizeModelDefinition({
+      modelScript: input.script,
+      modelScriptLanguage: definition.modelScriptLanguage as string,
+      modelScriptVersion: (input.previousFields.modelScriptVersion as string | undefined) ?? "woohaa-model-js-v2",
+      placement: input.previousFields.modelPlacement ?? DEFAULT_MODEL_PLACEMENT,
+      rig: definition.modelRig,
+      previous: previous && typeof previous.revision === "number" && typeof previous.contentHash === "string"
+        ? { revision: previous.revision, sourceHash: String(previous.sourceHash ?? ""), contentHash: previous.contentHash }
+        : null
+    });
+    if (!nextDefinition.ok) return failure("invalid-data", nextDefinition.reason);
+    const decodedCurrent = decodeWorldInstanceData(input.previousFields.sharedWorldInstance);
+    if (!decodedCurrent.ok) return failure("not-ready", "模型共享世界身份无效");
+    const fields = instanceFields({
+      modelScript: nextDefinition.value.modelScript,
+      modelScriptLanguage: nextDefinition.value.modelScriptLanguage,
+      modelScriptVersion: nextDefinition.value.modelScriptVersion,
+      modelContentVersion: nextDefinition.value.contentVersion,
+      modelPlacement: nextDefinition.value.placement,
+      ...(nextDefinition.value.rig ? { modelRig: nextDefinition.value.rig } : {})
+    }, decodedCurrent.value.instanceId, decodedCurrent.value.transform);
+    // The composed script must still compile into a real footprint before it
+    // becomes authoritative. A chunk that breaks the tail fails here and the
+    // committed content is untouched.
+    const prepared = await deps.authority.prepareContent({ ...input.previousFields, ...fields });
+    if (!prepared) {
+      return failure("invalid-data", "拼接后的完整脚本无法编译或无法确定占地；该段没有写入，已提交内容保持不变。每次追加必须是可在尾部拼接的完整语句块，请拆分或修正该段后重试");
+    }
+    return { composed: true, fields };
+  }
+
+  /**
+   * Commit one composed script and report the advanced version.
+   *
+   * The derive step re-checks inside the authority queue that the run is still
+   * issued, the target is still writable and the presented version is still the
+   * current one, so a concurrent整段 replacement or a revoke rejects the chunk
+   * instead of splicing onto content the caller never saw.
+   */
+  async function commitComposedScript(input: {
+    room: CanvasRoom;
+    ledger: RunLedger;
+    context: WorldToolContext;
+    capability: SpatialWriteContext;
+    operation: Extract<AssistantWorldWriteOperation, { kind: "append-model-script" | "patch-model-script" }>;
+    tag: string;
+    identity: WorldObjectIdentity;
+    nodeId: string;
+    fields: Record<string, unknown>;
+  }): Promise<AssistantWorldWriteOutcome> {
+    const { room, ledger, context, operation, identity } = input;
+    const commandId = intentCommandId(input.tag, operation);
+    const result = await room.submitDerived({
+      commandId,
+      // Freeze the exact intent with the receipt: a retry carrying the same
+      // commandId but a different chunk/patch is a reused identity, not a replay.
+      expectedWorldAuthoringHash: stableAuthorityVersion("assistant-world-intent", operation),
+      async derive(canvas) {
+        const node = findInstanceNode(canvas, operation.instanceId);
+        if (!node) return { ok: false as const, code: "not-found", message: "模型不存在" };
+        const stillIssued = resolve(context.contextId);
+        if ("ok" in stillIssued) return { ok: false as const, code: "outside-scope", message: stillIssued.message };
+        if (!findWritable(stillIssued.context, identity)) return { ok: false as const, code: "outside-scope", message: "模型不在本次可写集合" };
+        if (worldObjectVersion(canvas, identity) !== operation.expectedVersion) {
+          return { ok: false as const, code: "version-conflict", message: "模型内容版本已变化" };
+        }
+        return {
+          ok: true as const,
+          batch: {
+            protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+            canvasId: ledger.canvasId,
+            commandId,
+            actorId: `assistant-world:${context.runId}`,
+            baseRevision: canvas.revision,
+            commands: [{ type: "nodeData.patch" as const, nodeId: node.nodeId, value: input.fields as unknown as CanvasNodeData }]
+          }
+        };
+      }
+    }, { spatialContext: input.capability });
+    if (!result.ok) {
+      const rejected = commandFailure(result);
+      if (rejected.code === "version-conflict") {
+        // Report the real current version so the caller can retry from the
+        // content it actually reads next, never from the stale one it sent.
+        const after = await room.inspectPublished(value => value);
+        return versionConflict(after.ok ? worldObjectVersion(after.canvas, identity) : null);
+      }
+      return rejected;
+    }
+    const after = await room.inspectPublished(value => value);
+    const version = after.ok ? worldObjectVersion(after.canvas, identity) : null;
+    if (version) {
+      ledger.writes.set(objectKey(identity), { identity, version });
+      deps.worldAuthoring.refreshContextVersions({ canvasId: ledger.canvasId, contextId: ledger.contextId, targets: [{ ...identity, version }] });
+    }
+    return {
+      ok: true,
+      canvasId: ledger.canvasId,
+      commandId,
+      revision: result.revision,
+      duplicate: result.status === "duplicate",
+      noop: result.noop,
+      instanceId: operation.instanceId,
+      nodeId: input.nodeId,
+      scriptLength: String(input.fields.modelScript ?? "").length,
+      ...(version ? { version } : {})
+    };
+  }
+
+  /** Scope-only pre-check shared by chunk writes: nothing here depends on content versions. */
+  function chunkScope(
+    context: WorldToolContext,
+    canvas: ServerCanvas,
+    identity: WorldObjectIdentity
+  ): { target: true; node: { nodeId: string; fields: Record<string, unknown> } } | AssistantWorldFailure {
+    if (!findWritable(context, identity)) return failure("outside-scope", "模型不在本次可写集合");
+    const node = findInstanceNode(canvas, identity.kind === "instance" ? identity.instanceId : "");
+    if (!node) return failure("not-found", "模型不存在");
+    return { target: true, node };
+  }
+
+  /**
+   * Resolve a chunk operation against the *frozen receipt* first.
+   *
+   * A transport retry of an already committed chunk must return the original
+   * receipt even though its `expectedVersion` is now stale and the composed
+   * content no longer matches — that is what idempotency means. Reusing one
+   * operation id for a different chunk is a different identity: refuse it up
+   * front so the caller cannot mistake it for an ordinary version conflict.
+   */
+  async function replayChunk(input: {
+    room: CanvasRoom;
+    ledger: RunLedger;
+    identity: WorldObjectIdentity;
+    operation: Extract<AssistantWorldWriteOperation, { kind: "append-model-script" | "patch-model-script" }>;
+    commandId: string;
+  }): Promise<AssistantWorldWriteOutcome | null> {
+    const { room, ledger, identity, operation } = input;
+    const intentHash = stableAuthorityVersion("assistant-world-intent", operation);
+    const seen = ledger.chunkIntents.get(operation.operationId);
+    if (seen !== undefined && seen !== intentHash) {
+      return failure("operation-conflict", "相同 operationId 使用了不同意图：同一次请求只能重试完全相同的片段或修补");
+    }
+    // Remember the identity before attempting anything else, so a later reuse of
+    // the same id is caught even when this attempt itself failed.
+    ledger.chunkIntents.set(operation.operationId, intentHash);
+    if (typeof room.lookupCommand !== "function") return null;
+    let receipt: Awaited<ReturnType<CanvasRoom["lookupCommand"]>>;
+    try {
+      receipt = await room.lookupCommand(input.commandId);
+    } catch {
+      return null;
+    }
+    if (!receipt) return null;
+    // The chunk of this receipt is already in the canonical content, so the
+    // reported length is read from the truth and the version is re-derived.
+    const after = await room.inspectPublished(value => value);
+    const version = after.ok ? worldObjectVersion(after.canvas, identity) : null;
+    if (version) {
+      ledger.writes.set(objectKey(identity), { identity, version });
+      deps.worldAuthoring.refreshContextVersions({ canvasId: ledger.canvasId, contextId: ledger.contextId, targets: [{ ...identity, version }] });
+    }
+    const located = after.ok ? findInstanceNode(after.canvas, operation.instanceId) : null;
+    const script = located ? scriptOfNode(located.fields) : null;
+    return {
+      ok: true,
+      canvasId: ledger.canvasId,
+      commandId: input.commandId,
+      revision: receipt.revision,
+      duplicate: true,
+      noop: receipt.changed !== true,
+      instanceId: operation.instanceId,
+      ...(script !== null ? { scriptLength: script.length } : {}),
+      ...(operation.kind === "patch-model-script" ? { replaced: 1 } : {}),
+      ...(version ? { version } : {})
+    };
+  }
+
+  async function appendModelScript(
+    ledger: RunLedger,
+    context: WorldToolContext,
+    capability: SpatialWriteContext,
+    operation: Extract<AssistantWorldWriteOperation, { kind: "append-model-script" }>,
+    inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
+  ): Promise<AssistantWorldWriteOutcome> {
+    const identity: WorldObjectIdentity = { kind: "instance", instanceId: operation.instanceId };
+    // 重试优先：已冻结的回执直接返回，不重复拼接（此时 expectedVersion 必然已经过期）。
+    const replayed = await replayChunk({
+      room: inspected.room,
+      ledger,
+      identity,
+      operation,
+      commandId: intentCommandId("assistant-world-append", operation)
+    });
+    if (replayed) return replayed;
+    const target = chunkScope(context, inspected.canvas, identity);
+    if (!("target" in target)) return target;
+    const current = worldObjectVersion(inspected.canvas, identity);
+    if (current !== operation.expectedVersion) return versionConflict(current);
+    const script = scriptOfNode(target.node.fields);
+    if (script === null) return failure("not-ready", "模型没有可编辑的脚本内容");
+    const composed = await composeContent({
+      previousFields: target.node.fields,
+      script: appendWorldModelChunk(script, operation.chunk),
+      identity
+    });
+    if (!("composed" in composed)) return composed;
+    return commitComposedScript({
+      room: inspected.room,
+      ledger,
+      context,
+      capability,
+      operation,
+      tag: "assistant-world-append",
+      identity,
+      nodeId: target.node.nodeId,
+      fields: composed.fields
+    });
+  }
+
+  async function patchModelScript(
+    ledger: RunLedger,
+    context: WorldToolContext,
+    capability: SpatialWriteContext,
+    operation: Extract<AssistantWorldWriteOperation, { kind: "patch-model-script" }>,
+    inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
+  ): Promise<AssistantWorldWriteOutcome> {
+    const identity: WorldObjectIdentity = { kind: "instance", instanceId: operation.instanceId };
+    const replayed = await replayChunk({
+      room: inspected.room,
+      ledger,
+      identity,
+      operation,
+      commandId: intentCommandId("assistant-world-patch", operation)
+    });
+    if (replayed) return replayed;
+    const target = chunkScope(context, inspected.canvas, identity);
+    if (!("target" in target)) return target;
+    const current = worldObjectVersion(inspected.canvas, identity);
+    if (current !== operation.expectedVersion) return versionConflict(current);
+    const script = scriptOfNode(target.node.fields);
+    if (script === null) return failure("not-ready", "模型没有可编辑的脚本内容");
+    const planned = planWorldModelScriptPatch(script, operation.oldString, operation.newString);
+    if (!planned.ok) {
+      const message = planned.code === "patch-noop"
+        ? "oldString 与 newString 相同，内容与版本都没有变化"
+        : planned.code === "patch-not-found"
+          ? "oldString 未在模型脚本中命中；回执给出了最近相似片段与脚本长度，请带上更长的上下文后重试"
+          : `oldString 命中了 ${planned.diagnostic.occurrences} 处，无法确定要修补哪一处；请带上更长的上下文使其唯一`;
+      return failure(planned.code, message, { patchDiagnostic: planned.diagnostic });
+    }
+    const composed = await composeContent({ previousFields: target.node.fields, script: planned.script, identity });
+    if (!("composed" in composed)) return composed;
+    const outcome = await commitComposedScript({
+      room: inspected.room,
+      ledger,
+      context,
+      capability,
+      operation,
+      tag: "assistant-world-patch",
+      identity,
+      nodeId: target.node.nodeId,
+      fields: composed.fields
+    });
+    return outcome.ok ? { ...outcome, replaced: planned.replaced } : outcome;
   }
 
   async function moveModel(

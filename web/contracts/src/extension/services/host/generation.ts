@@ -85,6 +85,13 @@ export type GenerationProvider = {
      * 用户显式配置的地址仍按既有信任规则覆盖。
      */
     endpoints?: Partial<Record<import("../../host/service-connection.js").ServiceConnectionProtocol, string>>;
+    /**
+     * 画布里的模型身份 → 上游要发送的模型 ID。
+     *
+     * 目录身份可能带来源前缀（例如 RunningHub 的 `llm/<原始 id>`），但助手通道会把模型名
+     * 原样发给上游；不给出映射时上游会以 404 拒绝。缺省表示两者相同。
+     */
+    upstreamModelId?: (modelId: string) => string;
     create(input: { secret: string; endpoint: string; validate: () => Promise<void>; fetch?: typeof globalThis.fetch }): GenerationProviderHandle;
   };
   /**

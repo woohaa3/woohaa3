@@ -196,6 +196,10 @@ describe("没有写入时按真实结束原因归因", () => {
   it("输出额度写满报 output-truncated，而不是未确认写入", () => {
     expect(unwrittenError("length")).toEqual({ code: "output-truncated", message: expect.stringContaining("长度上限") });
     expect(unwrittenError("content_filter")).toMatchObject({ code: "content-filtered" });
+    for (const reason of ["length", "content_filter"] as const) {
+      expect(unwrittenError(reason, true)?.message).toContain("已成功提交的修改已保留");
+      expect(unwrittenError(reason, true)?.message).not.toContain("没有完成写入");
+    }
   });
 
   it("正常结束或未知原因仍交给未确认写入兜底", () => {

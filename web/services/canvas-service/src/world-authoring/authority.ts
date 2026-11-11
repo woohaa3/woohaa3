@@ -387,8 +387,12 @@ type ObjectState = {
 
 export type WorldAuthoringAuthority = SpatialCommitAuthority & {
   /**
-   * Resolve and cache one exact canonical revision. Unknown instance bounds make
-   * the whole scope not-ready; unknown never degrades to an empty writable set.
+   * Resolve and cache one exact canonical revision. An instance whose geometry
+   * cannot be prepared is classified `unknown` and is never writable, but it does
+   * not make the whole scope not-ready: one skeleton or unloaded asset must not
+   * block every other write in the director area. Unknown never degrades to an
+   * empty writable set — every other instance is still classified normally, and
+   * the unknown target keeps failing closed at the write that touches it.
    */
   prepareCanvas(canvas: ServerCanvas, scope: { kind: "scene-area"; areaId: string }): Promise<PreparedWorldScope>;
   prepareGroup(canvas: ServerCanvas, groupId: string): Promise<PreparedWorldGroup>;
@@ -555,9 +559,14 @@ export function createWorldAuthoringAuthority(
     if (!nonEmpty(scope.areaId)) return { ok: false, code: "invalid-data", message: "导演区身份无效" };
     const found = findArea(canvas, scope.areaId);
     if (!found) return { ok: false, code: "outside-scope", message: "导演区不存在" };
-    const { records: instances, failureMessage } = await collectInstances(canvas);
+    const { records: instances } = await collectInstances(canvas);
     const cameras = collectCameras(canvas);
-    if (failureMessage) return { ok: false, code: "not-ready", message: failureMessage };
+    // Unknown geometry never authorizes a write, but it must not lock the whole area:
+    // a design target (an empty skeleton waiting for its first chunk, or an asset whose
+    // bytes are not ready) only makes *that* model non-writable. Treating it as fatal
+    // would let one unfinished model block every other write in the director area.
+    // Such instances stay `unknown`/read-only and every write to them still fails
+    // closed at the target level.
 
     const writable: WorldObjectVersion[] = [];
     const readOnly: WorldObjectVersion[] = [];
@@ -617,9 +626,14 @@ export function createWorldAuthoringAuthority(
     if (!nonEmpty(groupId)) return { ok: false, code: "invalid-data", message: "2D 组身份无效" };
     const found = findGroup(canvas, groupId);
     if (!found) return { ok: false, code: "outside-scope", message: "2D 组不存在" };
-    const { records: instances, failureMessage } = await collectInstances(canvas);
+    const { records: instances } = await collectInstances(canvas);
     const cameras = collectCameras(canvas);
-    if (failureMessage) return { ok: false, code: "not-ready", message: failureMessage };
+    // Unknown geometry never authorizes a write, but it must not lock the whole area:
+    // a design target (an empty skeleton waiting for its first chunk, or an asset whose
+    // bytes are not ready) only makes *that* model non-writable. Treating it as fatal
+    // would let one unfinished model block every other write in the director area.
+    // Such instances stay `unknown`/read-only and every write to them still fails
+    // closed at the target level.
 
     const readOnly: WorldObjectVersion[] = [];
     const objects: WorldObjectAuthorityEntry[] = [];
@@ -839,8 +853,18 @@ export function createWorldAuthoringAuthority(
         if (!beforeState) {
           if (!afterState) return null;
           if (afterArea) {
+            // A new object must be inside the area, but its geometry may legitimately
+            // still be unknown: that is exactly a skeleton created for chunked
+            // authoring (no script yet), or an asset whose bytes are not ready. Such
+            // an object is created read-only/not-ready and never authorized for a
+            // later write until its geometry exists; refusing the create instead
+            // would make the skeleton step impossible. An object whose geometry *is*
+            // known must still be fully contained.
             const afterContainment = containmentOf(afterState, afterArea.bounds);
-            if (afterContainment !== "writable") return null;
+            if (afterContainment !== "writable" && afterContainment !== "unknown") return null;
+            // Both branches record the post-state version: the object may be created
+            // read-only (unknown geometry) and still holds the lease version a later
+            // chunk needs.
             postEligible.add(postKey(intent.canvasId, intent.scope.scopeVersion, target, afterState.version));
           }
           previous.push({ ...target, version: "absent" });
@@ -848,15 +872,32 @@ export function createWorldAuthoringAuthority(
           continue;
         }
         const beforeContainment = containmentOf(beforeState, beforeArea?.bounds ?? scopeArea.bounds);
-        if (beforeContainment !== "writable") return null;
+        // A skeleton (or an unloaded asset) is `unknown`: it has no geometry to violate
+        // containment yet, and the real geometry supplied by this very write is
+        // checked below. Anything known to be partial or outside still refuses.
+        if (beforeContainment !== "writable" && beforeContainment !== "unknown") return null;
+        if (beforeContainment === "unknown" && afterState && afterArea) {
+          const afterContainment = containmentOf(afterState, afterArea.bounds);
+          if (afterContainment !== "writable") return null;
+        }
 
         if (beforeState.camera && afterState?.camera) {
           const poseChanged = cameraPoseVersion(beforeState.camera) !== cameraPoseVersion(afterState.camera);
           if (poseChanged && afterState.camera.settingsVersion === beforeState.camera.settingsVersion) return null;
         }
         if (afterState && afterArea) {
+          // Writing content that legitimately has no geometry yet (an empty skeleton
+          // being created or reset for chunked authoring) is allowed: the object
+          // becomes read-only until a chunk supplies geometry, and the lease keeps
+          // the produced version so the next append can attach to it.
           const afterContainment = containmentOf(afterState, afterArea.bounds);
-          if (afterContainment !== "writable") return null;
+          if (afterContainment !== "writable" && afterContainment !== "unknown") return null;
+          if (afterContainment !== "writable") {
+            previous.push({ ...target, version: beforeState.version });
+            next.push({ ...target, version: afterState.version });
+            postEligible.add(postKey(intent.canvasId, intent.scope.scopeVersion, target, afterState.version));
+            continue;
+          }
           postEligible.add(postKey(intent.canvasId, intent.scope.scopeVersion, target, afterState.version));
         }
         previous.push({ ...target, version: beforeState.version });

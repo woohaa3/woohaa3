@@ -56,6 +56,11 @@ export function enabledAssistantModels(
   });
 }
 
+/** 目录身份 → 上游模型 ID；Provider 未声明映射时两者相同。 */
+function toUpstreamModelId(mapper: ((modelId: string) => string) | undefined, modelId: string): string {
+  return mapper ? mapper(modelId) : modelId;
+}
+
 export function createSiteProviderSource(options: {
   providerId: string; extensionId: string; label: string; prefix: string;
   settings: SettingsService; provider: () => GenerationProvider | undefined;
@@ -92,7 +97,9 @@ export function createSiteProviderSource(options: {
     const assistantCapabilities: ServiceConnectionCapability[] = assistantModels.map(model => {
       const evidence = provider?.languageCapabilities?.(model.providerModelId);
       return {
-        purpose: "text", protocol: assistantProtocol!, modelId: model.providerModelId,
+        // 助手通道把模型名原样发给上游：目录身份若带来源前缀（如 RunningHub 的 `llm/`），
+        // 必须换成上游认识的 ID，否则上游 404 拒绝本轮。
+        purpose: "text", protocol: assistantProtocol!, modelId: toUpstreamModelId(factory?.upstreamModelId, model.providerModelId),
         imageInput: evidence?.imageInput === true, evidence: "adapter"
       };
     });
@@ -101,7 +108,8 @@ export function createSiteProviderSource(options: {
     const assistantBinding = assistantProtocol && assistantModels.length ? {
       bindingId: `provider-assistant:${options.providerId}`, extensionId: "sdk-agent", consumer: "agent" as const,
       consumerId: `shared:${assistantProtocol}`, purposes: assistantPurposes,
-      modelKeys: assistantModels.map(model => model.providerModelId),
+      // 与上方能力证据同一口径：来源授权按上游 ID 匹配，binding 不能保留目录身份。
+      modelKeys: assistantModels.map(model => toUpstreamModelId(factory?.upstreamModelId, model.providerModelId)),
     } : null;
     const endpoints: ServiceConnectionEndpoint[] = [];
     for (const declared of factory?.protocols ?? []) {

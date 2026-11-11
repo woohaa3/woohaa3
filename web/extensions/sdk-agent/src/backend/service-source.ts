@@ -34,6 +34,8 @@ export function createSdkServiceSource(service: ConnectionService): ServiceConne
 export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, owner: string, connectionId: string, service?: Pick<ConnectionService, "get">) {
   const record = await service?.get(owner, connectionId);
   if (record?.serviceConnectionId) return port.get(owner, record.serviceConnectionId);
+  // 旧式手填连接按 `consumerId === connectionId` 查找绑定。找不到绑定说明该来源没有声明
+  // 助手可用协议，返回 null 由调用方决定如何呈现（可见但不可用），而不是在这里静默丢失。
   return (await port.list(owner)).find(source => source.bindings.some(binding => binding.extensionId === "sdk-agent" && binding.consumerId === connectionId)) ?? null;
 }
 
@@ -41,22 +43,38 @@ export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, own
  * Mutation handlers keep the raw service so their original CAS contract remains unchanged.
  */
 export function withServiceSources(service: ConnectionService, port: ApplicationServiceConnectionFacade): ConnectionService {
+  /**
+   * Project one stored connection onto its effective service source.
+   *
+   * A connection whose source is disabled, removed, or missing an `sdk-agent` binding is still
+   * returned — with `enabled: false` and a `reason` — instead of disappearing. Hiding it made
+   * a real configuration gap ("this provider never declared an assistant protocol") look like
+   * "the connection was never created", so the assistant panel silently lost the provider with
+   * no way to tell why.
+   */
   const project = async (owner: string, record: Awaited<ReturnType<ConnectionService["get"]>>) => {
     if (!record) return null;
     const source = await sdkSourceFor(port, owner, record.connectionId, service);
-    // A disabled, removed or opted-out source stops projecting its Agent connection; conversation history stays.
-    if (!source || !source.enabled || source.removed) return null;
-    const binding = source.bindings.find(item => item.extensionId === "sdk-agent" && (record.serviceConnectionId
-      ? item.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`
-      : item.consumerId === record.connectionId));
-    if (!binding?.purposes.includes("text")) return null;
-    const revision = Number.parseInt(createHash("sha256").update(JSON.stringify([record.configRevision, source.serviceConnectionId, source.configRevision, source.credentialEpoch, source.enabled, source.removed])).digest("hex").slice(0, 12), 16);
-    // 所有文本模型都支持工具调用：来源里同一协议下的 text 能力直接就是可用的 Agent 模型。
+    if (!source || source.removed) return null;
     const protocol = sdkSourceProtocol(record.adapterId);
+    const binding = source.bindings.find(item => item.extensionId === "sdk-agent" && (record.serviceConnectionId
+      ? item.consumerId === `shared:${protocol}`
+      : item.consumerId === record.connectionId));
+    // 所有文本模型都支持工具调用：来源里同一协议下的 text 能力直接就是可用的 Agent 模型。
     const textModels = source.capabilities.filter(capability => capability.purpose === "text" && capability.protocol === protocol);
+    const revision = Number.parseInt(createHash("sha256").update(JSON.stringify([record.configRevision, source.serviceConnectionId, source.configRevision, source.credentialEpoch, source.enabled, source.removed])).digest("hex").slice(0, 12), 16);
     const shared = record.serviceConnectionId ? { name: source.name, models: [...new Set(textModels.map(capability => capability.modelId))] } : {};
-    return { ...record, ...shared, configRevision: revision,
-      baseUrl: source.endpoints.find(endpoint => endpoint.protocol === sdkSourceProtocol(record.adapterId))?.baseUrl ?? record.baseUrl };
+    const projected = {
+      ...record,
+      ...shared,
+      configRevision: revision,
+      baseUrl: source.endpoints.find(endpoint => endpoint.protocol === protocol)?.baseUrl ?? record.baseUrl
+    };
+    if (!source.enabled) return { ...projected, enabled: false, reason: "该服务连接已停用，重新启用后可用于助手" };
+    if (!binding?.purposes.includes("text")) {
+      return { ...projected, enabled: false, reason: "该服务连接没有声明助手可用的文本协议，无法在助手面板中使用" };
+    }
+    return projected;
   };
   const ensureShared = async (owner: string) => {
     const existing = await service.list(owner);

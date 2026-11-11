@@ -244,10 +244,13 @@ export function projectDshEvents(
    * 回合归为「未确认写入」，用户看不到真实原因。
    */
   turnEnd?: string;
+  /** `turn/end` 的原始 reason 文本（诊断用；不参与业务判断）。 */
+  turnEndReason?: string;
   /** 每条助手消息的块类型与模型级终止原因（诊断与截断归因用）。 */
   assistantMessages: Array<{ blocks: string[]; finish?: string }>;
 } {
   let assistantText = "";
+  let turnEndReason: string | undefined;
   const toolCalls: ModelToolCall[] = [];
   const seen = new Set<string>();
   let turnEnd: string | undefined;
@@ -295,6 +298,7 @@ export function projectDshEvents(
     if (event.type === "turn/end") {
       const reason = event.data?.reason as Record<string, unknown> | undefined;
       if (typeof reason?.kind === "string") turnEnd = reason.kind;
+      if (reason) turnEndReason = JSON.stringify(reason).slice(0, 500);
       continue;
     }
     if (event.type !== "tool/call") continue;
@@ -310,7 +314,7 @@ export function projectDshEvents(
     toolCalls.push(call);
     emit({ type: "tool-call", call });
   }
-  return { assistantText, toolCalls, assistantMessages, ...(turnEnd !== undefined ? { turnEnd } : {}) };
+  return { assistantText, toolCalls, assistantMessages, ...(turnEnd !== undefined ? { turnEnd } : {}), ...(turnEndReason !== undefined ? { turnEndReason } : {}) };
 }
 
 type DshHarness = import("@deepseek-ai/dsh-sdk-client").DeepSeekHarness;
@@ -401,7 +405,12 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           }
           // dsh 只有「正常结束」才会 resolve；`blocked`/`error` 不是模型完成，必须如实报错。
           if (projected.turnEnd === "blocked") return { ok: false, code: "turn-blocked", message: "回合被运行时阻塞，未执行写入；请重试" };
-          if (projected.turnEnd === "error") return { ok: false, code: "execution-failed", message: "模型回合以错误结束，未提交写入；请重试" };
+          if (projected.turnEnd === "error") {
+            // 保留上游终止原因：`turn/end` 的 reason 是唯一能区分「上游拒绝」「限流」「协议错误」的证据。
+            const detail = projected.turnEndReason;
+            void writeFile(path.join(os.tmpdir(), "woohaa-dsh-last-turn.json"), JSON.stringify({ at: new Date().toISOString(), model: input.model, turnEnd: projected.turnEnd, reason: detail ?? null, calls: projected.toolCalls.map((call) => call.name) }, null, 1), { mode: 0o600 }).catch(() => undefined);
+            return { ok: false, code: "execution-failed", message: detail ? `模型回合以错误结束（${detail}），未提交写入；请重试` : "模型回合以错误结束，未提交写入；请重试" };
+          }
           // 模型自称以工具调用结束，却没有留下任何完整调用：分片被丢弃，本轮不可能写入。
           if (projected.toolCalls.length === 0 && modelFinish === "tool-calls")
             return { ok: false, code: "tool-call-incomplete", message: "模型生成的工具调用不完整，本轮未提交写入；请拆分需求后重试" };

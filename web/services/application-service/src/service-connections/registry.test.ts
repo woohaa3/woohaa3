@@ -135,6 +135,33 @@ describe("registered source adapters", () => {
       expect(JSON.stringify(await restarted.list("alice"))).not.toMatch(/first|second|origin|credentialKey/);
     } finally { f.close(); }
   });
+  it("rewrites changed model identities even when the adapter revision stays unchanged", async () => {
+    const f = fixture();
+    // Snapshot fingerprints cover model identities independently of the adapter revision.
+    let modelId = "llm/deepseek/deepseek-v4-flash";
+    const snapshot = () => ({
+      legacyId: "a", scope: "personal" as const, kind: "api" as const, name: "source-a", endpoints: input.endpoints,
+      capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId, imageInput: false, evidence: "adapter" as const }],
+      bindings: [{ ...binding, bindingId: "a", consumerId: "a", modelKeys: [modelId] }],
+      enabled: true, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
+    });
+    const adapter = { id: "mapped", scope: "personal" as const, get: async () => snapshot(), list: async () => [snapshot()], readSecret: async () => "private-key" };
+    try {
+      const port = f.registry.forExtension("sdk");
+      port.registerSource(adapter);
+      const [before] = await port.list("alice");
+      expect(before.capabilities).toContainEqual(expect.objectContaining({ modelId: "llm/deepseek/deepseek-v4-flash" }));
+
+      modelId = "deepseek/deepseek-v4-flash";
+      const [after] = await port.list("alice");
+      expect(after.serviceConnectionId).toBe(before.serviceConnectionId);
+      expect(after.capabilities).toContainEqual(expect.objectContaining({ modelId: "deepseek/deepseek-v4-flash" }));
+      expect(after.bindings.find(item => item.bindingId === "a")?.modelKeys).toEqual(["deepseek/deepseek-v4-flash"]);
+      // 授权按新 ID 通过，旧身份不再可用。
+      const call = { ...after, bindingId: "a", purpose: "text" as const, protocol: "responses", modelId: "deepseek/deepseek-v4-flash", endpoint: input.endpoints[0].baseUrl };
+      expect(await port.resolve("alice", call)).toMatchObject({ secret: "private-key" });
+    } finally { f.close(); }
+  });
   it("removes a disabled adapter source and republishes it only after the adapter content changes", async () => {
     const f = fixture();
     let enabled = true;

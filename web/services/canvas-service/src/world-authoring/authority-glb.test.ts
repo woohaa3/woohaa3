@@ -193,7 +193,9 @@ describe("trusted GLB world authority", () => {
     });
     const authority = createWorldAuthoringAuthority({ media: { read } });
     expect((await authority.prepareCanvas(a, AREA)).ok).toBe(true);
-    expect(await authority.prepareCanvas(b, AREA)).toMatchObject({ ok: false, code: "not-ready" });
+    // canvas-b 的字节不可读：该实例保持 unknown（不可写），不锁死其它实例。
+    const other = await authority.prepareCanvas(b, AREA);
+    expect(other.ok && other.snapshot.writable).toEqual([]);
     expect(read.mock.calls.map(call => call[1])).toEqual(["canvas-a", "canvas-b"]);
     expect(worldObjectVersion(a, TARGET)).not.toBe(worldObjectVersion(b, TARGET));
   });
@@ -211,7 +213,8 @@ describe("trusted GLB world authority", () => {
       return { bytes, contentType: TYPE };
     });
     const authority = createWorldAuthoringAuthority({ media: { read } });
-    expect(await authority.prepareCanvas(canvas, AREA)).toMatchObject({ ok: false, code: "not-ready" });
+    const failed = await authority.prepareCanvas(canvas, AREA);
+    expect(failed.ok && failed.snapshot.writable).toEqual([]);
     expect((await authority.prepareCanvas(canvas, AREA)).ok).toBe(true);
     expect((await authority.prepareCanvas(canvas, AREA)).ok).toBe(true);
     expect(read).toHaveBeenCalledTimes(2);
@@ -226,7 +229,8 @@ describe("trusted GLB world authority", () => {
     if (failure === "budget") invalid.assets[0].metadata!.size = GLB_MAX_FILE_BYTES + 1;
     if (failure === "metadata-type") invalid.assets[0].metadata!.contentType = "image/png";
     const read = readFrom(bytes), authority = createWorldAuthoringAuthority({ media: { read } });
-    expect(await authority.prepareCanvas(invalid, AREA)).toMatchObject({ ok: false, code: "not-ready" });
+    const invalidPrepared = await authority.prepareCanvas(invalid, AREA);
+    expect(invalidPrepared.ok && invalidPrepared.snapshot.writable).toEqual([]);
     expect(read).not.toHaveBeenCalled();
     expect((await authority.prepareCanvas(canvas, AREA)).ok).toBe(true);
   });
@@ -234,8 +238,10 @@ describe("trusted GLB world authority", () => {
   it.each([Buffer.from("invalid glb"), glb(1, false, true)])("retries malformed/unsupported content and recovers when the same asset id receives valid bytes", async bad => {
     const good = glb(), canvas = fixture(bad), read = readFrom(bad, good);
     const authority = createWorldAuthoringAuthority({ media: { read } });
-    expect((await authority.prepareCanvas(canvas, AREA)).ok).toBe(false);
-    expect((await authority.prepareCanvas(canvas, AREA)).ok).toBe(false);
+    // 坏字节只让该实例保持 unknown（不可写），不会把整个导演区判成 not-ready。
+    const w = (prepared: Awaited<ReturnType<typeof authority.prepareCanvas>>) => prepared.ok && prepared.snapshot.writable.length === 0;
+    expect(w(await authority.prepareCanvas(canvas, AREA))).toBe(true);
+    expect(w(await authority.prepareCanvas(canvas, AREA))).toBe(true);
     expect(read).toHaveBeenCalledTimes(2);
     canvas.assets[0] = asset(good);
     expect((await authority.prepareCanvas(canvas, AREA)).ok).toBe(true);

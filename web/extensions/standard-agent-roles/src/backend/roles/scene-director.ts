@@ -12,16 +12,17 @@ import { SCENE_DIRECTOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.j
 export const sceneDirectorRole: AgentRoleImplementation = {
   definition: {
     id: "scene-director",
-    revision: "1",
+    revision: "3",
     title: "导演区作者",
     specialty: "在导演区共享世界中创建、修改模型与镜头，并制作确定性动画",
     instructions: ["你是 Woohaa3 导演区的共享世界创作 Agent。", ...TOOL_COMMON_RULES, ...SCENE_DIRECTOR_FLOW].join("\n"),
     inputSchema: CONVERSATION_INPUT_SCHEMA,
     contextSchema: OPEN_CONTEXT_SCHEMA,
     // 读上下文是所有世界范围的最小必需工具；具体写入/建模工具按本轮 scope 收窄。
+    // get_world_model_script 是分段写入前的版本/脚本读取入口，和 rig/sample 一样是可选读工具。
     tools: {
       required: [ASSISTANT_WORLD_TOOL.readContext],
-      optional: ["get_model_api", ASSISTANT_WORLD_TOOL.readModelRig, ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS]
+      optional: ["get_model_api", ASSISTANT_WORLD_TOOL.readModelScript, ASSISTANT_WORLD_TOOL.readModelRig, ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS]
     },
     nativeCapabilities: { required: [], optional: [] },
     requirements: { imageInput: false, toolCalling: true, structuredOutput: "none" },
@@ -32,7 +33,7 @@ export const sceneDirectorRole: AgentRoleImplementation = {
     if (typeof context === "object" && context !== null && "imageReconstruction" in context) {
       lines.push(
         "本轮是根据参考图片重建导演区场景：先调用 get_world_context 读取空导演区范围，再创建主要模型与一个覆盖全部主体的镜头。",
-        "按图片还原主体、比例、空间布局与构图；只创建静态几何，不使用动画。模型脚本使用模型 API 的 Y-up 米制，世界变换使用 u/v/h 米制。",
+        "主体较多时同样先建骨架再分段追加，不要在一次参数里生成整份脚本；按图片还原主体、比例、空间布局与构图；只创建静态几何，不使用动画。模型脚本使用模型 API 的 Y-up 米制，世界变换使用 u/v/h 米制。",
         "图片只作为参考，不得要求用户上传文件；工具成功返回后才能说场景已创建。"
       );
     }

@@ -34,6 +34,7 @@ import {
   runningHubLanguageCapabilities,
   runningHubLanguageCatalogRevision,
   runningHubLanguageDefinitions,
+  RUNNINGHUB_LANGUAGE_MODEL_PREFIX,
   setRunningHubLanguageModels
 } from "./llm-catalog.js";
 import { createRunningHubTemporaryExposer } from "./temporary-hosting.js";
@@ -91,6 +92,8 @@ export function createRunningHubRegistration(input: RunningHubRegistrationInput)
       protocols: ["chat-completions"],
       assistantProtocol: "chat-completions",
       endpoints: { "chat-completions": input.languageBaseURL ?? DEFAULT_LLM_BASE_URL },
+      // 目录身份是 `llm/<原始 id>`，上游只认去掉前缀的原始 id：助手通道会把模型名原样发出。
+      upstreamModelId: (modelId) => modelId.startsWith(RUNNINGHUB_LANGUAGE_MODEL_PREFIX) ? modelId.slice(RUNNINGHUB_LANGUAGE_MODEL_PREFIX.length) : modelId,
       create: ({ secret, endpoint, fetch: sourceFetch }) => createRunninghubProvider({
         apiKey: secret,
         ...providerOptions,
