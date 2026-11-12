@@ -228,8 +228,11 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
   /**
    * 文本交付路径：无工具一次性候选。
    *
-   * 必须明确要求结构化输出：`assistant-text-service` 只认 `assistantText` 里的
-   * JSON 候选正文，散文本会被判 `candidate-invalid`。
+   * 交付层只认 `assistantText` 里的 **纯 JSON 候选**（`decodeAssistantTextCandidate`
+   * 要求恰好一个 `text` 键），散文本会判 `candidate-invalid`。所以这里做两件事：
+   * 1. 消息里明确给出 schema（见 `messagesOf`）；
+   * 2. 拿回正文后再**宽进严出**地抽出 JSON——模型经常加代码围栏或前后解释，
+   *    那属于格式噪声，不该让整次生成失败。
    */
   const runCandidate = async (
     input: AgentAdapterRunInput,
@@ -239,7 +242,16 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
     const result = await chatRemote(options, { model, messages, signal: input.signal });
     if (input.signal.aborted) return { status: "cancelled", error: { code: "cancelled", message: "已停止本次生成" } };
     if (!result.ok) return { status: "failed", error: { code: result.code, message: result.message } };
-    return { status: "succeeded", assistantText: result.text };
+    const extracted = extractJsonObject(result.text);
+    if (extracted === null) {
+      // 保留原文以便在详情里定位；错误码与交付层一致，便于上层归类。
+      return {
+        status: "failed",
+        assistantText: result.text,
+        error: { code: "candidate-invalid", message: "助手未返回结构化文本正文" },
+      };
+    }
+    return { status: "succeeded", assistantText: extracted };
   };
 
   /** 讨论路径：逐段增量，允许中途取消。 */
@@ -287,17 +299,125 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
  * 参考图明确不支持（`imageInput: false`）：有图片时直接失败而不是静默丢弃——用户会
  * 以为是模型忽略了图，而不是这条通路根本没有传图。
  */
+/**
+ * 把宿主准备的回合输入编译成对话消息。
+ *
+ * **必须优先使用 `prepared.messages`**：那是宿主与角色定义合成好的规范消息
+ * （`definition.instructions` 在最前、领域上下文已注入）。契约写得很直接：
+ * 「通道只消费它：不得再按业务 mode 构造角色提示词」。
+ *
+ * 曾经只用 `intent.prompt`，后果是模型收不到角色的输出契约，于是回一段散文而不是
+ * JSON，文本节点报「助手未返回结构化文本正文」。这不是解析太严，而是根本没告诉模型
+ * 要输出什么。
+ *
+ * `intent.prompt` 只作为旧回合的兜底（`prepared` 缺失时）。
+ */
 function messagesOf(input: AgentAdapterRunInput): RemoteChatMessage[] {
   const messages: RemoteChatMessage[] = [];
+  // 历史按 role 原样重放：压平成单条 user 会让 system 指令与先前的助手回复失去身份。
   for (const message of input.history) {
     const role = message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user";
     messages.push({ role, content: message.content });
   }
-  messages.push({ role: "user", content: input.intent.prompt });
+  const prepared = input.prepared;
+  if (prepared && prepared.messages.length > 0) {
+    for (const message of prepared.messages) {
+      messages.push({
+        role: message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user",
+        content: message.content
+      });
+    }
+  } else {
+    messages.push({ role: "user", content: input.intent.prompt });
+  }
+  // 角色的输出契约要求 JSON 时，把 schema 明确告诉模型。
+  //
+  // 为什么不假设"角色 instructions 里已经写了"：instructions 是给人读的领域描述，
+  // 不保证含机器可校验的 schema。缺了这一段，模型会回一段看起来合理但解析不了的散文。
+  const output = prepared?.output;
+  if (input.candidate && output?.kind === "candidate") {
+    messages.push({
+      role: "system",
+      content: [
+        "只输出一个 JSON 对象，不要代码围栏、不要解释。",
+        "它必须满足以下 JSON Schema：",
+        JSON.stringify(output.schema)
+      ].join("\n")
+    });
+  } else if (input.candidate) {
+    // 没有角色声明的 schema 时退回候选的通用契约（`{ text }`）。
+    messages.push({
+      role: "system",
+      content: [
+        "只输出一个 JSON 对象，不要代码围栏、不要解释。",
+        "它必须满足以下 JSON Schema：",
+        JSON.stringify(input.candidate.outputSchema)
+      ].join("\n")
+    });
+  }
   return messages;
 }
 
 /** 参考图是否被请求过（用于给出可读的拒绝原因）。 */
 export function hasReferenceImages(input: AgentAdapterRunInput): boolean {
   return (input.candidate?.images.length ?? 0) > 0;
+}
+
+/**
+ * 从模型输出里抽出第一个完整的 JSON 对象。
+ *
+ * 为什么需要它：交付层的解码器要求**恰好一个 `text` 键的纯对象**，而模型常见三种噪声——
+ * 代码围栏（```json … ```）、前后解释（"好的，这是结果："）、以及尾随标点。这些都是
+ * 格式问题，不是内容问题；让整次生成因它们失败，用户看到的是"助手未返回结构化文本正文"，
+ * 而他明明得到了一段可用正文。
+ *
+ * 实现是**扫描配对括号**而不是贪婪正则：正文里可能含 `}`（例如写代码），
+ * 正则截断会造出半个对象。字符串内的括号与转义也要跳过，否则 `{"text":"a}b"}` 会被截错。
+ *
+ * 返回重新序列化后的紧凑 JSON；抽不出对象时返回 null（由调用方按失败收敛）。
+ */
+export function extractJsonObject(raw: string): string | null {
+  const text = raw.trim();
+  // 去掉整段包裹的代码围栏。
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
+  const body = (fenced?.[1] ?? text).trim();
+
+  const start = body.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < body.length; index += 1) {
+    const char = body[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        const candidate = body.slice(start, index + 1);
+        try {
+          const parsed: unknown = JSON.parse(candidate);
+          // 只接受对象：交付层要读 `text` 键，数组或标量没有意义。
+          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+          return JSON.stringify(parsed);
+        } catch {
+          // 这一段括号配对但不是合法 JSON（例如正文里的代码片段）：继续往后找下一个对象。
+          depth = 0;
+          const next = body.indexOf("{", index + 1);
+          if (next < 0) return null;
+          index = next - 1;
+        }
+      }
+    }
+  }
+  return null;
 }

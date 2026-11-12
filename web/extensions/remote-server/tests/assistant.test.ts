@@ -337,7 +337,9 @@ describe("远端助手执行分支", () => {
     const messages = surface.calls[0]!.messages;
     expect(messages[0]).toEqual({ role: "system", content: "你是助手" });
     expect(messages[1]).toEqual({ role: "assistant", content: "上一轮回复" });
-    expect(messages[messages.length - 1]).toEqual({ role: "user", content: "你好" });
+    // 候选路径末尾会追加一条 schema 指令（见 messagesOf），所以本轮 prompt 不是最后一条。
+    const userMessages = messages.filter((message) => message.role === "user");
+    expect(userMessages.at(-1)).toEqual({ role: "user", content: "你好" });
   });
 
   it("未选模型时明确失败", async () => {
