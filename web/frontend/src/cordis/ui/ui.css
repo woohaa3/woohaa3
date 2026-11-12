@@ -1057,6 +1057,19 @@
 
 .ref-tile--waiting { border-style: dashed; color: var(--app-web-text-muted); }
 .ref-tile--invalid { border-color: var(--app-status-danger-soft); color: var(--app-status-danger); }
+/* 模型声明但还没填的槽位：虚线 + 可点，与「加一个参考」的 add tile 区分开——
+   前者有明确语义（控制图、遮罩），后者是"随便挑一个"。 */
+.ref-tile--empty {
+	border-style: dashed;
+	border-color: var(--app-interaction-accent);
+	color: var(--app-web-text-muted);
+}
+.ref-tile--empty.ref-tile--fillable { cursor: pointer; }
+.ref-tile--empty.ref-tile--fillable:hover {
+	background: color-mix(in srgb, var(--app-interaction-accent) 8%, transparent);
+}
+/* 必填空槽位用危险色描边：它挡住执行，必须比"可选槽位"更显眼。 */
+.ref-tile--empty[data-required="true"] { border-color: var(--app-status-danger); }
 .ref-tile--add {
 	border-style: dashed;
 	cursor: pointer;

@@ -67,6 +67,7 @@ import {
 import {
   addReference,
   canMentionReference,
+  fillReferenceSlot,
   mentionTypeFor,
   placeholderModel,
   readPanelLocalSurface,
@@ -552,6 +553,9 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       pickerOpen={pickerOpen}
       onPickerOpenChange={setPickerOpen}
       onConnect={(sourceNodeId) => addReference(session, context.nodeId, sourceNodeId)}
+      onFillSlot={(item, sourceNodeId) =>
+        fillReferenceSlot(session, canvas, context.nodeId, { role: item.role, sourceNodeId },
+          (message) => setReferenceError({ nodeId: context.nodeId, message }))}
       onDisconnect={(item) => editReferences([item])}
     />
   );

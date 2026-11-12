@@ -190,6 +190,52 @@ export type CanvasTaskInputBinding = {
   mediaTypes: string[];
   maxItems: number;
   valueFormat: "url" | "reference";
+  /**
+   * 槽位展示名（如「控制图」）。空表示按角色名兜底。
+   *
+   * 展示名随模型/工作流版本走，不在客户端硬编码：加一种条件输入不该要求客户端发版。
+   */
+  label?: string;
+  /**
+   * 该槽位不填充就不能执行。
+   *
+   * 只对参考槽位有意义。普通参数的必填由参数 schema 表达，两处各写一份会让
+   * 「这条必填谁说了算」没有答案。
+   */
+  required?: boolean;
+  /**
+   * 这个 binding 是否描述一个**模型显式声明的具名槽位**。
+   *
+   * 只有它为真时才为未填充的槽位渲染空位。按模型类型兜底的默认绑定（视频模型的
+   * `first_frame` / `last_frame`）表达的是"这类模型可以接"，不是"这个模型等你填"，
+   * 给它们都渲染空槽会让参考区凭空多出几个永远没人用的位置。
+   */
+  declaredSlot?: boolean;
+};
+
+/** 参考槽位的运行期身份：模型声明的一个槽，可能已填充也可能还空着。 */
+export type CanvasReferenceSlot = {
+  /** 槽位身份，与 binding 的 role 一致（reference_image / control_image…）。 */
+  role: string;
+  /** 展示名；binding 没声明时按角色兜底。 */
+  label: string;
+  mediaKind: CanvasReferenceMediaKind;
+  maxItems: number;
+  required: boolean;
+  /**
+   * 该槽位的绑定字段名。
+   *
+   * 派发按 role 找落点，但目录里一个槽位就是一条件，`field` 与 `role` 在远端工作流
+   * 模型上相同；留字段名是为了让不相等的情形（上游网关模型）也能被正确描述。
+   */
+  field: string;
+  /**
+   * 这个槽位由模型**显式声明**，而不是按模型类型兜底推出来的。
+   *
+   * 只有显式声明的槽位才会在未填充时渲染空位：兜底绑定里的 `first_frame` 表达的是
+   * "这类模型可以接首帧"，不是"这个模型正在等首帧"。
+   */
+  declared: boolean;
 };
 
 /** catalog 中单个模型的可投影描述。 */
@@ -276,6 +322,9 @@ export const REFERENCE_IMAGE_SEMANTIC = "reference-image";
 export const REFERENCE_VIDEO_SEMANTIC = "reference-video";
 export const REFERENCE_AUDIO_SEMANTIC = "reference-audio";
 
+/** 槽位展示名上限，与服务端 `MaxBindingLabelChars` 一致。 */
+export const MAX_REFERENCE_LABEL_CHARS = 24;
+
 const SEMANTIC_TO_MEDIA_KIND: Readonly<Record<string, CanvasReferenceMediaKind>> = {
   [REFERENCE_IMAGE_SEMANTIC]: "image",
   [REFERENCE_VIDEO_SEMANTIC]: "video",
@@ -326,6 +375,13 @@ export function normalizeInputBindings(input: unknown): CanvasTaskInputBinding[]
       typeof rawMax === "number" && Number.isFinite(rawMax) && rawMax > 0
         ? Math.min(Math.floor(rawMax), CANVAS_TASK_LIMITS.maxReferences)
         : 0;
+    // 槽位元数据只透传形状合法的值：展示名过长或必填声明在非参考角色上，
+    // 都说明上游声明有问题，静默带上它只会让面板显示一个错的东西。
+    const label = typeof entry.label === "string" && entry.label.trim() !== ""
+      ? entry.label.trim().slice(0, MAX_REFERENCE_LABEL_CHARS)
+      : undefined;
+    const required = entry.required === true;
+    const declaredSlot = entry.declaredSlot === true;
     bindings.push({
       field: typeof entry.field === "string" && entry.field !== "" ? entry.field : semantic,
       semantic,
@@ -333,7 +389,10 @@ export function normalizeInputBindings(input: unknown): CanvasTaskInputBinding[]
       mediaKinds: mediaKinds.length > 0 ? mediaKinds : [mediaKind],
       mediaTypes: mediaTypes.length > 0 ? mediaTypes : [...DEFAULT_BINDING_MEDIA_TYPES[mediaKind]],
       maxItems,
-      valueFormat: entry.valueFormat === "reference" ? "reference" : "url"
+      valueFormat: entry.valueFormat === "reference" ? "reference" : "url",
+      ...(label !== undefined ? { label } : {}),
+      ...(required ? { required } : {}),
+      ...(declaredSlot ? { declaredSlot } : {})
     });
   }
   return bindings;
@@ -402,4 +461,81 @@ export function referenceInputCapabilityFromDescription(description: {
   if (scanned.length > 0) return summarizeBindings(scanned);
 
   return summarizeBindings([]);
+}
+
+/**
+ * 把 bindings 展开成「模型声明的参考槽位」清单。
+ *
+ * 一个 binding 通常声明一个 role，但上游网关模型（如视频模型的 `urls`）会在一条
+ * binding 里列出 `reference_image` / `first_frame` / `last_frame` 三个角色——那是
+ * **三种角色共用一个落点**，属于"角色在字段内可互换"，不是三个独立槽位。所以这里按
+ * role 展开，而不是按 field 展开。
+ *
+ * 顺序即面板顺序：以 binding 顺序为准，同一 binding 内保持 roles 声明顺序。让客户端
+ * 按角色名重排会让「控制图在参考图前还是后」由字典序决定。
+ */
+export function declaredReferenceSlots(
+  bindings: readonly CanvasTaskInputBinding[]
+): CanvasReferenceSlot[] {
+  const slots: CanvasReferenceSlot[] = [];
+  for (const binding of bindings) {
+    const mediaKind = binding.mediaKinds[0];
+    if (mediaKind === undefined) continue;
+    for (const role of binding.roles) {
+      slots.push({
+        role,
+        label: referenceSlotLabel(binding, role),
+        mediaKind,
+        maxItems: binding.maxItems,
+        required: binding.required === true,
+        field: binding.field,
+        declared: binding.declaredSlot === true
+      });
+    }
+  }
+  return slots;
+}
+
+/**
+ * 槽位的展示名。
+ *
+ * 一条 binding 声明多个角色时不能直接用它自己的 label：那个名字说的是整个字段
+ * （「参考图」），套到 `first_frame` 上会让人以为首帧和参考图是同一回事。
+ */
+function referenceSlotLabel(binding: CanvasTaskInputBinding, role: string): string {
+  const declared = binding.label?.trim();
+  if (declared !== undefined && declared !== "" && binding.roles.length === 1) return declared;
+  return REFERENCE_ROLE_LABELS[role] ?? role;
+}
+
+/** 内置角色的中文名。自定义槽位没声明 label 时退回角色名本身。 */
+export const REFERENCE_ROLE_LABELS: Readonly<Record<string, string>> = {
+  reference_image: "参考图",
+  reference_video: "参考视频",
+  reference_audio: "参考音频",
+  first_frame: "首帧",
+  last_frame: "尾帧",
+  edit_video: "编辑视频",
+  voice_sample: "音色样本"
+};
+
+/**
+ * 必填槽位里还没被填充的那些。
+ *
+ * 返回稳定顺序的原因串，供面板与提交前门禁共用：两处各算一遍会让「面板说缺控制图、
+ * 提交却过了」或反过来。没有槽位声明时返回空数组（旧模型不受影响）。
+ */
+export function missingRequiredSlots(
+  bindings: readonly CanvasTaskInputBinding[],
+  filledRoles: Iterable<string>
+): string[] {
+  const filled = new Set(filledRoles);
+  const reasons: string[] = [];
+  for (const slot of declaredReferenceSlots(bindings)) {
+    // 没声明的槽位不参与必填判定：必填是声明的一部分，兜底绑定不会声明必填。
+    if (!slot.declared) continue;
+    if (!slot.required || filled.has(slot.role)) continue;
+    reasons.push(`缺少必填参考槽位：${slot.label}`);
+  }
+  return reasons;
 }

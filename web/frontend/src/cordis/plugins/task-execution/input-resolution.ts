@@ -18,6 +18,7 @@
  */
 import { decodeWorldCamera, worldCameraShotContext, ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
+  missingRequiredSlots,
   sortWoohaa3CanvasInputMappings,
   type CanvasNodeData,
   type CanvasNodeInputMapping,
@@ -161,6 +162,12 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       });
     }
   }
+
+  // 必填槽位未填充时在提交前拦住：这是"能不能跑"的问题，不是"填得对不对"，
+  // 所以与上面的逐条输入校验分开，且同样用稳定原因串。
+  const filledRoles = new Set(references.map((reference) => reference.role));
+  for (const deferred of deferredReferences) filledRoles.add(deferred.role);
+  blockingReasons.push(...missingRequiredSlots(bindings, filledRoles));
 
   return {
     references,
