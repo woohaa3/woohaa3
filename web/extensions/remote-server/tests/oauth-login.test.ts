@@ -122,6 +122,8 @@ function activate(options: {
   const definition = createRemoteServerPlugin({
     deployment: () => options.deployment,
     fetchImpl: options.fetchImpl,
+    // 这些用例断言的是登录流程本身；激活时的后台自动登录会多打一次请求，干扰计数。
+    autoLoginWithDeviceToken: false,
     ...(options.now ? { now: options.now } : {}),
     ...(options.store ? { store: options.store } : {})
   });

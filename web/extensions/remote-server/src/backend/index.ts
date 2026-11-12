@@ -118,6 +118,14 @@ export type RemoteServerExtensionOptions = {
   loginAssertionHeaders?: readonly string[];
   /** 部署配置读取（缺省读扩展目录 config.local.json + 环境变量）。 */
   deployment?: () => RemoteServerDeployment;
+  /**
+   * 激活时若配了 `serverUrl` 与 `deviceToken`，是否自动用凭证换一次会话（缺省 true）。
+   *
+   * 关掉它的场景只有测试：多数用例断言的是别的行为，一次后台登录会打乱它们的请求计数。
+   * 生产不该关——部署凭证的含义就是"这台机器不用人登录"，等一次存储操作才换会话会让
+   * 应用一直停在纯本地。
+   */
+  autoLoginWithDeviceToken?: boolean;
   /** 出站 fetch（测试注入）。 */
   fetchImpl?: typeof globalThis.fetch;
   /** 时钟（测试注入）。 */
@@ -727,7 +735,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
 
       const generationBridge = createRemoteGenerationBridge({
         // 宿主没有生成扩展点时省略：bridge 会安静跳过（旧宿主/纯本地宿主）。
-        ...(ctx.generation ? { registerGeneration: (provider: import("@woohaa3/contracts").GenerationProvider) => { ctx.generation!.register(provider); } } : {}),
+        ...(ctx.generation ? { registerGeneration: (provider: import("@woohaa3/contracts").GenerationProvider) => ctx.generation!.register(provider) } : {}),
         session: () => sessionSource.current(),
         fetchImpl,
         log,
@@ -737,8 +745,43 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
         putReference: async (input) => (referenceUploader === null ? undefined : referenceUploader(input))
       });
       generationBridge.activate();
+      // 卸载时把 Provider 摘掉：扩展热重载会重建 bridge，旧注册留着会让新实例撞
+      // "生成 Provider 已注册"，整条宿主重启失败（改服务端地址就是这条路径）。
+      ctx.effect(() => () => generationBridge.dispose());
       // 已有会话（本进程登录过或从文档存储恢复）时立即拉一次目录；没有会话就是安静休眠。
       void generationBridge.refresh().catch(() => undefined);
+
+      /**
+       * 配了部署凭证就在激活时换一次会话。
+       *
+       * `ensure()` 原本只有存储客户端在真正读写对象时才调用，于是"配了地址与凭证、但没人
+       * 打开过任何云端的画布"会一直停在纯本地：界面显示未连接、托管生成的目录永远拉不到。
+       * 部署凭证的含义恰恰是"这台机器不用人登录"，不该等一次存储操作来触发。
+       *
+       * 失败只记日志：凭证过期、服务端没开都是部署问题，不该让扩展激活失败（那会把
+       * 整个宿主拖下水，而用户可能只想用本地画布）。
+       *
+       * 测试可以通过 `options.autoLoginWithDeviceToken === false` 关掉：多数用例断言的
+       * 是别的行为，一次后台登录会打乱它们的请求计数。
+       */
+      if (options.autoLoginWithDeviceToken !== false) {
+        void (async () => {
+          const deployment = readDeployment();
+          if (deployment.serverUrl === null || deployment.deviceToken === null) return;
+          const result = await sessionSource.ensure();
+          if (result.ok) {
+            // 会话刚建立：目录、存储后端、同步上游都还没跟上，各自推一次。
+            void generationBridge.refresh().catch(() => undefined);
+            return;
+          }
+          log({
+            event: "remote-session-unavailable",
+            level: "warn",
+            reason: result.code,
+            serverUrl: deployment.serverUrl
+          });
+        })().catch(() => undefined);
+      }
 
       // 遥测上报出口（change: 2026-10-20-add-local-client-telemetry，tasks 7.3/7.4）。
       // 与存储后端同形：谁注册谁收回。宿主没有遥测能力时（纯本地宿主/旧版本）静默跳过，
