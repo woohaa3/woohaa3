@@ -20,6 +20,19 @@ import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
 import { nodeDownloadArgs } from './lib/node-download-args.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true,...options});
+/** 随包执行器 CLI：桌面宿主用它启动/复用 workspace 级 daemon。 */
+function ensureExecutorBundle(){
+ const cli=path.join(root,'packages/execution-runtime/dist/cli.js');
+ if(!fs.existsSync(cli))execFileSync('pnpm',['-C','web','--filter','woohaa3-executor','run','build'],{cwd:root,stdio:'inherit',shell:process.platform==='win32',windowsHide:true});
+ if(!fs.existsSync(cli))throw new Error('woohaa3-executor 构建后仍缺少 dist/cli.js');
+ return cli;
+}
+function stageExecutorRuntime(output){
+ const cli=ensureExecutorBundle();const dir=path.join(output,'executor-runtime');
+ fs.mkdirSync(path.join(dir,'dist'),{recursive:true});
+ fs.copyFileSync(cli,path.join(dir,'dist','cli.js'));
+ fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify({name:'woohaa3-executor-runtime',private:true,type:'module'},null,2)+'\n');
+}
 export async function prepareDesktopNode(){
  const artifact=nodeArtifact();const cache=path.join(root,'.local/desktop-node');fs.mkdirSync(cache,{recursive:true});
  const archive=path.join(cache,artifact.archive);const sums=path.join(cache,'SHASUMS256.txt');
@@ -68,6 +81,7 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  const {node,nodeSha256:actual}=await prepareDesktopNode();
  // Rebuild the staging tree. Never copy user configuration from source packages.
  fs.rmSync(output,{recursive:true,force:true});fs.mkdirSync(output,{recursive:true});
+ stageExecutorRuntime(output);
  const yaml=createRequire(path.join(root,'web/backend/package.json'))('yaml');
  const state=new Map();state.platform=process.platform;state.arch=process.arch;state.runtimeOnly=true;state.excludeDependency=isExternalDesktopDependency;state.packageExtensions=yaml.parse(fs.readFileSync(path.join(root,'web/pnpm-workspace.yaml'),'utf8')).packageExtensions??{};
  attachRuntimePackage(path.join(root,'web/backend'),path.join(output,'backend-runtime'),output,state);
@@ -131,6 +145,8 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
 export async function prepareDevelopmentHost(){
  const prepared=await prepareDesktopNode();const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
  const output=path.join(root,'.local/desktop-dev-host');fs.mkdirSync(output,{recursive:true});
+ ensureExecutorBundle();
+ const executorLink=path.join(output,'executor-runtime');if(!fs.existsSync(executorLink))fs.symlinkSync(path.join(root,'packages/execution-runtime'),executorLink,process.platform==='win32'?'junction':'dir');
  for(const [name,source] of [['backend-runtime',path.join(root,'web/backend')],['frontend',path.join(root,'web/frontend/dist')],['scripts',path.join(root,'scripts')],['models.json',path.join(root,'web/services/task-service/pptask.models.json')]]) {
   const dest=path.join(output,name);if(!fs.existsSync(dest)){if(process.platform==='win32'&&!fs.statSync(source).isDirectory())fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir');}
  }

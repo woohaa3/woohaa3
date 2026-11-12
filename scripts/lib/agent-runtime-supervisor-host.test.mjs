@@ -84,6 +84,65 @@ test("stopping the watch never shuts the runtime down", async () => {
 	assert.equal(calls.some(call => call.method === "shutdown"), false);
 });
 
+test("a packaged script path is used as-is and missing entries fail clearly", async () => {
+	const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-runtime-script-"));
+	const spawns = [];
+	const host = createAgentSupervisorHost({
+		root: ROOT,
+		runtimeDir,
+		workspaceKey: "workspace-script",
+		scriptPath: path.join(runtimeDir, "missing-cli.js"),
+		rpc: async (config) => ({ workspaceKey: config.workspaceKey, pid: 1 }),
+		spawnProcess: () => { spawns.push(true); return { unref() {} }; },
+		startupTimeoutMs: 100
+	});
+	await assert.rejects(() => host.ensure(), /缺少随包入口/);
+	assert.equal(spawns.length, 0);
+	fs.rmSync(runtimeDir, { recursive: true, force: true });
+});
+
+test("a matching build marker reuses the healthy runtime", async () => {
+	const { runtimeDir, spawns } = fixture();
+	fs.writeFileSync(path.join(runtimeDir, "runtime-build"), "build-new\n", { mode: 0o600 });
+	const host = createAgentSupervisorHost({
+		root: ROOT,
+		runtimeDir,
+		workspaceKey: "workspace-a",
+		scriptPath: path.join(ROOT, "packages/execution-runtime/dist/cli.js"),
+		expectedRuntimeBuild: "build-new",
+		rpc: async (config, method) => method === "ping" ? { workspaceKey: config.workspaceKey, pid: 4242 } : Promise.reject(new Error("unexpected")),
+		spawnProcess: () => { spawns.push(true); return { unref() {} }; }
+	});
+	const config = await host.ensure();
+	assert.equal(config.reused, true);
+	assert.equal(spawns.length, 0);
+});
+
+test("a changed build marker stops the old runtime and records the new marker", async () => {
+	const { runtimeDir, spawns } = fixture();
+	fs.writeFileSync(path.join(runtimeDir, "runtime-build"), "build-old\n", { mode: 0o600 });
+	const stops = [];
+	const host = createAgentSupervisorHost({
+		root: ROOT,
+		runtimeDir,
+		workspaceKey: "workspace-a",
+		scriptPath: path.join(ROOT, "packages/execution-runtime/dist/cli.js"),
+		expectedRuntimeBuild: "build-new",
+		rpc: async (config, method) => {
+			if (method !== "ping") throw new Error(`unexpected method ${method}`);
+			return { workspaceKey: config.workspaceKey, pid: config.token === "persisted-token" ? 4242 : 4343 };
+		},
+		spawnProcess: () => { spawns.push(true); return { unref() {} }; },
+		stopRuntime: async () => { stops.push(true); },
+		startupTimeoutMs: 300
+	});
+	const config = await host.ensure();
+	assert.equal(stops.length, 1);
+	assert.equal(spawns.length, 1);
+	assert.equal(config.pid, 4343);
+	assert.equal(fs.readFileSync(path.join(runtimeDir, "runtime-build"), "utf8").trim(), "build-new");
+});
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const readState = (runtimeDir) => JSON.parse(fs.readFileSync(path.join(runtimeDir, "executor.json"), "utf8"));
 

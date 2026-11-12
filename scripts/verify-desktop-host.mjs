@@ -2,6 +2,7 @@
 /** Real isolated bundle smoke. No source imports, no system Node in child PATH. */
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn,execFileSync} from 'node:child_process';import {createInterface} from 'node:readline';import assert from 'node:assert/strict';
 import {systemTar,installedHostLayout,isolatedHostEnvironment} from './lib/desktop-platform-commands.mjs';
+import {agentRuntimeDirectory,hashKey} from './lib/agent-runtime-endpoints.mjs';
 const app=path.resolve(process.argv.slice(2).filter(arg=>arg!=='--')[0]??(process.platform==='win32'?'desktop/target/release':'desktop/target/debug/bundle/macos/WooHaa3.app'));
 const work=fs.mkdtempSync(path.join(os.tmpdir(),'woohaa-bundle-smoke-'));const root=path.join(work,'runtime'),data=path.join(work,'data');fs.mkdirSync(root);fs.mkdirSync(data);
 const {node,archive}=installedHostLayout(app);
@@ -18,6 +19,7 @@ async function stop(){const process=child;child=null;if(!process||process.exitCo
 async function request(origin,url,options){const response=await fetch(origin+url,options);const body=await response.text();assert.ok(response.ok,`${response.status} ${body}`);return JSON.parse(body);}
 try{
  let origin=await start();assert.equal((await fetch(origin)).status,200);assert.equal((await fetch(origin+'/health/ready')).status,200);
+ const agentRuntimeDir=agentRuntimeDirectory({root:data});assert.ok(fs.existsSync(path.join(agentRuntimeDir,'executor.json')),'执行器运行时身份未生成');
  const canvasId='bundle-smoke';const created=await request(origin,'/api/canvases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({canvasId,title:'独立安装包验收'})});assert.equal(created.revision,1);
  const settings=await request(origin,'/api/settings');assert.ok(settings);
  await new Promise((resolve,reject)=>{const socket=new WebSocket(origin.replace('http:','ws:')+`/api/canvases/${canvasId}/sync?sessionProtocolVersion=1`);const timer=setTimeout(()=>{socket.close();reject(new Error('WS timeout'));},10_000);socket.addEventListener('open',()=>{clearTimeout(timer);socket.close();resolve();});socket.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('WS failed'));});});
@@ -28,5 +30,10 @@ try{
  // Open restored SQLite through the actual host, then restart it once more.
  fs.renameSync(data,path.join(work,'original-data'));fs.renameSync(imported,data);
  origin=await start();assert.ok(JSON.stringify(await request(origin,`/api/canvases/${canvasId}`)).includes('独立安装包验收'));await stop();
- console.log(JSON.stringify({ok:true,app,work,checks:['node24-sqlite','isolated-node','frontend','health','canvas-create','websocket','settings','restart-persistence','graceful-exit','export-import']},null,2));
-}finally{try{await stop();}finally{fs.closeSync(log);}}
+ console.log(JSON.stringify({ok:true,app,work,checks:['node24-sqlite','isolated-node','frontend','health','canvas-create','websocket','settings','agent-runtime','restart-persistence','graceful-exit','export-import']},null,2));
+}finally{
+ try{await stop();}finally{
+  try{execFileSync(node,[path.join(root,'executor-runtime/dist/cli.js'),'runtime','stop','--state',agentRuntimeDirectory({root:data}),'--workspace',hashKey(path.resolve(data))],{stdio:'ignore',windowsHide:true});}catch{}
+  fs.closeSync(log);
+ }
+}

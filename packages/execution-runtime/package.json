@@ -35,7 +35,7 @@
     "src"
   ],
   "scripts": {
-    "build": "node ../../web/scripts/build-package.mjs --platform node && node ../../web/scripts/build-package.mjs --platform node --entry src/protocol.ts --outdir dist --entry-name protocol && node ../../web/scripts/build-package.mjs --platform node --entry src/client.ts --outdir dist --entry-name client && node ../../web/scripts/build-package.mjs --platform node --entry src/daemon.ts --outdir dist --entry-name daemon && node ../../web/scripts/build-package.mjs --platform node --entry src/cli.ts --outdir dist --entry-name cli",
+    "build": "node ../../web/scripts/build-package.mjs --platform node && node ../../web/scripts/build-package.mjs --platform node --entry src/protocol.ts --outdir dist --entry-name protocol && node ../../web/scripts/build-package.mjs --platform node --entry src/client.ts --outdir dist --entry-name client && node ../../web/scripts/build-package.mjs --platform node --entry src/daemon.ts --outdir dist --entry-name daemon && node ../../web/scripts/build-package.mjs --platform node --entry src/cli.ts --outdir dist --entry-name cli --bundle-workspace",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "cli": "node ./dist/cli.js"
