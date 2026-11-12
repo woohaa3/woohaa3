@@ -15,7 +15,12 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
   return {
     optionsFor(id: string, version: number, executor: string): HostRuntimeOptions | undefined {
       const binding = bindings.get(key(id, version));
-      return binding ? { ...binding.options, executor: `${binding.options.executor}/${executor}` } : undefined;
+      if (!binding) return undefined;
+      return {
+        ...binding.options,
+        executor: `${binding.options.executor}/${executor}`,
+        get mcpEndpoint() { return options?.mcpEndpoint ?? binding.options.mcpEndpoint; }
+      };
     },
     async activate(definition: ApplicationBackendExtensionDefinition, version: number): Promise<{ service: ApplicationExtensionExecutorFacade; dispose(reason?: ExecutorDisposeReason): Promise<void> } | undefined> {
       if (!definition.executors?.length) return undefined;
@@ -34,7 +39,12 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
       };
       await ensure();
       const binding = {
-        options: { ...options, executor: registrationId, ensure },
+        options: {
+          ...options,
+          executor: registrationId,
+          ensure,
+          get mcpEndpoint() { return options.mcpEndpoint; }
+        },
         async dispose(reason: ExecutorDisposeReason = "disable") {
           const graceful = reason === "shutdown" || reason === "reload";
           if (graceful) {

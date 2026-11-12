@@ -669,6 +669,42 @@ describe("统一 Agent 创作入口", () => {
       expect(selector.disabled).toBe(true);
       expect(el.querySelector("p.authoring-generate__hint")).toBeNull();
     }
+    // Multiple connections with no prior selection still allow opening the assistant directory to choose one.
+    await render({
+      ...props,
+      sourceSelection: {
+        ...props.sourceSelection!,
+        selectedConnectionId: null,
+        connections: [
+          {
+            connectionId: "c1",
+            label: "连接一",
+            ready: true,
+            models: [{ id: "model-a", label: "模型 A" }],
+          },
+          {
+            connectionId: "c2",
+            label: "连接二",
+            ready: true,
+            models: [{ id: "model-b", label: "模型 B" }],
+          },
+        ],
+      },
+    });
+    await act(async () =>
+      el.querySelector<HTMLButtonElement>('button[aria-label="来源与模型"]')!.click(),
+    );
+    const directoryDialog = document.querySelector('[role="dialog"][aria-label="来源与模型"]');
+    expect(directoryDialog).not.toBeNull();
+    expect(directoryDialog?.textContent).toContain("模型 A");
+    expect(directoryDialog?.textContent).toContain("模型 B");
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>(".generation-directory__model")]
+        .find((button) => button.textContent?.includes("模型 B"))!
+        .click(),
+    );
+    expect(props.sourceSelection!.onSelectConnection).toHaveBeenCalledWith("c2");
+
     await render({
       ...props,
       onAuthorize: configure,

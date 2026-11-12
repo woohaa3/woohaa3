@@ -520,7 +520,8 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
 
   if (!panelKind) {
     return (
-      <ExecutionPanelSurface nodeId={context.nodeId} presentation="compact" runtime={runtime}>
+      // 3D 模型锚点大且没有卡片：不为腾出编辑空间平移画布，面板最多贴底停靠。
+      <ExecutionPanelSurface nodeId={context.nodeId} presentation="compact" runtime={runtime} revealAnchor={false}>
         <ModelParameterPanel
           canvasId={canvasId}
           nodeId={context.nodeId}

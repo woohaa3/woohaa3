@@ -242,3 +242,25 @@ it("binds each lease to the channel-declared host methods only (tasks 2.4/3.2)",
   expect(f.leases[1]).toEqual(f.leases[0]);
   await binding!.dispose();
 });
+
+it("resolves mcpEndpoint dynamically after activation when host binds a random loopback port later", async () => {
+  const f = await fixture(`export const createExecutor = () => ({ id: "custom", kind: "agent", async run() { return { status: "succeeded" }; } });`);
+  let currentUrl = "http://127.0.0.1:5180/mcp/model-canvas";
+  const runtime = createExtensionExecutorRuntime({
+    socketPath: f.daemon.socketPath,
+    token: "daemon",
+    workspaceKey: "test",
+    executor: "",
+    bridge: { socketPath: path.join(f.dir, "host.sock"), token: "host", workspaceKey: "test" },
+    get mcpEndpoint() { return currentUrl; },
+    hostCalls: { registerCall() { return { leaseId: "1", release() {} }; } }
+  });
+  const binding = await runtime.activate(f.definition, 1);
+  cleanup.push(() => binding!.dispose());
+  expect(runtime.optionsFor("external-extension", 1, "custom")?.mcpEndpoint).toBe("http://127.0.0.1:5180/mcp/model-canvas");
+  currentUrl = "http://127.0.0.1:54356/mcp/model-canvas";
+  const resolved = runtime.optionsFor("external-extension", 1, "custom");
+  expect(resolved?.mcpEndpoint).toBe("http://127.0.0.1:54356/mcp/model-canvas");
+  currentUrl = "http://127.0.0.1:59388/mcp/model-canvas";
+  expect(resolved?.mcpEndpoint).toBe("http://127.0.0.1:59388/mcp/model-canvas");
+});

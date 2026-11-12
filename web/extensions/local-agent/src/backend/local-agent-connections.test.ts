@@ -502,6 +502,22 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
     expect(patches.some((patch) => patch.transport?.state === "unavailable")).toBe(true);
   });
 
+  it("传输返回 model-access-denied 时只把 modelAccess 记为 unavailable，不污染 transport 连接状态", async () => {
+    const { service, patches } = fakeService([record()]);
+    const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
+    const { transport } = fakeTransport({ ok: false, code: "model-access-denied", message: "OpenCode 模型不可用或已从配置中移除：tencentwoa/deepseek-v4.1-flash（请重新选择模型）" });
+    const { facade } = fakeToolFacade();
+    const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
+    const outcome = await adapter.run(runInput());
+    expect(outcome.status).toBe("failed");
+    expect(outcome.error).toEqual({
+      code: "model-access-denied",
+      message: "OpenCode 模型不可用或已从配置中移除：tencentwoa/deepseek-v4.1-flash（请重新选择模型）"
+    });
+    expect(patches.some((patch) => patch.modelAccess?.state === "unavailable")).toBe(true);
+    expect(patches.some((patch) => patch.transport?.state === "unavailable")).toBe(false);
+  });
+
   it("停用/未启用时拒绝新回合，且不启动进程", async () => {
     const { service } = fakeService([record()]);
     const { manager, ensureCalls } = fakeProcessManager({ executable: "/usr/bin/codex" });

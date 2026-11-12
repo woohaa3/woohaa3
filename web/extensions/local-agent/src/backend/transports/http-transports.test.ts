@@ -284,6 +284,35 @@ describe("OpenCode v2 remote MCP", () => {
     expect(await createOpenCodeTransport({ ...mock, catalogSettleMs: 0 }).run(input({ resumeNativeId: "session-1" }))).toMatchObject({ ok: true, outcome: { assistantText: "new reply" } });
     expect(mock.fetchImpl.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
   });
+
+  it("模型在 OpenCode 中不存在或配置移除时，从非 assistant 的 idle 消息读取 provider.no-route 并给出明确模型不可用提示", async () => {
+    const mock = openCodeMock();
+    const original = mock.fetchImpl.getMockImplementation()!;
+    mock.fetchImpl.mockImplementation(async (url, init) => {
+      const parsed = new URL(String(url));
+      const path = parsed.pathname;
+      if (path.endsWith("/message")) {
+        expect(parsed.searchParams.get("type")).toBeNull();
+        return json({
+          data: [
+            { id: "msg-user", type: "user", text: "prompt" },
+            { id: "msg-idle", type: "idle", outcome: "failed", error: { type: "provider.no-route", message: "Model unavailable: tencentwoa/deepseek-v4.1-flash" } }
+          ]
+        });
+      }
+      if (path === "/api/session/session-1" && init?.method === "GET") {
+        return json({ data: { id: "session-1", outcome: "failed" } });
+      }
+      return original(url, init);
+    });
+    const result = await createOpenCodeTransport({ ...mock, catalogSettleMs: 0 }).run(input({ model: "tencentwoa/deepseek-v4.1-flash" }));
+    expect(result).toEqual({
+      ok: false,
+      code: "model-access-denied",
+      message: "OpenCode 模型不可用或已从配置中移除：tencentwoa/deepseek-v4.1-flash（请重新选择模型）",
+      nativeId: "session-1"
+    });
+  });
 });
 
 
