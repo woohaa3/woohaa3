@@ -561,6 +561,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     const area = decodeSceneAreaData(canvas?.nodeData[gesture.areaNodeId]?.sceneArea);
     if (area.ok && area.value.animationScript) {
       const executed = executeWorldAnimationScript(area.value.animationScript.script, {
+        purpose: "read",
         duration: area.value.animationScript.duration,
         loop: area.value.animationScript.loop
       });

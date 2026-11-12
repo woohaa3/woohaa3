@@ -553,13 +553,13 @@ export function stablePresentationStringify(value: unknown): string {
   });
 }
 
-/** 编译缓存：同一动画脚本只在源码/时长/循环变化时重新执行。 */
+/** 模块内只读编译缓存；模块重载即重建，不继承旧版本的失败（null）结果。 */
 const worldAnimationCache = new Map<string, WorldAnimationIr | null>();
 
 function compiledWorldAnimation(script: WorldAnimationScript): WorldAnimationIr | null {
   const key = `${script.sourceHash}:${script.scriptVersion}:${script.duration}:${script.loop ? 1 : 0}`;
   if (worldAnimationCache.has(key)) return worldAnimationCache.get(key)!;
-  const result = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+  const result = executeWorldAnimationScript(script.script, { purpose: "read", duration: script.duration, loop: script.loop });
   const ir = result.ok ? result.ir : null;
   if (worldAnimationCache.size >= 64) {
     const first = worldAnimationCache.keys().next().value;

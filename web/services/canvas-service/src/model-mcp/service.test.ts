@@ -164,6 +164,22 @@ describe("ModelMcpService.applyCommands（change: split-model-mcp-into-mcp-servi
 });
 
 describe("ModelMcpService.submitScript", () => {
+  it("rejects rig authoring before execution/commit and accepts a plain retry", async () => {
+    const { room } = await readyRoom("canvas-model");
+    const service = serviceFor(room);
+    const before = room.exportCanvas();
+    for (let retry = 0; retry < 2; retry++) {
+      expect(await service.submitScript({ canvasId: "canvas-model", nodeId: "model-1",
+        source: 'rig.joint("Head"); throw new Error("must not execute");', requestId: "rig-rejected" }))
+        .toMatchObject({ ok: false, code: "humanoid-rig-disabled" });
+      expect(room.exportCanvas()).toEqual(before);
+    }
+    expect(await service.submitScript({ canvasId: "canvas-model", nodeId: "model-1", source: VALID_SCRIPT, requestId: "plain-retry" }))
+      .toMatchObject({ ok: true });
+    const after = room.exportCanvas();
+    expect(after.ok && after.canvas.nodeData["model-1"].modelRig).toBeUndefined();
+  });
+
   it("读取 model3d 节点当前的权威 scripting model", async () => {
     const { room } = await readyRoom("canvas-model", {
       "model-1": {

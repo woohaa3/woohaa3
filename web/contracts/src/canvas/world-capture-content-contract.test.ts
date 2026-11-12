@@ -30,6 +30,8 @@ import {
 import type { SceneV2Op } from "./scene-ir-v2.js";
 import type { SharedWorldDecodeResult } from "./shared-world.js";
 
+import { referenceHumanoidRig } from "./humanoid-rig.js";
+
 const SCENE_VERSION = "woohaa-model-scene-ir-v2";
 
 function clonePlacement(placement: ModelPlacement = DEFAULT_MODEL_PLACEMENT): ModelPlacement {
@@ -168,6 +170,26 @@ describe("world capture model content", () => {
         }
       })
     );
+  });
+
+  it("round-trips saved rig and pins its parameters in content and request fingerprints", () => {
+    const base = scriptModel('scene.box({ parent: rig.joint("Head") });');
+    if (base.kind !== "script") throw new Error("expected script");
+    const saved = referenceHumanoidRig();
+    if (!saved.ok) throw new Error("expected rig");
+    const definition = { ...base.definition, rig: saved.value };
+    definition.contentVersion = deriveModelContentVersion({ ...definition, revision: 1 });
+    const content = { ...base, definition };
+    expect(expectOk(createWorldCaptureModelContent(JSON.parse(JSON.stringify(content))))).toEqual(content);
+    const changed = structuredClone(content);
+    changed.definition.rig.parameters.torsoHeight += 0.1;
+    expectInvalid(createWorldCaptureModelContent(changed));
+    changed.definition.contentVersion = deriveModelContentVersion({ ...changed.definition, revision: 2 });
+    expect(createWorldCaptureModelContent(changed).ok).toBe(true);
+    expect(worldCaptureContentFingerprint([instanceContent("a", content)]))
+      .not.toBe(worldCaptureContentFingerprint([instanceContent("a", changed)]));
+    expect(expectOk(createWorldCaptureModelContent(base))).toEqual(base);
+    expect(base.definition).not.toHaveProperty("rig");
   });
 
   it("pins local placement inside script content identity instead of ignoring it", () => {

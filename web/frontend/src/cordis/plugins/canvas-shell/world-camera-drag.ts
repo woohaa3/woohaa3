@@ -317,7 +317,7 @@ export function animatedCameraAt(
     const decoded = decodeSceneAreaData(data?.sceneArea);
     if (!decoded.ok || !decoded.value.animationScript) continue;
     const script = decoded.value.animationScript;
-    const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+    const executed = executeWorldAnimationScript(script.script, { purpose: "read", duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
     if (!executed.ir.cameraTracks.some(track => track.targetId === cameraId)) continue;
     const sample = sampleWorldAnimationInArea(

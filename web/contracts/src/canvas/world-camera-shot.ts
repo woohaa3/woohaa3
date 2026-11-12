@@ -69,6 +69,7 @@ export function compiledShotAnimation(script: WorldAnimationScript): WorldAnimat
   const key = `${script.sourceHash}:${script.scriptVersion}:${script.duration}:${script.loop ? 1 : 0}`;
   if (compiledScripts.has(key)) return compiledScripts.get(key)!;
   const result = executeWorldAnimationScript(script.script, {
+    purpose: "read",
     duration: script.duration,
     loop: script.loop
   });

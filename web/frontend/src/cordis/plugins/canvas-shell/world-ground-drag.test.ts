@@ -185,7 +185,7 @@ describe("世界模型地面拖动", () => {
     if (!decoded.ok) return;
     const nextScript = decoded.value.animationScript!;
     expect(nextScript.revision).toBe(4);
-    const executed = executeWorldAnimationScript(nextScript.script, { duration: nextScript.duration, loop: nextScript.loop });
+    const executed = executeWorldAnimationScript(nextScript.script, { purpose: "read", duration: nextScript.duration, loop: nextScript.loop });
     expect(executed.ok).toBe(true);
     if (!executed.ok) return;
     const track = executed.ir.instanceTracks.find(item => item.targetId === "inst-1" && item.property === "position")!;
@@ -290,12 +290,12 @@ it("unlink removes target cycles and preserves other instances, parts, and camer
     'motion.camera.tween({ targetId: "camera", property: "position", startTime: 0, endTime: 4, from: [0,0,0], to: [1,0,0] });'
   ].join('\n');
   const canvas = anchorCanvas(script);
-  const original = executeWorldAnimationScript(script, { duration: 4, loop: false });
+  const original = executeWorldAnimationScript(script, { purpose: "read", duration: 4, loop: false });
   expect(original.ok).toBe(true);
   const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 })!;
   const plan = planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 }, undefined, new Set(["area"]))!;
   const areaPatch = plan.forward.find(c => c.type === "nodeData.patch" && c.nodeId === "area") as any;
-  const executed = executeWorldAnimationScript(areaPatch.value.sceneArea.animationScript.script, { duration: 4, loop: false });
+  const executed = executeWorldAnimationScript(areaPatch.value.sceneArea.animationScript.script, { purpose: "read", duration: 4, loop: false });
   expect(executed.ok).toBe(true);
   if (!executed.ok || !original.ok) return;
   expect(executed.ir.instanceTracks).toEqual(original.ir.instanceTracks.filter(t => t.targetId === "other"));
@@ -336,7 +336,7 @@ it('moves compact walk waypoints and unlinks them with complete undo',()=>{
  const start=beginWorldGroundDrag(canvas,'m1',{u:0,v:0},new Map([['m1',[0,-.86,.08] as [number,number,number]]]))!;
  const plan=planWorldGroundMoveWithAnimationParts(canvas,start,{u:.1,v:.2})!;
  const patch=plan.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
- const compiled=executeWorldAnimationScript(patch.value.sceneArea.animationScript.script,{duration:4,loop:false});
+ const compiled=executeWorldAnimationScript(patch.value.sceneArea.animationScript.script,{purpose:"read",duration:4,loop:false});
  expect(compiled.ok&&compiled.ir.walkTracks?.[0]?.path).toEqual(options.path.map(([u,v])=>[u!+.1,v!+.2]));
  const unlinked=planWorldGroundMoveWithAnimationParts(canvas,start,{u:10,v:0},undefined,new Set(['area']))!;
  const areaPatch=unlinked.forward.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
@@ -345,4 +345,39 @@ it('moves compact walk waypoints and unlinks them with complete undo',()=>{
  expect(grounded.value.sharedWorldInstance.transform.position.h).toBeCloseTo(.86*options.scale,8);
  const undo=unlinked.inverse.find(c=>c.type==='nodeData.patch'&&c.nodeId==='area') as any;
  expect(undo.value.sceneArea).toEqual(canvas.nodeData.area.sceneArea);
+});
+
+it("unlinking saved walk removes only its instance and preserves other model and camera tracks", () => {
+  const profile = { version: "humanoid-walk-v1", groundAnchorLocal: [0, -.86, .08], legs: {
+    Left: { hipLocal: [.2, 0, 0], upperLength: .4, lowerLength: .35, soleLocal: [0, -.11, .08] },
+    Right: { hipLocal: [-.2, 0, 0], upperLength: .4, lowerLength: .35, soleLocal: [0, -.11, .08] }
+  }, armsDownPose: { LeftUpperArm: [0, 0, -90], RightUpperArm: [0, 0, 90] } };
+  const options = { startTime: 0, endTime: 4, path: [[1, -2], [4, -2], [4, -4], [1, -4]],
+    cornerRadius: .5, strideLength: .6, stepHeight: .09, scale: 1.25, baseYawDegrees: 0, profile };
+  const script = [
+    `motion.instance.walk("inst-1",${JSON.stringify(options)});`,
+    `motion.instance.walk("other-walker",${JSON.stringify(options)});`,
+    'motion.instance.tween("other", {property:"position",startTime:0,endTime:4,from:[0,0,0],to:[1,0,0]});',
+    'motion.part.tween("other", "foot", {property:"rotation",startTime:0,endTime:4,from:[0,0,0],to:[20,0,0]});',
+    'motion.camera.tween({targetId:"camera",property:"position",startTime:0,endTime:4,from:[0,0,0],to:[1,0,0]});'
+  ].join("\n");
+  const canvas = anchorCanvas(script);
+  canvas.nodeData.m1.sharedWorldInstance = { ...instance, transform: { ...instance.transform, rotation: [0, 0, 0, 1] } } as never;
+  const before = structuredClone(canvas);
+  const start = beginWorldGroundDrag(canvas, "m1", { u: 0, v: 0 }, new Map([["m1", [0, -.86, .08] as [number, number, number]]]))!;
+  expect(planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 })!.unbindCandidates).toHaveLength(1);
+  const plan = planWorldGroundMoveWithAnimationParts(canvas, start, { u: 10, v: 0 }, undefined, new Set(["area"]))!;
+  const patch = plan.forward.find(c => c.type === "nodeData.patch" && c.nodeId === "area") as any;
+  const original = executeWorldAnimationScript(script, { purpose: "read", duration: 4, loop: false });
+  const remaining = executeWorldAnimationScript(patch.value.sceneArea.animationScript.script, { purpose: "read", duration: 4, loop: false });
+  expect(original.ok).toBe(true);
+  expect(remaining.ok).toBe(true);
+  if (!original.ok || !remaining.ok) return;
+  expect(remaining.ir.walkTracks).toEqual(original.ir.walkTracks!.filter(track => track.targetId !== "inst-1"));
+  expect(remaining.ir.instanceTracks).toEqual(original.ir.instanceTracks);
+  expect(remaining.ir.partTracks).toEqual(original.ir.partTracks);
+  expect(remaining.ir.cameraTracks).toEqual(original.ir.cameraTracks);
+  expect(canvas).toEqual(before);
+  const undo = plan.inverse.find(c => c.type === "nodeData.patch" && c.nodeId === "area") as any;
+  expect(undo.value.sceneArea).toEqual(before.nodeData.area.sceneArea);
 });

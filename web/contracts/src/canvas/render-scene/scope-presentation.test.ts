@@ -307,6 +307,36 @@ it("projects local joint poses without rebuilding model resources or moving the 
   expect(buildCanvasRenderScene({canvas,modelResources:new Map([["model",resource]])}).nodes.find(n => n.id === "model")!.model?.partRotations).toBeUndefined();
 });
 
+it("samples saved walk position and joint poses, including repeated cached playback", () => {
+  const canvas = fixture();
+  const profile = {
+    version: "humanoid-walk-v1", groundAnchorLocal: [0, -.86, .08],
+    legs: {
+      Left: { hipLocal: [.2, 0, 0], upperLength: .4, lowerLength: .35, soleLocal: [0, -.11, .08] },
+      Right: { hipLocal: [-.2, 0, 0], upperLength: .4, lowerLength: .35, soleLocal: [0, -.11, .08] }
+    },
+    armsDownPose: { LeftUpperArm: [0, 0, -90], RightUpperArm: [0, 0, 90] }
+  };
+  const options = { startTime: 0, endTime: 12, path: [[0, 0], [4, 0], [4, -3], [0, -3]],
+    cornerRadius: .5, strideLength: .6, stepHeight: .09, scale: 1, baseYawDegrees: 0, profile };
+  const area = canvas.nodeData.area!.sceneArea as unknown as import("../shared-world.js").SceneAreaData;
+  area.animationScript = createWorldAnimationScript({
+    script: `motion.instance.walk("instance-main",${JSON.stringify(options)});`, duration: 12, loop: true
+  });
+  const resource = prepareModelResource({ sceneVersion: "woohaa-model-scene-ir-v2", ops: [] });
+  const render = (time: number) => buildCanvasRenderScene({ canvas,
+    modelResources: new Map([["model", resource]]), sceneAnimationTimes: new Map([["area", time]])
+  }).nodes.find(node => node.id === "model")!;
+  const start = render(1), later = render(7);
+  expect(start.sharedWorldInstance?.transform.position).not.toEqual({ u: 1, v: 1, h: 0 });
+  expect(later.sharedWorldInstance?.transform.position).not.toEqual(start.sharedWorldInstance?.transform.position);
+  expect(start.model?.partRotations?.LeftUpperLeg).toHaveLength(4);
+  expect(later.model?.partRotations?.RightUpperLeg).toHaveLength(4);
+  expect(start.model?.resourceKey).toBe(later.model?.resourceKey);
+  // The same source/hash must keep returning the saved animation, not a cached null.
+  expect(render(1)).toEqual(start);
+});
+
 it("lets the selected director's empty pre-roll pose clear another area's joints", () => {
   const canvas = fixture();
   const first = canvas.nodeData.area!.sceneArea as unknown as import("../shared-world.js").SceneAreaData;

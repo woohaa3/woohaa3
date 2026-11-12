@@ -432,6 +432,7 @@ function remapWorldPayload(
         // 动画脚本是代码：先编译成 IR，再按复制集合重写目标身份并反序列化，
         // 不允许把旧 ID 留在脚本里。
         const compiled = executeWorldAnimationScript(animationScript.script, {
+          purpose: "read",
           duration: animationScript.duration,
           loop: animationScript.loop
         });

@@ -1,13 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { buildModelApiGuideText } from "./guide.js";
 
-describe("model api guide", () => {
-  it("告诉人形脚本使用关节局部坐标，而不是整个人的站立高度", () => {
-    const text = buildModelApiGuideText();
-    expect(text).toContain("是该关节的局部坐标，不是整个人的站立高度");
-    expect(text).toContain('from: [0, 0, 0]，to: [0, -0.4, 0]');
-    expect(text).toContain('from: [0, -0.5, 0], to: [0, 0, 0]');
-    expect(text).toContain("不要只在 Hips 和 Spine 原点各放一个小盒子");
-    expect(text).toContain("人形和机甲不要照搬这些绝对高度");
-  });
+it("keeps geometry guidance while hiding humanoid authoring", () => {
+  const guide = buildModelApiGuideText();
+  expect(guide).toContain("scene.segment");
+  expect(guide).toContain("连接示例");
+  for (const text of ["rig.joint", "人形骨架", "人形和机甲不要照搬"]) expect(guide).not.toContain(text);
 });

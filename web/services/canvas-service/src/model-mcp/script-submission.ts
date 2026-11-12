@@ -9,6 +9,7 @@ import type { CanvasNodeData } from "@woohaa3/contracts";
 import {
   hashModelScript,
   humanoidRigForAuthoredScript,
+  rejectHumanoidRigAuthoring,
   isSupportedModelScriptVersion,
   isCompositeAssetNodeType,
   isModelAuthoringNodeType,
@@ -74,6 +75,8 @@ export async function submitScript(
     return { ok: false, code: "unsupported-version", message: `不支持的模型脚本版本 ${String(targetVersion)}` };
   }
   const nodeData = exported.canvas.nodeData[nodeId];
+  const authoring = rejectHumanoidRigAuthoring(input.source);
+  if (!authoring.ok) return authoring;
   const rig = humanoidRigForAuthoredScript(input.source, undefined, nodeData?.modelRig);
   if (!rig.ok) return { ok: false, code: rig.code, message: rig.message };
   const validation = await executeSceneIr(input.source, targetVersion, {

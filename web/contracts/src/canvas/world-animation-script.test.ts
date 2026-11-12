@@ -41,7 +41,7 @@ describe("world animation script", () => {
     expect(atStart.get("actor")?.partRotations?.LeftUpperLeg[0]).toBeCloseTo(-Math.sin(Math.PI / 12));
     expect(atStart.get("other")?.partRotations).toEqual({});
     expect(sampleWorldAnimation(compiled.ir, 1).instances.get("actor")?.partRotations?.LeftUpperLeg[0]).toBeCloseTo(Math.sin(Math.PI / 12));
-    const again = executeWorldAnimationScript(serializeWorldAnimationScript(compiled.ir), { duration: 2, loop: true });
+    const again = executeWorldAnimationScript(serializeWorldAnimationScript(compiled.ir), { purpose: "read", duration: 2, loop: true });
     expect(again.ok && again.json).toBe(compiled.json);
   });
 
@@ -85,7 +85,7 @@ describe("world animation script", () => {
     const compiled = executeWorldAnimationScript(SCRIPT, { duration: 4, loop: false });
     if (!compiled.ok) throw new Error(compiled.message);
     const serialized = serializeWorldAnimationScript(compiled.ir);
-    const again = executeWorldAnimationScript(serialized, { duration: 4, loop: false });
+    const again = executeWorldAnimationScript(serialized, { purpose: "read", duration: 4, loop: false });
     expect(again.ok).toBe(true);
     if (!again.ok) return;
     expect(again.json).toBe(compiled.json);
@@ -184,7 +184,7 @@ it("reuses compact cycles with phase offsets, seamless boundaries and end-pose h
   expect(pose(1.25,"left")?.[0]).toBeCloseTo(0);
   expect(pose(1,"left")).toEqual(pose(18,"left"));
   expect(pose(3,"right")).toEqual(pose(2.25,"right"));
-  const again=executeWorldAnimationScript(serializeWorldAnimationScript(compiled.ir),{duration:18,loop:true});
+  const again=executeWorldAnimationScript(serializeWorldAnimationScript(compiled.ir),{purpose:"read",duration:18,loop:true});
   expect(again.ok && again.json).toBe(compiled.json);
 });
 
@@ -247,14 +247,15 @@ function walkOptions(){
 }
 it('records a compact deterministic walk and roundtrips all sampled channels',()=>{
  const source=`motion.instance.walk("walker",${JSON.stringify(walkOptions())});`;
- const result=executeWorldAnimationScript(source,{duration:24,loop:true});
+ expect(executeWorldAnimationScript(source,{duration:24,loop:true})).toMatchObject({ok:false,stage:"invalid",code:"humanoid-rig-disabled"});
+ const result=executeWorldAnimationScript(source,{duration:24,loop:true,purpose:"read"});
  expect(result.ok).toBe(true);if(!result.ok)return;
  expect(result.ir.walkTracks).toHaveLength(1);
  expect(countWorldAnimationChannels(result.ir)).toBe(12);
  const serialized=serializeWorldAnimationScript(result.ir);
  expect(serialized).toContain('motion.instance.walk');
  expect(serialized.length).toBeLessThan(3000);
- const again=executeWorldAnimationScript(serialized,{duration:24,loop:true});
+ const again=executeWorldAnimationScript(serialized,{duration:24,loop:true,purpose:"read"});
  expect(again.ok).toBe(true);if(!again.ok)return;
  expect(again.json).toBe(result.json);
  expect(sampleWorldAnimation(again.ir,1.23)).toEqual(sampleWorldAnimation(result.ir,1.23));
@@ -264,7 +265,7 @@ it('records a compact deterministic walk and roundtrips all sampled channels',()
 it('rejects mixing generated walk and independent motion on the same target',()=>{
  const walk=`motion.instance.walk("walker",${JSON.stringify(walkOptions())});`;
  for(const extra of ['motion.part.tween("walker","LeftUpperArm",{property:"rotation",startTime:0,endTime:1,from:[0,0,0],to:[1,0,0]});','motion.instance.tween("walker",{property:"position",startTime:0,endTime:1,from:[0,0,0],to:[1,0,0]});',walk]){
-  const result=executeWorldAnimationScript(walk+extra,{duration:24,loop:true});
+  const result=executeWorldAnimationScript(walk+extra,{duration:24,loop:true,purpose:"read"});
   expect(result.ok).toBe(false);if(!result.ok)expect(result.code).toBe('conflicting-walk');
  }
 });

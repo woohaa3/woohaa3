@@ -122,7 +122,8 @@ function readPinnedInstance(canvas: ServerCanvas, nodeId: string): PinnedInstanc
     modelScriptLanguage: fields.modelScriptLanguage,
     modelScriptVersion: fields.modelScriptVersion,
     modelContentVersion: fields.modelContentVersion,
-    modelPlacement: fields.modelPlacement
+    modelPlacement: fields.modelPlacement,
+    modelRig: fields.modelRig
   });
   if (!definition.ok) return null;
   const content = createWorldCaptureModelContent({

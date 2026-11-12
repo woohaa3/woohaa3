@@ -16,6 +16,18 @@ export const HUMANOID_LENGTH_EPSILON = 1e-4;
 export const HUMANOID_TEMPLATE_ID = "humanoid";
 export const HUMANOID_TEMPLATE_VERSION = 1;
 
+/** 创作入口暂停；既有模型的执行、采样和播放不受影响。 */
+export const HUMANOID_RIG_AUTHORING_ENABLED = false;
+
+export function rejectHumanoidRigAuthoring(source: string):
+  | { ok: true }
+  | { ok: false; code: "humanoid-rig-disabled"; message: string } {
+  if (!HUMANOID_RIG_AUTHORING_ENABLED && scriptUsesHumanoidRig(source)) {
+    return { ok: false, code: "humanoid-rig-disabled", message: "人形骨架暂未开放，请用普通几何体拼人物" };
+  }
+  return { ok: true };
+}
+
 export const HUMANOID_V1_JOINT_IDS = [
   "Root",
   "Hips",
@@ -596,7 +608,7 @@ export function humanoidRigForAuthoredScript(
   const prior = readStoredRig(previous);
   if (!prior.ok) return { ok: false, code: "invalid-rig", message: prior.message };
   if (prior.value && next.value == null && !scriptUsesHumanoidRig(source)) {
-    return { ok: false, code: "rig-removed", message: "不能移除已有骨架" };
+    return { ok: false, code: "rig-removed", message: "不能移除已有骨架，请新建模型替代" };
   }
   if (next.value) return { ok: true, rig: next.value };
   if (prior.value) return { ok: true, rig: prior.value };

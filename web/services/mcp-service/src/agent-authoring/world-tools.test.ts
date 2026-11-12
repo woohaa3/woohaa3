@@ -126,9 +126,9 @@ describe("assistant world MCP tools", () => {
     expect(guidance).toContain("motion.part.cycle");
     expect(guidance).toContain("phase:0.5");
     expect(guidance).toContain("不按时长展开");
-    expect(guidance).toContain("不可为绕过通道预算降低步态频率");
-    expect(guidance).toContain("motion.instance.walk");
-    for(const term of ["motionReference", "armsDownPose", "longAxisLocal", "joint-twist-without-swing", "T-pose", "endpoint"]) expect(guidance).toContain(term);
+    expect(guidance).not.toContain("motion.instance.walk");
+    expect(catalog.result.tools.map(tool => tool.name)).not.toContain("get_world_model_rig");
+    for(const term of ["motionReference", "armsDownPose", "longAxisLocal", "joint-twist-without-swing", "T-pose", "endpoint"]) expect(guidance).not.toContain(term);
 
     const result = await callTool(base, "get_world_context", {}, issued.token);
     expect(result.result?.structuredContent).toMatchObject({ ok: true, sceneArea: { nodeId: "area-node", revision: 7, animationScript } });
@@ -333,7 +333,7 @@ it("samples the published timeline with its origin and reports data-only evidenc
  const context = await callTool(base,"get_world_context",{},issued.token);
  expect(context.result?.structuredContent).toMatchObject({animationBudget:{maxChannels:256,channelCount:1,logicalTrackCount:1,keyframeCount:2,cycleCount:0,segmentCount:1},motionConventions:{cameraForward:expect.stringContaining("-Z")}});
  const rig = await callTool(base,"get_world_model_rig",{instanceId:"actor"},issued.token);
- expect(rig.result?.structuredContent).toMatchObject({transform:{position:{h:1}},animationRig:{spatial:{rootToGroundHeightMeters:1}},animationBudget:{segmentCount:1}});
+ expect(rig.error).toBeDefined();
  const result = await callTool(base,"sample_scene_animation",{times:[0,1,2]},issued.token);
  expect(result.result?.structuredContent).toMatchObject({animationBudget:{maxChannels:256,channelCount:1,logicalTrackCount:1,keyframeCount:2,cycleCount:0,segmentCount:1,instanceSegmentCount:1,partSegmentCount:0,cameraSegmentCount:0},ok:true,verification:"sampled-data-only",revision:8,samples:[
   {time:0,instances:{actor:{position:{u:10,v:20,h:0}}}},
@@ -346,7 +346,36 @@ it("samples the published timeline with its origin and reports data-only evidenc
   {diagnostics:{actor:{heading:{status:"backward"},bounds:{outsideSceneArea:true}}}}
  ]});
  expect((await callTool(base,"sample_scene_animation",{times:[3]},issued.token)).result?.isError).toBe(true);
- expect((await callTool(base,"get_world_model_rig",{instanceId:"foreign"},issued.token)).result?.isError).toBe(true);
+ expect((await callTool(base,"get_world_model_rig",{instanceId:"foreign"},issued.token)).error).toBeDefined();
+});
+
+it("samples a saved walk while hiding its authoring metadata", async () => {
+ const issued=grant();
+ const stored={profile:"humanoid",templateId:"humanoid",templateVersion:1,parameters:HUMANOID_REFERENCE_PARAMETERS} as const;
+ const model=executeModelWithStoredRig('scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.5,0],to:[0,0,0],width:0.32,depth:0.24,shape:"box"});for(const side of ["Left","Right"])scene.box({id:side+"Sole",parent:rig.joint(side+"Foot"),position:[0,-0.04,0.08],size:[0.24,0.14,0.38]});',"woohaa-model-js-v2",stored);
+ if(!model.ok) throw new Error(model.message);
+ const animationRig=describeWorldModelAnimationRig(model.scene.ops,stored);
+ const script=`motion.instance.walk("actor",${JSON.stringify({startTime:0,endTime:24,path:[[0,0],[4,0],[4,-3],[0,-3]],cornerRadius:.5,strideLength:.6,stepHeight:.09,scale:1,baseYawDegrees:0,profile:animationRig.walkProfile})});`;
+ const base=await start({
+  read:()=>({ok:true,view:{version:"assistant-world-authority-v1",canvasId:"canvas-1",contextId:"ctx-1",runId:"run-1",epoch:0,
+   scope:issued.world!.scope,writable:[],readOnly:[],objects:[],worldWritable:true,
+   sceneArea:{nodeId:"area",revision:8,scopeVersion:"scope-1",animationOrigin:{u:0,v:0},animationScript:{script,scriptLanguage:"javascript",scriptVersion:"woohaa-world-animation-js-v2",sourceHash:"saved-walk",revision:1,duration:24,loop:true}},
+   sceneModels:[{instanceId:"actor",nodeId:"actor-node",title:"Actor",localBounds:null,transform:{version:"shared-world-v1",position:{u:0,v:0,h:1},rotation:[0,0,0,1],scale:1},animationRig}]
+  }}),
+  async write(){throw new Error("must not write");},async complete(){throw new Error("must not complete");}
+ },issued);
+ const context=await callTool(base,"get_world_context",{},issued.token);
+ const models=(context.result?.structuredContent as {sceneModels:Array<{animationRig:unknown}>}).sceneModels;
+ expect(models[0].animationRig).not.toHaveProperty("walkProfile");
+ expect(models[0].animationRig).not.toHaveProperty("motionReference");
+ expect(models[0].animationRig).not.toHaveProperty("rig");
+ expect(context.result?.structuredContent).toMatchObject({animationBudget:{channelCount:12}});
+ const sample=await callTool(base,"sample_scene_animation",{times:[0,1,2]},issued.token);
+ expect(sample.result?.structuredContent).toMatchObject({ok:true,verification:"sampled-data-only",samples:[
+  {instances:{actor:{position:expect.any(Object),partRotations:expect.any(Object)}}},
+  {instances:{actor:{position:expect.any(Object),partRotations:expect.any(Object)}}},
+  {instances:{actor:{position:expect.any(Object),partRotations:expect.any(Object)}}}
+ ]});
 });
 
 it.each([
@@ -487,7 +516,7 @@ it("returns axial joint warnings after a successful save in a fresh director are
   async write(){saved=true;return {ok:true,canvasId:"canvas-1",commandId:"saved",revision:8,duplicate:false,noop:false};},async complete(){throw new Error("unused");}
  },issued);
  const rig=await callTool(base,"get_world_model_rig",{instanceId:"actor"},issued.token);
- expect(rig.result?.structuredContent).toMatchObject({animationRig:{motionReference:{profile:"humanoid-v1",armsDownPose:expect.any(Object)}}});
+ expect(rig.error).toBeDefined();
  const result=await callTool(base,"set_scene_animation_script",candidate,issued.token);
  expect(result.result?.isError).not.toBe(true);
  expect(result.result?.structuredContent).toMatchObject({ok:true,motionVerification:{status:"warnings",issues:expect.arrayContaining([expect.objectContaining({code:"joint-twist-without-swing",detail:expect.objectContaining({jointId:"LeftUpperArm",rotationRadians:expect.any(Number),endpointDisplacementMeters:expect.any(Number)})})])}});

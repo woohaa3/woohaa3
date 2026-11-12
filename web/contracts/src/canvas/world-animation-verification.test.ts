@@ -4,7 +4,7 @@ import {executeWorldAnimationScript} from "./world-animation-script.js";
 import type {WorldModelAnimationRig} from "./assistant-world-authority.js";
 const transform={version:"shared-world-v1",position:{u:0,v:0,h:0},rotation:[0,0,0,1],scale:1} as const;
 const animationRig:WorldModelAnimationRig={rig:null,groups:[],shapes:[{id:"foot",parent:null,position:[0,-1,0],rotation:[0,0,0],scale:[1,1,1],localBounds:{min:[-0.1,-0.1,-0.1],max:[0.1,0.1,0.1]}}],spatial:{forwardLocal:[0,0,1],forwardSource:"humanoid-v1",groundAnchorLocal:[0,-1.1,0],rootToGroundHeightMeters:1.1,anchorSource:"geometry-bounds"}};
-function ir(script:string){const result=executeWorldAnimationScript(script,{duration:18,loop:true});if(!result.ok)throw new Error(result.message);return result.ir;}
+function ir(script:string){const result=executeWorldAnimationScript(script,{duration:18,loop:true,purpose:"read"});if(!result.ok)throw new Error(result.message);return result.ir;}
 const area={min:{u:-2,v:-20},max:{u:2,v:20}},origin={u:0,v:0};
 it("automatically flags backwards movement and below-ground geometry without rejecting writes",()=>{
  const result=analyzeWorldAnimationData(ir('motion.instance.tween("a",{property:"position",startTime:0,endTime:18,from:[0,0,0],to:[0,1,0]});'),[{instanceId:"a",transform,animationRig}],origin,area);
@@ -111,7 +111,7 @@ it("diagnoses the generated 24 second rectangle with gradually turning heading a
   script+=`motion.instance.tween("a",{property:"position",startTime:${i*6},endTime:${(i+1)*6},from:[${points[i]},1],to:[${points[i+1]},1]});`;
   script+=`motion.part.tween("a","Root",{property:"rotation",startTime:${i*6},endTime:${(i+1)*6},from:[0,${i*90},0],to:[0,${(i+1)*90},0]});`;
  }
- const execution=executeWorldAnimationScript(script,{duration:24,loop:true});if(!execution.ok)throw new Error(execution.message);
+ const execution=executeWorldAnimationScript(script,{duration:24,loop:true,purpose:"read"});if(!execution.ok)throw new Error(execution.message);
  const result=analyzeWorldAnimationData(execution.ir,[{instanceId:"a",transform,animationRig:humanoid()}],origin);
  expect(result.issues.map(i=>i.code)).toEqual(expect.arrayContaining(["knee-hyperextension","sideways-motion","path-tangent-discontinuity"]));
  expect(result.issues.find(i=>i.code==="path-tangent-discontinuity")?.occurrenceCount).toBe(4);

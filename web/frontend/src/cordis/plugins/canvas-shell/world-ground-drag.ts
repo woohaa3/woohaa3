@@ -244,7 +244,7 @@ export function planWorldGroundMoveWithAnimationParts(
     const area = decodeSceneAreaData(nodeData?.sceneArea);
     if (!area.ok || !area.value.animationScript) continue;
     const script = area.value.animationScript;
-    const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+    const executed = executeWorldAnimationScript(script.script, { purpose: "read", duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
     if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
     const unbind = unbindAreaIds?.has(node.id) === true;

@@ -76,7 +76,7 @@ it.each(["same-canvas", "cross-canvas"])("copies a complete animated collection 
   const u = actor.transform.position.u - 1, v = actor.transform.position.v - 2;
   expect(area.animationScript!.duration).toBe(5);
   expect(area.animationScript!.loop).toBe(true);
-  const compiled = executeWorldAnimationScript(area.animationScript!.script, { duration: 5, loop: true });
+  const compiled = executeWorldAnimationScript(area.animationScript!.script, { purpose: "read", duration: 5, loop: true });
   expect(compiled.ok).toBe(true);
   if (!compiled.ok) return;
   expect(compiled.ir.instanceTracks.map(track => track.targetId)).toEqual([actor.instanceId, actor.instanceId, actor.instanceId]);

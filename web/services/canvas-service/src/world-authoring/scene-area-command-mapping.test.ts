@@ -149,6 +149,7 @@ function worldPosition(sceneArea: unknown): { u: number; v: number } {
   const decoded = decodeSceneAreaData(sceneArea);
   if (!decoded.ok || !decoded.value.animationScript) throw new Error("missing animation");
   const executed = executeWorldAnimationScript(decoded.value.animationScript.script, {
+    purpose: "read",
     duration: decoded.value.animationScript.duration,
     loop: decoded.value.animationScript.loop
   });
@@ -174,7 +175,7 @@ describe("scene-area command mapping animation origin", () => {
     expect(sceneArea.animationOrigin).toEqual({ u: 7, v: 8 });
     const rawScript = executeWorldAnimationScript(
       (sceneArea.animationScript as { script: string }).script,
-      { duration: 4, loop: false }
+      { purpose: "read", duration: 4, loop: false }
     );
     expect(rawScript.ok).toBe(true);
     if (rawScript.ok) {
@@ -246,6 +247,7 @@ describe("scene-area command mapping animation origin", () => {
     expect(decoded.ok).toBe(true);
     if (!decoded.ok || !decoded.value.animationScript) return;
     const executed = executeWorldAnimationScript(decoded.value.animationScript.script, {
+      purpose: "read",
       duration: decoded.value.animationScript.duration,
       loop: decoded.value.animationScript.loop
     });

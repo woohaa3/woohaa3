@@ -51,7 +51,7 @@ it("keeps unknown model forward unknown and handles endpoint backward difference
 });
 
 it("counts segments independently of distinct joint and channel count", () => {
-  const c = executeWorldAnimationScript('for(let i=0;i<18;i++){motion.part.tween("a","knee",{property:"rotation",startTime:i,endTime:i+1,from:[0,0,0],to:[1,0,0]});}',{duration:18,loop:false});
+  const c = executeWorldAnimationScript('for(let i=0;i<18;i++){motion.part.tween("a","knee",{property:"rotation",startTime:i,endTime:i+1,from:[0,0,0],to:[1,0,0]});}',{purpose:"read",duration:18,loop:false});
   if(!c.ok)throw new Error(c.message);
   expect(worldAnimationSegmentSummary(c.ir)).toMatchObject({segmentCount:18,animatedJointCount:1,channelCount:1,logicalTrackCount:1,keyframeCount:36,cycleCount:0,maxChannels:256});
 });
@@ -79,7 +79,7 @@ it("preserves affine parent scaling when a child rotates", () => {
 });
 
 it("counts authored cycle points and segments without expanding duration", () => {
-  const c = executeWorldAnimationScript('motion.part.cycle("a","knee",{property:"rotation",startTime:0,endTime:180,period:1,phase:0.5,keyframes:[{time:0,value:[0,0,0]},{time:0.5,value:[30,0,0]},{time:1,value:[0,0,0]}]}); motion.part.tween("a","knee",{property:"rotation",startTime:180,endTime:181,from:[0,0,0],to:[1,0,0]}); motion.instance.tween("a",{property:"position",startTime:0,endTime:181,from:[0,0,0],to:[1,0,0]});',{duration:181,loop:false});
+  const c = executeWorldAnimationScript('motion.part.cycle("a","knee",{property:"rotation",startTime:0,endTime:180,period:1,phase:0.5,keyframes:[{time:0,value:[0,0,0]},{time:0.5,value:[30,0,0]},{time:1,value:[0,0,0]}]}); motion.part.tween("a","knee",{property:"rotation",startTime:180,endTime:181,from:[0,0,0],to:[1,0,0]}); motion.instance.tween("a",{property:"position",startTime:0,endTime:181,from:[0,0,0],to:[1,0,0]});',{purpose:"read",duration:181,loop:false});
   if(!c.ok)throw new Error(c.message);
   expect(worldAnimationSegmentSummary(c.ir)).toEqual({maxChannels:256,locomotionCount:0,channelCount:2,logicalTrackCount:2,animatedJointCount:1,segmentCount:4,keyframeCount:7,cycleCount:1,instanceSegmentCount:1,partSegmentCount:3,cameraSegmentCount:0});
 });

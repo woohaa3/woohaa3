@@ -30,6 +30,7 @@ import {
   decodeWorldInstanceData,
   normalizeModelDefinition,
   humanoidRigForAuthoredScript,
+  rejectHumanoidRigAuthoring,
   sceneAreaAnimationOrigin,
   type AssistantWorldCancelInput,
   type AssistantWorldCompletionInput,
@@ -272,6 +273,8 @@ function runView(record: LeaseRecord): AssistantWorldRunView {
 }
 
 function contentFields(content: AssistantWorldModelContent, previousRig?: unknown): Record<string, unknown> {
+  const authoring = rejectHumanoidRigAuthoring(content.modelScript);
+  if (!authoring.ok) throw Object.assign(new Error(authoring.message), { code: authoring.code });
   const resolved = humanoidRigForAuthoredScript(content.modelScript, undefined, previousRig);
   if (!resolved.ok) throw new Error(resolved.message);
   const definition = normalizeModelDefinition({
@@ -841,6 +844,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         if (decoded.value.animationScript) {
           const script = decoded.value.animationScript;
           const compiled = executeWorldAnimationScript(script.script, {
+            purpose: "read",
             duration: script.duration,
             loop: script.loop
           });
@@ -1034,7 +1038,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     if (!located) return failure("outside-scope", "导演区不存在");
     // 脚本必须先编译成功，且目标只允许本轮可写的导演区内部部件（实例与镜头）。
     const compiled = executeWorldAnimationScript(operation.script, { duration: operation.duration, loop: operation.loop });
-    if (!compiled.ok) return failure("invalid-data", `动画脚本编译失败：${compiled.message}`);
+    if (!compiled.ok) return failure(compiled.code === "humanoid-rig-disabled" ? compiled.code : "invalid-data", `动画脚本编译失败：${compiled.message}`);
     const writableInstances = new Set(context.writableTargets
       .map((entry) => entry.target)
       .filter((target) => target.kind === "instance")
@@ -1226,7 +1230,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     try {
       definition = contentFields(operation.content);
     } catch (error) {
-      return failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效");
+      return failure(error instanceof Error && "code" in error && error.code === "humanoid-rig-disabled" ? error.code : "invalid-data", error instanceof Error ? error.message : "模型脚本无效");
     }
     const fields = instanceFields(definition, instanceId, operation.transform);
     const prepared = await deps.authority.prepareContent(fields);
@@ -1296,7 +1300,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     try {
       definition = contentFields(operation.content, current.fields.modelRig);
     } catch (error) {
-      return failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效");
+      return failure(error instanceof Error && "code" in error && error.code === "humanoid-rig-disabled" ? error.code : "invalid-data", error instanceof Error ? error.message : "模型脚本无效");
     }
     const previous = current.fields.modelContentVersion as { revision?: number; contentHash?: string } | undefined;
     const nextDefinition = normalizeModelDefinition({

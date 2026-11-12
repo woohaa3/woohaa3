@@ -34,6 +34,7 @@
  */
 
 import { fnv1a64Hex } from "./content-hash.js";
+import { humanoidRigCanonical } from "./humanoid-rig.js";
 import {
   decodeGlbModelReference,
   decodeModelDefinition,
@@ -72,7 +73,8 @@ const DEFINITION_KEYS = [
   "modelScriptLanguage",
   "modelScriptVersion",
   "contentVersion",
-  "placement"
+  "placement",
+  "rig"
 ] as const;
 const GLB_REFERENCE_KEYS = ["assetId", "contentVersion", "placement"] as const;
 const CONTENT_VERSION_KEYS = ["revision", "sourceHash", "contentHash"] as const;
@@ -336,7 +338,8 @@ function decodeScriptContent(
     modelScriptLanguage: ownField(raw, "modelScriptLanguage"),
     modelScriptVersion: ownField(raw, "modelScriptVersion"),
     modelContentVersion: ownField(raw, "contentVersion"),
-    modelPlacement: ownField(raw, "placement")
+    modelPlacement: ownField(raw, "placement"),
+    modelRig: ownField(raw, "rig")
   });
   if (!definition.ok) return decodeFailure("invalid-data", input);
   const value = definition.value;
@@ -349,7 +352,8 @@ function decodeScriptContent(
       modelScript: value.modelScript,
       modelScriptLanguage: value.modelScriptLanguage,
       modelScriptVersion: value.modelScriptVersion,
-      placement: value.placement
+      placement: value.placement,
+      rig: value.rig ?? null
     })
   ) {
     return decodeFailure("invalid-data", input);
@@ -592,7 +596,8 @@ function contentCanonical(content: WorldCaptureModelContent): string {
         content.definition.modelScriptLanguage,
         content.definition.modelScriptVersion,
         content.definition.modelScript,
-        placementKey(content.definition.placement)
+        placementKey(content.definition.placement),
+        ...(content.definition.rig ? [humanoidRigCanonical(content.definition.rig.parameters)] : [])
       ].join("\u0000")
     : ["glb", content.reference.assetId, placementKey(content.reference.placement)].join("\u0000");
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDefaultWorldCameraData, createEmptyWoohaa3ServerCanvas, normalizeGlbModelReference, normalizeModelDefinition } from "@woohaa3/contracts";
-import { buildWorldCaptureObservation } from "./capture-snapshot.js";
+import { createWorldAnimationScript, createDefaultWorldCameraData, createEmptyWoohaa3ServerCanvas, HUMANOID_REFERENCE_PARAMETERS, referenceHumanoidRig, normalizeGlbModelReference, normalizeModelDefinition } from "@woohaa3/contracts";
+import { buildWorldCameraObservation, buildWorldCaptureObservation } from "./capture-snapshot.js";
 import { createWorldCaptureProducer } from "./capture-producer.js";
 import type { RendererClient, RendererSceneRequest } from "../model-renderer/client.js";
 
@@ -68,6 +68,60 @@ describe("native world capture producer", () => {
     expect(sent.world!.instances.every(entry => entry.ops.length > 0)).toBe(true);
     expect(sent.placement).toBeUndefined();
     expect(sent.ops).toEqual([]);
+  });
+
+  it("freezes mixed saved rig/ordinary models and executes custom stored dimensions", async () => {
+    const { canvas, snapshot } = fixture();
+    const saved = referenceHumanoidRig({ ...HUMANOID_REFERENCE_PARAMETERS, torsoHeight: 0.8 });
+    if (!saved.ok) throw new Error("expected rig");
+    const definition = normalizeModelDefinition({
+      modelScript: 'scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.8,0],to:[0,0,0],width:0.32,depth:0.24,shape:"box"});scene.box({id:"headShape",parent:rig.joint("Head"),size:[0.2,0.2,0.2]});',
+      modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", rig: saved.value
+    });
+    if (!definition.ok) throw new Error(definition.reason);
+    // Flat authoritative nodeData: modelRig is beside script/version/placement, never nested.
+    Object.assign(canvas.nodeData.a, { modelScript: definition.value.modelScript,
+      modelContentVersion: definition.value.contentVersion, modelRig: saved.value });
+    const secondRig = referenceHumanoidRig();
+    if (!secondRig.ok) throw new Error("expected reference rig");
+    const second = normalizeModelDefinition({
+      modelScript: 'scene.segment({id:"abdomen",parent:rig.joint("Spine"),from:[0,-0.5,0],to:[0,0,0],width:0.32,depth:0.24,shape:"box"});',
+      modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", rig: secondRig.value
+    });
+    if (!second.ok) throw new Error(second.reason);
+    const secondId = "asset-model3d-1tsjeqy";
+    canvas.document.nodes.push({id:secondId,type:"model3d",position:{x:0,y:0}});
+    canvas.nodeData[secondId] = {
+      modelScript:second.value.modelScript,modelScriptLanguage:second.value.modelScriptLanguage,
+      modelScriptVersion:second.value.modelScriptVersion,modelContentVersion:second.value.contentVersion,
+      modelPlacement:second.value.placement,modelRig:secondRig.value,
+      sharedWorldInstance:{kind:"world-instance",version:"shared-world-v1",instanceId:"instance-assistant-model-1vrznrb6a3p7k",
+        transform:{version:"shared-world-v1",position:{u:1,v:1,h:1},rotation:[0,0,0,1],scale:1}}
+    };
+    const firstId = "asset-model3d-1i09bo7";
+    canvas.document.nodes.find(node=>node.id==="a")!.id=firstId;
+    canvas.nodeData[firstId]=canvas.nodeData.a;
+    delete canvas.nodeData.a;
+    Object.assign(canvas.nodeData[firstId], {sharedWorldInstance:{kind:"world-instance",version:"shared-world-v1",instanceId:"instance-assistant-model-uuh985203fkg",
+      transform:{version:"shared-world-v1",position:{u:4,v:8,h:1},rotation:[0,0,0,1],scale:1.5}}});
+    const before = structuredClone(canvas.nodeData);
+    const request = snapshot();
+    const client = renderer();
+    const producer = createWorldCaptureProducer({ renderer: client, resolveRoom: async () => null });
+    expect((await producer.capture(JSON.parse(JSON.stringify(request)))).status).toBe("image");
+    const instances = client.render.mock.calls[0][0].world!.instances;
+    expect(instances).toHaveLength(3);
+    expect(instances[0].ops).toContainEqual(expect.objectContaining({ id: "Spine", position: [0, 0.8, 0] }));
+    expect(canvas.nodeData).toEqual(before);
+    canvas.document.nodes.push({id:"area",type:"scene-area"});
+    canvas.nodeData.area = {sceneArea:{kind:"scene-area",version:"shared-world-v1",areaId:"area",scopeVersion:"scope-1",
+      bounds:{min:{u:-30,v:-30},max:{u:30,v:30}},
+      animationScript:createWorldAnimationScript({script:'motion.part.tween("instance-assistant-model-uuh985203fkg","LeftUpperArm",{property:"rotation",startTime:0,endTime:2,from:[0,0,-90],to:[30,0,-90]});',duration:2,loop:true})
+    }};
+    expect(buildWorldCameraObservation({canvasId:canvas.id,canvas,cameraId:"camera",outputLongEdge:2048,attemptCounter:1}))
+      .toMatchObject({ok:true,observation:{kind:"dynamic"}});
+    canvas.nodeData[firstId].modelRig = { ...saved.value, parameters: { ...saved.value.parameters, torsoHeight: 0.9 } };
+    expect(() => snapshot()).toThrow("共享世界模型内容不完整");
   });
 
   it("renders only the bound instance and never falls back when its target is missing", async () => {

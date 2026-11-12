@@ -54,7 +54,7 @@ function areaScript(canvas: ServerCanvas): WorldAnimationScript | null {
 }
 
 function positionAt(script: WorldAnimationScript, cameraId: string, time: number) {
-  const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
+  const executed = executeWorldAnimationScript(script.script, { purpose: "read", duration: script.duration, loop: script.loop });
   if (!executed.ok) throw new Error(executed.message);
   return sampleWorldAnimation(executed.ir, time).cameras.get(cameraId)?.position ?? null;
 }
@@ -135,7 +135,7 @@ it.each(['rotate','unbind'] as const)('preserves unrelated walking and part moti
   const plan=planWorldCameraMoveWithAnimationParts(canvas,start,{u:1,v:0},new Map([['area',0]]),mode==='unbind'?new Set(['area']):undefined)!;
   const forward=plan.forwardAreas[0] as any;
   expect(forward.value.sceneArea.animationScript).toBeDefined();
-  const compiled=executeWorldAnimationScript(forward.value.sceneArea.animationScript.script,{duration:4,loop:false});
+  const compiled=executeWorldAnimationScript(forward.value.sceneArea.animationScript.script,{duration:4,loop:false,purpose:"read"});
   expect(compiled.ok).toBe(true);if(!compiled.ok)continue;
   expect(compiled.ir.cameraTracks).toEqual([]);
   expect((compiled.ir.walkTracks?.length??0)+(compiled.ir.partTracks?.length??0)).toBe(1);

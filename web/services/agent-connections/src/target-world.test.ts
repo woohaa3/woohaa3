@@ -32,7 +32,6 @@ describe("world target prompt and tools", () => {
     expect(localAgentToolsForMode("world", intent.worldScope)).toEqual([
       "get_model_api",
       ASSISTANT_WORLD_TOOL.readContext,
-      ASSISTANT_WORLD_TOOL.readModelRig,
       ASSISTANT_WORLD_TOOL.sampleAnimation,
       ASSISTANT_WORLD_TOOL.createModel,
       ASSISTANT_WORLD_TOOL.replaceModel,
@@ -43,6 +42,7 @@ describe("world target prompt and tools", () => {
       ASSISTANT_WORLD_TOOL.setCamera,
       ASSISTANT_WORLD_TOOL.completeCamera
     ]);
+    expect(localAgentToolsForMode("world", intent.worldScope)).not.toContain("get_world_model_rig");
     const prompt = buildTargetPrompt(intent, "req-1");
     expect(prompt).toContain('scope="scene-area:area-1"');
     expect(prompt).toContain("get_world_context");

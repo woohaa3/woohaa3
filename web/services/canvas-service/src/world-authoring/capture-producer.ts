@@ -57,6 +57,7 @@ export function createWorldCaptureProducer(options: {
         const definition = content.definition;
         const result = await executeSceneIr(definition.modelScript, definition.modelScriptVersion, {
           ...options.scriptExecutor,
+          ...(definition.rig ? { rig: definition.rig.parameters } : {}),
           signal
         });
         if (signal?.aborted) {
@@ -177,6 +178,7 @@ export function createWorldCaptureProducer(options: {
         return { ...identity, status: "failed", code: "content-mismatch" };
       }
       const compiled = executeWorldAnimationScript(area.value.animationScript.script, {
+        purpose: "read",
         duration: area.value.animationScript.duration,
         loop: area.value.animationScript.loop
       });

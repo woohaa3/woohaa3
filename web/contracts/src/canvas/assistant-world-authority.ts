@@ -12,6 +12,7 @@
  * by the local host composition. It never contains command mapping, storage or
  * version algorithms.
  */
+import { HUMANOID_RIG_AUTHORING_ENABLED } from "./humanoid-rig.js";
 import type {
   GroundAabb,
   WorldCameraData,
@@ -82,7 +83,7 @@ export const ASSISTANT_WORLD_WRITE_TOOLS = [
 
 export const ASSISTANT_WORLD_TOOLS = [
   ...ASSISTANT_WORLD_READ_TOOLS,
-  ASSISTANT_WORLD_TOOL.readModelRig,
+  ...(HUMANOID_RIG_AUTHORING_ENABLED ? [ASSISTANT_WORLD_TOOL.readModelRig] : []),
   ASSISTANT_WORLD_TOOL.sampleAnimation,
   ...ASSISTANT_WORLD_WRITE_TOOLS
 ] as const satisfies readonly AssistantWorldToolName[];
@@ -160,6 +161,7 @@ export interface AssistantWorldIssued {
 
 export type AssistantWorldFailureCode =
   | WorldAuthoringFailureCode
+  | "humanoid-rig-disabled"
   | "target-unavailable"
   | "capability-unsupported"
   | "not-issued"

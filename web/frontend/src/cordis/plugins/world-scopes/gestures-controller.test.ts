@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SHARED_WORLD_VERSION,
   createEmptyWoohaa3ServerCanvas,
+  createWorldAnimationScript,
   type ServerCanvas,
   type WorldAuthoringPrepareOutcome,
   type WorldCameraData,
@@ -327,4 +328,31 @@ describe("interaction controller wiring regressions", () => {
     expect(moved.map(command => command.nodeId).sort()).toEqual(["a", "b", "g"]);
     controller.dispose();
   });
+});
+
+it("recognizes saved walk as position animation while previewing a director move", async () => {
+  const previewArea = vi.fn();
+  const { deps, prepared } = runtimeHarness({ previewArea });
+  const profile = { version: "humanoid-walk-v1", groundAnchorLocal: [0, -.86, .08], legs: {
+    Left: { hipLocal: [.2, 0, 0], upperLength: .4, lowerLength: .35, soleLocal: [0, -.11, .08] },
+    Right: { hipLocal: [-.2, 0, 0], upperLength: .4, lowerLength: .35, soleLocal: [0, -.11, .08] }
+  }, armsDownPose: { LeftUpperArm: [0, 0, -90], RightUpperArm: [0, 0, 90] } };
+  const options = { startTime: 0, endTime: 4, path: [[1, 2], [4, 2], [4, 4], [1, 4]],
+    cornerRadius: .5, strideLength: .6, stepHeight: .09, scale: 1, baseYawDegrees: 0, profile };
+  const canvas = structuredClone(deps.getCanvas()!);
+  canvas.nodeData.area.sceneArea = { ...canvas.nodeData.area.sceneArea as object,
+    animationScript: createWorldAnimationScript({ script: `motion.instance.walk("i1",${JSON.stringify(options)});`, duration: 4, loop: false })
+  } as never;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  // Also include a static member: only that member needs a direct ground delta.
+  prepared.members.instances.push({ ...prepared.members.instances[0]!, identity: { kind: "instance", instanceId: "i2" } });
+  const port = createSceneAreaGestures(deps);
+  expect(port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true, mode: "move" })).not.toBeNull();
+  await Promise.resolve();
+  await Promise.resolve();
+  port.update({ x: 700, y: 800 });
+  expect(previewArea).toHaveBeenCalledWith("area", expect.anything());
+  expect(deps.preview).toHaveBeenCalledWith("m2", { u: 2, v: 3 });
+  expect(deps.preview).not.toHaveBeenCalledWith("m1", expect.anything());
+  port.cancel();
 });

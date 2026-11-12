@@ -129,7 +129,7 @@ describe("world copy reference remapping", () => {
     const result = expectOk(remapWorldCopyReferences(input));
     const copied = bySource(result, "node-area").nodeData.sceneArea as SceneAreaData;
     expect(copied.animationScript).toBeDefined();
-    const compiled = executeWorldAnimationScript(copied.animationScript!.script, { duration: 5, loop: true });
+    const compiled = executeWorldAnimationScript(copied.animationScript!.script, { purpose: "read", duration: 5, loop: true });
     expect(compiled.ok).toBe(true);
     if (!compiled.ok) return;
     expect(compiled.ir.instanceTracks.map(track => `${track.targetId}:${track.property}`).sort()).toEqual([
@@ -553,7 +553,7 @@ it('remaps a compact walk and refuses a missing copied walker',()=>{
  const result=expectOk(remapWorldCopyReferences(input));
  const copied=bySource(result,'node-area').nodeData.sceneArea as SceneAreaData;
  expect(copied.animationScript!.script).toContain('motion.instance.walk');
- const compiled=executeWorldAnimationScript(copied.animationScript!.script,{duration:24,loop:true});
+ const compiled=executeWorldAnimationScript(copied.animationScript!.script,{duration:24,loop:true,purpose:"read"});
  expect(compiled.ok&&compiled.ir.walkTracks?.[0]?.targetId).toBe('copy-instance');
  expectFailed(remapWorldCopyReferences({...input,nodes:[input.nodes[0]!]}),'binding-unavailable');
 });

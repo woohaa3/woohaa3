@@ -10,6 +10,7 @@
  *
  * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
+import { HUMANOID_RIG_AUTHORING_ENABLED } from "./humanoid-rig.js";
 import {validateHumanoidWalk,sampleHumanoidWalk,HUMANOID_WALK_PART_IDS,type HumanoidWalkTrack} from "./world-walk.js";
 import { fnv1a64Hex } from "./content-hash.js";
 import { easingProgress } from "./motion-ir.js";
@@ -258,10 +259,10 @@ function rawTrack(targetId: unknown, options: unknown): RawTrack {
   };
 }
 
-/** 执行一次动画脚本并做确定性重跑；失败隔离为结构化诊断。 */
+/** 默认校验新提交；purpose: read 仅用于读取既有脚本的播放、采样和身份重映射。 */
 export function executeWorldAnimationScript(
   source: string,
-  input: { duration: number; loop: boolean }
+  input: { duration: number; loop: boolean; purpose?: "read" }
 ): WorldAnimationScriptResult {
   const first = runWorldAnimationOnce(source, input);
   if (!first.ok) return first;
@@ -275,7 +276,7 @@ export function executeWorldAnimationScript(
 
 function runWorldAnimationOnce(
   source: string,
-  input: { duration: number; loop: boolean }
+  input: { duration: number; loop: boolean; purpose?: "read" }
 ): WorldAnimationScriptResult {
   if (!(input.duration > 0) || input.duration > WORLD_ANIMATION_MAX_DURATION_SECONDS) {
     return { ok: false, stage: "invalid", code: "invalid-duration", message: "动画时长必须为 (0, 3600] 秒" };
@@ -294,6 +295,9 @@ function runWorldAnimationOnce(
     return { ok: false, stage: "execute", code: "runtime-error", message: error instanceof Error ? error.message : String(error) };
   }
   const raw = recorder.raw();
+  if (!HUMANOID_RIG_AUTHORING_ENABLED && input.purpose !== "read" && raw.walkTracks.length > 0) {
+    return { ok: false, stage: "invalid", code: "humanoid-rig-disabled", message: "人形骨架暂未开放，请使用普通实例或部件的 tween/cycle 动画" };
+  }
   const instanceTracks: WorldInstanceTrack[] = [];
   const cameraTracks: WorldCameraTrack[] = [];
   for (const track of raw.instanceTracks) {

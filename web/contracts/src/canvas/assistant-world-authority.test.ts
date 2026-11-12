@@ -149,8 +149,9 @@ it("decodes a camera scope strictly and grants only camera adjustments", () => {
   expect(assistantWorldSourceCapability({ targets: ["world-camera"] })).toMatchObject({ targets: ["world-camera"], tools: ["get_world_context", "set_world_camera", "complete_world_camera"], completion: true });
 });
 
-it("grants rig reads and scene samples only to a director area", () => {
-  for (const name of ["get_world_model_rig", "sample_scene_animation"]) {
+it("hides rig reads and grants scene samples only to a director area", () => {
+  expect(assistantWorldToolsForScope({kind:"scene-area",areaId:"a"})).not.toContain("get_world_model_rig");
+  for (const name of ["sample_scene_animation"]) {
     expect(assistantWorldToolsForScope({kind:"scene-area",areaId:"a"})).toContain(name);
     expect(assistantWorldToolsForScope({kind:"world-camera",cameraId:"c"})).not.toContain(name);
     expect(assistantWorldToolsForScope({kind:"workflow-group-2d",groupId:"g"})).not.toContain(name);
