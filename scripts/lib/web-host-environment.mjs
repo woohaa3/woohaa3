@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto';
 
 export function buildWebHostEnvironment({ resourceRoot, dataDir, host, port, basePath, runtimeInstall = 'enabled', baseEnv = process.env }) {
   const data = (name) => path.join(dataDir, name);
-  for (const dir of ['stores', 'media', 'config', 'secrets', 'extension-data', 'extensions', 'logs', 'cache']) {
+  for (const dir of ['stores', 'media', 'config', 'secrets', 'extension-data', 'extensions', 'extensions-managed', 'logs', 'cache']) {
     fs.mkdirSync(data(dir), { recursive: true, mode: 0o700 });
   }
   const env = { ...baseEnv };
@@ -37,6 +37,18 @@ export function buildWebHostEnvironment({ resourceRoot, dataDir, host, port, bas
     WOOHAA3_MODELS_CONFIG_PATH: fs.existsSync(data('config/models.json')) ? data('config/models.json') : path.join(resourceRoot, 'models.json'),
     WOOHAA3_EXTENSION_DIRS: [path.join(resourceRoot, 'extensions'), data('extensions')].join(','),
     WOOHAA3_EXTENSION_WRITABLE_DIRS: data('extensions'),
+    /**
+     * 受管安装根（市场安装落盘处）必须放在**数据目录**，不能留在资源根。
+     *
+     * 资源根随版本替换：`scripts/deploy-web-host.mjs` 的切换步骤里有
+     * `rm -rf <resourceRoot>`（强制重新释放 payload），放在那里的 `installations.json` 与
+     * `installed/<id>/<version>/` 会随每次部署一起消失，表现成「市场装过的扩展部署后没了」。
+     * 与 release（`shared/extensions-managed`）和桌面（数据目录）保持同一原则。
+     *
+     * 缺省值 `resolveManagedRoot` 是 `<repoRoot>/.woohaa3/extensions`，在 web host 里
+     * `repoRoot` 正是资源根——所以必须显式给出，否则默认就落在会被删的位置。
+     */
+    WOOHAA3_EXTENSION_MANAGED_DIR: data('extensions-managed'),
     // npm registry runtime：与桌面同一 manager / 同一 app-local Node+npm；缓存写在数据目录。
     WOOHAA3_RUNTIME_DATA_DIR: dataDir,
     WOOHAA3_RUNTIME_DEFAULTS_FILE: path.join(resourceRoot, 'runtime-downloads.json'),

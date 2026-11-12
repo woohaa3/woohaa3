@@ -244,6 +244,27 @@ describe("插件配置弹窗", () => {
     expect(container.textContent).toContain("不用在这里手写名单");
   });
 
+  it("非站点插件启动失败时，模型页直接给出原因而不是「还没有模型」", async () => {
+    const plugin: SettingPluginView = {
+      id: "litellm-provider",
+      label: "LiteLLM",
+      description: "网关",
+      layer: "extension",
+      configPrefix: "providers.litellm",
+      settingCount: 1,
+      // Provider 不进站点控制面：没有 actualState，失败原因只能靠 activationFailure 上屏。
+      siteManaged: false,
+      provider: true,
+      modelRefresh: { path: "/api/providers/litellm/refresh", hint: "从网关发现" },
+      activationFailure: "ctx.generation.registerConversion is not a function"
+    };
+    const { container } = await renderDialog({ pluginId: "litellm-provider", page: "models", plugins: [plugin] });
+    expect(container.textContent).toContain("ctx.generation.registerConversion is not a function");
+    // 概览页的状态标记同样要跟着变：否则卡片写着「运行中」，模型页却说插件没启动。
+    const overview = await renderDialog({ pluginId: "litellm-provider", page: "overview", plugins: [plugin] });
+    expect(overview.container.querySelector(".plugin-overview__status")?.textContent).toBe("启动失败");
+  });
+
   it("全部启用和全部关闭一次写这张卡片上的模型，关闭前先确认", async () => {
     const { container, setModelsEnabled } = await renderDialog({
       pluginId: "litellm-provider",

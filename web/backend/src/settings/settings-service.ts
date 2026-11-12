@@ -113,6 +113,15 @@ export type SettingsPluginRegistration = {
   testConnection?: (config: SettingsSection) => Promise<{ readonly ok: boolean; readonly message?: string }>;
 };
 
+/**
+ * 非站点扩展层插件的启动失败说明（装载器写入，设置面只读）。
+ *
+ * 这类插件（Provider / 存储后端）不进站点控制面，也没有 `actualState`；`apply` 抛错时
+ * 过去只有一行日志，设置页照旧显示「还没有模型」——把「插件没启动」说成「没有模型」，
+ * 用户只能去翻日志。这里保留最近一次失败原因，激活成功时清空。
+ */
+export type PluginActivationFailure = string | null;
+
 export type SettingsTestResult =
   | { ok: true; message: string }
   | { ok: false; message: string; issues?: SettingsIssue[] };
@@ -124,6 +133,13 @@ export type SettingsService = SettingsReader & {
   describe(): Array<SettingDescription & { pendingRestart: boolean }>;
   /** 登记一个插件（设置页「插件配置」的清单来源）：宿主三层插件树与扩展都走这里。返回注销函数。 */
   registerPlugin(plugin: SettingsPluginRegistration): () => void;
+  /**
+   * 记录非站点扩展层插件的启动失败原因（`null` 清除）。
+   *
+   * 只对**不进站点控制面**的插件有意义：它们没有 `actualState`，失败只能靠这里曝光。
+   * 站点插件由控制面的 `desiredEnabled` / `actualState` / `diagnostics` 表达，不走这条。
+   */
+  setPluginActivationFailure(pluginId: string, reason: PluginActivationFailure): void;
   /** 当前插件树；`settingCount` 按已登记的定义表统计，「插件配置」据此显示每个插件有几项可配置。 */
   plugins(): SettingPluginView[];
   pendingRestart(): string[];
@@ -217,6 +233,8 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
   );
   /** 插件清单：按登记顺序排列（设置页「插件配置」的展示顺序）。 */
   const pluginRegistry = new Map<string, SettingsPluginRegistration>();
+  /** 非站点扩展层插件的最近一次启动失败原因（见 {@link PluginActivationFailure}）。 */
+  const activationFailures = new Map<string, string>();
 
   /**
    * 产品/构建默认里表示「用内置」的 `exposer.primary = local-public` 迁移为自动。
@@ -329,8 +347,16 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     pluginRegistry.set(plugin.id, plugin);
     return () => {
       // 扩展重启会重新登记；只有当前登记的还是自己时才注销，免得误删后来者。
-      if (pluginRegistry.get(plugin.id) === plugin) pluginRegistry.delete(plugin.id);
+      if (pluginRegistry.get(plugin.id) === plugin) {
+        pluginRegistry.delete(plugin.id);
+        activationFailures.delete(plugin.id);
+      }
     };
+  };
+
+  const setPluginActivationFailure: SettingsService["setPluginActivationFailure"] = (pluginId, reason) => {
+    if (reason === null) activationFailures.delete(pluginId);
+    else activationFailures.set(pluginId, reason);
   };
 
   const plugins = (): SettingPluginView[] =>
@@ -351,7 +377,9 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
         settingCount: count,
         siteManaged: plugin.siteManaged ?? false,
         provider: providerIdFromConfigPrefix(prefix) !== null,
-        ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {})
+        ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
+        // 只报「这个插件最近启动失败过」，不猜它「应该有什么」：站点插件的状态走控制面。
+        ...(activationFailures.has(plugin.id) ? { activationFailure: activationFailures.get(plugin.id)! } : {})
       };
     });
 
@@ -593,6 +621,7 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     unknownKeys: () => latest.unknown,
     register,
     registerPlugin,
+    setPluginActivationFailure,
     plugins,
     section,
     reload: () => serialize(reload),
