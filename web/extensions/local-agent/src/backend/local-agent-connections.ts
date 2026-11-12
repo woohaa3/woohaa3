@@ -27,7 +27,7 @@ import {
   type AgentConversationAdapter,
   type ApplicationToolDelegationFacade
 } from "@woohaa3/contracts";
-import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, preflightInput, preparedPromptText, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
+import { ASSISTANT_CANDIDATE_CAPABILITIES, createTurnObserver, modelCatalogForRecord, preflightInput, preparedPromptText, type ConnectionDescriptor, type ConnectionService } from "@woohaa3/agent-connections";
 import { LOCAL_AGENT_ADAPTERS, LOCAL_AGENT_PLUGIN_ID, localAgentConnectionName, type LocalAgentAdapterDescriptor } from "../shared.js";
 import { generatedImageImportFailure } from "./generated-image-import.js";
 import type { ProcessManager } from "./process-manager.js";
@@ -139,21 +139,38 @@ export function createLocalAgentDescriptors(): Record<string, ConnectionDescript
   const descriptors: Record<string, ConnectionDescriptor> = {};
   for (const adapter of LOCAL_AGENT_ADAPTERS) {
     descriptors[adapter.adapterId] = {
-      describe: ({ record }) => ({
-        name: localAgentConnectionName(adapter.adapterId, record.name),
-        capabilities: capabilitiesFor(),
-        // 不在连接描述里伪造 `app-server-default`：它不是 App Server 的真实模型 id，提交后会被
-        // 上游拒绝。用户手填过的模型作为 user-provided 保留；没有时交给 adapter 读取真实目录。
-        models:
-          record.models && record.models.length > 0
-            ? record.models.map((id) => ({ id, label: id, source: "user-provided" as const, accountAuthorized: false }))
-            : [],
-        // 本机来源的 credential 证据来自**真实探测/登录状态**（local-login），不来自 secrets；
-        // 不在这里写死 status（否则会覆盖 record.lastStatus）。未探测登录前给出可读原因。
-        // 本地连接只表示用户选择了该工具；真正的进程、登录和模型检查在首次使用时完成。
-        required: [],
-        ...(record.lastStatus?.credential.state === "ready" ? {} : { reason: "尚未确认本机工具配置或账号；执行时会启动专用进程并核对" })
-      })
+      describe: ({ record }) => {
+        // 目录快照里保留了模型级 reasoning 事实；连接视图必须与 adapter catalog 给出同一份
+        // 档位，否则受理回合时会以「模型未开放此思考强度」拒绝所有显式选择。
+        const catalog = record.modelCatalog ? modelCatalogForRecord(record) : undefined;
+        const models = catalog
+          ? catalog.models.map((model) => {
+            const efforts = model.reasoning.state === "supported" ? (model.reasoning.efforts ?? []).map((option) => option.id) : [];
+            return {
+              id: model.id,
+              label: model.label ?? model.id,
+              source: "user-provided" as const,
+              accountAuthorized: false,
+              reasoning: model.reasoning,
+              ...(efforts.length ? { reasoningEfforts: efforts } : {})
+            };
+          })
+          // 不在连接描述里伪造 `app-server-default`：它不是 App Server 的真实模型 id，提交后会被
+          // 上游拒绝。用户手填过的模型作为 user-provided 保留；没有时交给 adapter 读取真实目录。
+          : (record.models ?? []).map((id) => ({ id, label: id, source: "user-provided" as const, accountAuthorized: false }));
+        return {
+          name: localAgentConnectionName(adapter.adapterId, record.name),
+          capabilities: capabilitiesFor(),
+          models,
+          // 旧记录还没有目录快照时不冻结修订号，等首次目录读取写回真实能力后再参与失效判断。
+          ...(catalog ? { capabilityRevision: catalog.revision } : {}),
+          // 本机来源的 credential 证据来自**真实探测/登录状态**（local-login），不来自 secrets；
+          // 不在这里写死 status（否则会覆盖 record.lastStatus）。未探测登录前给出可读原因。
+          // 本地连接只表示用户选择了该工具；真正的进程、登录和模型检查在首次使用时完成。
+          required: [],
+          ...(record.lastStatus?.credential.state === "ready" ? {} : { reason: "尚未确认本机工具配置或账号；执行时会启动专用进程并核对" })
+        };
+      }
     };
   }
   return descriptors;
@@ -210,6 +227,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
         snapshot = await readCatalog();
       }
       for (const model of snapshot.models) catalog.set(model.id, model);
+      const snapshotCatalog = catalogSnapshot([...catalog.values()]);
       // 目录读取成功证明传输可用：清掉上次运行留下的 transport 失败证据；账号/模型权限仍由
       // credential/modelAccess 证据单独表达，不能因目录成功就宣称可生成。
       if (!snapshot.error || snapshot.models.length > 0) {
@@ -220,9 +238,14 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
             patch: { transport: { state: "ready", checkedAt: new Date().toISOString() } }
           })
           .catch(() => undefined);
+        // 把真实目录写回同一条连接记录：连接视图必须携带同一份模型级思考档位，否则受理回合
+        // 时会把合法的显式强度当成未开放。目录不是用户配置，不推进 configRevision。
+        try {
+          await options.service.setModelCatalog?.({ owner: input.owner, connectionId: record.connectionId, models: snapshotCatalog.models });
+        } catch { /* 快照写回失败不阻止本次目录读取；下次刷新会重试。 */ }
       }
       return {
-        ...catalogSnapshot([...catalog.values()]),
+        ...snapshotCatalog,
         ...(snapshot.error && catalog.size === 0 ? { error: snapshot.error } : {})
       };
     } catch (error) {

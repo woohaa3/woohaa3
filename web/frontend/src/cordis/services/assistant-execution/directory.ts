@@ -127,7 +127,9 @@ export class AgentDirectoryStore {
         const result = await this.service.listConnections();
         if (!current()) return;
         if (!result.ok) throw new Error(result.error);
-        const waiting = new Map([...new Set(result.value.filter(c => !c.models?.length).map(c => c.adapterId))].map(id => [
+        // 显式刷新也要重读已有模型列表的连接目录：本机来源会把上次目录快照写进连接，
+        // 只在 models 为空时读取会让上游新增/变化的模型与思考档位永远不再刷新。
+        const waiting = new Map([...new Set(result.value.filter(c => force || !c.models?.length).map(c => c.adapterId))].map(id => [
           id, [...new Set(result.value.filter(c => c.adapterId === id).map(c => c.name))].join(" / ")
         ]));
         const names = new Map(waiting);
