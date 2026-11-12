@@ -24,7 +24,9 @@
       { "id": "remote-server.diagnostics", "kind": "handler", "description": "读取已脱敏的服务端接入诊断事件", "auth": "authenticated" },
       { "id": "remote-server.diagnostics-report", "kind": "handler", "description": "把诊断事件上报到已连接的服务端", "auth": "authenticated" },
       { "id": "remote-server.oauth-start", "kind": "handler", "description": "发起浏览器授权码登录（本机 loopback 回调）", "auth": "authenticated" },
-      { "id": "remote-server.oauth-poll", "kind": "handler", "description": "轮询浏览器授权码登录结果", "auth": "authenticated" }
+      { "id": "remote-server.oauth-poll", "kind": "handler", "description": "轮询浏览器授权码登录结果", "auth": "authenticated" },
+      { "id": "agent-connection-provider:remote-server", "kind": "capability", "description": "远端服务端的助手连接发现" },
+      { "id": "agent-conversation-adapter:remote-assistant", "kind": "capability", "description": "远端服务端的助手会话执行" }
     ],
     "defaultEnabled": false,
     "order": 80

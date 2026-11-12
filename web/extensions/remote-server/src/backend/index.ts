@@ -25,6 +25,10 @@ import type {
 } from "@woohaa3/contracts";
 import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
+  agentConnectionProviderCapabilityId,
+  agentConversationAdapterCapabilityId,
+} from "@woohaa3/contracts";
+import {
   CANVAS_SERVICE,
   IDENTITY_SERVICE,
   LOCAL_ONLY_SNAPSHOT,
@@ -85,6 +89,7 @@ import {
 } from "../shared.js";
 import { readRemoteServerDeployment, type RemoteServerDeployment } from "../deployment.js";
 import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
+import { createRemoteAssistant, REMOTE_ASSISTANT_ADAPTER_ID } from "./assistant/index.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
 import { createOAuthLogin } from "./oauth-login.js";
 import { createRemoteTelemetryExport } from "./telemetry-export.js";
@@ -750,6 +755,41 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       ctx.effect(() => () => generationBridge.dispose());
       // 已有会话（本进程登录过或从文档存储恢复）时立即拉一次目录；没有会话就是安静休眠。
       void generationBridge.refresh().catch(() => undefined);
+
+      /**
+       * 远端助手通路：连接发现 + 会话适配器。
+       *
+       * 与 generationBridge 是**两条独立的路径**，不是同一个能力的两面：
+       * - generationBridge 让远端模型进入任务目录（SubmitTask/GetTask，画布 ACL）；
+       * - 这里让远端模型进入助手目录（/v1/chat/completions，部署级授权）。
+       *
+       * 互相不牵连：生成目录因协议协商失败而休眠时助手仍可用，反之亦然。唯一的共同
+       * 依赖是远端会话本身。
+       *
+       * 宿主没有 `registerCapability` 或没有 agent 相关扩展点时整体跳过（旧宿主 /
+       * 纯本地宿主），不影响接入本身。
+       */
+      const remoteAssistant = createRemoteAssistant({
+        fetchImpl,
+        session: () => sessionSource.current()
+      });
+      if (ctx.capabilities) {
+        // 与 canvasUpstream 同一注册面：返回注销函数，交给 Cordis 托管。
+        const undoProvider = ctx.capabilities.register(
+          agentConnectionProviderCapabilityId(REMOTE_SERVER_EXTENSION_ID),
+          remoteAssistant.provider
+        );
+        const undoAdapter = ctx.capabilities.register(
+          agentConversationAdapterCapabilityId(REMOTE_ASSISTANT_ADAPTER_ID),
+          remoteAssistant.adapter
+        );
+        ctx.effect(() => () => {
+          undoAdapter();
+          undoProvider();
+          // 会话一变就让助手目录失效：登出/切服后继续展示旧模型会让"可用"变成假象。
+          remoteAssistant.invalidate();
+        });
+      }
 
       /**
        * 配了部署凭证就在激活时换一次会话。
