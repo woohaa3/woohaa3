@@ -6,7 +6,7 @@ import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { createRuntimeComponentManager } from './index.mjs';
-import { extractNpmTarball, planLayout, registryTarballUrl, verifyIntegrity } from './npm-registry.mjs';
+import { extractNpmTarball, orderRegistries, planLayout, probeRegistry, registryTarballUrl, verifyIntegrity } from './npm-registry.mjs';
 
 const BLOCK = 512;
 function header({ name, mode = 0o755, size = 0, type = '0' }) {
@@ -57,12 +57,13 @@ function npmTarball(files) {
   return gzipSync(Buffer.concat(chunks));
 }
 const integrity = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function packageJson(name, version, extra = {}) {
   return JSON.stringify({ name, version, ...extra });
 }
 
-function fixtureLock({ id = 'tool', platform = process.platform, arch = process.arch } = {}) {
+function fixtureLock({ id = 'tool', platform = process.platform, arch = process.arch, mirrors = [] } = {}) {
   const key = `${platform}-${arch}`;
   const exe = platform === 'win32' ? '.exe' : '';
   const packages = {
@@ -104,7 +105,7 @@ function fixtureLock({ id = 'tool', platform = process.platform, arch = process.
     lock: {
       schemaVersion: 1,
       kind: 'woohaa-runtime-npm-lock',
-      registry: { default: 'https://registry.npmjs.org/' },
+      registry: { default: 'https://registry.npmjs.org/', mirrors },
       platforms: [key],
       engines: {
         [id]: {
@@ -135,26 +136,32 @@ async function managerFixture(t, options = {}) {
   await fs.writeFile(lockPath, JSON.stringify({ schemaVersion: 1, components: { tool: { version: '1.0.0' } } }));
   await fs.writeFile(npmLockPath, JSON.stringify(f.lock, null, 2));
   const requests = [];
+  const requestDetails = [];
   const urls = new Map();
+  const registries = [options.registryUrl ?? 'https://registry.npmjs.org/', ...(options.mirrors ?? [])];
   for (const [id, bytes] of f.tarballs) {
     const entry = f.packages[id];
-    urls.set(registryTarballUrl('https://registry.npmjs.org/', entry.name, entry.version), bytes);
+    for (const registry of registries) urls.set(registryTarballUrl(registry, entry.name, entry.version), bytes);
   }
-  const fetchImpl = options.fetchImpl ?? (async (url) => {
+  const fetchImpl = options.fetchImpl ?? (async (url, init = {}) => {
     requests.push(String(url));
+    requestDetails.push({ url: String(url), method: init.method ?? 'GET' });
     const bytes = urls.get(String(url));
     return bytes ? new Response(bytes) : new Response('', { status: 404 });
   });
   const manager = createRuntimeComponentManager({
     dataDir: root, defaultsPath, lockPath, npmLockPath, toolsDir,
     platform: process.platform, arch: process.arch,
+    ...(options.registryUrl ? { registryUrl: options.registryUrl } : {}),
     fetchImpl
   });
-  return { manager, root, toolsDir, f, requests, urls, npmLockPath, lockPath, defaultsPath,
+  return { manager, root, toolsDir, f, requests, requestDetails, urls, npmLockPath, lockPath, defaultsPath,
     rebuild: async (changes = {}) => {
       Object.assign(f.lock.engines.tool, changes.lock ?? {});
       await fs.writeFile(npmLockPath, JSON.stringify(f.lock, null, 2));
       return createRuntimeComponentManager({ dataDir: root, defaultsPath, lockPath, npmLockPath, toolsDir, platform: process.platform, arch: process.arch,
+        ...(options.registryUrl ? { registryUrl: options.registryUrl } : {}),
+        probeTimeoutMs: changes.probeTimeoutMs ?? 2000, downloadTimeoutMs: changes.downloadTimeoutMs ?? 120000,
         fetchImpl: changes.fetchImpl ?? fetchImpl });
     }
   };
@@ -169,6 +176,41 @@ test('npm layout keeps conflicting versions resolvable and hoists shared package
   assert.equal(byDir.get('node_modules/@fixture/b'), '@fixture/b@1.0.0');
   assert.equal(byDir.get('node_modules/@fixture/c'), '@fixture/c@1.0.0');
   assert.equal(byDir.get('node_modules/@fixture/b/node_modules/@fixture/c'), '@fixture/c@2.0.0');
+});
+
+test('registry probes use the locked tarball and fall back when HEAD is rejected', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method, range: init.headers?.Range });
+    return new Response(null, { status: init.method === 'HEAD' ? 405 : 206 });
+  };
+  const result = await probeRegistry({
+    baseUrl: 'https://registry.example.test/', name: '@fixture/tool', version: '1.0.0', fetchImpl, timeoutMs: 500
+  });
+  assert.deepEqual(calls.map((call) => call.method), ['HEAD', 'GET']);
+  assert.equal(calls[0].url, 'https://registry.example.test/@fixture/tool/-/tool-1.0.0.tgz');
+  assert.equal(calls[1].range, 'bytes=0-0');
+  assert.equal(result.baseUrl, 'https://registry.example.test/');
+  assert.ok(result.ms >= 0);
+});
+
+test('registry ordering prefers the fastest healthy probe and keeps failed sources last', async () => {
+  const urls = ['https://slow.test/', 'https://fast.test/', 'https://broken.test/'];
+  const delays = new Map([['slow.test', 60], ['fast.test', 5]]);
+  const fetchImpl = async (url) => {
+    const host = new URL(String(url)).host;
+    if (host === 'broken.test') throw new Error('down');
+    await sleep(delays.get(host));
+    return new Response(null, { status: 200 });
+  };
+  const order = await orderRegistries({
+    registryUrls: urls, name: '@fixture/tool', version: '1.0.0', fetchImpl, timeoutMs: 500
+  });
+  assert.deepEqual(order, ['https://fast.test/', 'https://slow.test/', 'https://broken.test/']);
+  assert.deepEqual(await orderRegistries({
+    registryUrls: urls, name: '@fixture/tool', version: '1.0.0', timeoutMs: 500,
+    fetchImpl: async () => { throw new Error('offline'); }
+  }), urls);
 });
 
 test('npm tarball URLs are exact and PAX paths are honoured', async (t) => {
@@ -240,6 +282,112 @@ test('npm registry 404 reports the registry and keeps the engine unavailable', a
   const state = await f.manager.inspect('tool');
   assert.equal(state.status, 'failed');
   assert.match(state.error, /404/);
+});
+
+test('npm registry probes candidates and downloads from the fastest mirror', async (t) => {
+  const mirrors = ['https://mirror-fast.test/', 'https://mirror-slow.test/'];
+  const f = await managerFixture(t, { mirrors });
+  const downloads = [];
+  const fetchImpl = async (url, init = {}) => {
+    const host = new URL(String(url)).host;
+    if (init.method === 'HEAD') {
+      await sleep(host === 'mirror-fast.test' ? 5 : host === 'registry.npmjs.org' ? 30 : 90);
+      return new Response(null, { status: 200 });
+    }
+    downloads.push(host);
+    const bytes = f.urls.get(String(url));
+    return bytes ? new Response(bytes) : new Response('', { status: 404 });
+  };
+  const manager = await f.rebuild({ fetchImpl, probeTimeoutMs: 500 });
+  const state = await manager.install('tool');
+  assert.equal(state.status, 'ready', state.error);
+  assert.equal(downloads[0], 'mirror-fast.test');
+  assert.ok(downloads.every((host) => host === 'mirror-fast.test'));
+  const receipt = JSON.parse(await fs.readFile(path.join(f.root, 'runtimes/tool/1.0.0', `${process.platform}-${process.arch}`, '.runtime-receipt.json'), 'utf8'));
+  assert.deepEqual(receipt.registries, ['https://mirror-fast.test/']);
+});
+
+test('npm registry falls back when the fastest source starts failing', async (t) => {
+  const f = await managerFixture(t, { mirrors: ['https://mirror-fast.test/'] });
+  const downloads = [];
+  let mirrorRequests = 0;
+  const fetchImpl = async (url, init = {}) => {
+    const host = new URL(String(url)).host;
+    if (init.method === 'HEAD') {
+      await sleep(host === 'mirror-fast.test' ? 5 : 30);
+      return new Response(null, { status: 200 });
+    }
+    downloads.push(host);
+    if (host === 'mirror-fast.test' && ++mirrorRequests === 1) return new Response('', { status: 503 });
+    const bytes = f.urls.get(String(url));
+    return bytes ? new Response(bytes) : new Response('', { status: 404 });
+  };
+  const manager = await f.rebuild({ fetchImpl, probeTimeoutMs: 500 });
+  const state = await manager.install('tool');
+  assert.equal(state.status, 'ready', state.error);
+  assert.equal(downloads[0], 'mirror-fast.test');
+  assert.equal(downloads[1], 'registry.npmjs.org');
+  assert.ok(downloads.slice(1).every((host) => host === 'registry.npmjs.org'));
+});
+
+test('npm registry falls back when the fastest source serves corrupted bytes', async (t) => {
+  const f = await managerFixture(t, { mirrors: ['https://mirror-fast.test/'] });
+  const fetchImpl = async (url, init = {}) => {
+    const host = new URL(String(url)).host;
+    if (init.method === 'HEAD') {
+      await sleep(host === 'mirror-fast.test' ? 5 : 30);
+      return new Response(null, { status: 200 });
+    }
+    if (host === 'mirror-fast.test') return new Response(Buffer.from('corrupt'));
+    const bytes = f.urls.get(String(url));
+    return bytes ? new Response(bytes) : new Response('', { status: 404 });
+  };
+  const manager = await f.rebuild({ fetchImpl, probeTimeoutMs: 500 });
+  const state = await manager.install('tool');
+  assert.equal(state.status, 'ready', state.error);
+});
+
+test('explicit deployment registry keeps single-source semantics unless mirrors are provided', async (t) => {
+  const f = await managerFixture(t, { registryUrl: 'https://primary.test/', mirrors: ['https://mirror-fast.test/'] });
+  const hosts = [];
+  const fetchImpl = async (url, init = {}) => {
+    const host = new URL(String(url)).host;
+    hosts.push(host);
+    const bytes = f.urls.get(String(url));
+    return bytes ? new Response(bytes) : new Response('', { status: 404 });
+  };
+  const manager = await f.rebuild({ fetchImpl, probeTimeoutMs: 500 });
+  assert.equal((await manager.install('tool')).status, 'ready');
+  assert.ok(hosts.length > 0);
+  assert.ok(hosts.every((host) => host === 'primary.test'));
+});
+
+test('npm registry probe failure keeps configured order and network errors stay actionable', async (t) => {
+  const f = await managerFixture(t, { mirrors: ['https://mirror-fast.test/'] });
+  const manager = await f.rebuild({
+    probeTimeoutMs: 500,
+    fetchImpl: async (url, init = {}) => {
+      if (init.method === 'HEAD') throw new Error('probe blocked');
+      const bytes = f.urls.get(String(url));
+      return bytes ? new Response(bytes) : new Response('', { status: 404 });
+    }
+  });
+  assert.equal((await manager.install('tool')).status, 'ready');
+
+  const offline = await managerFixture(t, { mirrors: ['https://mirror-fast.test/'] });
+  const failing = await offline.rebuild({
+    probeTimeoutMs: 500,
+    fetchImpl: async (url, init = {}) => {
+      if (init.method === 'HEAD') return new Response(null, { status: 200 });
+      throw new Error('network down');
+    }
+  });
+  await assert.rejects(failing.install('tool'), (error) => {
+    assert.equal(error.code, 'REGISTRY_UNAVAILABLE');
+    assert.match(error.message, /registry\.npmjs\.org/);
+    assert.match(error.message, /mirror-fast\.test/);
+    return true;
+  });
 });
 
 test('npm registry disabled by deployment reports an actionable unavailable state', async (t) => {

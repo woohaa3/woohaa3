@@ -79,6 +79,11 @@ test('lock build records exact integrity, entry rules and per-platform package s
   assert.deepEqual(lock.engines.claude.entry, { type: 'package-file', package: '@anthropic-ai/claude-agent-sdk-{platform}', pattern: 'claude{exe}', probeVersion: '2.1.0' });
   assert.deepEqual(lock.engines.codex.entry, { type: 'package-file', package: '@openai/codex-{platform}', pattern: 'vendor/*/bin/codex{exe}', probeVersion: '1.0.0' });
   assert.equal(lock.engines.dsh.entry.type, 'module-generator');
+  assert.equal(lock.registry.default, 'https://registry.npmjs.org/');
+  assert.deepEqual(lock.registry.mirrors, [
+    'https://repo.huaweicloud.com/repository/npm/',
+    'https://mirrors.cloud.tencent.com/npm/'
+  ]);
   // Codex publishes its platform binary as an alias; the install path keeps the alias name.
   const edge = lock.engines.codex.packages['@openai/codex@1.0.0'].dependencies[0];
   assert.deepEqual(edge, { name: '@openai/codex-darwin-arm64', target: '@openai/codex@1.0.0-darwin-arm64', optional: true });
@@ -150,6 +155,13 @@ test('committed lock is validated by platform-independent facts, not by re-deriv
   const accepted = assertRuntimeNpmLockCurrent({ clientRoot: root, committed });
   assert.equal(accepted.generatedFrom.lockfileSha256, committed.generatedFrom.lockfileSha256);
   assert.ok(accepted.engines.dsh.platforms['darwin-arm64'].packages.length > 0);
+});
+
+test('committed lock rejects registry mirrors that are not HTTPS URLs', async (t) => {
+  const root = await fixture(t);
+  const committed = buildRuntimeNpmLock({ clientRoot: root, platforms: ['darwin-arm64'] });
+  committed.registry.mirrors = ['http://mirror.example.test/'];
+  assert.throws(() => assertRuntimeNpmLockCurrent({ clientRoot: root, committed }), { code: 'STALE_LOCK' });
 });
 
 test('committed lock fails fast when the pnpm lockfile moved on', async (t) => {

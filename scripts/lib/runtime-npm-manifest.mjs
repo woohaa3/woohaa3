@@ -24,6 +24,11 @@ export const RUNTIME_NPM_SUPPORTED_PLATFORMS = [
   'win32-x64',
   'win32-arm64'
 ];
+/** 官方源之外的候选：下载前并行探测，按 TTFB 选最快，失败再按顺序回退。 */
+export const RUNTIME_NPM_MIRRORS = [
+  'https://repo.huaweicloud.com/repository/npm/',
+  'https://mirrors.cloud.tencent.com/npm/'
+];
 /** 运行期安装会执行的 lifecycle；`prepare` 只在 git/本地依赖安装时触发，registry tarball 不执行。 */
 const LIFECYCLE_KEYS = ['preinstall', 'install', 'postinstall'];
 const IGNORED_LIFECYCLE_KEYS = ['prepare', 'prepublish', 'prepublishOnly'];
@@ -384,7 +389,7 @@ export function buildRuntimeNpmLock({ clientRoot, platforms = RUNTIME_NPM_SUPPOR
     schemaVersion: RUNTIME_NPM_SCHEMA_VERSION,
     kind: 'woohaa-runtime-npm-lock',
     generatedFrom: { lockfile: 'client/locks/web/pnpm-lock.yaml', lockfileSha256: normalizedTextSha256(text) },
-    registry: { default: 'https://registry.npmjs.org/', mirrors: [] },
+    registry: { default: 'https://registry.npmjs.org/', mirrors: RUNTIME_NPM_MIRRORS },
     node: { version: readDesktopNodeVersion(clientRoot) },
     platforms,
     engines
@@ -502,6 +507,10 @@ export function assertRuntimeNpmLockCurrent({ clientRoot, committed } = {}) {
     }
   }
   if (!actual.registry?.default) fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 缺少 registry 声明');
+  if (!Array.isArray(actual.registry.mirrors) || actual.registry.mirrors.some((mirror) => {
+    if (typeof mirror !== 'string') return true;
+    try { return new URL(mirror).protocol !== 'https:'; } catch { return true; }
+  })) fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 的 registry.mirrors 必须是 HTTPS 地址数组');
   if (!actual.node?.version) fail('STALE_LOCK', 'desktop/runtime-npm-lock.json 缺少 Node 版本');
   return actual;
 }

@@ -35,6 +35,10 @@ export function createRuntimeComponentManager(options: {
   toolsDir?: string | null;
   /** 受管 npm mirror；缺省读 defaults.registry.baseUrl 或 npm 官方 registry。 */
   registryUrl?: string | null;
+  /** 下载前并行探测 registry 的单项超时（毫秒），默认 2000。 */
+  probeTimeoutMs?: number;
+  /** 单个 tarball 下载的请求超时（毫秒），默认 120000。 */
+  downloadTimeoutMs?: number;
   /** 部署显式关闭运行期安装（false 时 npm-registry 组件返回 unavailable）。 */
   installEnabled?: boolean;
   nodeExecPath?: string;

@@ -9,6 +9,7 @@
 - 安装目录：`<appData>/runtimes/<engine>/<version>/<platform>-<arch>`；tarball 缓存在 `<appData>/cache/npm/`，同一版本在应用升级、多个连接、多个扩展之间共享。
 - 安装写随机 staging：逐包校验 integrity → 解包到 npm 兼容的 `node_modules` → 校验每个包版本与依赖解析 → 入口探针（dsh 生成 `entry.mjs`，Claude/Codex 使用平台包内绝对 executable）→ 只运行审核过的 lifecycle script → 写 `ready.json`/receipt 后原子 rename。中断、取消、校验失败都不会覆盖既有 ready 版本。
 - 生命周期脚本由 `desktop/runtime-npm-scripts.json` 审核：未列出的脚本让构建失败；明确 deny 的脚本记录在 lock 中且运行期永不执行。安装器只用应用自己的 Node 执行允许的 `node <script>`，PATH 只含应用工具目录。
+- 下载前对锁定根包的 tarball 做并行 `HEAD` 探测，官方源、华为云和腾讯云中 TTFB 最快者先下；探测失败保持配置顺序，真实下载失败再逐个回退。探测只是排序，不替代 integrity 校验；`/-/ping` 不作为健康检查，因为镜像的 tarball 可能另走 CDN 或返回 302。部署可用 `runtime-downloads.json` 的 `registry.mirrors` 替换镜像列表；`registry.baseUrl` 或 Web host 的 `WOOHAA_WEB_HOST_RUNTIME_REGISTRY` 会变成单源，除非同时提供 `registry.mirrors`。
 - 同一引擎版本的并发准备合并为一个 job；运行中的 lease 阻止删除。失败状态带真实来源与原因（registry 不可达、integrity、磁盘不足、脚本被拒绝、管理员关闭），不会提示重新安装扩展。
 - Web host 复用同一 manager 与 app-local Node/npm。部署显式关闭时（`--runtime-install disabled` 或 `WOOHAA_WEB_HOST_RUNTIME_INSTALL=disabled`）API 返回“管理员未启用运行时安装”，不静默下载、不宣称助手可用。
 - 自有 CDN（下文签名 archive 方案）保留为可选的企业镜像/离线来源，不是默认运行期流量入口。

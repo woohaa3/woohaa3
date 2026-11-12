@@ -56,6 +56,57 @@ export function registryTarballUrl(baseUrl, name, version) {
   return url.href;
 }
 
+function attemptSignal(signal, timeoutMs) {
+  return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+}
+
+/**
+ * 用锁定 tarball 的 HEAD 探测 registry 的真实 TTFB。
+ *
+ * `/-/ping` 只能证明 registry API 主机可达；部分镜像的 tarball 会跳到另一个 CDN 域名，
+ * 甚至返回 302，健康检查必须走与实际下载相同的 tarball 路径和重定向策略。
+ */
+export async function probeRegistry({ baseUrl, name, version, fetchImpl = globalThis.fetch, signal, timeoutMs = 2000, now = () => performance.now() }) {
+  const url = registryTarballUrl(baseUrl, name, version);
+  const started = now();
+  let response;
+  try {
+    response = await fetchImpl(url, { method: 'HEAD', redirect: 'error', signal: attemptSignal(signal, timeoutMs) });
+    // 部分镜像不允许 HEAD；用 Range 只取响应头，不真正下载整个包。
+    if ([403, 405, 501].includes(response.status)) {
+      await response.body?.cancel().catch(() => {});
+      response = await fetchImpl(url, {
+        method: 'GET', headers: { Range: 'bytes=0-0' }, redirect: 'error', signal: attemptSignal(signal, timeoutMs)
+      });
+    }
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error;
+    throw Object.assign(new Error(`${baseUrl}: ${error?.message ?? error}`), { code: 'PROBE_FAILED' });
+  }
+  await response.body?.cancel().catch(() => {});
+  if (!response.ok) throw Object.assign(new Error(`${baseUrl}: HTTP ${response.status}`), { code: 'PROBE_FAILED' });
+  return { baseUrl, ms: now() - started };
+}
+
+/**
+ * 并行探测候选 registry，按 TTFB 排序；全部失败时保持配置顺序，交给实际下载继续尝试。
+ * 预检只是排序，不是可用性证明：探测失败、超时或结果不可信都不能阻止后续 fallback。
+ */
+export async function orderRegistries({ registryUrls, name, version, fetchImpl = globalThis.fetch, signal, timeoutMs = 2000, now }) {
+  const candidates = [...new Set((registryUrls ?? []).filter(Boolean))];
+  if (candidates.length < 2) return candidates;
+  const results = await Promise.allSettled(candidates.map((baseUrl) => probeRegistry({ baseUrl, name, version, fetchImpl, signal, timeoutMs, now })));
+  if (signal?.aborted) throw signal.reason ?? new Error('Cancelled');
+  const healthy = [];
+  const failed = [];
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') healthy.push(result.value);
+    else failed.push(candidates[index]);
+  });
+  healthy.sort((left, right) => left.ms - right.ms);
+  return [...healthy.map((entry) => entry.baseUrl), ...failed];
+}
+
 function normalizeList(value) {
   if (Array.isArray(value)) return value;
   return value === undefined ? undefined : [value];
