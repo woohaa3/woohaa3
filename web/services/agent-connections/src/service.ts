@@ -62,6 +62,14 @@ export type ConnectionService = {
   get(owner: string, connectionId: string): Promise<ConnectionMetadataRecord | null>;
   create(owner: string, input: ConnectionConfigInput): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
   update(owner: string, connectionId: string, patch: Partial<ConnectionConfigInput>, expected?: { configRevision: number; credentialEpoch: number }): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
+  /**
+   * 记录模型目录快照（id/label/reasoning），不推进 `configRevision`。
+   *
+   * 供目录随上游动态刷新的来源（本机 Agent）把真实能力事实写进同一条连接记录：
+   * 连接视图与 adapter catalog 必须给出同一份思考档位，否则接收回合时无法校验。
+   * 目录本身不是用户配置，刷新不应让已冻结的连接身份失效。
+   */
+  setModelCatalog?(input: { owner: string; connectionId: string; models: readonly ConnectionModelInput[] }): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
   /** Atomic configuration/key publication; stable operation IDs survive lost responses. */
   configure(owner: string, input: ConnectionConfigInput & { operationId: string; connectionId?: string; secret?: string; expectedEpoch?: number; expectedRevision?: number }): Promise<ConnectionServiceResult<ConnectionMetadataRecord>>;
   /** 删除连接：清其凭据与元数据；不删除宿主历史/画布内容。 */
@@ -235,6 +243,25 @@ export function createConnectionService(options: ConnectionServiceOptions): Conn
         configRevision: found.record.configRevision + 1,
         ...(patch.adapterId !== undefined || patch.authMode !== undefined || patch.baseUrl !== undefined ? { native: undefined, nativeBindings: undefined, lastStatus: undefined } : {}),
         updatedAt: now()
+      };
+      const written = await writeRecord(next, found.revision);
+      return written.ok ? { ok: true, value: next } : written;
+    },
+
+    async setModelCatalog({ owner, connectionId, models }) {
+      const found = await readRecord(owner, connectionId);
+      if (!found) return { ok: false, error: { code: "not-found", message: "连接不存在或无权访问" } };
+      const timestamp = now();
+      const catalog = catalogFromInput(models, found.record.modelCatalog, timestamp);
+      const unchanged = found.record.modelCatalog !== undefined
+        && JSON.stringify(found.record.modelCatalog.models) === JSON.stringify(catalog.modelCatalog?.models)
+        && JSON.stringify(found.record.models ?? []) === JSON.stringify(catalog.models);
+      if (unchanged) return { ok: true, value: found.record };
+      const next: ConnectionMetadataRecord = {
+        ...found.record,
+        models: catalog.models,
+        ...(catalog.modelCatalog ? { modelCatalog: catalog.modelCatalog } : {}),
+        updatedAt: timestamp
       };
       const written = await writeRecord(next, found.revision);
       return written.ok ? { ok: true, value: next } : written;

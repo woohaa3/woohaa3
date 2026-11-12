@@ -109,10 +109,10 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
       const conversationOwnerIdFor = options.conversationOwnerIdFor ?? defaultConversationOwnerIdFor;
       const conversationAdapter = createChatGptConversationAdapter({ service, ownerIdFor: conversationOwnerIdFor });
       host.registerCapability({ id: agentConversationAdapterCapabilityId(CHATGPT_CONVERSATION_ADAPTER_ID), value: conversationAdapter });
-      const connectionProvider = createOAuthConnectionProvider({ service, adapter: conversationAdapter, ownerIdFor: conversationOwnerIdFor });
-      host.registerCapability({ id: agentConnectionProviderCapabilityId(OAUTH_AGENT_PLUGIN_ID), value: connectionProvider });
       // Only project a model directory actually returned for this owner and authorization epoch.
       const observedModels = new Map<string, { epoch: number; models: readonly import("@woohaa3/contracts").AgentModelView[] }>();
+      const connectionProvider = createOAuthConnectionProvider({ service, adapter: conversationAdapter, ownerIdFor: conversationOwnerIdFor, observedModelsFor: owner => observedModels.get(owner) });
+      host.registerCapability({ id: agentConnectionProviderCapabilityId(OAUTH_AGENT_PLUGIN_ID), value: connectionProvider });
       const readModels = conversationAdapter.models;
       conversationAdapter.models = async input => {
         const before = await connectionProvider.listConnections({ owner: input.owner });

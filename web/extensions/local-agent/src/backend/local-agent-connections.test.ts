@@ -38,11 +38,16 @@ function record(overrides: Partial<ConnectionMetadataRecord> = {}): ConnectionMe
 function fakeService(initial: ConnectionMetadataRecord[]) {
   const patches: Array<Partial<AgentConnectionStatus>> = [];
   const natives: Array<{ nativeId: string; credentialEpoch: number }> = [];
+  const catalogs: Array<{ connectionId: string; models: readonly unknown[] }> = [];
   const service = {
     list: async () => initial,
     get: async (_owner: string, connectionId: string) => initial.find((entry) => entry.connectionId === connectionId) ?? null,
     setStatus: async ({ patch }: { patch: Partial<AgentConnectionStatus> }) => {
       patches.push(patch);
+      return { ok: true as const, value: initial[0] };
+    },
+    setModelCatalog: async ({ connectionId, models }: { owner: string; connectionId: string; models: readonly unknown[] }) => {
+      catalogs.push({ connectionId, models });
       return { ok: true as const, value: initial[0] };
     },
     resolveNativeBinding: async () => null,
@@ -51,7 +56,7 @@ function fakeService(initial: ConnectionMetadataRecord[]) {
       return { ok: true as const, value: initial[0] };
     }
   };
-  return { service: service as unknown as LocalAgentRuntimeOptions["service"], patches, natives };
+  return { service: service as unknown as LocalAgentRuntimeOptions["service"], patches, natives, catalogs };
 }
 
 function fakeProcessManager(options: { executable?: string | null } = {}): {
@@ -186,6 +191,22 @@ describe("local-agent 连接描述（任务 3.1）", () => {
     expect(empty.models).toEqual([]);
     const configured = await descriptors["codex-appserver"]!.describe({ record: record({ models: ["gpt-6.1-sol"] }), credentialConfigured: false, readCredential: async () => null, recordStatus: async () => undefined });
     expect(configured.models).toEqual([{ id: "gpt-6.1-sol", label: "gpt-6.1-sol", source: "user-provided", accountAuthorized: false }]);
+  });
+
+  it("连接视图携带目录中同一份模型级思考档位与修订号", async () => {
+    const descriptors = createLocalAgentDescriptors();
+    const reasoning = { state: "supported" as const, source: "provider" as const, revision: "r1", efforts: [{ id: "high" as const }] };
+    const described = await descriptors["codex-appserver"]!.describe({
+      record: record({
+        models: ["gpt-6.1-sol"],
+        modelCatalog: { revision: "rev-1", capturedAt: "2026-11-12T00:00:00.000Z", models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol", reasoning }] }
+      }),
+      credentialConfigured: false,
+      readCredential: async () => null,
+      recordStatus: async () => undefined
+    });
+    expect(described.models).toEqual([{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol", source: "user-provided", accountAuthorized: false, reasoning, reasoningEfforts: ["high"] }]);
+    expect(described.capabilityRevision).toBe("rev-1");
   });
 });
 
@@ -512,18 +533,20 @@ describe("local-agent 会话 adapter（任务 3.2/4.2/6.2/6.4）", () => {
   });
 
   it("模型目录读取启动专用进程并采用上游真实列表；未安装时返回原因", async () => {
-    const { service, patches } = fakeService([record()]);
+    const { service, patches, catalogs } = fakeService([record()]);
     const { manager, ensureCalls } = fakeProcessManager({ executable: "/usr/bin/codex" });
     const transport: LocalAgentTransport = {
       id: "codex-appserver",
       probe: async () => ({ ok: true }),
-      models: async () => ({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }] }),
+      models: async () => ({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol", reasoningEfforts: ["high"] }] }),
       run: async () => ({ ok: true, outcome: { status: "succeeded", assistantText: "unused" } })
     };
     const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => ["app-server", "--stdio"] });
     expect(await adapter.models({ owner: "u1" })).toMatchObject({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }] });
     expect(ensureCalls).toEqual([{ adapterId: "codex-appserver", owner: "u1", connectionId: "c1" }]);
     expect(patches.at(-1)?.transport?.state).toBe("ready");
+    // 真实目录写回连接记录，受理回合时连接视图才能校验同一个显式强度。
+    expect(catalogs.at(-1)).toMatchObject({ connectionId: "c1", models: [{ id: "gpt-6.1-sol", reasoning: { state: "supported", efforts: [{ id: "high" }] } }] });
 
     const { service: missingService } = fakeService([record()]);
     const { manager: missingManager, ensureCalls: missingEnsure } = fakeProcessManager({ executable: null });
