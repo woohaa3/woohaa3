@@ -29,6 +29,12 @@ export type NodeExecutionReferencesProps = {
   onPickerOpenChange: (open: boolean) => void;
   /** 提交 edge 连接；返回是否被接受（拒绝时保留 picker）。 */
   onConnect: (sourceNodeId: string) => boolean;
+  /**
+   * 往模型声明的空槽位填素材；返回是否被接受。
+   *
+   * 与 `onConnect` 分开：填槽必须显式写入槽位角色，普通连接走角色推断。
+   */
+  onFillSlot?: (item: ReferenceItem, sourceNodeId: string) => boolean;
   /** 提交 edge 删除（权威命令由宿主完成）。 */
   onDisconnect: (item: ReferenceItem) => void;
 };
@@ -41,10 +47,18 @@ export function NodeExecutionReferences({
   pickerOpen,
   onPickerOpenChange,
   onConnect,
+  onFillSlot,
   onDisconnect
 }: NodeExecutionReferencesProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 正在填充的槽位。
+   *
+   * 打开 picker 的入口有两个（add tile 与空槽位 tile），选中候选后要走的命令不同。
+   * 把这个意图存在本地：它只影响"这次选择落到哪"，不参与权威状态。
+   */
+  const [fillTarget, setFillTarget] = useState<ReferenceItem | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -64,10 +78,18 @@ export function NodeExecutionReferences({
 
   // add tile 点击时打开 picker（Popover trigger 负责锚点与定位）。
   const openPicker = () => {
+    setFillTarget(null);
+    onPickerOpenChange(true);
+  };
+
+  // 空槽位点击：打开同一份 picker，但选中后要落进这个槽位。
+  const openPickerForSlot = (item: ReferenceItem) => {
+    setFillTarget(item);
     onPickerOpenChange(true);
   };
 
   const closePicker = () => {
+    setFillTarget(null);
     onPickerOpenChange(false);
     addButtonRef.current?.focus();
   };
@@ -87,6 +109,7 @@ export function NodeExecutionReferences({
           items={items}
           onRemove={onDisconnect}
           onAdd={openPicker}
+          {...(onFillSlot ? { onFillSlot: openPickerForSlot } : {})}
           disabled={disabled}
           presentation={presentation}
           pickerOpen={pickerOpen}
@@ -102,8 +125,11 @@ export function NodeExecutionReferences({
               onPick={(nodeId) => {
                 // 只有命令被接受才关闭 picker；拒绝时保留并展示稳定原因（design D4）。
                 if (disabled) return;
-                const accepted = onConnect(nodeId);
-                if (accepted) { setError(null); onPickerOpenChange(false); }
+                const accepted =
+                  fillTarget !== null && onFillSlot !== undefined
+                    ? onFillSlot(fillTarget, nodeId)
+                    : onConnect(nodeId);
+                if (accepted) { setError(null); closePicker(); }
                 else setError("参考已变化或暂不可修改，请重新选择");
               }}
               onClose={closePicker}

@@ -10,8 +10,10 @@
  * - 直接文字 source 明确 mention 的 ready 媒体作为 carried inputs 追加（一层，按 asset ID 去重）。
  */
 import {
+  alignRoleToDeclaredSlot,
   collectWoohaa3CanvasMentions,
   decodeWorldCamera,
+  declaredReferenceSlots,
   worldCameraShotContext,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
@@ -88,12 +90,20 @@ function resolveEffectivePrompt(canvas: ServerCanvas, nodeId: string, authored: 
 export function collectDirectMentionCandidates(
   canvas: ServerCanvas,
   nodeId: string,
-  cameraInputs?: ReadonlyMap<string, CanvasTaskInput>
+  cameraInputs?: ReadonlyMap<string, CanvasTaskInput>,
+  bindings?: readonly CanvasTaskInputBinding[]
 ): MentionCandidate[] {
   const candidates: MentionCandidate[] = [];
   let ordinal = 0;
   const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
-  for (const mapping of collectDirectMappings(canvas, nodeId)) {
+  const mappings = collectDirectMappings(canvas, nodeId);
+  // 与参考区投影同一规则：被模型接受的显式角色才算占位，推断角色不占。
+  const claimedRoles = new Set(
+    mappings
+      .map((mapping) => mapping.role)
+      .filter((role) => bindings?.some((entry) => entry.roles.includes(role)) ?? true)
+  );
+  for (const mapping of mappings) {
     let kind = mentionTypeForMapping(mapping);
     let role = mapping.role;
     const isCamera = canvas.document.nodes.some(node => node.id === mapping.sourceNodeId && node.type === "world-camera");
@@ -110,13 +120,27 @@ export function collectDirectMentionCandidates(
     const slotId = mapping.slotId;
     if (typeof slotId !== "string" || slotId === "") continue;
     const cameraInput = cameraInputs?.get(mapping.sourceNodeId);
+    /**
+     * token 标签与角色都要跟着模型声明的槽位走：连线推断出 `reference_image`，
+     * 而工作流只声明 `control_image` 时，prompt 里出现「图片 1」同样对不上位置。
+     * 只对齐媒体槽位：文字槽不参与参考区，也不该被归到控制图之类的位置上。
+     */
+    const alignKind = kind === "input_image" ? "image" : kind === "input_video" ? "video" : null;
+    if (alignKind !== null && !isCamera) {
+      role = alignRoleToDeclaredSlot({ inferredRole: role, mediaKind: alignKind, bindings, claimedRoles });
+      claimedRoles.add(role);
+    }
     candidates.push({
       slotId,
       type: kind,
       role,
       sourceNodeId: mapping.sourceNodeId,
-      label: mentionLabel(kind, ordinal, mapping),
-      input: cameraInput ? { ...cameraInput, role } : resolved?.input ?? null,
+      label: mentionLabel(kind, ordinal, mapping, role, bindings),
+      input: cameraInput
+        ? { ...cameraInput, role }
+        : resolved?.input
+          ? { ...resolved.input, role }
+          : null,
       ...(kind === "input_text" && resolved?.text !== undefined ? { text: resolved.text } : {})
     });
   }
@@ -139,7 +163,7 @@ export function resolveMentionsAndCompile(options: {
   cameraInputs?: ReadonlyMap<string, CanvasTaskInput>;
 }): MentionResolution {
   const { canvas, nodeId, bindings } = options;
-  const candidates = collectDirectMentionCandidates(canvas, nodeId, options.cameraInputs);
+  const candidates = collectDirectMentionCandidates(canvas, nodeId, options.cameraInputs, bindings);
 
   // 有效 prompt 与 token 的归属节点（上游文字回退时 token 属于文字节点自身 mappings）。
   const effective = resolveEffectivePrompt(canvas, nodeId, options.authored);
@@ -165,7 +189,7 @@ export function resolveMentionsAndCompile(options: {
 
   // 2) 直接媒体输入（保持顺序）+ carried inputs（一层文字 source）。
   const direct = options.directInputs;
-  const carried = collectCarriedInputs(canvas, nodeId);
+  const carried = collectCarriedInputs(canvas, nodeId, bindings);
   const merged = mergeInputs(direct, carried);
 
   // 3) binding 校验（合并后统一校验，不静默丢弃）。
@@ -190,7 +214,8 @@ export function resolveMentionsAndCompile(options: {
  */
 export function collectCarriedInputs(
   canvas: ServerCanvas,
-  nodeId: string
+  nodeId: string,
+  bindings?: readonly CanvasTaskInputBinding[]
 ): CanvasTaskInput[] {
   const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
   const textSources = canvas.document.edges
@@ -202,7 +227,7 @@ export function collectCarriedInputs(
   for (const textNodeId of textSources) {
     const authored = textNodeContent(nodeData[textNodeId], canvas.assets);
     if (authored === "") continue;
-    const textCandidates = collectDirectMentionCandidates(canvas, textNodeId);
+    const textCandidates = collectDirectMentionCandidates(canvas, textNodeId, undefined, bindings);
     const bySlot = new Map(textCandidates.map((candidate) => [candidate.slotId, candidate]));
     // 按 token 出现顺序追加。
     for (const mention of collectWoohaa3CanvasMentions(authored)) {
@@ -333,8 +358,20 @@ function resolveMappingAsset(canvas: ServerCanvas, mapping: CanvasNodeInputMappi
   };
 }
 
-function mentionLabel(type: Woohaa3CanvasMentionType, ordinal: number, mapping: CanvasNodeInputMapping): string {
+function mentionLabel(
+  type: Woohaa3CanvasMentionType,
+  ordinal: number,
+  mapping: CanvasNodeInputMapping,
+  effectiveRole: string,
+  bindings: readonly CanvasTaskInputBinding[] | undefined
+): string {
   if (typeof mapping.label === "string" && mapping.label !== "") return mapping.label;
+  // 角色被对齐到模型声明的槽位时用槽位名：token 里写「图片 1」会让 prompt 里指的
+  // 位置和实际落点对不上。
+  if (bindings !== undefined && effectiveRole !== mapping.role) {
+    const slot = declaredReferenceSlots(bindings).find((entry) => entry.role === effectiveRole);
+    if (slot) return slot.label;
+  }
   const noun = type === "input_image" ? "图片" : type === "input_video" ? "视频" : type === "input_audio" ? "音频" : "文本";
   return `${noun} ${ordinal}`;
 }

@@ -5,14 +5,15 @@ import { canvasToolName, loopbackHttp, toolResultDetail, toolResultFailed } from
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportModelInput, LocalAgentTransportResult } from "./transport.js";
 
 /**
- * 分页读取一个会话的全部 assistant 消息（change: 2026-10-22-remove-agent-execution-limits，
- * 任务 4.1）。
+ * 分页读取一个会话的消息（change: 2026-10-22-remove-agent-execution-limits，任务 4.1）。
  *
  * 原生快照不再取「最近 100 条」：分页只是单次传输量，完整历史可继续读取。页内按时间升序返回，
- * 调用方据此保持真实顺序。
+ * 调用方据此保持真实顺序。不加 `type=assistant` 过滤，以便同时读取 OpenCode 在模型路由/认证失败
+ * 等尚未产生 assistant 消息时写入的 `type: "idle"` 终态错误记录。
  */
 type OpenCodeMessage = {
   id: string;
+  type?: string;
   error?: { type?: string; message?: string };
   content?: Array<{
     type?: string;
@@ -61,7 +62,7 @@ function openCodeModelDirectory(entries: readonly OpenCodeModelEntry[]): AgentMo
   return [...catalog.values()];
 }
 
-async function readAllAssistantMessages(
+async function readAllSessionMessages(
   http: { json: (path: string) => Promise<{ data?: OpenCodeMessage[] }> },
   sessionPath: string
 ): Promise<OpenCodeMessage[]> {
@@ -69,12 +70,28 @@ async function readAllAssistantMessages(
   const collected: OpenCodeMessage[] = [];
   const seen = new Set<string>();
   for (let offset = 0; ; offset += pageSize) {
-    const response = await http.json(`${sessionPath}/message?limit=${pageSize}&offset=${offset}&order=asc&type=assistant`);
+    const response = await http.json(`${sessionPath}/message?limit=${pageSize}&offset=${offset}&order=asc`);
     const page = response.data ?? [];
     for (const message of page) if (message.id && !seen.has(message.id)) { seen.add(message.id); collected.push(message); }
     if (page.length < pageSize) break;
   }
   return collected;
+}
+
+function mapOpenCodeMessageFailure(error: { type?: string; message?: string }): { code: string; message: string } {
+  const type = typeof error.type === "string" && error.type.trim() !== "" ? error.type.trim() : "agent-failed";
+  const rawMessage = typeof error.message === "string" && error.message.trim() !== "" ? error.message.trim() : "";
+  const unavailableMatch = /^Model unavailable:\s*(.+)$/i.exec(rawMessage);
+  if (type === "provider.no-route" || unavailableMatch) {
+    const modelId = unavailableMatch?.[1]?.trim();
+    return {
+      code: "model-access-denied",
+      message: modelId
+        ? `OpenCode 模型不可用或已从配置中移除：${modelId}（请重新选择模型）`
+        : rawMessage || "OpenCode 模型不可用或已从配置中移除（请重新选择模型）"
+    };
+  }
+  return { code: type, message: rawMessage || "OpenCode 推理失败" };
 }
 
 export type HttpTransportOptions = {
@@ -166,7 +183,7 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
       // change: 2026-10-22-remove-agent-execution-limits，任务 4.1：原「最近 100 条 assistant
       // 消息」的整体截断已删除。历史基线按分页完整读取，不把长会话的第 100 条以外记录当成不存在。
       const previousMessages = new Set<string>(input.resumeNativeId
-        ? (await readAllAssistantMessages(http, sessionPath)).map((message: { id: string }) => message.id)
+        ? (await readAllSessionMessages(http, sessionPath)).map((message: { id: string }) => message.id)
         : []);
       await http.json(`${sessionPath}/prompt`, "POST", { text: input.prompt, ...(input.images?.length ? { files: input.images.map((image, index) => ({ uri: `data:${image.contentType};base64,${Buffer.from(image.bytes).toString("base64")}`, name: `frame-${index}` })) } : {}) });
       // Native idle wait + durable message snapshots avoid relying on a lossy global SSE window.
@@ -174,11 +191,12 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
         .then(async response => { await response.body?.cancel(); }, error => { waitError = error; })
         .finally(() => { settled = true; });
       const project = async () => {
-        const messages = { data: await readAllAssistantMessages(http, sessionPath) };
+        const messages = { data: await readAllSessionMessages(http, sessionPath) };
         const texts: string[] = [];
         for (const message of messages.data) {
           if (previousMessages.has(message.id)) continue;
-          if (message.error) failure = { code: message.error.type ?? "agent-failed", message: message.error.message ?? "OpenCode 推理失败" };
+          if (message.error) failure = mapOpenCodeMessageFailure(message.error);
+          if (message.type && message.type !== "assistant") continue;
           for (const [index, part] of (message.content ?? []).entries()) {
             if (part.type === "text") {
               const key = `${message.id}:${index}`;

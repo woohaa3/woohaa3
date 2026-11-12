@@ -43,7 +43,7 @@ export type ExecutionPanelSurfaceProps = {
   runtime?: CanvasRuntimeService;
   /**
    * 锚点下方放不下完整编辑器时，是否平移画布腾出空间。
-   * 导演区这类超大锚点关闭：画布保持不动，面板改为贴可用区域底边。
+   * 导演区与共享世界模型这类超大/无卡片锚点关闭：画布保持不动，面板最多贴可用区域底边停靠。
    */
   revealAnchor?: boolean;
   children: ReactNode;
@@ -92,8 +92,6 @@ function AnchoredDock({ nodeId, runtime, revealAnchor, children }: { nodeId: str
       const nodeRect = { ...node, right: node.left + node.width, bottom: node.top + node.height };
       const areaRect = { ...area, right: area.left + area.width, bottom: area.top + area.height };
       const revealOffset = belowPanelRevealOffset(nodeRect, areaRect, PANEL_COMPOSER_RESERVE_HEIGHT);
-      // 导演区等超大锚点不再为了给编辑器腾空间而平移画布：下方放不下就贴底停靠。
-      const dockToEdge = !revealAnchor && revealOffset > 1;
       // Locate may bring an initially offscreen anchor into view over several frames.
       // Keep reserving room during programmatic movement; a navigation gesture yields
       // control for the rest of this panel's lifetime.
@@ -114,8 +112,16 @@ function AnchoredDock({ nodeId, runtime, revealAnchor, children }: { nodeId: str
         revealTargetY = null;
       }
       // 节点面板统一优先落在锚点下方：3D 模型/镜头不再翻到模型上方遮挡对象，2D 节点也不随
-      // 视口在「上/下/贴边」之间跳。下方确实放不下时依次退到侧面、再退到视口边缘。
-      const next = layoutNodePanel(node, area, { width: dock.offsetWidth, height: dock.offsetHeight }, lastPlacement.current, dockToEdge ? "dock" : "below");
+      // 视口在「上/下/贴边」之间跳。下方确实放不下时退到贴底停靠（允许覆盖锚点局部），
+      // 不再为了「放得下」改贴左右两侧或平移画布。
+      // 高度取自然高度（`scrollHeight` 不受当前 `max-height` 收缩影响），否则贴底/squeeze
+      // 后的 offsetHeight 会让下一帧误判「放得下」而在两种落点之间来回跳。
+      const panelSize = { width: dock.offsetWidth, height: Math.max(dock.offsetHeight, dock.scrollHeight) };
+      // 关闭避让只表示「不为了腾空间平移画布」：面板本身仍放得下时照常贴在锚点下方，
+      // 放不下（或锚点下缘已越过底边）才吸附到可用区域底边。
+      const belowPanel = layoutNodePanel(node, area, panelSize, lastPlacement.current, "below");
+      const fitsBelow = belowPanel !== null && belowPanel.maxHeight >= panelSize.height;
+      const next = layoutNodePanel(node, area, panelSize, lastPlacement.current, !revealAnchor && !fitsBelow ? "dock" : "below");
       if (!next) {
         dock.style.visibility = "hidden";
         dock.removeAttribute("data-placement");

@@ -17,6 +17,7 @@ import { appPublicUrl } from "../../../services/app-base-path.js";
 import type { BackendSettingsStore } from "../backend-settings-store.js";
 import {
   PLUGIN_LAYER_LABELS,
+  activationFailed,
   diagnosticsOf,
   inactiveStateOf,
   indexPlugins,
@@ -152,7 +153,9 @@ export function PluginConfigContent({
             : "运行中"
         : inactive
           ? "未运行"
-          : "运行中";
+          : activationFailed(group)
+            ? "启动失败"
+            : "运行中";
   const statusTone = siteRow
     ? siteRow.busy || siteRow.actualState === "degraded" || siteRow.actualState === "failed"
       ? "warning"
@@ -167,7 +170,9 @@ export function PluginConfigContent({
           : "success"
       : inactive
         ? "muted"
-        : "success";
+        : activationFailed(group)
+          ? "warning"
+          : "success";
   const enabledModels = models.filter((model) => model.enabled).length;
   const manageable = isManageable(index, group);
   const directory = group.directory;
@@ -377,6 +382,8 @@ export function PluginConfigContent({
       ) : current.id === "models" ? (
         <>
           <PluginPageHeader page={current} />
+          {/* 「刷新」按钮给的是「不支持的凭据路由」这类表象；插件为什么没起来只在这里说。 */}
+          {diagnosticsHint}
           {modelRefresh ? (
             <section className="settings-workbench__section">
               <h3 className="settings-page__group-title">可用模型</h3>

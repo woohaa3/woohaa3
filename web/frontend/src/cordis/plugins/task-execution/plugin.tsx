@@ -240,7 +240,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
           if (!resolveSelectionContext(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), route.nodeId)) return null;
           return (
-            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
+            // 共享世界模型是没有卡片的大锚点：下方放不下时不要让画布平移找空间，
+            // 面板贴可用区域底边停靠即可（与导演区同一规则）。
+            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime} revealAnchor={false}>
               <ModelParameterPanel
                 canvasId={canvasId}
                 nodeId={route.nodeId}

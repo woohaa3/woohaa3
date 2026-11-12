@@ -52,7 +52,14 @@ export type RemoteGenerationLogInput = {
 
 export type RemoteGenerationBridgeOptions = {
   /** 宿主是否提供生成扩展点；缺失时安静跳过（旧宿主/纯本地宿主）。 */
-  registerGeneration?: (provider: GenerationProvider) => void;
+  /**
+   * 注册 Provider；**返回撤销函数**。
+   *
+   * 必须把返回值交回去：扩展热重载会重建 bridge，旧的 Provider 若还挂在
+   * `ctx.generation` 上，新实例再注册同名 Provider 就会撞 "已注册" 并让宿主整个起不来。
+   * 返回 void 的旧签名掩盖了这条责任。
+   */
+  registerGeneration?: (provider: GenerationProvider) => (() => void) | void;
   /** 当前会话（唯一来源；不触发自动登录）。 */
   session: () => Promise<Pick<RemoteSession, "serverUrl" | "token"> | null>;
   fetchImpl: typeof globalThis.fetch;
@@ -75,6 +82,14 @@ export type RemoteGenerationBridge = {
   /** 重新探测并替换目录；并发调用共享同一次往返。 */
   refresh(): Promise<RemoteGenerationStatus>;
   status(): RemoteGenerationStatus;
+  /**
+   * 撤销 Provider 注册。
+   *
+   * 扩展热重载/停用时会重建 bridge：不撤旧注册的话，新实例注册同名 Provider 会撞
+   * "生成 Provider 已注册" 并让宿主重启失败——症状是"改一下服务端地址，应用就起不来"。
+   * 幂等：没注册过或已撤销时是空操作。
+   */
+  dispose(): void;
 };
 
 const DORMANT_PROTOCOL_REASON = "服务端托管生成协议版本不匹配";
@@ -92,6 +107,8 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
   /** providerModelId → 受理版本（SubmitTask.admission）。 */
   let admission = new Map<string, GenerationAdmission>();
   let registration: GenerationProvider | null = null;
+  /** 注册时宿主给的撤销函数；没有（旧宿主返回 void）时为 null。 */
+  let unregister: (() => void) | null = null;
   let lastError: string | null = null;
   let inflight: Promise<RemoteGenerationStatus> | null = null;
 
@@ -320,8 +337,10 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
         prepareInput: (input) => prepareRemoteGenerationInput(input, { modelFor, admissionFor: (id) => admission.get(id) })
       };
       // 只注册一次：registration 非空即已注册，之后的刷新只原地改写。
-      options.registerGeneration(provider);
+      const disposeRegistration = options.registerGeneration(provider);
       registration = provider;
+      // 宿主返回撤销函数时留着它，扩展卸载时把 Provider 摘掉。旧宿主不返回则无操作。
+      unregister = typeof disposeRegistration === "function" ? disposeRegistration : null;
       options.log({ event: "remote-generation-registered", level: "info", modelCount: 0, catalogRevision: 0 });
       return true;
     },
@@ -342,6 +361,23 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
       return started;
     },
 
-    status: currentStatus
+    status: currentStatus,
+
+    dispose() {
+      // 幂等：没注册过、或已经撤过，都是空操作。
+      if (unregister === null && registration === null) return;
+      try {
+        unregister?.();
+      } catch (error) {
+        // 撤销失败不能把卸载流程也带崩：宿主可能已经先把注册表关了。
+        options.log({
+          event: "remote-generation-unregister-failed",
+          level: "warn",
+          reason: error instanceof Error ? error.message : "撤销生成 Provider 失败"
+        });
+      }
+      unregister = null;
+      registration = null;
+    }
   };
 }

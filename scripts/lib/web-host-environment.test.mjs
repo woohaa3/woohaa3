@@ -26,11 +26,22 @@ test('web host injects the same npm registry runtime manager inputs as the deskt
   assert.equal(env.WOOHAA3_RUNTIME_REGISTRY, 'https://npm.example.test/');
   assert.equal(env.WOOHAA3_REPO_ROOT, resourceRoot);
   assert.equal(env.VITE_SECRET, undefined);
-  for (const dir of ['stores', 'media', 'config', 'secrets', 'extension-data', 'extensions', 'logs', 'cache']) assert.ok(fs.existsSync(path.join(dataDir, dir)), dir);
+  for (const dir of ['stores', 'media', 'config', 'secrets', 'extension-data', 'extensions', 'extensions-managed', 'logs', 'cache']) assert.ok(fs.existsSync(path.join(dataDir, dir)), dir);
   // 主密钥首次生成后固定，重启沿用同一凭据根。
   const master = fs.readFileSync(path.join(dataDir, 'secrets/master.key'), 'utf8');
   const again = buildWebHostEnvironment({ resourceRoot, dataDir, host: '127.0.0.1', port: 4173, basePath: '/', baseEnv: {} });
   assert.equal(again.WOOHAA3_PLUGIN_SECRET_MASTER_KEY, master);
+});
+
+test('受管安装根落在数据目录，不随资源根替换被删', (t) => {
+  const { resourceRoot } = fixture(t);
+  // 部署形态：数据目录与资源根分家（`--data-dir /data/woohaa-data`），切换 release 时资源根整个删掉。
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'woohaa-web-host-data-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const env = buildWebHostEnvironment({ resourceRoot, dataDir, host: '127.0.0.1', port: 4173, basePath: '/', baseEnv: {} });
+  assert.equal(env.WOOHAA3_EXTENSION_MANAGED_DIR, path.join(dataDir, 'extensions-managed'));
+  assert.ok(!env.WOOHAA3_EXTENSION_MANAGED_DIR.startsWith(resourceRoot + path.sep));
+  assert.ok(fs.existsSync(env.WOOHAA3_EXTENSION_MANAGED_DIR));
 });
 
 test('web host can explicitly disable runtime installation', (t) => {

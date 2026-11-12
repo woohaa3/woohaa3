@@ -6,6 +6,7 @@
  */
 import type { ReactNode } from "react";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
+import { desktopAppVersion } from "../../../extension-api/host-platform.js";
 import { appBuildVersion } from "../../services/build-info.js";
 
 function settingValue(snapshot: SettingsSnapshot | null, key: string): string {
@@ -31,7 +32,9 @@ function Row({ label, children, testId }: { label: string; children: ReactNode; 
 }
 
 export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }) {
-  const version = appBuildVersion();
+  const desktopVersion = desktopAppVersion();
+  const buildVersion = appBuildVersion();
+  const version = desktopVersion ?? buildVersion;
   const storagePrimary = settingValue(snapshot, "storage.primary");
   const exposerPrimary = settingValue(snapshot, "exposer.primary");
   const storageProviders = snapshot?.extensionPoints?.storage;
@@ -45,7 +48,12 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
     <ul className="settings-page__list" data-testid="settings-about">
       <Row label="应用版本" testId="settings-about-version">
         {version !== "" ? <code>{version}</code> : <span>未注入（开发构建或非发布产物）</span>}
-        <span className="settings-page__hint"> 发布构建自报 `desktop/tauri.conf.json` 的版本。</span>
+        {desktopVersion !== null && buildVersion !== "" && buildVersion !== desktopVersion ? (
+          <span className="settings-page__hint"> · 构建 {buildVersion}</span>
+        ) : null}
+        <span className="settings-page__hint">
+          {desktopVersion !== null ? " Tauri 桌面包版本。" : " 发布构建自报 `desktop/tauri.conf.json` 的版本。"}
+        </span>
       </Row>
       <Row label="运行环境" testId="settings-about-platform">
         <code>{platform}</code>

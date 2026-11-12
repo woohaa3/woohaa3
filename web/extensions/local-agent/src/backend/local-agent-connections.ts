@@ -402,9 +402,11 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       });
 
       if (!result.ok) {
-        // MCP 工具面不可用是 tools 证据，不是传输故障；避免把整个连接误标为不可连接。
+        // MCP 工具面不可用是 tools 证据，模型不可用/无权限是 modelAccess 证据，都不是传输故障；避免把整个连接误标为不可连接。
         if (result.code === "tools-unavailable") {
           await options.service.setStatus({ owner: input.owner, connectionId, patch: { tools: { state: "unavailable", checkedAt: new Date().toISOString(), reason: result.message } } });
+        } else if (result.code === "model-access-denied") {
+          await options.service.setStatus({ owner: input.owner, connectionId, patch: { modelAccess: { state: "unavailable", checkedAt: new Date().toISOString(), reason: result.message } } });
         } else if (result.code !== "cancelled") {
           await options.service.setStatus({ owner: input.owner, connectionId, patch: { transport: { state: "unavailable", checkedAt: new Date().toISOString(), reason: result.message } } });
         }

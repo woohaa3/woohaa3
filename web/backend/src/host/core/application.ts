@@ -272,7 +272,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         hostCalls: bridge,
         // token 与 host key 持久化：新宿主重启后旧 daemon 仍能用原 token 回调。
         bridge: { socketPath: bridgeSocket, token: bridge.token, workspaceKey: executorWorkspace },
-        mcpEndpoint: mcpEndpoint.url
+        get mcpEndpoint() { return mcpEndpoint.url; }
       };
     }
     const servicesFor = createServicesFactory(ctx, env, foundationStorage);

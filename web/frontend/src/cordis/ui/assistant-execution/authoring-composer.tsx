@@ -232,8 +232,11 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
   const emptyDirectory =
     !connections.length && !selection?.loading && !selection?.error;
   useEffect(() => {
-    if (locked || noConnection) setOpenSelector(null);
-  }, [locked, noConnection]);
+    if (locked || !service) setOpenSelector(null);
+  }, [locked, service]);
+  useEffect(() => {
+    if (noConnection) setOpenSelector((current) => (current === "model" ? null : current));
+  }, [noConnection]);
 
   const connectionModels = selectedConnection?.models;
   // 连接自带的模型列表优先；空列表表示该来源尚未内联目录，继续读 adapter 的真实目录
@@ -472,7 +475,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
             }
             if (c.connectionId !== connectionId || selection?.selectedSourceId !== c.adapterId || (selectedConnection?.binding && (selectedConnection.binding.configRevision !== c.configRevision || selectedConnection.binding.credentialEpoch !== c.credentialEpoch))) selection?.onSelectConnection(c.connectionId);
           }} /> : null}
-        model={<ReasoningParameters value={effort} options={supportedEfforts} open={openSelector === "model"} onOpenChange={open => setOpenSelector(current => open ? "model" : current === "model" ? null : current)} disabled={locked}
+        model={<ReasoningParameters value={effort} options={supportedEfforts} open={openSelector === "model"} onOpenChange={open => setOpenSelector(current => open ? "model" : current === "model" ? null : current)} disabled={locked || noConnection}
           onChange={value => { setEfforts(current => ({ ...current, [effortKey]: value as AgentReasoningEffort | "" })); remember(model, value as AgentReasoningEffort | ""); }} />}
         detail={
           <>
