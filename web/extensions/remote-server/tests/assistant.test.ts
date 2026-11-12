@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
+import { isAgentAdapterCapabilities, isAgentConnectionView } from "@woohaa3/contracts";
 import {
   createRemoteAssistant,
   REMOTE_ASSISTANT_ADAPTER_ID,
@@ -168,6 +169,34 @@ describe("远端助手能力声明", () => {
     expect(capabilities.discussion).toBe(true);
     expect(capabilities.tools).toBe(false);
     expect(capabilities.targets).toEqual([]);
+  });
+
+  // 锁定的真实缺陷：曾把 `textDelivery` 的 `{ imageInput: false, maxImages: 0 }`
+  // 直接复用到 `candidateGeneration`，而契约要求后者的 `maxImages >= 1`。整份能力
+  // 因此被判非法，助手目录报「Agent adapter 能力声明非法」，远端模型全部消失。
+  //
+  // 只断言单个字段抓不到这类问题——必须跑契约自己的校验函数。
+  it("能力声明通过契约校验", () => {
+    const surface = createFakeSurface({ models: ["a"] });
+    const assistant = createRemoteAssistant({ fetchImpl: surface.fetchImpl, session: sessionFor() });
+    const capabilities = assistant.adapter.capabilities();
+    expect(isAgentAdapterCapabilities(capabilities)).toBe(true);
+  });
+
+  it("不声明图片候选生成能力", () => {
+    const surface = createFakeSurface({ models: ["a"] });
+    const assistant = createRemoteAssistant({ fetchImpl: surface.fetchImpl, session: sessionFor() });
+    // 远端助手只做文本：`candidateGeneration` 是「生成图片候选」的能力，声明它会让
+    // 媒体候选链路以为这里能出图。
+    expect(assistant.adapter.capabilities().candidateGeneration).toBeUndefined();
+  });
+
+  it("连接视图通过契约校验", async () => {
+    const surface = createFakeSurface({ models: ["a"] });
+    const assistant = createRemoteAssistant({ fetchImpl: surface.fetchImpl, session: sessionFor() });
+    const [connection] = await assistant.provider.listConnections({ owner: "local:test" });
+    // 连接视图也有自己的形状校验；两边任一不合法都会让目录整体不可用。
+    expect(isAgentConnectionView(connection)).toBe(true);
   });
 });
 

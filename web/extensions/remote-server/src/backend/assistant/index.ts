@@ -151,7 +151,13 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
       // 同一个 adapter 同时承载文本交付与讨论：文本节点走无工具一次性候选，
       // 讨论走带增量的普通回合，两者共用连接与模型目录。
       textDelivery: TEXT_DELIVERY,
-      candidateGeneration: TEXT_DELIVERY,
+      // 刻意**不**声明 `candidateGeneration`：那是「生成图片候选」的能力
+      //（片场/生物等媒体候选走它），远端助手只做文本。
+      //
+      // 也不能用 TEXT_DELIVERY 的值去填它：契约要求 `maxImages >= 1`
+      // （见 isAgentAdapterCapabilities），拿 `maxImages: 0` 去声明会让整份能力
+      // 被判非法，表现为助手目录里「Agent adapter 能力声明非法」，所有远端模型
+      // 从下拉里消失。这曾真实发生过。
       discussion: true,
       targets: [],
       tools: false,
