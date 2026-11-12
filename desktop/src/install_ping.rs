@@ -3,10 +3,7 @@
 //! 桌面启动路径专用：
 //! - 安装 ID 是随机 UUID v4（不掺任何硬件指纹），落在 `diagnostics::data_directory()` 下的
 //!   `install-id`；缺失、空内容或非法内容重建，临时文件 + rename 原子写入；
-//! - **受「外部上报遥测」总开关约束**（`telemetry.export.enabled`，缺省 false）：关闭时一条
-//!   都不发，**也不生成安装 ID**；桌面壳无法直连宿主设置服务（`client/web/**` 不在本任务范围），
-//!   因此只读宿主写出的配置文件（`WOOHAA3_CONFIG_FILE`，缺省 `data_directory()/config/woohaa.config.yml`），
-//!   读取失败/文件不存在/键缺失一律按关闭处理——宁可少发，不能误发；
+//! - **默认上报，不读任何开关**：桌面壳每次启动都发这一条，不查宿主设置、不读配置文件；
 //! - 每次启动最多一条 GET，端点可配置（`WOOHAA3_INSTALL_PING_URL`），缺省
 //!   `https://woohaa3.zombee.tech/woohaa/ping`；参数 `install_id`、`v`、`os`，全部百分号编码；
 //! - 约 3s 超时、失败静默、不重试、不阻塞启动：异步派发，启动路径不等网络、也不等磁盘；
@@ -30,25 +27,12 @@ pub const DEFAULT_INSTALL_PING_URL: &str = "https://woohaa3.zombee.tech/woohaa/p
 pub const INSTALL_PING_TIMEOUT_MS: u64 = 3000;
 /// 安装 ID 文件名；与 `diagnostics::data_directory()` 同目录。
 pub const INSTALL_ID_FILE: &str = "install-id";
-/// 配置文件上限；它只是开关所在的小文件，挡住异常大的输入。
-const MAX_CONFIG_BYTES: u64 = 64 * 1024;
-
-/// 启动 ping 的开关来源：桌面壳只读宿主配置文件里的这一项。
-pub type EnabledSource = Box<dyn Fn() -> bool + Send + Sync>;
 
 static STARTED: OnceLock<()> = OnceLock::new();
 
 /// 安装 ID 文件路径；`base` 是 `diagnostics::data_directory()`。
 pub fn install_id_file(base: &Path) -> PathBuf {
     base.join(INSTALL_ID_FILE)
-}
-
-/// 宿主配置文件路径：显式环境变量优先，否则 `data_directory()/config/woohaa.config.yml`。
-///
-/// 这与 `scripts/lib/desktop-host-data.mjs` 的 `desktopEnvironment` 给出的
-/// `WOOHAA3_CONFIG_FILE` 一致（`<数据目录>/config/woohaa.config.yml`）。
-pub fn config_file(env_file: Option<PathBuf>, base: &Path) -> PathBuf {
-    env_file.unwrap_or_else(|| base.join("config").join("woohaa.config.yml"))
 }
 
 /// UUID v4 形态（不区分大小写，允许首尾空白）。
@@ -223,105 +207,6 @@ pub fn version() -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-/// 完整开关判定：读取失败/文件缺失/键缺失/类型不对都是关闭。
-///
-/// 桌面壳只读这一个键，不解释宿主的其它设置；写入由宿主自己完成（设置页 / `/api/settings`）。
-pub fn export_enabled(config: &Path) -> bool {
-    read_export_enabled(config).unwrap_or(false)
-}
-
-fn read_export_enabled(config: &Path) -> Option<bool> {
-    let metadata = fs::metadata(config).ok()?;
-    if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
-        return None;
-    }
-    // 宿主写配置是「临时文件 + rename」，这里读到的总是完整旧值或完整新值，不必再取锁。
-    parse_export_enabled(&fs::read(config).ok()?)
-}
-
-/// 解析 `telemetry.export.enabled`。
-///
-/// 配置是 YAML。桌面侧只需要一个布尔，所以按真实嵌套路径定位键，再只认两种明确写法：
-/// `true` / `false`（大小写不敏感，允许行尾注释）。带引号的字符串、`yes`/`on` 这类
-/// 由 YAML 1.1 解析器解释成布尔的写法都**不算打开**——宁可少发。
-pub fn parse_export_enabled(bytes: &[u8]) -> Option<bool> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    let mut stack: Vec<(usize, String)> = Vec::new();
-    for raw in text.lines() {
-        let line = strip_comment(raw);
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-        if trimmed == "-" || trimmed.starts_with("- ") {
-            // 序列项：本键不可能落在序列里，清掉更深的层。
-            stack.retain(|(depth, _)| *depth < indent);
-            continue;
-        }
-        let Some((key, value)) = split_key(trimmed) else {
-            continue;
-        };
-        stack.retain(|(depth, _)| *depth < indent);
-        let mut full = stack
-            .iter()
-            .map(|(_, key)| key.as_str())
-            .collect::<Vec<_>>()
-            .join(".");
-        if !full.is_empty() {
-            full.push('.');
-        }
-        full.push_str(&key);
-        if full == "telemetry.export.enabled" {
-            return parse_bool(value);
-        }
-        if value.is_empty() {
-            stack.push((indent, key));
-        }
-    }
-    None
-}
-
-/// 去掉行首空白后的 `# …` 注释；引号内的 `#` 保留。
-fn strip_comment(line: &str) -> &str {
-    let mut quote: Option<char> = None;
-    let mut previous = ' ';
-    for (index, ch) in line.char_indices() {
-        match (quote, ch) {
-            (Some(q), c) if c == q => quote = None,
-            (None, '\'' | '"') => quote = Some(ch),
-            (None, '#') if previous.is_whitespace() => return &line[..index],
-            _ => {}
-        }
-        previous = ch;
-    }
-    line
-}
-
-/// `key: value`（也接受 `"key": value` 与 `key:`）。值里的 `:` 不参与切分。
-fn split_key(line: &str) -> Option<(String, &str)> {
-    let (key, rest) = if let Some(stripped) = line.strip_prefix('"') {
-        let end = stripped.find('"')?;
-        (&stripped[..end], stripped[end + 1..].trim_start())
-    } else if let Some(stripped) = line.strip_prefix('\'') {
-        let end = stripped.find('\'')?;
-        (&stripped[..end], stripped[end + 1..].trim_start())
-    } else {
-        let at = line.find(':')?;
-        (line[..at].trim(), &line[at..])
-    };
-    let value = rest.strip_prefix(':')?;
-    Some((key.to_owned(), value.trim()))
-}
-
-fn parse_bool(value: &str) -> Option<bool> {
-    match value.to_ascii_lowercase().as_str() {
-        "true" => Some(true),
-        "false" => Some(false),
-        _ => None,
-    }
-}
-
 /// 本次启动的安装 ID：读取或生成一次。
 ///
 /// 不跨调用缓存：一次启动只发一条 ping，重复读取的成本可以忽略；缓存反而会在数据目录被
@@ -334,15 +219,7 @@ pub fn install_id(base: &Path) -> String {
 ///
 /// 任何失败（超时、网络、非 2xx）只记一个错误码事件，不抛错、不重试；调用方在独立线程里调用，
 /// 不占启动路径。
-pub fn send_install_ping(
-    enabled: bool,
-    endpoint: &str,
-    base: &Path,
-    mut log: impl FnMut(&str, &str),
-) -> bool {
-    if !enabled {
-        return false;
-    }
+pub fn send_install_ping(endpoint: &str, base: &Path, mut log: impl FnMut(&str, &str)) -> bool {
     let id = install_id(base);
     let target = match build_install_ping_url(endpoint, &id, &version(), &os_name()) {
         Ok(target) => target,
@@ -426,26 +303,13 @@ fn rustls_provider() -> Result<(), ()> {
     })
 }
 
-/// 开关来源：只读宿主配置文件里的 `telemetry.export.enabled`。
-///
-/// 桌面壳不直连宿主设置服务（那在 `client/web/**`），只读宿主自己维护的同一份配置文件；
-/// 键缺失、文件缺失、解析失败都按关闭处理。每次调用现读，不做缓存（设置项是热重载）。
-pub fn config_enabled(config: &Path) -> bool {
-    export_enabled(config)
-}
-
-/// 把某个配置文件固化成 [`EnabledSource`]（每次调用现读，不缓存）。
-pub fn leak_enabled(config: PathBuf) -> EnabledSource {
-    Box::new(move || config_enabled(&config))
-}
-
 /// 派发一次启动 ping：每个进程最多一次；启动路径不等网络。
 ///
-/// 开关判定与安装 ID 读取都在后台线程完成（本地小文件 I/O，读不到就按关闭处理），即使磁盘很慢
-/// 也不会拖住窗口出现。`enabled` 为真时才读取/生成安装 ID，所以关闭开关不会在本地留下安装痕迹。
+/// 安装 ID 读取与请求都在后台线程完成（本地小文件 I/O），即使磁盘很慢也不会拖住窗口出现。
+/// 不读任何开关：只要能确定数据目录，每次启动都发这一条。
 ///
 /// 返回是否真的派发了后台线程（`false` 表示本次进程已经派发过或没有数据目录，调用方通常忽略）。
-pub fn dispatch(enabled: EnabledSource, endpoint: String) -> bool {
+pub fn dispatch(endpoint: String) -> bool {
     if STARTED.set(()).is_err() {
         return false;
     }
@@ -453,10 +317,7 @@ pub fn dispatch(enabled: EnabledSource, endpoint: String) -> bool {
         return false;
     };
     std::thread::spawn(move || {
-        if !enabled() {
-            return;
-        }
-        send_install_ping(true, &endpoint, &base, log_ping);
+        send_install_ping(&endpoint, &base, log_ping);
     });
     true
 }
@@ -589,48 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn export_switch_defaults_to_off() {
-        let base = fixture();
-        assert!(!export_enabled(&config_file(None, &base)));
-        let config = config_file(None, &base);
-        fs::create_dir_all(config.parent().unwrap()).unwrap();
-        write(&config, "telemetry:\n  local:\n    enabled: true\n");
-        assert!(!export_enabled(&config), "缺键按关闭");
-        fs::remove_dir_all(base).unwrap();
-    }
-
-    #[test]
-    fn export_switch_reads_the_nested_boolean() {
-        assert_eq!(
-            parse_export_enabled(b"telemetry:\n  export:\n    enabled: true\n"),
-            Some(true)
-        );
-        assert_eq!(
-            parse_export_enabled(b"telemetry:\n  export:\n    enabled: false\n"),
-            Some(false)
-        );
-        assert_eq!(
-            parse_export_enabled(b"# comment\ntelemetry:\n  export:\n    enabled: TRUE  # on\n"),
-            Some(true)
-        );
-        assert_eq!(
-            parse_export_enabled(b"telemetry:\n  export:\n    enabled: \"true\"\n"),
-            None,
-            "字符串不算打开"
-        );
-        assert_eq!(
-            parse_export_enabled(b"storage:\n  telemetry:\n    export:\n      enabled: true\n"),
-            None,
-            "只认顶层 telemetry"
-        );
-        assert_eq!(
-            parse_export_enabled(b"telemetry:\n  export:\n    enabled: true\n    other: 1\n"),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn enabled_switch_sends_a_single_encoded_request() {
+    fn sends_a_single_encoded_request() {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}/woohaa/ping?site=woo", listener.local_addr().unwrap());
@@ -651,18 +471,14 @@ mod tests {
             request
         });
         let base = fixture();
-        let config = config_file(None, &base);
-        fs::create_dir_all(config.parent().unwrap()).unwrap();
-        write(&config, "telemetry:\n  export:\n    enabled: true\n");
         let mut events = Vec::new();
         let sent = send_install_ping(
-            export_enabled(&config),
             &endpoint,
             &base,
             |event, detail| events.push(format!("{event}:{detail}")),
         );
         let request = server.join().unwrap();
-        assert!(sent, "开关打开时必须真的发出请求");
+        assert!(sent, "每次启动都必须真的发出请求");
         let expected = format!(
             "GET /woohaa/ping?site=woo&install_id={}&v={}&os={} HTTP/1.1",
             install_id(&base),
@@ -687,7 +503,6 @@ mod tests {
         let mut events = Vec::new();
         let started = std::time::Instant::now();
         let sent = send_install_ping(
-            true,
             &format!("http://127.0.0.1:{port}/ping"),
             &base,
             |event, detail| events.push(format!("{event}:{detail}")),
@@ -695,19 +510,6 @@ mod tests {
         assert!(sent);
         assert!(started.elapsed() < Duration::from_millis(INSTALL_PING_TIMEOUT_MS + 2000));
         assert!(events.iter().any(|event| event.starts_with("install-ping-failed:")));
-        fs::remove_dir_all(base).unwrap();
-    }
-
-    #[test]
-    fn disabled_switch_sends_nothing() {
-        let base = fixture();
-        assert!(!send_install_ping(
-            export_enabled(&config_file(None, &base)),
-            DEFAULT_INSTALL_PING_URL,
-            &base,
-            |_, _| panic!("开关关闭时不应记录请求"),
-        ));
-        assert!(!install_id_file(&base).exists(), "开关关闭时不生成安装 ID");
         fs::remove_dir_all(base).unwrap();
     }
 
