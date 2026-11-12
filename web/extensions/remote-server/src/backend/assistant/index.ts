@@ -293,6 +293,8 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
     channel: RemoteToolChannel
   ): Promise<AgentAdapterRunOutcome> => {
     try {
+      // 工具声明必须显式收集并传出：模型收不到 `tools` 就会把调用写成文本。
+      const toolList = await channel.listTools();
       const result = await runToolLoop(messages, {
         turn: async ({ messages: outbound, tools }) => {
           const reply = await chatRemote(options, { model, messages: outbound, tools, signal: input.signal });
@@ -301,6 +303,7 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
             : { ok: false, code: reply.code, message: reply.message };
         },
         execute: channel.callTool,
+        tools: toolList,
         signal: input.signal,
         onToolCall: (call) => {
           input.emit({ type: "tool-started", tool: call.name, callId: call.id });

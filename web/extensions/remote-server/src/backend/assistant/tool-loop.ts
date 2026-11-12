@@ -36,8 +36,17 @@ export type ToolLoopExecutor = {
 
 export type ToolLoopOptions = {
   turn: ToolLoopTurn;
-  /** 执行工具；缺省表示本轮没有工具通道（`tools` 为空即可）。 */
+  /** 执行工具；缺省表示本轮没有工具通道。 */
   execute?: ToolLoopExecutor;
+  /**
+   * 本轮开放的工具声明。
+   *
+   * **必须显式传入**，不能从 `execute` 上"顺手"取：`execute` 是 `channel.callTool`
+   * 这样的裸函数，把 `listTools` 挂在函数对象上既不可发现也不可靠。曾经这么写过，
+   * 后果是模型收不到任何 `tools` 声明，于是把工具调用写成文本（`<｜DSML｜invoke>`），
+   * 表现为「助手返回了工具调用文本，本轮没有修改作品」。
+   */
+  tools?: readonly RemoteToolDefinition[];
   /**
    * 最大往返轮数。缺省 8：足够覆盖"查一次 → 写一次 → 复核"的常见链路，又不至于让
    * 一个打转的模型把配额烧穿。
@@ -69,7 +78,7 @@ export async function runToolLoop(
 ): Promise<ToolLoopResult> {
   const maxRounds = options.maxRounds ?? 8;
   const messages: Message[] = [...initialMessages];
-  const tools = options.execute === undefined ? [] : await collectTools(options);
+  const tools = options.execute === undefined ? [] : (options.tools ?? []);
   let text = "";
 
   for (let round = 1; round <= maxRounds; round += 1) {
@@ -136,10 +145,4 @@ async function executeCall(
     const message = error instanceof Error ? error.message : "工具执行失败";
     return { ok: false, content: `[tool-failed] ${message}` };
   }
-}
-
-/** 收集本轮可用工具（由 executor 提供 list 钩子时才有）。 */
-async function collectTools(options: ToolLoopOptions): Promise<readonly RemoteToolDefinition[]> {
-  const lister = (options.execute as unknown as { listTools?: () => Promise<RemoteToolDefinition[]> }).listTools;
-  return lister === undefined ? [] : await lister();
 }
