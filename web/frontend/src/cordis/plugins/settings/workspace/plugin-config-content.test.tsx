@@ -191,6 +191,19 @@ function typeInto(input: HTMLInputElement, value: string) {
 }
 
 describe("插件配置弹窗", () => {
+  it("浏览器插件失败时概览可展开原因，开关旁不误报运行中", async () => {
+    const { container } = await renderDialog({
+      pluginId: "sdk-agent",
+      plugins: [sdkAgentPlugin()],
+      view: { rows: [{ id: "sdk-agent", name: "SDK Agent 来源", description: "SDK", required: false, configurable: true, status: "failed", failureReason: "模块加载失败：HTTP 404" }] }
+    });
+    const details = query<HTMLDetailsElement>(container, "plugin-failure-sdk-agent")!;
+    await act(async () => details.querySelector("summary")!.click());
+    expect(details.open).toBe(true);
+    expect(details.textContent).toContain("模块加载失败：HTTP 404");
+    expect(container.querySelector(".plugin-state__label")?.textContent).toBe("激活失败");
+  });
+
   it("详情头展示扩展声明的版本，没有版本时不渲染空标记", async () => {
     const plugin: SettingPluginView = {
       id: "fal-provider", label: "fal.ai", description: "", layer: "extension",

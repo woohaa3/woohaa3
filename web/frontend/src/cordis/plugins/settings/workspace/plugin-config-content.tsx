@@ -26,7 +26,7 @@ import {
   versionLabel,
   type PluginSettingsGroup
 } from "../plugin-groups.js";
-import { PluginStateControl } from "../plugin-state-control.js";
+import { PluginFailureDetails, PluginStateControl } from "../plugin-state-control.js";
 import { PluginIconMark } from "../plugin-icons.js";
 import { SettingRow } from "../setting-row.js";
 import { ArkEndpointSection, isArkEndpointEntry } from "../ark-endpoints.js";
@@ -154,7 +154,7 @@ export function PluginConfigContent({
           ? "未运行"
           : "运行中";
   const statusTone = siteRow
-    ? siteRow.busy || siteRow.actualState === "degraded"
+    ? siteRow.busy || siteRow.actualState === "degraded" || siteRow.actualState === "failed"
       ? "warning"
       : isSiteRowRunning(siteRow.actualState)
         ? "success"
@@ -180,7 +180,9 @@ export function PluginConfigContent({
       该插件当前未运行（{inactive}）：这里保存的配置要等启用后才生效。
     </p>
   ) : null;
-  const diagnosticsHint = diagnostics.length > 0 ? (
+  const diagnosticsHint = siteRow?.actualState === "failed" || browserRow?.status === "failed" ? (
+    <PluginFailureDetails key={group.id} index={index} group={group} />
+  ) : diagnostics.length > 0 ? (
     <p className="settings-page__hint" role="status">{diagnostics.join("；")}</p>
   ) : null;
 
