@@ -48,10 +48,17 @@ export type ToolLoopOptions = {
    */
   tools?: readonly RemoteToolDefinition[];
   /**
-   * 最大往返轮数。缺省 8：足够覆盖"查一次 → 写一次 → 复核"的常见链路，又不至于让
-   * 一个打转的模型把配额烧穿。
+   * 连续多少轮没有任何工具成功就停（缺省 6）。
+   *
+   * **唯一**的熔断条件，也是唯一该由本层设的限制：它回答的是"这条链路是不是坏了"
+   * （工具全被拒、grant 失效、MCP 不可达），而不是"任务该做多少步"。
+   *
+   * 不设总轮数上限：那属于 agent 自己的决策。sdk-agent / local-agent 把整个循环交给
+   * dsh、Codex、OpenCode 这些 runtime，provider 层从不规定它们跑几步；远端模型没有
+   * runtime，循环在这里，但语义应当一致——**跑到模型自己不再要求调工具为止**。
+   * 曾经设过 8 轮，结果一次「建宫殿」（9 轮）被掐在第五段，用户看到"部分完成"。
    */
-  maxRounds?: number;
+  maxIdleRounds?: number;
   /** 每次工具调用前后的可观察钩子（用于 emit 进度与记录回执）。 */
   onToolCall?: (call: { id: string; name: string; arguments: string }) => void;
   onToolResult?: (call: { id: string; name: string; ok: boolean; content: string }) => void;
@@ -76,12 +83,15 @@ export async function runToolLoop(
   initialMessages: readonly Message[],
   options: ToolLoopOptions
 ): Promise<ToolLoopResult> {
-  const maxRounds = options.maxRounds ?? 8;
+  const maxIdleRounds = options.maxIdleRounds ?? 6;
   const messages: Message[] = [...initialMessages];
   const tools = options.execute === undefined ? [] : (options.tools ?? []);
   let text = "";
+  /** 连续多少轮没有任何工具成功。 */
+  let idleRounds = 0;
 
-  for (let round = 1; round <= maxRounds; round += 1) {
+  // 没有总轮数上限：终点是模型自己不再要求调工具（`toolCalls` 为空）。
+  for (let round = 1; ; round += 1) {
     if (options.signal?.aborted) {
       return { ok: false, code: "cancelled", message: "已停止本次生成", text, rounds: round - 1 };
     }
@@ -102,23 +112,29 @@ export async function runToolLoop(
     // tool 结果与调用配对，会整轮拒绝。
     messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
 
+    let anySucceeded = false;
     for (const call of turn.toolCalls) {
       options.onToolCall?.({ id: call.id, name: call.function.name, arguments: call.function.arguments });
       const outcome = await executeCall(options, call);
+      if (outcome.ok) anySucceeded = true;
       options.onToolResult?.({ id: call.id, name: call.function.name, ok: outcome.ok, content: outcome.content });
       // tool 消息必须带 toolCallId：缺了它上游无法配对，表现为"工具结果被忽略"。
       messages.push({ role: "tool", toolCallId: call.id, content: outcome.content });
     }
-  }
 
-  // 打满上限：如实说"没能在限定轮数内收敛"，而不是把最后一次的工具请求当成答案。
-  return {
-    ok: false,
-    code: "tool-loop-exceeded",
-    message: `助手在 ${maxRounds} 轮内没有给出最终答复`,
-    text,
-    rounds: maxRounds,
-  };
+    // 只在"完全没有进展"时熔断：长任务每轮都在写入，不该被任何计数掐断；
+    // 连续几轮工具全失败说明这条链路坏了，继续跑只是烧配额。
+    idleRounds = anySucceeded ? 0 : idleRounds + 1;
+    if (idleRounds >= maxIdleRounds) {
+      return {
+        ok: false,
+        code: "tool-loop-stalled",
+        message: `助手连续 ${maxIdleRounds} 轮没有成功执行任何工具，已停止`,
+        text,
+        rounds: round,
+      };
+    }
+  }
 }
 
 /** 执行一次工具调用；参数解析失败也要回给模型，而不是让整轮崩掉。 */

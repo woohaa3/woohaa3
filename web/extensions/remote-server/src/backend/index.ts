@@ -776,6 +776,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
         session: () => sessionSource.current(),
         // 模型启停策略：与设置页「生成的模型」同源。宿主不提供时按全部可用处理。
         policy: () => ctx.generation?.policySnapshot?.(),
+        log: (event) => log({ event: String(event.event ?? "remote-assistant"), ...event }),
         // 画布工具通道：只有宿主装配了工具授权面时才有，否则这条连接只做文本与讨论。
         ...(ctx.services?.authoring?.tools
           ? {

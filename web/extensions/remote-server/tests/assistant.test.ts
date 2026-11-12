@@ -351,9 +351,13 @@ describe("远端助手执行分支", () => {
       })
     );
     const messages = surface.calls[0]!.messages;
-    expect(messages[0]).toEqual({ role: "system", content: "你是助手" });
-    expect(messages[1]).toEqual({ role: "assistant", content: "上一轮回复" });
-    // 候选路径末尾会追加一条 schema 指令（见 messagesOf），所以本轮 prompt 不是最后一条。
+    // 系统消息一律前置（OpenAI 协议要求，也是模型忽略工具协议的直接原因），
+    // 所以断言按 role 分组而不是按下标。
+    const systems = messages.filter((message) => message.role === "system");
+    expect(systems[0]).toEqual({ role: "system", content: "你是助手" });
+    expect(messages.some((message) => message.role === "assistant" && message.content === "上一轮回复")).toBe(true);
+    // 候选路径末尾的 schema 指令也是 system，必须同样前置。
+    expect(systems.some((message) => message.content.includes("JSON Schema"))).toBe(true);
     const userMessages = messages.filter((message) => message.role === "user");
     expect(userMessages.at(-1)).toEqual({ role: "user", content: "你好" });
   });

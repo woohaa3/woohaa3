@@ -50,6 +50,8 @@ const TEXT_DELIVERY = { imageInput: false, maxImages: 0 } as const;
 export type RemoteAssistantOptions = RemoteChatTransportOptions & {
   /** 目录读取结果的缓存时点（毫秒）。目录不必每次点击都拉。 */
   now?: () => number;
+  /** 诊断出口（不含凭据）。 */
+  log?: (event: Record<string, unknown>) => void;
   /**
    * 本机模型启停策略（宿主 `ctx.generation.policySnapshot`）。
    *
@@ -455,30 +457,49 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
  * `intent.prompt` 只作为旧回合的兜底（`prepared` 缺失时）。
  */
 function messagesOf(input: AgentAdapterRunInput): RemoteChatMessage[] {
-  const messages: RemoteChatMessage[] = [];
-  // 历史按 role 原样重放：压平成单条 user 会让 system 指令与先前的助手回复失去身份。
+  const history: RemoteChatMessage[] = [];
   for (const message of input.history) {
     const role = message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user";
-    messages.push({ role, content: message.content });
+    history.push({ role, content: message.content });
   }
+
   const prepared = input.prepared;
+  const turnMessages: RemoteChatMessage[] = [];
   if (prepared && prepared.messages.length > 0) {
     for (const message of prepared.messages) {
-      messages.push({
+      turnMessages.push({
         role: message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user",
         content: message.content
       });
     }
   } else {
-    messages.push({ role: "user", content: input.intent.prompt });
+    turnMessages.push({ role: "user", content: input.intent.prompt });
   }
+
+  /**
+   * 系统消息必须**全部在最前面**。
+   *
+   * 这是 OpenAI 协议的实际约束（很多实现只读第一条 system）。把 system 夹在对话中间会
+   * 让模型忽略其中的工具协议，退化成用文本表达工具调用——实测表现为
+   * `<｜DSML｜invoke name="...">` 这样的一段 XML，而 `tool_calls` 恒为空。
+   *
+   * 因此这里分三步拼：所有 system（历史里的 + 本轮的 + 输出契约）在前，然后是非 system
+   * 的历史，最后是本轮输入。
+   */
+  const systems: RemoteChatMessage[] = [];
+  const dialogue: RemoteChatMessage[] = [];
+  for (const message of [...history, ...turnMessages]) {
+    if (message.role === "system") systems.push(message);
+    else dialogue.push(message);
+  }
+
   // 角色的输出契约要求 JSON 时，把 schema 明确告诉模型。
   //
   // 为什么不假设"角色 instructions 里已经写了"：instructions 是给人读的领域描述，
   // 不保证含机器可校验的 schema。缺了这一段，模型会回一段看起来合理但解析不了的散文。
   const output = prepared?.output;
   if (input.candidate && output?.kind === "candidate") {
-    messages.push({
+    systems.push({
       role: "system",
       content: [
         "只输出一个 JSON 对象，不要代码围栏、不要解释。",
@@ -488,7 +509,7 @@ function messagesOf(input: AgentAdapterRunInput): RemoteChatMessage[] {
     });
   } else if (input.candidate) {
     // 没有角色声明的 schema 时退回候选的通用契约（`{ text }`）。
-    messages.push({
+    systems.push({
       role: "system",
       content: [
         "只输出一个 JSON 对象，不要代码围栏、不要解释。",
@@ -497,7 +518,7 @@ function messagesOf(input: AgentAdapterRunInput): RemoteChatMessage[] {
       ].join("\n")
     });
   }
-  return messages;
+  return [...systems, ...dialogue];
 }
 
 /** 参考图是否被请求过（用于给出可读的拒绝原因）。 */

@@ -67,14 +67,22 @@ export async function createCanvasToolChannel(
   return {
     async listTools(): Promise<readonly RemoteToolDefinition[]> {
       try {
-        return await client.listTools();
+        const tools = await client.listTools();
+        // 空列表是**异常信号**：grant 里明明有工具，MCP 却一个都给不出，说明端点或
+        // 鉴权有问题。不静默降级——模型收不到声明会把调用写成文本，用户看到的是一段
+        // 莫名其妙的 XML，而不是"工具通道不可用"。
+        if (tools.length === 0) {
+          throw new Error("MCP 没有返回任何可用工具");
+        }
+        return tools;
       } catch (error) {
-        // 列出失败不该让整轮崩掉：没有工具声明时模型会正常回答，只是改不了东西。
         options.log?.({
           event: "remote-assistant-tool-discovery-failed",
+          code: "tool-discovery",
           reason: error instanceof Error ? error.message : "unknown",
         });
-        return [];
+        // 让调用方看到一个可归因的失败，而不是"模型不肯动手"。
+        throw error;
       }
     },
 

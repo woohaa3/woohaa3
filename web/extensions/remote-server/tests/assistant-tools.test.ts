@@ -70,24 +70,69 @@ describe("工具往返循环", () => {
     expect(toolMessage!.content).toContain("target-mismatch");
   });
 
-  it("打满轮数上限时如实失败，不把最后一次调用当答案", async () => {
-    const infinite: TurnResult = {
+  // 锁定设计：**不设总轮数上限**，终点是模型自己不再要求调工具。
+  // sdk-agent / local-agent 把循环交给 dsh / Codex / OpenCode，provider 层从不规定跑几步；
+  // 远端模型没有 runtime，循环在这里，但语义必须一致。
+  //
+  // 现场故障：曾设 8 轮，一次「建宫殿」用了 9 轮（读上下文、读 API、建模型、5 段脚本、
+  // 1 次 patch），被掐在第五段，用户看到"部分完成"。
+  it("长任务每轮都在写入时能一直跑到模型自己收尾", async () => {
+    const writing: TurnResult = {
       ok: true,
       text: "",
-      toolCalls: [call("c1", "loop_tool", {})],
+      toolCalls: [call("c1", "append_world_model_script", {})],
       finishReason: "tool_calls",
     };
-    const { turn } = scriptedTurn([infinite, infinite, infinite, infinite]);
+    // 30 轮写入后收尾：远超任何"合理轮数"，循环仍应跑完。
+    const script: TurnResult[] = [...Array(30).fill(writing), { ok: true, text: "宫殿建好了", toolCalls: [], finishReason: "stop" }];
+    const { turn } = scriptedTurn(script);
     const result = await runToolLoop([{ role: "user", content: "x" }], {
       turn,
-      execute: async () => ({ ok: true, content: "ok" }),
-      maxRounds: 3,
+      execute: async () => ({ ok: true, content: '{"ok":true}' }),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.rounds).toBe(31);
+  });
+
+  it("连续无进展才熔断（链路坏了的判断，不是任务长度）", async () => {
+    const failing: TurnResult = {
+      ok: true,
+      text: "",
+      toolCalls: [call("c1", "bad_tool", {})],
+      finishReason: "tool_calls",
+    };
+    const { turn } = scriptedTurn([failing, failing, failing, failing]);
+    const result = await runToolLoop([{ role: "user", content: "x" }], {
+      turn,
+      execute: async () => ({ ok: false, content: "[rejected] 还是不行" }),
+      maxIdleRounds: 3,
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("tool-loop-exceeded");
-      expect(result.message).toContain("3");
-    }
+    if (!result.ok) expect(result.code).toBe("tool-loop-stalled");
+  });
+
+  it("中途有成功就把无进展计数清零，不提前熔断", async () => {
+    const failing: TurnResult = {
+      ok: true,
+      text: "",
+      toolCalls: [call("c1", "t", {})],
+      finishReason: "tool_calls",
+    };
+    // 失败 2 次（idle=2）→ 第 3 次成功（idle 归零）→ 再失败 2 次（idle=2）→ 收尾。
+    // 中途的成功证明链路是通的，不该按累计失败次数熔断。
+    const { turn } = scriptedTurn([failing, failing, failing, failing, failing,
+      { ok: true, text: "完成", toolCalls: [], finishReason: "stop" },
+    ]);
+    let calls = 0;
+    const result = await runToolLoop([{ role: "user", content: "x" }], {
+      turn,
+      execute: async () => {
+        calls += 1;
+        return calls === 3 ? { ok: true, content: "{}" } : { ok: false, content: "[rejected]" };
+      },
+      maxIdleRounds: 3,
+    });
+    expect(result.ok).toBe(true);
   });
 
   it("工具参数不是合法 JSON 时回给模型而不是抛错", async () => {

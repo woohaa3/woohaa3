@@ -34,6 +34,8 @@ export type RemoteChatModel = { id: string; label: string };
 export type RemoteChatTransportOptions = {
   fetchImpl: typeof globalThis.fetch;
   session: () => Promise<Pick<RemoteSession, "serverUrl" | "token"> | null>;
+  /** 诊断出口（不含凭据）。 */
+  log?: (event: Record<string, unknown>) => void;
 };
 
 /** 兼容面把失败折成稳定码，不把远端正文带出去。 */
@@ -177,6 +179,14 @@ export async function chatRemote(
   if (!session) return { ok: false, code: "unauthenticated", message: chatErrorText("unauthenticated") };
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+  // 一行最小诊断：模型收到几个工具声明。
+  //
+  // 只记数量、不记内容（prompt 与 schema 都是用户数据）。这一行值得留：模型收不到
+  // `tools` 时会改用文本表达调用意图，症状是「助手返回了工具调用文本」，而根因在
+  // 这一跳——没有这个计数就只能靠猜。
+  if (input.tools !== undefined && input.tools.length > 0) {
+    options.log?.({ event: "remote-assistant-chat-tools", count: input.tools.length });
+  }
   let response: Response;
   try {
     response = await options.fetchImpl(chatEndpoint(session.serverUrl, "/v1/chat/completions"), {
