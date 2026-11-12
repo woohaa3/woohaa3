@@ -28,14 +28,40 @@ pub struct HostConfig {
     pub height: u32,
 }
 
+/// 默认窗口尺寸（逻辑像素）。
+const DEFAULT_WINDOW_WIDTH: u32 = 1600;
+const DEFAULT_WINDOW_HEIGHT: u32 = 1000;
+/// 默认尺寸超过工作区该比例时，该维度改用 [`WINDOW_FIT_RATIO`]。
+const WINDOW_FIT_THRESHOLD: f64 = 0.8;
+const WINDOW_FIT_RATIO: f64 = 0.9;
+
+/// 按主屏工作区收敛默认窗口尺寸（逻辑像素）。
+///
+/// 默认宽或高超过工作区 80% 时，该维度改用工作区 90%；另一维保持默认值。
+/// 工作区不可用（零/非有限值）时保留默认值。
+fn resolve_default_window_size(work_width: f64, work_height: f64) -> (f64, f64) {
+    let fit = |default: u32, available: f64| {
+        let default = f64::from(default);
+        if available.is_finite() && available > 0.0 && default > available * WINDOW_FIT_THRESHOLD {
+            available * WINDOW_FIT_RATIO
+        } else {
+            default
+        }
+    };
+    (
+        fit(DEFAULT_WINDOW_WIDTH, work_width),
+        fit(DEFAULT_WINDOW_HEIGHT, work_height),
+    )
+}
+
 impl HostConfig {
     /// overlay 形态：透明 WebView + 下层 native。
     pub fn overlay() -> Self {
         Self {
             mode: CompositionMode::Overlay,
             title: "WooHaa3".into(),
-            width: 1600,
-            height: 1000,
+            width: DEFAULT_WINDOW_WIDTH,
+            height: DEFAULT_WINDOW_HEIGHT,
         }
     }
 
@@ -44,8 +70,8 @@ impl HostConfig {
         Self {
             mode: CompositionMode::NativeOnly,
             title: "Woohaa native 画布".into(),
-            width: 1600,
-            height: 1000,
+            width: DEFAULT_WINDOW_WIDTH,
+            height: DEFAULT_WINDOW_HEIGHT,
         }
     }
 }
@@ -215,6 +241,39 @@ mod tests {
         // 物理尺寸 1280x720 不为零，pump 仍可推进。
         assert!(session.pump());
     }
+
+    #[test]
+    fn default_window_size_keeps_defaults_on_large_work_area() {
+        assert_eq!(
+            resolve_default_window_size(2560.0, 1440.0),
+            (1600.0, 1000.0)
+        );
+    }
+
+    #[test]
+    fn default_window_size_keeps_dimensions_at_the_eighty_percent_boundary() {
+        assert_eq!(
+            resolve_default_window_size(2000.0, 1250.0),
+            (1600.0, 1000.0)
+        );
+    }
+
+    #[test]
+    fn default_window_size_switches_each_dimension_over_eighty_percent_to_ninety() {
+        let (width, height) = resolve_default_window_size(1920.0, 1080.0);
+        assert!((width - 1728.0).abs() < f64::EPSILON);
+        assert!((height - 972.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn default_window_size_can_shrink_only_the_height() {
+        assert_eq!(resolve_default_window_size(2560.0, 1080.0), (1600.0, 972.0));
+    }
+
+    #[test]
+    fn default_window_size_falls_back_when_work_area_is_unavailable() {
+        assert_eq!(resolve_default_window_size(0.0, f64::NAN), (1600.0, 1000.0));
+    }
 }
 
 /// 启动 overlay 形态 Tauri 宿主。
@@ -266,6 +325,29 @@ mod platform {
         static SESSION: RefCell<Option<NativeCanvasSession>> = const { RefCell::new(None) };
         /// setup 阶段填充的合成事实（供退出时打印，不进入权威状态）。
         static FACTS: RefCell<Option<CompositionFacts>> = const { RefCell::new(None) };
+    }
+
+    /// 按主屏工作区收敛默认窗口尺寸；拿不到工作区或调用方显式指定尺寸时保持不变。
+    fn apply_default_window_size(app: &tauri::AppHandle, config: &mut HostConfig) {
+        if config.width != super::DEFAULT_WINDOW_WIDTH
+            || config.height != super::DEFAULT_WINDOW_HEIGHT
+        {
+            return;
+        }
+        let Ok(Some(monitor)) = app.primary_monitor() else {
+            return;
+        };
+        let scale = monitor.scale_factor();
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        let area = monitor.work_area().size;
+        let (width, height) = super::resolve_default_window_size(
+            f64::from(area.width) / scale,
+            f64::from(area.height) / scale,
+        );
+        config.width = width.round().max(1.0) as u32;
+        config.height = height.round().max(1.0) as u32;
     }
 
     pub fn run(config: HostConfig) -> Result<(), String> {
@@ -335,6 +417,8 @@ mod platform {
         let setup_config = config.clone();
         let app = builder
             .setup(move |app| {
+                let mut setup_config = setup_config;
+                apply_default_window_size(app.handle(), &mut setup_config);
                 crate::devtools::install(app.handle())?;
                 crate::diagnostic_export::install(app.handle())?;
                 crate::diagnostic_upload::install(app.handle())?;
