@@ -34,8 +34,8 @@ impl HostConfig {
         Self {
             mode: CompositionMode::Overlay,
             title: "WooHaa3".into(),
-            width: 1280,
-            height: 720,
+            width: 1600,
+            height: 1000,
         }
     }
 
@@ -44,8 +44,8 @@ impl HostConfig {
         Self {
             mode: CompositionMode::NativeOnly,
             title: "Woohaa native 画布".into(),
-            width: 1280,
-            height: 720,
+            width: 1600,
+            height: 1000,
         }
     }
 }
