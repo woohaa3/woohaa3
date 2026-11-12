@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-export function buildWebHostEnvironment({ resourceRoot, dataDir, host, port, basePath, runtimeInstall = 'enabled', baseEnv = process.env }) {
+export function buildWebHostEnvironment({ resourceRoot, dataDir, host, port, basePath, runtimeInstall = 'enabled', agentRuntime = null, baseEnv = process.env }) {
   const data = (name) => path.join(dataDir, name);
   for (const dir of ['stores', 'media', 'config', 'secrets', 'extension-data', 'extensions', 'extensions-managed', 'logs', 'cache']) {
     fs.mkdirSync(data(dir), { recursive: true, mode: 0o700 });
@@ -37,6 +37,21 @@ export function buildWebHostEnvironment({ resourceRoot, dataDir, host, port, bas
     WOOHAA3_MODELS_CONFIG_PATH: fs.existsSync(data('config/models.json')) ? data('config/models.json') : path.join(resourceRoot, 'models.json'),
     WOOHAA3_EXTENSION_DIRS: [path.join(resourceRoot, 'extensions'), data('extensions')].join(','),
     WOOHAA3_EXTENSION_WRITABLE_DIRS: data('extensions'),
+    /**
+     * 独立执行器（`woohaa3-executor` daemon）的连接信息。
+     *
+     * 三个变量缺任一，宿主就不装配 `agentRuntime`，于是声明了 `executors` 的扩展
+     * （sdk-agent / local-agent / oauth-agent）拿不到执行器能力——Provider 语言模型
+     * 因此不会投影成助手连接，文本节点与导演台看不到它们。dev 与桌面启动器一直有这条，
+     * web host 形态长期缺失，这里补上。
+     *
+     * 由启动器在 `ensure()` 之后传入；缺失时保持不注入（执行器不可用是合法状态）。
+     */
+    ...(agentRuntime ? {
+      WOOHAA3_AGENT_RUNTIME_SOCKET: agentRuntime.socketPath,
+      WOOHAA3_AGENT_RUNTIME_TOKEN: agentRuntime.token,
+      WOOHAA3_AGENT_WORKSPACE_KEY: agentRuntime.workspaceKey
+    } : {}),
     /**
      * 受管安装根（市场安装落盘处）必须放在**数据目录**，不能留在资源根。
      *

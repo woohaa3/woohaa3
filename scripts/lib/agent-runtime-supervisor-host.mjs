@@ -148,6 +148,14 @@ export function createAgentSupervisorHost({
 	spawnProcess = spawn,
 	stopRuntime = null,
 	readIdentity = readRuntimeIdentity,
+	/**
+	 * 启动 daemon 用的 Node 解释器。缺省 `process.execPath`。
+	 *
+	 * 单文件 SEA 形态里 `process.execPath` 指向 web host 可执行文件本身，用它跑
+	 * `dist/cli.js` 会重新执行内嵌 main（SEA 永远跑自己的入口，命令行参数被忽略），
+	 * 结果是又起一个 web host 而不是执行器。这类形态必须显式给出真实的 node 路径。
+	 */
+	nodeBin = process.execPath,
 	log = () => undefined,
 	watchIntervalMs = SUPERVISOR_WATCH_INTERVAL_MS,
 	startupTimeoutMs = STARTUP_TIMEOUT_MS
@@ -200,7 +208,7 @@ export function createAgentSupervisorHost({
 	/** 制品升级：停掉同 workspace 的旧 daemon 后再起随包版本。 */
 	const stopExistingRuntime = async () => {
 		try {
-			execFileSync(process.execPath, [ensureScript(), "runtime", "stop", "--state", runtimeDir, "--workspace", workspaceKey], {
+			execFileSync(nodeBin, [ensureScript(), "runtime", "stop", "--state", runtimeDir, "--workspace", workspaceKey], {
 				cwd: root,
 				stdio: ["ignore", "pipe", "pipe"],
 				encoding: "utf8",
@@ -281,7 +289,7 @@ export function createAgentSupervisorHost({
 		if (process.platform !== "win32") {
 			try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
 		}
-		const child = spawnProcess(process.execPath, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey], {
+		const child = spawnProcess(nodeBin, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey], {
 			cwd: root, detached: true, stdio: "ignore", windowsHide: true
 		});
 		child.unref();

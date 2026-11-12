@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,8 @@ const { resolveAppPageTitle } = await load('app-html.mjs');
 const { startWebHostServer } = await load('web-host-runtime.mjs');
 const { loadExtensionHost } = await load('extension-host.mjs');
 const { buildWebHostEnvironment } = await load('web-host-environment.mjs');
+const { createAgentSupervisorHost } = await load('agent-runtime-supervisor-host.mjs');
+const { hashKey, agentRuntimeDirectory } = await load('agent-runtime-endpoints.mjs');
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -63,6 +66,31 @@ function resolveDataDir(resourceRoot) {
   return path.resolve(explicit ?? path.join(resourceRoot, 'data'));
 }
 
+/**
+ * 定位执行器运行时入口与 node 解释器。
+ *
+ * 产物里执行器是 `packages/woohaa3-executor-<hash>/dist/cli.js`（内容寻址目录名，
+ * 不能写死）。node 解释器用 `$WOOHAA3_NODE_BIN` → 随资源根的 `node/woohaa-node` →
+ * `process.execPath`。SEA 形态下 `process.execPath` 是 web host 本体，**不能用**，
+ * 所以这类部署必须显式给出 `WOOHAA3_NODE_BIN`（部署脚本会注入）。
+ */
+function resolveExecutorRuntime(resourceRoot) {
+  const packagesDir = path.join(resourceRoot, 'packages');
+  let scriptPath = null;
+  try {
+    const entry = fs.readdirSync(packagesDir).filter((name) => name.startsWith('woohaa3-executor-')).sort()[0];
+    if (entry) {
+      const candidate = path.join(packagesDir, entry, 'dist', 'cli.js');
+      if (fs.existsSync(candidate)) scriptPath = candidate;
+    }
+  } catch {
+    // 没有 packages/ 目录：本产物不带执行器，按「不可用」处理。
+  }
+  const nodeBin = process.env.WOOHAA3_NODE_BIN?.trim()
+    || (fs.existsSync(path.join(resourceRoot, 'node', 'woohaa-node')) ? path.join(resourceRoot, 'node', 'woohaa-node') : process.execPath);
+  return { scriptPath, nodeBin };
+}
+
 async function main() {
   const resourceRoot = resolveResourceRoot();
   const manifestFile = path.join(resourceRoot, 'web-host-manifest.json');
@@ -85,7 +113,38 @@ async function main() {
   const runtimeInstall = arg('runtime-install', process.env.WOOHAA_WEB_HOST_RUNTIME_INSTALL ?? 'npm-registry');
   if (!['npm-registry', 'disabled'].includes(runtimeInstall)) throw new Error(`非法运行期安装策略：${runtimeInstall}（npm-registry|disabled）`);
 
-  const env = buildWebHostEnvironment({ resourceRoot, dataDir, host, port, basePath, runtimeInstall: runtimeInstall === 'disabled' ? 'disabled' : 'enabled' });
+  // 独立执行器：声明 `executors` 的扩展（sdk-agent / local-agent / oauth-agent）靠它执行。
+  // 拿不到就如实缺省——画布与本地文件不受影响，插件激活时按真实原因失败，不伪装成「没有模型」。
+  const executor = resolveExecutorRuntime(resourceRoot);
+  let agentRuntime = null;
+  let supervisor = null;
+  if (executor.scriptPath) {
+    try {
+      const runtimeDir = agentRuntimeDirectory({ root: dataDir });
+      supervisor = createAgentSupervisorHost({
+        root: resourceRoot,
+        runtimeDir,
+        workspaceKey: hashKey(path.resolve(dataDir)),
+        scriptPath: executor.scriptPath,
+        // 制品升级（重新部署换了执行器构建）时停掉旧 daemon 再起新的。
+        expectedRuntimeBuild: createHash('sha256').update(fs.readFileSync(executor.scriptPath)).digest('hex').slice(0, 32),
+        nodeBin: executor.nodeBin,
+        log: (message) => process.stderr.write(`[agent-runtime] ${message}\n`)
+      });
+      agentRuntime = await supervisor.ensure();
+      supervisor.startWatch();
+      process.stderr.write(`[agent-runtime] 执行器就绪 pid=${agentRuntime.pid} reused=${agentRuntime.reused}\n`);
+    } catch (error) {
+      // 执行器不可用不阻断 web host 启动：这是可选能力，缺了只影响需要执行器的插件。
+      supervisor = null;
+      agentRuntime = null;
+      process.stderr.write(`[web-host] 执行器运行时不可用：${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  } else {
+    process.stderr.write('[web-host] 本产物不含执行器运行时（packages/woohaa3-executor-*），需要执行器的扩展将不可用\n');
+  }
+
+  const env = buildWebHostEnvironment({ resourceRoot, dataDir, host, port, basePath, runtimeInstall: runtimeInstall === 'disabled' ? 'disabled' : 'enabled', agentRuntime });
   const pageTitle = resolveAppPageTitle(env);
   // 后端产物是独立 bundle：必须在设置完 env 之后加载，它读的是 process.env。
   Object.assign(process.env, env);
@@ -131,6 +190,9 @@ async function main() {
     if (stopping) return;
     stopping = true;
     process.stderr.write(`[web-host] ${signal}：正在停止\n`);
+    // 只停止探活：执行器 daemon 是 workspace 级独立实例，宿主退出不结束它
+    // （下一宿主启动时复用同一实例；显式 `runtime stop` 才终止）。
+    supervisor?.stopWatch();
     void server.close().finally(() => process.exit(0));
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
