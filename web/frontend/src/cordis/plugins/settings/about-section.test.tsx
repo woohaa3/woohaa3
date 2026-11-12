@@ -39,4 +39,26 @@ describe("设置 · 关于", () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it("Tauri 桌面壳注入版本时，应用版本优先显示桌面包版本号", async () => {
+    const globals = globalThis as unknown as { __WOOHAA_DESKTOP__?: unknown };
+    const prev = globals.__WOOHAA_DESKTOP__;
+    globals.__WOOHAA_DESKTOP__ = { protocol: "woohaa-window-v1", token: "test", platform: "darwin", version: "0.1.22" };
+    try {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => root.render(<AboutSection snapshot={snapshot} />));
+
+      const versionText = container.querySelector('[data-testid="settings-about-version"]')?.textContent ?? "";
+      expect(versionText).toContain("0.1.22");
+      expect(versionText).not.toContain("未注入");
+
+      await act(async () => root.unmount());
+      container.remove();
+    } finally {
+      if (prev === undefined) delete globals.__WOOHAA_DESKTOP__;
+      else globals.__WOOHAA_DESKTOP__ = prev;
+    }
+  });
 });

@@ -366,13 +366,18 @@ mod platform {
         // 允许源取决于最终界面地址：`--ui-url`/环境变量此时已知，打包默认值要等 `setup` 读到
         // bundle 资源才确定，因此使用 RwLock，允许宿主恢复后更新 loopback origin。
         let origin = std::sync::Arc::new(std::sync::RwLock::new(String::from("tauri://localhost")));
+        let desktop_version = serde_json::from_str::<serde_json::Value>(include_str!("../tauri.conf.json"))
+            .ok()
+            .and_then(|value| value["version"].as_str().map(str::to_owned))
+            .filter(|value| !value.is_empty());
         let bootstrap = format!(
             "window.__WOOHAA_NATIVE__ = {{ token: {0}, protocol: 'woohaa-native-v1', viewportAsync: true, platform: {1}, diagnosticsVerbose: {2}, performanceCapture: {3} }};\
-             window.__WOOHAA_DESKTOP__ = {{ token: {0}, protocol: 'woohaa-window-v1', platform: {1} }};",
+             window.__WOOHAA_DESKTOP__ = {{ token: {0}, protocol: 'woohaa-window-v1', platform: {1}, version: {4} }};",
             serde_json::to_string(&token).unwrap(),
             serde_json::to_string(std::env::consts::OS).unwrap(),
             std::env::var("WOOHAA_DIAGNOSTICS_VERBOSE").as_deref() == Ok("1"),
             crate::performance_capture::enabled(),
+            serde_json::to_string(&desktop_version).unwrap(),
         );
         let bootstrap = format!("{}\n{}", bootstrap, include_str!("webview-diagnostics.js"));
         let bootstrap = format!("{}\n{}", bootstrap, include_str!("webview-performance.js"));

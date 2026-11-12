@@ -8,7 +8,7 @@
  * 放在 leaf API 里而不是 `desktop/window-controls.ts`，是为了让扩展只依赖一个纯函数判断宿主，
  * 不把窗口控制（fetch 协议）带进扩展运行时闭包。
  */
-export type DesktopBootstrap = { protocol: "woohaa-window-v1"; token: string };
+export type DesktopBootstrap = { protocol: "woohaa-window-v1"; token: string; platform?: string; version?: string | null };
 
 const DESKTOP_PROTOCOL = "woohaa-window-v1";
 
@@ -16,6 +16,14 @@ const DESKTOP_PROTOCOL = "woohaa-window-v1";
 export function desktopBootstrap(target: typeof globalThis): DesktopBootstrap | undefined {
   const bootstrap = (target as typeof globalThis & { __WOOHAA_DESKTOP__?: DesktopBootstrap }).__WOOHAA_DESKTOP__;
   return bootstrap?.protocol === DESKTOP_PROTOCOL && bootstrap.token ? bootstrap : undefined;
+}
+
+/** 读取 Tauri 桌面壳自报的包版本（来自 `desktop/tauri.conf.json`）；非桌面壳或未注入时返回 `null`。 */
+export function desktopAppVersion(target: typeof globalThis = globalThis): string | null {
+  const version = desktopBootstrap(target)?.version;
+  if (typeof version !== "string") return null;
+  const trimmed = version.trim();
+  return trimmed !== "" ? trimmed : null;
 }
 
 /**
