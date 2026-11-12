@@ -311,7 +311,14 @@ export async function prepareWebHost({
 
   // 5) 扩展：逐扩展自包含目录
   const siteDefaults = buildProfile.resolved.siteExtensionDefaults;
-  const scan = scanExtensions({ repoRoot: clientRoot, env: {} });
+  // 尊重 `WOOHAA3_EXTENSION_DIRS`：父仓 `scripts/deploy-web-host.mjs` 会在装配前注入全部扫描根
+  // （含父仓私有 `extensions/`），内建扩展必须与发布形态一致地进入产物。
+  //
+  // 这里曾经写死 `env: {}`，于是只扫 client 自己的两个根：`extensions/litellm-provider` 这类
+  // 父仓私有扩展在 web host 上**不存在内建副本**，只能从市场安装——而市场版本落后于宿主时
+  // （删过 ctx 能力），装上去就是一个启动不了的插件。公开 client 不能反向读父仓配置，
+  // 所以根仍由父仓显式注入，这里只负责不要吞掉它。
+  const scan = scanExtensions({ repoRoot: clientRoot, env: process.env });
   // 扫描根可能是三类，处理方式不同：
   // - 源码根（`web/extensions`、`extensions`）：workspace 成员，用 `pnpm deploy --prod` 装自包含目录；
   // - 运行时受管根（`.woohaa3/extensions`，市场/本地安装）：目录本身**就是**已构建的版本化产物，
