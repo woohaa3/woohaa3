@@ -399,7 +399,11 @@ mod platform {
                         .min_inner_size(800.0, 500.0)
                         .visible(!managed)
                         .decorations(false)
-                        .transparent(true);
+                        .transparent(true)
+                        // 关闭 Tauri 的原生拖放处理：启用时 WebView2（Windows）会禁用 HTML5 文件拖放，
+                        // macOS/Linux 的自定义 handler 也会吞掉 drop 并只发 Tauri 事件。前端 `input.drop`
+                        // 走标准 DOM 事件，桌面壳没有 Tauri 拖放监听者，因此统一交回 WebView。
+                        .disable_drag_drop_handler();
                     // macOS ignores this for WKWebView and colors only NSWindow.
                     // Other platforms would also make the WebView opaque.
                     #[cfg(target_os = "macos")]
