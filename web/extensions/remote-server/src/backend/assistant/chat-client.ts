@@ -17,7 +17,14 @@ const REQUEST_TIMEOUT_MS = 120_000;
 
 /** 一次会话式完成的结果。 */
 export type RemoteChatResult =
-  | { ok: true; text: string }
+  | {
+      ok: true;
+      text: string;
+      /** 模型要求调用的工具；非空时 `text` 通常为空。 */
+      toolCalls: RemoteToolCall[];
+      /** 结束原因（stop / length / tool_calls …）。 */
+      finishReason: string;
+    }
   | { ok: false; code: string; message: string };
 
 /** 目录里的一个文本模型。 */
@@ -123,17 +130,48 @@ export async function listRemoteChatModels(
 }
 
 /** 一条对话消息。 */
-export type RemoteChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type RemoteChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  /** tool 消息可为空串以外必有值；assistant 带 tool_calls 时 content 允许为空串。 */
+  content: string;
+  /** assistant 要求调用的工具（OpenAI `tool_calls`）。 */
+  toolCalls?: RemoteToolCall[];
+  /** tool 消息对应的调用 id（OpenAI `tool_call_id`）。 */
+  toolCallId?: string;
+};
+
+/** 一次工具调用（与 OpenAI 同形）。 */
+export type RemoteToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+/** 给模型看的工具声明。 */
+export type RemoteToolDefinition = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
 
 /**
  * 执行一次非流式会话式完成。
  *
  * `signal` 由助手的取消路径提供：远端请求必须能被真正中止，否则用户点了停止却还在
  * 消耗配额。
+ *
+ * `tools` 非空时带上工具声明，返回里可能出现 `toolCalls`（模型要求调工具，此时正文
+ * 通常为空）。调用方据此进入工具执行回合。
  */
 export async function chatRemote(
   options: RemoteChatTransportOptions,
-  input: { model: string; messages: readonly RemoteChatMessage[]; signal?: AbortSignal }
+  input: {
+    model: string;
+    messages: readonly RemoteChatMessage[];
+    signal?: AbortSignal;
+    tools?: readonly RemoteToolDefinition[];
+    toolChoice?: "auto" | "none" | "required";
+  }
 ): Promise<RemoteChatResult> {
   const session = await options.session();
   if (!session) return { ok: false, code: "unauthenticated", message: chatErrorText("unauthenticated") };
@@ -148,7 +186,20 @@ export async function chatRemote(
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ model: input.model, messages: input.messages, stream: false }),
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages.map(serializeMessage),
+        stream: false,
+        ...(input.tools !== undefined && input.tools.length > 0
+          ? {
+              tools: input.tools.map((tool) => ({
+                type: "function",
+                function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+              })),
+              ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
+            }
+          : {}),
+      }),
       signal,
     });
   } catch (error) {
@@ -162,13 +213,61 @@ export async function chatRemote(
     return failure(response.status, code);
   }
   const payload = (await response.json().catch(() => null)) as {
-    choices?: Array<{ message?: { content?: unknown } }>;
+    choices?: Array<{
+      finish_reason?: unknown;
+      message?: { content?: unknown; tool_calls?: unknown };
+    }>;
   } | null;
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
+  const choice = payload?.choices?.[0];
+  const toolCalls = parseToolCalls(choice?.message?.tool_calls);
+  // 带 tool_calls 时正文通常是 null：这时不算错误，产出就是"要调哪些工具"。
+  const rawContent = choice?.message?.content;
+  const content = typeof rawContent === "string" ? rawContent : "";
+  if (content === "" && toolCalls.length === 0) {
     return { ok: false, code: "invalid", message: chatErrorText("invalid") };
   }
-  return { ok: true, text: content };
+  return {
+    ok: true,
+    text: content,
+    toolCalls,
+    finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : "",
+  };
+}
+
+/** 把领域消息序列化成 OpenAI 形状（含 tool_calls / tool_call_id）。 */
+function serializeMessage(message: RemoteChatMessage): Record<string, unknown> {
+  const serialized: Record<string, unknown> = { role: message.role, content: message.content };
+  if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
+    serialized.tool_calls = message.toolCalls;
+    // 带工具调用时正文必须显式为 null：上游据此知道"这一条只含调用"。
+    if (message.content === "") serialized.content = null;
+  }
+  if (message.toolCallId !== undefined) serialized.tool_call_id = message.toolCallId;
+  return serialized;
+}
+
+/** 解析响应里的 tool_calls；形状不符的条目丢弃而不是让整次调用失败。 */
+function parseToolCalls(raw: unknown): RemoteToolCall[] {
+  if (!Array.isArray(raw)) return [];
+  const calls: RemoteToolCall[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const call = entry as { id?: unknown; type?: unknown; function?: { name?: unknown; arguments?: unknown } };
+    if (typeof call.id !== "string" || typeof call.function?.name !== "string") continue;
+    calls.push({
+      id: call.id,
+      type: "function",
+      function: {
+        name: call.function.name,
+        // arguments 是 JSON 字符串；上游有时给对象，这里统一成字符串。
+        arguments:
+          typeof call.function.arguments === "string"
+            ? call.function.arguments
+            : JSON.stringify(call.function.arguments ?? {}),
+      },
+    });
+  }
+  return calls;
 }
 
 /**

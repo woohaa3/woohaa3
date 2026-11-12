@@ -91,6 +91,7 @@ import {
 import { readRemoteServerDeployment, type RemoteServerDeployment } from "../deployment.js";
 import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
 import { createRemoteAssistant } from "./assistant/index.js";
+import { createCanvasToolChannel } from "./assistant/canvas-tools.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
 import { createOAuthLogin } from "./oauth-login.js";
 import { createRemoteTelemetryExport } from "./telemetry-export.js";
@@ -774,7 +775,19 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
         fetchImpl,
         session: () => sessionSource.current(),
         // 模型启停策略：与设置页「生成的模型」同源。宿主不提供时按全部可用处理。
-        policy: () => ctx.generation?.policySnapshot?.()
+        policy: () => ctx.generation?.policySnapshot?.(),
+        // 画布工具通道：只有宿主装配了工具授权面时才有，否则这条连接只做文本与讨论。
+        ...(ctx.services?.authoring?.tools
+          ? {
+              toolChannel: (input) =>
+                createCanvasToolChannel(input, {
+                  tools: ctx.services!.authoring!.tools,
+                  endpoint: canvasMcpEndpoint(ctx.deployment?.basePath ?? ""),
+                  fetchImpl,
+                  log: (event) => log({ event: String(event.event ?? "remote-assistant-tool"), ...event })
+                })
+            }
+          : {})
       });
       if (ctx.capabilities) {
         // 与 canvasUpstream 同一注册面：返回注销函数，交给 Cordis 托管。
@@ -2528,6 +2541,17 @@ function toWsBase(serverUrl: string): string {
  * 为什么不记完整地址：部署路径可能带环境名，query 可能带一次性参数——两者都不该进日志。
  * 同源挂载（`/remote`）保留路径本身：它不含 origin，无法折成 host，而路径是排查必需的。
  */
+/**
+ * 画布 MCP 端点的本机地址。
+ *
+ * 与 `sdk-agent` 用同一套约定（同源 `/mcp/model-canvas`）：端点只接受回环来源，
+ * grant 不落浏览器。部署挂在子路径时前缀要带上，否则请求打到宿主的根上。
+ */
+function canvasMcpEndpoint(basePath: string): string {
+  const prefix = basePath === "" || basePath === "/" ? "" : basePath.replace(/\/+$/, "");
+  return `http://127.0.0.1:${process.env.WOOHAA3_BACKEND_PORT ?? process.env.PORT ?? 5180}${prefix}/mcp/model-canvas`;
+}
+
 function serverHostOf(serverUrl: string): string {
   if (serverUrl.startsWith("/")) return serverUrl;
   try {

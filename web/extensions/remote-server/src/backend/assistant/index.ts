@@ -25,7 +25,9 @@ import {
   streamRemoteChat,
   type RemoteChatMessage,
   type RemoteChatTransportOptions,
+  type RemoteToolDefinition,
 } from "./chat-client.js";
+import { runToolLoop } from "./tool-loop.js";
 
 /**
  * 生成侧 Provider id。模型启停策略的键是 `<providerId>:<providerModelId>`，
@@ -54,6 +56,25 @@ export type RemoteAssistantOptions = RemoteChatTransportOptions & {
    * 缺席表示旧宿主：按「全部可用」处理，不假装用户关过什么。
    */
   policy?: () => GenerationModelPolicySnapshot | undefined;
+  /**
+   * 本轮的宿主 MCP 工具通道（可选）。
+   *
+   * 返回 null 表示本轮没有可用工具通道（宿主未装配、角色没开工具、或模式不支持写）。
+   * 这时适配器只做讨论，绝不假装自己能改作品。
+   */
+  toolChannel?: (input: AgentAdapterRunInput) => Promise<RemoteToolChannel | null>;
+};
+
+/** 一次回合可用的宿主工具通道。 */
+export type RemoteToolChannel = {
+  /** 执行一次工具调用。 */
+  callTool: (name: string, args: Record<string, unknown>) => Promise<{ ok: boolean; content: string }>;
+  /** 本轮开放的工具声明。 */
+  listTools: () => Promise<readonly RemoteToolDefinition[]>;
+  /** 收尾（撤销 grant、关闭网关）。幂等。 */
+  close: () => Promise<void>;
+  /** 本轮真实产生的写入回执；有回执才算"改动已落地"。 */
+  receipts: () => readonly { canvasId: string; nodeId?: string; commandId: string; revision?: number }[];
 };
 
 export type RemoteAssistant = {
@@ -130,6 +151,9 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
   const buildView = async (): Promise<AgentConnectionView | null> => {
     const session = await options.session();
     if (!session) return null;
+    // 工具能力取决于宿主是否装配了通道，与远端会话无关：会话在、通道不在时，
+    // 这条连接只可用于文本与讨论，界面据此隐藏作品修改入口。
+    const toolCapable = options.toolChannel !== undefined;
     const { models, error } = await readModels();
     const ready = error === undefined && models.length > 0;
     return {
@@ -148,7 +172,10 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
         transport: { state: error === undefined ? "ready" : "unknown", checkedAt: null },
         credential: { state: "ready", checkedAt: null },
         modelAccess: { state: ready ? "ready" : "unknown", checkedAt: null },
-        tools: { state: "unavailable", checkedAt: null, reason: "远端助手不提供画布写工具" },
+        tools:
+          toolCapable
+            ? { state: "ready", checkedAt: null }
+            : { state: "unavailable", checkedAt: null, reason: "此宿主未装配画布工具通道" },
       },
       ready,
       capabilities: {
@@ -156,8 +183,10 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
         textDelivery: TEXT_DELIVERY,
         discussion: true,
         imageInput: false,
-        // 明确 false：远端助手没有画布写权限，界面据此说明"不支持作品修改"。
-        tools: false,
+        // 有工具通道才声称支持作品修改：否则界面会让人进导演区，然后每一轮都失败。
+        tools: toolCapable,
+        // 目标模式随工具能力一起声明：没有工具时进导演区只能干看着。
+        ...(toolCapable ? { targets: ["world", "model3d", "canvas-group"] as const } : {}),
         structuredResult: false,
         cancel: true,
         resume: false,
@@ -196,8 +225,13 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
       // 被判非法，表现为助手目录里「Agent adapter 能力声明非法」，所有远端模型
       // 从下拉里消失。这曾真实发生过。
       discussion: true,
-      targets: [],
-      tools: false,
+      // 目标执行模式：只有宿主真的给了工具通道时这些模式才可用。
+      //
+      // 声明它不会让"没有工具"的部署变可用——`toolChannelFor` 在 `prepared.tools` 为空
+      // 时返回 null，回合会如实报 `tool-unavailable`。这里是能力上限，不是承诺。
+      targets: ["world", "model3d", "canvas-group"],
+      // 声明 true 才能进导演区/模型面板；实际是否可写由每轮的宿主工具集决定。
+      tools: options.toolChannel !== undefined,
       models: "remote",
     }),
     async authorization() {
@@ -218,11 +252,116 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
       }
       const messages = messagesOf(input);
       if (input.candidate) return runCandidate(input, messages, model);
+      // 目标执行（导演区/模型/组）：宿主准备了工具集就走工具循环，否则只是讨论。
+      // 注意 `toolChannelFor` 是异步的——直接比较 Promise 永远为真，会把所有讨论
+      // 回合都送进写路径。
+      let channel: RemoteToolChannel | null = null;
+      try {
+        channel = await toolChannelFor(input);
+      } catch (error) {
+        // grant 签发失败是**可证明的失败**，不能退化成讨论：用户要的是改作品，
+        // 悄悄变成聊天会让他以为改好了。
+        return {
+          status: "failed",
+          error: {
+            code: "tool-unavailable",
+            message: error instanceof Error ? error.message : "本轮无法获得画布工具授权",
+          },
+        };
+      }
+      if (channel !== null) return runTarget(input, messages, model, channel);
       return runDiscussion(input, messages, model);
     },
     async cancel() {
       // 取消由 `signal` 承担（run 里把它传给了 fetch）；这里不需要额外动作。
     },
+  };
+
+  /**
+   * 目标执行路径：走工具循环，让模型通过宿主 MCP 改画布。
+   *
+   * 与讨论路径的区别只在"能不能调工具"：两者都是多轮对话，但这里每轮带上工具声明，
+   * 模型要求调用时执行并回填。
+   *
+   * **只有拿到权威回执才算成功**：模型说"改好了"不等于改动落地了——回执来自宿主对
+   * 实际写入的确认。这与整个仓库「不假装成功」的口径一致。
+   */
+  const runTarget = async (
+    input: AgentAdapterRunInput,
+    messages: RemoteChatMessage[],
+    model: string,
+    channel: RemoteToolChannel
+  ): Promise<AgentAdapterRunOutcome> => {
+    try {
+      const result = await runToolLoop(messages, {
+        turn: async ({ messages: outbound, tools }) => {
+          const reply = await chatRemote(options, { model, messages: outbound, tools, signal: input.signal });
+          return reply.ok
+            ? { ok: true, text: reply.text, toolCalls: reply.toolCalls, finishReason: reply.finishReason }
+            : { ok: false, code: reply.code, message: reply.message };
+        },
+        execute: channel.callTool,
+        signal: input.signal,
+        onToolCall: (call) => {
+          input.emit({ type: "tool-started", tool: call.name, callId: call.id });
+        },
+        onToolResult: (call) => {
+          input.emit({
+            type: "tool-completed",
+            tool: call.name,
+            callId: call.id,
+            ok: call.ok,
+            ...(call.ok ? {} : { summary: call.content.slice(0, 200) }),
+          });
+        },
+      });
+      if (input.signal.aborted) {
+        return { status: "cancelled", assistantText: result.text, error: { code: "cancelled", message: "已停止本次生成" } };
+      }
+      const receipts = channel.receipts();
+      if (!result.ok) {
+        return {
+          status: receipts.length > 0 ? "partial" : "failed",
+          assistantText: result.text,
+          error: { code: result.code, message: result.message },
+          ...(receipts.length > 0 ? { receipt: { kind: "canvas-commands", commands: receipts } } : {}),
+        };
+      }
+      // 目标回合必须至少有一条真实回执：模型可能只聊了两句就结束，那不是"改好了"。
+      if (receipts.length === 0) {
+        return {
+          status: "failed",
+          assistantText: result.text,
+          error: { code: "write-unconfirmed", message: "助手没有提交任何画布修改；请核对原请求" },
+        };
+      }
+      return {
+        status: "succeeded",
+        assistantText: result.text,
+        receipt: { kind: "canvas-commands", commands: receipts },
+      };
+    } finally {
+      await channel.close().catch(() => undefined);
+    }
+  };
+
+  /**
+   * 取本轮的宿主工具通道。
+   *
+   * 判据是**动作类型 + 宿主准备的工具集 + 通道实现**，三者缺一不可：
+   * - `action === "discuss"` 是纯对话，永远不开工具（即使角色声明了工具）；
+   * - `prepared.tools` 为空说明宿主求交后没有可用工具；
+   * - 没有通道实现（宿主未装配）时只做讨论。
+   *
+   * 为什么以 action 优先而不是只看 `prepared.tools`：两者语义不同——工具集是"允许用
+   * 哪些"，action 是"这一回合要不要动手"。只看工具集会让讨论回合误入写路径。
+   */
+  const toolChannelFor = async (input: AgentAdapterRunInput): Promise<RemoteToolChannel | null> => {
+    if (options.toolChannel === undefined) return null;
+    if (input.intent.action === "discuss") return null;
+    const prepared = input.prepared;
+    if (!prepared || prepared.tools.length === 0) return null;
+    return options.toolChannel(input);
   };
 
   /**

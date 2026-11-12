@@ -247,14 +247,30 @@ describe("模型启停策略过滤", () => {
 });
 
 describe("远端助手能力声明", () => {
-  it("同一 adapter 同时声明文本交付与讨论，且不声明工具", () => {
+  it("同一 adapter 同时声明文本交付与讨论；工具能力随通道装配", () => {
     const surface = createFakeSurface({ models: ["a"] });
     const assistant = createRemoteAssistant({ fetchImpl: surface.fetchImpl, session: sessionFor() });
     const capabilities = assistant.adapter.capabilities();
     expect(capabilities.textDelivery).toEqual({ imageInput: false, maxImages: 0 });
     expect(capabilities.discussion).toBe(true);
+    // 没有注入工具通道的部署不该声称能改作品——否则界面会让人进导演区、每轮都失败。
     expect(capabilities.tools).toBe(false);
-    expect(capabilities.targets).toEqual([]);
+    expect(capabilities.targets).toEqual(["world", "model3d", "canvas-group"]);
+  });
+
+  it("装配了工具通道的宿主声明工具能力", () => {
+    const surface = createFakeSurface({ models: ["a"] });
+    const assistant = createRemoteAssistant({
+      fetchImpl: surface.fetchImpl,
+      session: sessionFor(),
+      toolChannel: async () => ({
+        callTool: async () => ({ ok: true, content: "{}" }),
+        listTools: async () => [],
+        close: async () => undefined,
+        receipts: () => [],
+      }),
+    });
+    expect(assistant.adapter.capabilities().tools).toBe(true);
   });
 
   // 锁定的真实缺陷：曾把 `textDelivery` 的 `{ imageInput: false, maxImages: 0 }`
