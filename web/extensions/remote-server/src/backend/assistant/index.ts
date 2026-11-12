@@ -18,7 +18,7 @@ import type {
   AgentConversationAdapter,
   GenerationModelPolicySnapshot,
 } from "@woohaa3/contracts";
-import { REMOTE_SERVER_EXTENSION_ID } from "../../shared.js";
+import { REMOTE_SERVER_EXTENSION_ID, REMOTE_ASSISTANT_ADAPTER_ID } from "../../shared.js";
 import {
   chatRemote,
   listRemoteChatModels,
@@ -26,9 +26,6 @@ import {
   type RemoteChatMessage,
   type RemoteChatTransportOptions,
 } from "./chat-client.js";
-
-/** 远端助手的稳定 adapter id（= capability 后缀 = registry key）。 */
-export const REMOTE_ASSISTANT_ADAPTER_ID = "remote-assistant";
 
 /**
  * 生成侧 Provider id。模型启停策略的键是 `<providerId>:<providerModelId>`，

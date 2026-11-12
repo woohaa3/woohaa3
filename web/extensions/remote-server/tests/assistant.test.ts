@@ -10,9 +10,9 @@ import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import { isAgentAdapterCapabilities, isAgentConnectionView } from "@woohaa3/contracts";
 import {
   createRemoteAssistant,
-  REMOTE_ASSISTANT_ADAPTER_ID,
   REMOTE_ASSISTANT_CONNECTION_ID,
 } from "../src/backend/assistant/index.js";
+import { REMOTE_ASSISTANT_ADAPTER_ID } from "../src/shared.js";
 import { __test } from "../src/backend/assistant/chat-client.js";
 
 type ChatCall = { model: string; messages: Array<{ role: string; content: string }>; stream: boolean };

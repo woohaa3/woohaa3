@@ -25,7 +25,7 @@ import type {
 } from "@woohaa3/frontend/extension-api";
 
 import { defineExtensionPlugin } from "@woohaa3/frontend/extension-api";
-import { REMOTE_SERVER_CAPABILITY, REMOTE_SERVER_EXTENSION_ID } from "../shared.js";
+import { REMOTE_ASSISTANT_ADAPTER_ID, REMOTE_SERVER_CAPABILITY, REMOTE_SERVER_EXTENSION_ID } from "../shared.js";
 import { createRemoteServerCatalogActionRenderer } from "./catalog-action.js";
 import { createRemoteServerCollaboratorsActionRenderer } from "./collaborators-action.js";
 import {
@@ -179,6 +179,25 @@ export function remoteServerExtension(): ReturnType<typeof defineExtensionPlugin
         render: createRemoteServerCollaboratorsActionRenderer(service, openCollaborators)
       });
       ctx.effect(() => () => removeCollaboratorsAction(), "remote-server-collaborators-action");
+
+      /**
+       * 助手来源声明：`sourceId` **必须**等于后端注册的 adapterId。
+       *
+       * 宿主按 `selectedConnection.adapterId` 反查来源清单；对不上就判成
+       * 「先前使用的来源已停用」，即使连接本身完全可用——这正是实测到的故障：
+       * 模型下拉里明明选着 `deepseek-v4.1-flash · 远端服务端`，下面却红字报来源停用。
+       *
+       * 面板 UI 由宿主内置渲染（与 sdk-agent / local-agent / oauth-agent 同一套）；
+       * 这里只声明身份，不实现任何面板。
+       */
+      const removeGenerate = ctx.slots.register("authoring.generate", {
+        id: `${REMOTE_SERVER_EXTENSION_ID}-generate`,
+        owner: REMOTE_SERVER_EXTENSION_ID,
+        priority: 10,
+        sourceId: REMOTE_ASSISTANT_ADAPTER_ID,
+        sourceLabel: "远端服务端"
+      });
+      ctx.effect(() => () => removeGenerate(), "remote-server-generate");
 
       // 新建画布时可勾选的「同时同步到远端」：建好后由宿主调用 apply 把它推到远端。
       // 只在已连接时出现；不回填 defaultEnabled——新建默认本地，同步是显式选择。

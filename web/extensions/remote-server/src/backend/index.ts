@@ -85,11 +85,12 @@ import {
   type RemoteDiagnosticsSnapshot,
   type RemoteDeviceLoginStart,
   type RemoteServerLoginInput,
-  type RemoteServerSnapshot
+  type RemoteServerSnapshot,
+  REMOTE_ASSISTANT_ADAPTER_ID
 } from "../shared.js";
 import { readRemoteServerDeployment, type RemoteServerDeployment } from "../deployment.js";
 import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
-import { createRemoteAssistant, REMOTE_ASSISTANT_ADAPTER_ID } from "./assistant/index.js";
+import { createRemoteAssistant } from "./assistant/index.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
 import { createOAuthLogin } from "./oauth-login.js";
 import { createRemoteTelemetryExport } from "./telemetry-export.js";
