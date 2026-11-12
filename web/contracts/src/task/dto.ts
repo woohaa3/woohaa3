@@ -539,3 +539,38 @@ export function missingRequiredSlots(
   }
   return reasons;
 }
+
+/**
+ * 把连线推断出的角色对齐到模型**实际声明的槽位**。
+ *
+ * 连线的角色来自源节点类型（图片源 → `reference_image`），而工作流驱动的模型只声明
+ * 它自己要的槽位（例如只有 `control_image`）。不对齐的话，用户连一张控制图过来会得到
+ * 「所选模型不接受参考角色 reference_image」——功能明明支持，却被判成不支持。
+ *
+ * 规则（只在当前角色不被任何 binding 接受时生效）：
+ *   1. 找出模型声明的、媒体类别相同、且**还没被别的连线占用**的槽位；
+ *   2. 恰好一个 → 用它（用户只有这一种可能，不需要选）；
+ *   3. 多个 → 不猜，保持原角色让面板显示「不接受」，由用户显式指定；
+ *   4. 没有 → 保持原角色（真的不支持该媒体类别）。
+ *
+ * 面板投影（`resolveReferenceItems`）与提交门禁（前端预检、Canvas Service 权威解析）
+ * 共用这一份规则：三处各算一遍会出现「面板说就绪、提交却拦住」。
+ */
+export function alignRoleToDeclaredSlot(options: {
+  inferredRole: string;
+  mediaKind: CanvasReferenceMediaKind;
+  bindings: readonly CanvasTaskInputBinding[] | undefined;
+  /** 已被其它连线占用（或显式指定）的角色。 */
+  claimedRoles: ReadonlySet<string>;
+}): string {
+  const { inferredRole, mediaKind, bindings, claimedRoles } = options;
+  if (bindings === undefined) return inferredRole;
+  const accepted = bindings.some(
+    (entry) => entry.roles.includes(inferredRole) && entry.mediaKinds.includes(mediaKind)
+  );
+  if (accepted) return inferredRole;
+  const candidates = declaredReferenceSlots(bindings).filter(
+    (slot) => slot.declared && slot.mediaKind === mediaKind && !claimedRoles.has(slot.role)
+  );
+  return candidates.length === 1 ? candidates[0]!.role : inferredRole;
+}

@@ -197,3 +197,124 @@ describe("填槽命令", () => {
     expect(planFillSlot(canvas, "gen-1", { role: "control_image", sourceNodeId: "img-1" })).toBeNull();
   });
 });
+
+describe("连线推断角色对齐模型声明的槽位", () => {
+  /** 只声明 control_image 的模型（真实工作流的样子）。 */
+  const ONLY_CONTROL: CanvasTaskInputBinding[] = [{
+    field: "control_image", semantic: "reference-image", roles: ["control_image"],
+    mediaKinds: ["image"], mediaTypes: ["image/png"], maxItems: 1,
+    valueFormat: "reference", label: "控制图", required: true, declaredSlot: true
+  }];
+
+  it("模型只声明控制图时，连进来的图片自动归到控制图", () => {
+    // 实测踩过：图片源连线默认推断 reference_image，而工作流只声明 control_image，
+    // 于是界面报「所选模型不接受参考角色 reference_image」+「缺少必填参考槽位」——
+    // 功能明明支持，用户却看到一个自相矛盾的死局，而且没有任何入口能改。
+    const canvas = canvasWith(
+      [{ id: "img-1", type: "image", assetId: "a1" }],
+      "gen-1",
+      [{ sourceNodeId: "img-1", role: "reference_image", sortKey: "0" }]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"));
+    const projection = resolveReferenceItems({ canvas, nodeId: "gen-1", bindings: ONLY_CONTROL });
+
+    expect(projection.items.map((item) => [item.role, item.status])).toEqual([["control_image", "ready"]]);
+    expect(projection.blockingReasons).toEqual([]);
+  });
+
+  it("对齐到控制图后 tile 文案也换成槽位名，不再显示「图片 1」", () => {
+    // 连线角色被对齐，但 tile 仍按 mention 类型编号 → 用户看到「图片 1」占着控制位置，
+    // 会以为连错了。文案必须跟着对齐后的槽位走。
+    const canvas = canvasWith(
+      [{ id: "img-1", type: "image", assetId: "a1" }],
+      "gen-1",
+      [{ sourceNodeId: "img-1", role: "reference_image", sortKey: "0" }]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"));
+    const projection = resolveReferenceItems({ canvas, nodeId: "gen-1", bindings: ONLY_CONTROL });
+
+    expect(projection.items[0]!.role).toBe("control_image");
+    expect(projection.items[0]!.label).toBe("控制图");
+  });
+
+  it("模型有多个同类槽位时不猜，保持原角色并给出原因", () => {
+    const twoImageSlots: CanvasTaskInputBinding[] = [
+      { ...CONTROLNET_BINDINGS[0]!, field: "reference_image", roles: ["reference_image"], label: "参考图", required: false, declaredSlot: true },
+      { ...CONTROLNET_BINDINGS[1]! }
+    ];
+    const canvas = canvasWith(
+      [{ id: "img-1", type: "image", assetId: "a1" }],
+      "gen-1",
+      [{ sourceNodeId: "img-1", role: "style_reference", sortKey: "0" }]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"));
+    const projection = resolveReferenceItems({ canvas, nodeId: "gen-1", bindings: twoImageSlots });
+
+    // 两个候选，不能替用户选；保留原角色让面板如实报"不接受"。
+    expect(projection.items[0]!.role).toBe("style_reference");
+    expect(projection.items[0]!.status).toBe("invalid");
+  });
+
+  it("模型本来接受该角色时不动它", () => {
+    const canvas = canvasWith(
+      [{ id: "img-1", type: "image", assetId: "a1" }],
+      "gen-1",
+      [{ sourceNodeId: "img-1", role: "reference_image", sortKey: "0" }]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"));
+    const projection = resolveReferenceItems({ canvas, nodeId: "gen-1", bindings: [CONTROLNET_BINDINGS[0]!] });
+    expect(projection.items[0]!.role).toBe("reference_image");
+    expect(projection.items[0]!.status).toBe("ready");
+  });
+
+  it("提交前的门禁也按对齐后的槽位校验，不再报不接受参考角色", () => {
+    // 面板与门禁是两条路径：只修面板会出现「面板显示控制图就绪，提交却拦住」。
+    const canvas = canvasWith(
+      [{ id: "img-1", type: "image", assetId: "a1" }],
+      "gen-1",
+      [{ sourceNodeId: "img-1", role: "reference_image", sortKey: "0" }]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"));
+    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "gen-1", bindings: ONLY_CONTROL });
+
+    expect(resolution.blockingReasons).toEqual([]);
+    expect(resolution.references.map((reference) => reference.role)).toEqual(["control_image"]);
+    expect(resolution.inputs.map((input) => input.role)).toEqual(["control_image"]);
+  });
+
+  it("模型有多个同类槽位时门禁不猜，如实报告不接受", () => {
+    const twoImageSlots: CanvasTaskInputBinding[] = [
+      { ...CONTROLNET_BINDINGS[0]!, required: false, declaredSlot: true },
+      { ...CONTROLNET_BINDINGS[1]! }
+    ];
+    const canvas = canvasWith(
+      [{ id: "img-1", type: "image", assetId: "a1" }],
+      "gen-1",
+      [{ sourceNodeId: "img-1", role: "style_reference", sortKey: "0" }]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"));
+    const resolution = resolveNodeReferenceInputs({ canvas, nodeId: "gen-1", bindings: twoImageSlots });
+
+    expect(resolution.blockingReasons.some((reason) => reason.includes("不接受参考角色"))).toBe(true);
+  });
+
+  it("两条图片连线不会抢同一个控制图槽位", () => {
+    const canvas = canvasWith(
+      [
+        { id: "img-1", type: "image", assetId: "a1" },
+        { id: "img-2", type: "image", assetId: "a2" }
+      ],
+      "gen-1",
+      [
+        { sourceNodeId: "img-1", role: "style_reference", sortKey: "0" },
+        { sourceNodeId: "img-2", role: "reference_image", sortKey: "1" }
+      ]
+    );
+    (canvas.assets as unknown as StoredAsset[]).push(mediaAsset("a1", "image"), mediaAsset("a2", "image"));
+    const projection = resolveReferenceItems({ canvas, nodeId: "gen-1", bindings: CONTROLNET_BINDINGS });
+
+    // 第一个拿到唯一可用的 control_image，第二个保持原角色并报不接受。
+    const roles = projection.items.map((item) => item.role);
+    expect(roles.filter((role) => role === "control_image")).toHaveLength(1);
+  });
+});

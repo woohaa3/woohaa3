@@ -16,7 +16,7 @@
  *
  * 每次渲染都从当前画布重算（不缓存旧快照）。
  */
-import { decodeWorldCamera, worldCameraShotContext, ensureWoohaa3CanvasInputMappingSlotId,
+import { decodeWorldCamera, worldCameraShotContext, alignRoleToDeclaredSlot, ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   missingRequiredSlots,
   sortWoohaa3CanvasInputMappings,
@@ -84,6 +84,15 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
   }
 
   const mappings = collectInputMappings(canvas, nodeId, nodeData);
+  /**
+   * 已被占用的角色（与参考区投影同一规则）：只收模型接受的显式角色。连线的推断角色
+   * 若模型根本不接受，它并不真正占用槽位。
+   */
+  const claimedRoles = new Set(
+    mappings
+      .map((mapping) => mapping.role)
+      .filter((role) => bindings.some((entry) => entry.roles.includes(role)))
+  );
 
   for (const mapping of mappings) {
     if (mapping.role === "text_prompt") continue;
@@ -128,7 +137,17 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
 
     for (const assetId of assetIds) {
       const asset = canvas.assets.find((entry) => entry.id === assetId);
-      const problem = validateReferenceAsset(asset, assetId, bindings, providerRole);
+      /**
+       * 连线推断的角色可能不是模型声明的槽位（图片源默认 `reference_image`，而工作流只声明
+       * `control_image`）。先对齐再校验：否则会出现「功能明明支持，却被判成不支持参考角色」
+       * 的自相矛盾门禁，而用户没有任何入口能改映射角色。
+       */
+      const assetKind = asset?.mediaKind;
+      const effectiveRole =
+        assetKind === "image" || assetKind === "video" || assetKind === "audio"
+          ? alignRoleToDeclaredSlot({ inferredRole: providerRole, mediaKind: assetKind, bindings, claimedRoles })
+          : providerRole;
+      const problem = validateReferenceAsset(asset, assetId, bindings, effectiveRole);
       if (problem) {
         blockingReasons.push(problem);
         continue;
@@ -139,7 +158,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       const mediaKind = typedAsset.mediaKind as CanvasReferenceMediaKind;
       const binding = bindings.find(
         (entry) =>
-          entry.roles.includes(providerRole) &&
+          entry.roles.includes(effectiveRole) &&
           entry.mediaKinds.includes(mediaKind) &&
           entry.mediaTypes.includes(mediaType)
       );
@@ -155,11 +174,13 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       }
       references.push({
         slotId: mapping.slotId ?? "",
-        role: providerRole,
+        role: effectiveRole,
         sortKey: mapping.sortKey,
         sourceNodeId: mapping.sourceNodeId,
-        input: { assetId, role: providerRole, storageKey, mediaType, mediaKind }
+        input: { assetId, role: effectiveRole, storageKey, mediaType, mediaKind }
       });
+      // 对齐结果占住槽位：后续连线不能再被归到同一处（与参考区投影同一规则）。
+      claimedRoles.add(effectiveRole);
     }
   }
 
