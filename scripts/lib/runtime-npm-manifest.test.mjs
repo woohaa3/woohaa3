@@ -142,6 +142,40 @@ test('unapproved lifecycle scripts fail the build audit; denied scripts are reco
   assert.throws(() => auditRuntimeNpmScripts({ clientRoot: root, lock, readInstalled: (name, version) => manifests.get(`${name}@${version}`) }), { code: 'UNAPPROVED_LIFECYCLE_SCRIPT' });
 });
 
+test('committed lock is validated by platform-independent facts, not by re-derivation', async (t) => {
+  const root = await fixture(t);
+  const committed = buildRuntimeNpmLock({ clientRoot: root, platforms: ['darwin-arm64'] });
+  // 模拟「Linux/macOS 上生成、Windows 上校验」：提交的锁里平台包集合按生成机裁剪，
+  // 校验机重新推导会得到不同对象，但锁本身仍然有效。
+  const accepted = assertRuntimeNpmLockCurrent({ clientRoot: root, committed });
+  assert.equal(accepted.generatedFrom.lockfileSha256, committed.generatedFrom.lockfileSha256);
+  assert.ok(accepted.engines.dsh.platforms['darwin-arm64'].packages.length > 0);
+});
+
+test('committed lock fails fast when the pnpm lockfile moved on', async (t) => {
+  const root = await fixture(t);
+  const committed = buildRuntimeNpmLock({ clientRoot: root, platforms: ['darwin-arm64'] });
+  const stale = structuredClone(committed);
+  stale.generatedFrom.lockfileSha256 = '0'.repeat(64);
+  assert.throws(() => assertRuntimeNpmLockCurrent({ clientRoot: root, committed: stale }), { code: 'STALE_LOCK' });
+});
+
+test('committed lock fails fast when an engine version is not the declared one', async (t) => {
+  const root = await fixture(t);
+  const committed = buildRuntimeNpmLock({ clientRoot: root, platforms: ['darwin-arm64'] });
+  const drifted = structuredClone(committed);
+  drifted.engines.dsh.version = '0.0.1-rc.0';
+  assert.throws(() => assertRuntimeNpmLockCurrent({ clientRoot: root, committed: drifted }), { code: 'STALE_LOCK' });
+});
+
+test('committed lock fails fast when a platform package set is missing', async (t) => {
+  const root = await fixture(t);
+  const committed = buildRuntimeNpmLock({ clientRoot: root, platforms: ['darwin-arm64'] });
+  const incomplete = structuredClone(committed);
+  delete incomplete.engines.claude.platforms['darwin-arm64'];
+  assert.throws(() => assertRuntimeNpmLockCurrent({ clientRoot: root, committed: incomplete }), { code: 'STALE_LOCK' });
+});
+
 test('committed lock matches the repository pnpm lock and covers every platform', async (t) => {
   const lock = assertRuntimeNpmLockCurrent({ clientRoot: REPO_ROOT });
   for (const engineId of ['dsh', 'claude', 'codex']) {

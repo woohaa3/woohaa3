@@ -72,7 +72,11 @@ function createHost(options: { registerGeneration?: boolean } = {}) {
       register: (provider: GenerationProvider) => {
         counts.register += 1;
         providers.push(provider);
-        return () => undefined;
+        // 与生产一致：返回撤销函数，把 provider 从列表里摘掉。
+        return () => {
+          const index = providers.indexOf(provider);
+          if (index >= 0) providers.splice(index, 1);
+        };
       },
       unregister: () => undefined,
       list: () => providers,
@@ -88,6 +92,8 @@ function createHost(options: { registerGeneration?: boolean } = {}) {
     providers,
     logEvents,
     counts,
+    /** 插件通过 `ctx.effect` 注册的清理函数，按注册顺序。 */
+    undos,
     async call(route: string, body: unknown = {}): Promise<HandlerResult> {
       const handler = handlers.get(route);
       if (!handler) throw new Error(`未注册 handler：${route}`);
@@ -851,3 +857,20 @@ describe("服务端托管生成：会话与刷新", () => {
     expect(fake.calls.filter((call) => call.path.includes("woohaa.generation"))).toHaveLength(0);
   });
 });
+
+  it("卸载时撤销 Provider 注册，热重载不会撞「已注册」", async () => {
+    // 实测踩过：改设置页的服务端地址会触发热重载，扩展重建后新的 bridge 再注册同名
+    // Provider，core 抛「生成 Provider 已注册：remote-server」，整条宿主重启失败——
+    // 症状是「改一下地址，应用就起不来」。
+    const fake = createFakeServer({ generation: { catalog: { models: [textModel()] } } });
+    const harness = activate({ fake });
+    expect(harness.providers).toHaveLength(1);
+
+    // 模拟卸载：跑一遍 effect 里的清理函数。
+    for (const undo of harness.undos) undo();
+    expect(harness.providers).toHaveLength(0);
+
+    // 卸载是幂等的：重复清理不会报错，也不会误删别人的注册。
+    for (const undo of harness.undos) undo();
+    expect(harness.providers).toHaveLength(0);
+  });

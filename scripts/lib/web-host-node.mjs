@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DESKTOP_NODE_VERSION } from './desktop-host-package.mjs';
+import { nodeDownloadArgs } from './node-download-args.mjs';
 import { systemTar, systemTarArgs } from './desktop-platform-commands.mjs';
 
 export const WEB_HOST_NODE_VERSION = DESKTOP_NODE_VERSION;
@@ -53,14 +54,30 @@ export async function prepareWebHostNode({ cacheDir, platform = process.platform
   const sums = path.join(cache, 'SHASUMS256.txt');
   const curl = platform === 'win32' ? 'curl.exe' : 'curl';
   const base = `https://nodejs.org/dist/v${artifact.version}`;
-  if (!fs.existsSync(sums)) run(curl, ['--fail', '--location', '--retry', '2', `${base}/SHASUMS256.txt`, '-o', sums]);
-  if (!fs.existsSync(archive)) run(curl, ['--fail', '--location', '--retry', '2', `${base}/${artifact.archive}`, '-o', archive]);
+  // 参数按本机 curl 能力裁剪：Windows Server 自带 curl 不认 `--retry-all-errors`。
+  const download = (url, destination) => run(curl, nodeDownloadArgs(url, destination, { curl }));
+  if (!fs.existsSync(sums)) download(`${base}/SHASUMS256.txt`, sums);
 
   const expected = fs
     .readFileSync(sums, 'utf8')
     .split('\n')
     .find((line) => line.trim().endsWith(` ${artifact.archive}`))
     ?.split(/\s+/)[0];
+  /**
+   * 下载并校验归档；摘要不符（或缺条目）时丢弃重下一次。
+   *
+   * 只在两次都失败后才抛错：`--continue-at -` 让上次中断的归档从断点续传，但若中间那份
+   * 本身已损坏，续传结果依旧过不了摘要——那一次先删掉从头再来，避免坏成永久失败。
+   */
+  const ensureArchive = () => {
+    if (fs.existsSync(archive) && expected) {
+      const current = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+      if (current === expected) return;
+      fs.rmSync(archive, { force: true });
+    }
+    download(`${base}/${artifact.archive}`, archive);
+  };
+  ensureArchive();
   const actual = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
   if (!expected || expected !== actual) {
     fs.rmSync(archive, { force: true });

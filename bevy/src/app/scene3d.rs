@@ -398,7 +398,7 @@ fn rig_preview_rect(content_width: f32, height: f32, aspect: f32) -> Vec4 {
     )
 }
 
-/// 观察相机始终铺满主画面，用来看 rig 和模型。它没有可画的本体。
+/// 观察相机使用 sync_surface 对齐的画布视口，用来看 rig 和模型。
 pub(super) fn drive_observer_from_shot(
     scene: Res<CurrentScene>,
     rig: Res<FocusRig>,
@@ -414,7 +414,9 @@ pub(super) fn drive_observer_from_shot(
             .as_ref()
             .is_some_and(|p| p.view_mode == "focus-preview");
         camera.order = 0;
-        camera.viewport = None;
+        // sync_surface owns the DOM-aligned viewport. Clearing it here stretches
+        // 3D content over the native window (including chrome), while picking
+        // and director-area resize handles still use canvas-local CSS pixels.
         *layers = bevy::camera::visibility::RenderLayers::from_layers(&[
             0,
             crate::preview_layers::GRID_LAYER,

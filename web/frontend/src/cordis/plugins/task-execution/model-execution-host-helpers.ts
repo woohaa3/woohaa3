@@ -8,7 +8,7 @@ import { randomId } from "@woohaa3/contracts";
 import { planConnectEdge } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
 import type { ReferenceItem } from "./reference-items.js";
-import { planReferenceChange } from "./reference-command-plan.js";
+import { planFillSlot, planReferenceChange } from "./reference-command-plan.js";
 
 /** 参考必须已就绪，避免把类型未知或上游缺失的槽位写进提示词。 */
 export function canMentionReference(
@@ -24,6 +24,29 @@ export function addReference(session: CanvasSession, target: string, source: str
     planConnectEdge({ source, target }),
     `web-ref-add-${Date.now().toString(36)}`
   ).ok;
+}
+
+/**
+ * 往模型声明的一个空槽位填素材（受控 Canvas 命令）。
+ *
+ * 角色必须显式写入：推断只会产出内置角色，自定义槽位（`control_image`）根本推断不出来。
+ */
+export function fillReferenceSlot(
+  session: CanvasSession,
+  canvas: ServerCanvas | null,
+  target: string,
+  slot: { role: string; sourceNodeId: string },
+  onFailure?: (message: string) => void
+): boolean {
+  if (!session.isWritable() || !canvas) { onFailure?.("画布当前只读，无法修改参考"); return false; }
+  const commands = planFillSlot(canvas, target, slot);
+  if (!commands) { onFailure?.("该槽位已被占用或素材已在参考里，请重新选择"); return false; }
+  const result = session.submitCommands(commands, `web-ref-slot-${randomId()}`);
+  if (!result.ok) { onFailure?.(result.reason); return false; }
+  void result.handle.settled.then(receipt => {
+    if (receipt.state === "rejected") onFailure?.(receipt.error ?? "槽位填充未保存，请重新选择");
+  }).catch(() => onFailure?.("槽位填充未确认，请检查画布连接"));
+  return true;
 }
 
 /** 删除目标节点与来源节点之间的参考连线（受控 Canvas 命令）。 */

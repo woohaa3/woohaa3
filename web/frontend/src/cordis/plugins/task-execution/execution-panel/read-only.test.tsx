@@ -52,3 +52,20 @@ describe("ExecutionPanel 会话只读", () => {
 		expect(sendButton(html)).toContain("disabled");
 	});
 });
+
+describe("ExecutionPanel 必填参考槽位", () => {
+	it("必填槽位未填充时主操作禁用并显示稳定原因", () => {
+		// 必填参考槽位是「能不能跑」的问题：缺控制图就提交，产物看起来正常、
+		// 只是完全没照结构约束，比直接失败难查得多。
+		const html = renderToStaticMarkup(
+			<ExecutionPanel {...BASE_PROPS} blockingReasons={["缺少必填参考槽位：控制图"]} />
+		);
+		expect(sendButton(html)).toContain("disabled");
+		expect(html).toContain("缺少必填参考槽位：控制图");
+	});
+
+	it("填充后原因消失、主操作恢复", () => {
+		const html = renderToStaticMarkup(<ExecutionPanel {...BASE_PROPS} blockingReasons={[]} />);
+		expect(sendButton(html)).not.toContain("disabled");
+	});
+});

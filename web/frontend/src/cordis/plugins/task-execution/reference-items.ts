@@ -9,6 +9,8 @@
 import {
   decodeWorldCamera,
   worldCameraShotContext,
+  alignRoleToDeclaredSlot,
+  declaredReferenceSlots,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   sortWoohaa3CanvasInputMappings,
@@ -22,10 +24,13 @@ import {
 } from "@woohaa3/contracts";
 import { resolveCanonicalMediaUrl } from "../../services/media-remote.js";
 
-export type ReferenceItemStatus = "ready" | "waiting" | "invalid";
+/** `empty` 表示模型声明了这个槽位但用户还没填素材。 */
+export type ReferenceItemStatus = "ready" | "waiting" | "invalid" | "empty";
 
 export type ReferenceItem = {
+  /** 空槽位没有真实 mapping，slotId 为空串。 */
   slotId: string;
+  /** 空槽位没有来源节点。 */
   sourceNodeId: string;
   role: string;
   /** mention token 类型（可确定时）；文字角色为 input_text。 */
@@ -38,6 +43,13 @@ export type ReferenceItem = {
   status: ReferenceItemStatus;
   /** 阻止执行的原因（无则为 null）。 */
   blockingReason: string | null;
+  /**
+   * 模型声明了这个槽位且要求必填。
+   *
+   * 与 `status` 分开：一个已填充但上游尚未就绪的必填槽位是 `waiting` + `required`，
+   * 两者的修复动作不同（补素材 vs 等上游）。
+   */
+  required?: boolean;
 };
 
 export type ReferenceProjection = {
@@ -59,7 +71,19 @@ export function resolveReferenceItems(options: {
   const blockingReasons: string[] = [];
   let ordinal = 0;
 
-  for (const mapping of collectDirectMappings(canvas, nodeId)) {
+  const mappings = collectDirectMappings(canvas, nodeId);
+  /**
+   * 已被占用的角色。初始只收**被模型接受的显式声明**：
+   * 连线的推断角色（图片源默认 `reference_image`）若模型根本不接受，它并不真正占用
+   * 任何槽位，把它们算进占用会让自动对齐永远找不到可用槽位。
+   */
+  const claimedRoles = new Set(
+    mappings
+      .map((mapping) => mapping.role)
+      .filter((role) => bindings?.some((entry) => entry.roles.includes(role)) ?? true)
+  );
+
+  for (const mapping of mappings) {
     const mentionType = mentionTypeForMapping(mapping);
     ordinal += 1;
     const label = referenceLabel(mapping, mentionType, ordinal);
@@ -120,9 +144,17 @@ export function resolveReferenceItems(options: {
       });
       continue;
     }
+    // 连线推断的角色可能不是模型声明的槽位（图片源默认 reference_image，而工作流只声明
+    // control_image）。对齐到模型唯一可用的同类槽位，否则用户会看到"模型不支持"的假错误。
+    const effectiveRole = alignRoleToDeclaredSlot({
+      inferredRole: mapping.role,
+      mediaKind: resolved.mediaKind,
+      bindings,
+      claimedRoles
+    });
     const binding = bindings?.find(
       (entry) =>
-        entry.roles.includes(mapping.role) &&
+        entry.roles.includes(effectiveRole) &&
         entry.mediaKinds.includes(resolved.mediaKind) &&
         entry.mediaTypes.includes(resolved.mediaType)
     );
@@ -130,20 +162,77 @@ export function resolveReferenceItems(options: {
     const item: ReferenceItem = {
       slotId,
       sourceNodeId: mapping.sourceNodeId,
-      role: mapping.role,
+      role: effectiveRole,
       mentionType,
-      label,
+      // 对齐到声明槽位后要跟着换名字：模型说的是「控制图」，tile 却写「图片 1」，
+      // 用户看到的就是一个语义对不上的位置。
+      label: tileLabel({ mapping, mentionType, ordinal, effectiveRole, bindings }),
       mediaKind: resolved.mediaKind,
       previewUrl: resolved.previewUrl,
       assetId: resolved.assetId,
       status: resolved.ready && acceptable ? "ready" : resolved.ready ? "invalid" : "waiting",
-      blockingReason: acceptable ? null : `所选模型不接受参考角色「${mapping.role}」或媒体类型「${resolved.mediaType}」`
+      blockingReason: acceptable
+        ? null
+        : `所选模型不接受参考角色「${effectiveRole}」或媒体类型「${resolved.mediaType}」`
     };
     items.push(item);
+    // 对齐结果要记进占用集合：后面的连线不能再被归到同一个槽位。
+    claimedRoles.add(effectiveRole);
     if (item.blockingReason) blockingReasons.push(item.blockingReason);
   }
 
+  appendEmptySlots(items, blockingReasons, bindings, new Set(items.map((item) => item.role)));
+
   return { items, blockingReasons };
+}
+
+/**
+ * 追加「模型声明了但还没填」的槽位。
+ *
+ * 只在有 bindings 时做：authoring 入口不传绑定，也就没有「声明」，追加空槽会凭空
+ * 造出用户没见过的输入位。
+ *
+ * 已填充的判定按 role 而不是按数量：一个同类素材组（多张参考图）共享一个落点，
+ * 填了一张就该认为这个槽位已经填过。数量上限由 bindings 的 maxItems 表达，不在这里拦。
+ */
+function appendEmptySlots(
+  items: ReferenceItem[],
+  blockingReasons: string[],
+  bindings: readonly CanvasTaskInputBinding[] | undefined,
+  filledRoles: ReadonlySet<string>
+): void {
+  if (bindings === undefined) return;
+  for (const slot of declaredReferenceSlots(bindings)) {
+    if (filledRoles.has(slot.role)) continue;
+    // 只有显式声明的槽位才渲染空位；兜底绑定表达的是"这类模型可以接"。
+    if (!slot.declared) continue;
+    // 文字槽位不是素材槽位：它由上游文字节点承担，不该在参考区出现一个空位。
+    if (slot.mediaKind !== "image" && slot.mediaKind !== "video" && slot.mediaKind !== "audio") continue;
+    const reason = slot.required ? `缺少必填参考槽位：${slot.label}` : null;
+    items.push({
+      slotId: "",
+      sourceNodeId: "",
+      role: slot.role,
+      mentionType: mentionTypeForMediaKind(slot.mediaKind),
+      label: slot.label,
+      mediaKind: slot.mediaKind,
+      previewUrl: null,
+      assetId: null,
+      status: "empty",
+      blockingReason: reason,
+      ...(slot.required ? { required: true } : {})
+    });
+    if (reason) blockingReasons.push(reason);
+  }
+}
+
+/** 媒体类别 → mention 类型。空槽位据此决定图标，也决定填进去后会生成什么 token。 */
+export function mentionTypeForMediaKind(
+  kind: CanvasReferenceMediaKind
+): Woohaa3CanvasMentionType {
+  if (kind === "video") return "input_video";
+  if (kind === "audio") return "input_audio";
+  return "input_image";
 }
 
 /** mapping 当前指向的稳定资产解析结果。 */
@@ -266,4 +355,29 @@ function referenceLabel(mapping: CanvasNodeInputMapping, type: Woohaa3CanvasMent
   if (typeof mapping.label === "string" && mapping.label !== "") return mapping.label;
   const noun = type === "input_image" ? "图片" : type === "input_video" ? "视频" : type === "input_audio" ? "音频" : "文本";
   return `${noun} ${ordinal}`;
+}
+
+/**
+ * tile 的展示名。
+ *
+ * 优先级：mapping 自带的 label → 模型对该**对齐后**槽位声明的 label → 按类型编号兜底。
+ *
+ * 第三档的编号只描述"这是第几张图"，说不出它被当成什么用。一旦连线被对齐到模型声明的
+ * 槽位（图片源默认 `reference_image` → 工作流声明的 `control_image`），就必须换成槽位名：
+ * 否则用户连的是控制图，面板却写着「图片 1」，看起来像是走错了位置。
+ */
+function tileLabel(options: {
+  mapping: CanvasNodeInputMapping;
+  mentionType: Woohaa3CanvasMentionType;
+  ordinal: number;
+  effectiveRole: string;
+  bindings: readonly CanvasTaskInputBinding[] | undefined;
+}): string {
+  const { mapping, mentionType, ordinal, effectiveRole, bindings } = options;
+  if (typeof mapping.label === "string" && mapping.label !== "") return mapping.label;
+  if (bindings !== undefined && effectiveRole !== mapping.role) {
+    const slot = declaredReferenceSlots(bindings).find((entry) => entry.role === effectiveRole);
+    if (slot) return slot.label;
+  }
+  return referenceLabel(mapping, mentionType, ordinal);
 }

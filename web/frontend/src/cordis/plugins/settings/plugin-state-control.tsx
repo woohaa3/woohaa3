@@ -10,7 +10,25 @@ import { useState } from "react";
 import { Switch } from "@woohaa3/ui/primitives";
 import type { ExtensionManagerFacade } from "../extension-manager/contract.js";
 import type { BackendSettingsStore } from "./backend-settings-store.js";
-import { pluginStateKind, type PluginSettingsGroup, type PluginViewIndex } from "./plugin-groups.js";
+import { diagnosticsOf, pluginStateKind, type PluginSettingsGroup, type PluginViewIndex } from "./plugin-groups.js";
+
+/** 失败原因独立于配置入口；没有配置项或修改权限也可以展开查看。 */
+export function PluginFailureDetails({ index, group }: { index: PluginViewIndex; group: PluginSettingsGroup }) {
+  const failed = index.siteRows.get(group.id)?.actualState === "failed"
+    || index.browserRows.get(group.id)?.status === "failed";
+  if (!failed) return null;
+  const reasons = diagnosticsOf(index, group).filter((reason) => reason.trim());
+  return (
+    <details className="plugin-failure" data-testid={`plugin-failure-${group.id}`}>
+      <summary>查看失败原因</summary>
+      <div className="plugin-failure__reasons">
+        {reasons.length > 0
+          ? reasons.map((reason, i) => <p key={i}>{reason}</p>)
+          : <p>插件激活失败，未返回具体原因。</p>}
+      </div>
+    </details>
+  );
+}
 
 export function PluginStateControl({ index, group, manager, siteManageable, store, testId }: {
   index: PluginViewIndex;
@@ -57,7 +75,7 @@ export function PluginStateControl({ index, group, manager, siteManageable, stor
   return (
     <div className="plugin-state">
       <span className="plugin-state__label" data-pending={kind === "browser" && browserRow!.status.startsWith("pending") ? "true" : "false"}>
-        {browserEnabled ? "运行中" : "已停用"}
+        {browserRow!.status === "failed" ? "激活失败" : browserEnabled ? "运行中" : "已停用"}
       </span>
       <Switch
         checked={browserEnabled}

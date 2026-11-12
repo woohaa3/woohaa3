@@ -5,7 +5,10 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { acquireDataLock, desktopEnvironment, prepareData, commitDataVersion, exportWorkspace, importWorkspace, restoreBackup } from './lib/desktop-host-data.mjs';
+import { agentRuntimeDirectory, hashKey } from './lib/agent-runtime-endpoints.mjs';
+import { createAgentSupervisorHost } from './lib/agent-runtime-supervisor-host.mjs';
 import { importConfigPackage } from './lib/config-handoff.mjs';
 import { materializeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 const arg=(name,fallback)=>{const i=process.argv.indexOf(`--${name}`);return i<0?fallback:process.argv[i+1];};
@@ -20,10 +23,11 @@ const dataDir=path.resolve(arg('data-dir',''));const resourceRoot=path.resolve(a
 process.on('uncaughtExceptionMonitor', (error, origin) => {
  try { process.stderr.write(`[desktop-host] ${JSON.stringify({event:'fatal-exception',time:new Date().toISOString(),pid:process.pid,origin,stack:error?.stack??String(error)})}\n`); } catch {}
 });
-let releaseLock,runtime,closing=false;
+let releaseLock,runtime,agentSupervisor,closing=false;
 async function shutdown(){
  if(closing)return;closing=true;
- try{await runtime?.close();releaseLock?.();releaseLock=null;emit({type:'stopped'});process.exit(0);}
+ // 只停止探活：执行器运行时与在途回合由下一宿主接管（change: 2026-11-10-split-agent-runtime-lifecycle）。
+ try{agentSupervisor?.stopWatch();await runtime?.close();releaseLock?.();releaseLock=null;emit({type:'stopped'});process.exit(0);}
  catch(error){emit({type:'error',message:`关闭失败：${error.message}`});process.exit(1);}
 }
 async function main(){
@@ -52,6 +56,35 @@ async function main(){
  Object.assign(process.env,env);
  // Ensure library code reading process.env cannot recover inherited development settings.
  for(const key of Object.keys(process.env))if((key.startsWith('WOOHAA3_')&&!Object.hasOwn(env,key))||['NODE_OPTIONS','NODE_PATH','MONGODB_URI','MONGODB_DB'].includes(key))delete process.env[key];
+ // 独立执行器（Agent 来源 / SDK / OAuth / 本机通道）：桌面形态与 dev 启动器同源，
+ // 先按 workspace 复用或拉起随包 daemon，再把连接信息交给 backend。
+ const executorScript=path.join(resourceRoot,'executor-runtime','dist','cli.js');
+ try{
+  if(!fs.existsSync(executorScript))throw new Error(`缺少随包执行器运行时：${executorScript}`);
+  agentSupervisor=createAgentSupervisorHost({
+   root:resourceRoot,
+   runtimeDir:agentRuntimeDirectory({root:dataDir}),
+   workspaceKey:hashKey(path.resolve(dataDir)),
+   scriptPath:executorScript,
+   expectedRuntimeBuild:createHash('sha256').update(fs.readFileSync(executorScript)).digest('hex').slice(0,32),
+   log:message=>console.error(`[agent-runtime] ${message}`)
+  });
+  const agentRuntime=await agentSupervisor.ensure();
+  agentSupervisor.startWatch();
+  env.WOOHAA3_AGENT_RUNTIME_SOCKET=agentRuntime.socketPath;
+  env.WOOHAA3_AGENT_RUNTIME_TOKEN=agentRuntime.token;
+  env.WOOHAA3_AGENT_WORKSPACE_KEY=agentRuntime.workspaceKey;
+  Object.assign(process.env,{
+   WOOHAA3_AGENT_RUNTIME_SOCKET:agentRuntime.socketPath,
+   WOOHAA3_AGENT_RUNTIME_TOKEN:agentRuntime.token,
+   WOOHAA3_AGENT_WORKSPACE_KEY:agentRuntime.workspaceKey
+  });
+  console.error(`[agent-runtime] 执行器就绪 pid=${agentRuntime.pid} reused=${agentRuntime.reused}`);
+ }catch(error){
+  // 执行器不可用不阻断画布与本地文件；插件激活会如实报告失败原因，日志保留真实堆栈。
+  agentSupervisor=null;
+  console.error(`[desktop-host] 执行器运行时不可用：${error?.stack??error}`);
+ }
  materializeRuntimeLinks(resourceRoot);
  const backendRoot=path.join(resourceRoot,'backend-runtime');
  const require=createRequire(path.join(backendRoot,'package.json'));

@@ -127,8 +127,11 @@ export function readRuntimeIdentity(runtimeDir) {
  *   root: string,
  *   runtimeDir: string,
  *   workspaceKey?: string,
+ *   scriptPath?: string,
+ *   expectedRuntimeBuild?: string,
  *   rpc?: typeof supervisorRpc,
  *   spawnProcess?: typeof spawn,
+ *   stopRuntime?: () => Promise<void>,
  *   readIdentity?: typeof readRuntimeIdentity,
  *   log?: (message: string) => void,
  *   watchIntervalMs?: number,
@@ -139,8 +142,11 @@ export function createAgentSupervisorHost({
 	root,
 	runtimeDir,
 	workspaceKey = hashKey(path.resolve(root)),
+	scriptPath = null,
+	expectedRuntimeBuild = null,
 	rpc = supervisorRpc,
 	spawnProcess = spawn,
+	stopRuntime = null,
 	readIdentity = readRuntimeIdentity,
 	log = () => undefined,
 	watchIntervalMs = SUPERVISOR_WATCH_INTERVAL_MS,
@@ -149,10 +155,18 @@ export function createAgentSupervisorHost({
 	const socketPath = supervisorEndpoint({ workspaceKey, runtimeDir });
 	const tokenPath = path.join(runtimeDir, "token");
 	const packageDir = path.join(root, "packages", "execution-runtime");
-	const script = path.join(packageDir, "dist", "cli.js");
+	const script = scriptPath ? path.resolve(scriptPath) : path.join(packageDir, "dist", "cli.js");
+	const buildMarkerPath = path.join(runtimeDir, "runtime-build");
 
-	/** dev 启动器不跑完整 build：只在产物缺失时构建一次，避免每次启动都等打包。 */
+	/**
+	 * dev 启动器不跑完整 build：只在产物缺失时构建一次，避免每次启动都等打包。
+	 * 发行包传入随包 `scriptPath` 时直接用该产物，禁止在只读资源目录里尝试 pnpm。
+	 */
 	const ensureScript = () => {
+		if (scriptPath) {
+			if (!fs.existsSync(script)) throw new Error(`执行器运行时缺少随包入口：${script}`);
+			return script;
+		}
 		if (!fs.existsSync(script)) {
 			try {
 				execFileSync("pnpm", ["-C", "web", "--filter", "woohaa3-executor", "run", "build"], {
@@ -167,6 +181,38 @@ export function createAgentSupervisorHost({
 		}
 		return script;
 	};
+
+	const readBuildMarker = () => {
+		try {
+			return fs.readFileSync(buildMarkerPath, "utf8").trim();
+		} catch (error) {
+			if (error?.code === "ENOENT") return "";
+			throw error;
+		}
+	};
+
+	const writeBuildMarker = () => {
+		if (!expectedRuntimeBuild) return;
+		fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+		fs.writeFileSync(buildMarkerPath, `${expectedRuntimeBuild}\n`, { mode: 0o600 });
+	};
+
+	/** 制品升级：停掉同 workspace 的旧 daemon 后再起随包版本。 */
+	const stopExistingRuntime = async () => {
+		try {
+			execFileSync(process.execPath, [ensureScript(), "runtime", "stop", "--state", runtimeDir, "--workspace", workspaceKey], {
+				cwd: root,
+				stdio: ["ignore", "pipe", "pipe"],
+				encoding: "utf8",
+				windowsHide: true,
+				timeout: 15_000
+			});
+		} catch (error) {
+			const detail = [error?.stdout, error?.stderr].filter(Boolean).join(" ").trim();
+			throw new Error(`旧执行器运行时停止失败：${describeError(error)}${detail ? `（${detail}）` : ""}`);
+		}
+	};
+	const stopRuntimeImpl = stopRuntime ?? stopExistingRuntime;
 
 	/** token 只用于「没有既有身份时的新实例」；已有身份一律复用其 token。 */
 	let token = "";
@@ -206,14 +252,22 @@ export function createAgentSupervisorHost({
 			if (identity.workspaceKey !== workspaceKey) {
 				throw new Error(`运行时属于其它 workspace（${identity.workspaceKey}），拒绝复用也不结束该实例`);
 			}
+			let healthy = false;
 			try {
-				if (await pingIdentity(identity)) {
+				healthy = await pingIdentity(identity);
+			} catch (error) {
+				log(`执行器运行时探活失败（${describeError(error)}），按缺失处理`);
+			}
+			if (healthy) {
+				const marker = readBuildMarker();
+				if (!expectedRuntimeBuild || marker === expectedRuntimeBuild) {
 					log(`复用执行器运行时（pid ${identity.pid}，${identity.runtimeVersion}）`);
 					return { socketPath: identity.socketPath, token: identity.token, workspaceKey, pid: identity.pid, reused: true };
 				}
+				log(`执行器运行时制品已更新（${marker || "未记录"} → ${expectedRuntimeBuild}），重启运行时`);
+				await stopRuntimeImpl();
+			} else {
 				log(`执行器运行时端点无响应（pid ${identity.pid}），按缺失处理`);
-			} catch (error) {
-				log(`执行器运行时探活失败（${describeError(error)}），按缺失处理`);
 			}
 		} else if (stored.status === "legacy" || stored.status === "incompatible") {
 			// 旧运行时不是「缺失」：不接管，也不结束；端点可能仍被它占用。
@@ -237,7 +291,10 @@ export function createAgentSupervisorHost({
 			if (stopped) throw new Error("Agent Supervisor 已停止");
 			try {
 				const state = await rpc(next, "ping", {}, PING_TIMEOUT_MS);
-				if (state?.workspaceKey === workspaceKey) return { ...next, pid: state.pid, reused: false };
+				if (state?.workspaceKey === workspaceKey) {
+					writeBuildMarker();
+					return { ...next, pid: state.pid, reused: false };
+				}
 			} catch (error) {
 				lastError = error;
 				await delay(100);
