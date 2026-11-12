@@ -160,6 +160,92 @@ describe("远端助手连接投影", () => {
   });
 });
 
+describe("模型启停策略过滤", () => {
+  const policyRows = (entries: Array<[string, boolean, boolean?]>) => () => ({
+    initialized: true,
+    models: entries.map(([modelKey, enabled, tombstone]) => ({
+      modelKey,
+      enabled,
+      ...(tombstone ? { tombstone: true } : {}),
+    })),
+  });
+
+  it("只投影被启用的模型", async () => {
+    const surface = createFakeSurface({ models: ["on-model", "off-model"] });
+    const assistant = createRemoteAssistant({
+      fetchImpl: surface.fetchImpl,
+      session: sessionFor(),
+      policy: policyRows([
+        ["remote-server:on-model", true],
+        ["remote-server:off-model", false],
+      ]),
+    });
+    const [connection] = await assistant.provider.listConnections({ owner: "local:test" });
+    expect(connection!.models.map((model) => model.id)).toEqual(["on-model"]);
+  });
+
+  it("策略里没有这条时视为未启用（新接入的 Provider 从未被勾选）", async () => {
+    const surface = createFakeSurface({ models: ["never-勾选过的"] });
+    const assistant = createRemoteAssistant({
+      fetchImpl: surface.fetchImpl,
+      session: sessionFor(),
+      policy: policyRows([["remote-server:其它模型", true]]),
+    });
+    const [connection] = await assistant.provider.listConnections({ owner: "local:test" });
+    // 已初始化但没这一行 → 不出现。这与 catalog 的判据一致，也是"新 Provider 默认全关"的来源。
+    expect(connection!.models).toEqual([]);
+    expect(connection!.ready).toBe(false);
+  });
+
+  it("tombstone 模型即使 enabled 也不出现", async () => {
+    const surface = createFakeSurface({ models: ["removed-model"] });
+    const assistant = createRemoteAssistant({
+      fetchImpl: surface.fetchImpl,
+      session: sessionFor(),
+      policy: policyRows([["remote-server:removed-model", true, true]]),
+    });
+    const [connection] = await assistant.provider.listConnections({ owner: "local:test" });
+    expect(connection!.models).toEqual([]);
+  });
+
+  it("策略未初始化时按全开（与 catalog 同语义）", async () => {
+    const surface = createFakeSurface({ models: ["a", "b"] });
+    const assistant = createRemoteAssistant({
+      fetchImpl: surface.fetchImpl,
+      session: sessionFor(),
+      policy: () => ({ initialized: false, models: [] }),
+    });
+    const [connection] = await assistant.provider.listConnections({ owner: "local:test" });
+    expect(connection!.models.map((model) => model.id)).toEqual(["a", "b"]);
+  });
+
+  it("宿主没提供策略快照时按全开（旧宿主）", async () => {
+    const surface = createFakeSurface({ models: ["a"] });
+    const assistant = createRemoteAssistant({ fetchImpl: surface.fetchImpl, session: sessionFor() });
+    const [connection] = await assistant.provider.listConnections({ owner: "local:test" });
+    expect(connection!.models.map((model) => model.id)).toEqual(["a"]);
+  });
+
+  it("用户在设置页改开关后立刻生效（缓存不冻结过滤结果）", async () => {
+    const surface = createFakeSurface({ models: ["m1"] });
+    let enabled = true;
+    const assistant = createRemoteAssistant({
+      fetchImpl: surface.fetchImpl,
+      session: sessionFor(),
+      policy: () => ({
+        initialized: true,
+        models: [{ modelKey: "remote-server:m1", enabled }],
+      }),
+    });
+    const [first] = await assistant.provider.listConnections({ owner: "local:test" });
+    expect(first!.models.map((model) => model.id)).toEqual(["m1"]);
+    // 关掉之后，下一次读取就该消失——缓存只缓存上游目录，不缓存过滤结果。
+    enabled = false;
+    const [second] = await assistant.provider.listConnections({ owner: "local:test" });
+    expect(second!.models).toEqual([]);
+  });
+});
+
 describe("远端助手能力声明", () => {
   it("同一 adapter 同时声明文本交付与讨论，且不声明工具", () => {
     const surface = createFakeSurface({ models: ["a"] });

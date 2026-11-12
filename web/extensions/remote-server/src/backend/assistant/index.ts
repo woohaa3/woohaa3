@@ -16,6 +16,7 @@ import type {
   AgentConnectionProvider,
   AgentConnectionView,
   AgentConversationAdapter,
+  GenerationModelPolicySnapshot,
 } from "@woohaa3/contracts";
 import { REMOTE_SERVER_EXTENSION_ID } from "../../shared.js";
 import {
@@ -28,6 +29,12 @@ import {
 
 /** 远端助手的稳定 adapter id（= capability 后缀 = registry key）。 */
 export const REMOTE_ASSISTANT_ADAPTER_ID = "remote-assistant";
+
+/**
+ * 生成侧 Provider id。模型启停策略的键是 `<providerId>:<providerModelId>`，
+ * 而远端生成 Provider 注册时用的就是这个 id。
+ */
+const REMOTE_ASSISTANT_PROVIDER_ID = REMOTE_SERVER_EXTENSION_ID;
 
 /**
  * 全部远端模型共用一条连接。
@@ -44,6 +51,12 @@ const TEXT_DELIVERY = { imageInput: false, maxImages: 0 } as const;
 export type RemoteAssistantOptions = RemoteChatTransportOptions & {
   /** 目录读取结果的缓存时点（毫秒）。目录不必每次点击都拉。 */
   now?: () => number;
+  /**
+   * 本机模型启停策略（宿主 `ctx.generation.policySnapshot`）。
+   *
+   * 缺席表示旧宿主：按「全部可用」处理，不假装用户关过什么。
+   */
+  policy?: () => GenerationModelPolicySnapshot | undefined;
 };
 
 export type RemoteAssistant = {
@@ -65,14 +78,41 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
   let inflight: Promise<{ models: readonly AgentConnectionModel[]; error?: string }> | null = null;
   const CACHE_MS = 60_000;
 
+  /**
+   * 按本机启停策略过滤远端模型。
+   *
+   * 必须与设置页「生成的模型」开关给出同一个答案：只读上游 `/v1/models` 会让用户在下拉里
+   * 看到自己明确关掉的模型——那不是"目录更全"，而是两个界面说了相反的话。
+   *
+   * 策略语义与 catalog 一致：
+   * - 宿主没提供 `policySnapshot`（旧宿主）或 `initialized=false` → 按全部可用处理；
+   * - 已初始化但策略里没有这条 → 视为未启用（新接入的 Provider 从未被勾选过）；
+   * - `enabled=false` 或 `tombstone` → 不出现。
+   *
+   * 模型键的形状是 `<providerId>:<providerModelId>`：`remote-server` 的 providerModelId
+   * 就是上游模型的稳定 id，与 `/v1/models` 里的一致。
+   */
+  const filterByPolicy = (models: readonly AgentConnectionModel[]): readonly AgentConnectionModel[] => {
+    const snapshot = options.policy?.();
+    if (!snapshot || !snapshot.initialized) return models;
+    const byKey = new Map(snapshot.models.map((row) => [row.modelKey, row]));
+    return models.filter((model) => {
+      const row = byKey.get(`${REMOTE_ASSISTANT_PROVIDER_ID}:${model.id}`);
+      return row !== undefined && row.enabled && row.tombstone !== true;
+    });
+  };
+
   const readModels = async (): Promise<{ models: readonly AgentConnectionModel[]; error?: string }> => {
-    if (cache !== null && now() - cache.at < CACHE_MS) return { models: cache.models };
+    if (cache !== null && now() - cache.at < CACHE_MS) {
+      // 策略可以随时被用户在设置页改掉，所以缓存只保存上游目录，过滤每次都现算。
+      return { models: filterByPolicy(cache.models) };
+    }
     if (inflight !== null) return inflight;
     const started = (async () => {
       const result = await listRemoteChatModels(options);
       if (!result.ok) {
         // 失败不清空缓存：一次网络抖动不该让已经可用的模型列表消失。
-        return { models: cache?.models ?? [], error: result.message };
+        return { models: cache === null ? [] : filterByPolicy(cache.models), error: result.message };
       }
       const models: AgentConnectionModel[] = result.models.map((model) => ({
         id: model.id,
@@ -82,7 +122,7 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
         accountAuthorized: false,
       }));
       cache = { at: now(), models };
-      return { models };
+      return { models: filterByPolicy(models) };
     })().finally(() => {
       if (inflight === started) inflight = null;
     });

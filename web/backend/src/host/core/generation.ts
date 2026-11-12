@@ -53,7 +53,27 @@ export const generationPlugin: HostPlugin<{ env: Record<string, string | undefin
     const registry = createGenerationRegistry({ logger: ctx.log.scope("generation") });
     const policy = createSqliteGenerationModelStore({ path: generationPolicyPath(env) });
     ctx.effect(() => () => policy.close());
-    const service: GenerationService = { ...registry, policy };
+    const service: GenerationService = {
+      ...registry,
+      policy,
+      /**
+       * 扩展侧的只读投影：只交出「哪个模型开着」这件事，不交出可写策略库。
+       *
+       * 与设置页 `projectGenerationModelViews` 同源（同一个 `policy.snapshot()`），
+       * 所以助手目录与「生成的模型」开关不会给出两种答案。
+       */
+      policySnapshot: () => {
+        const snapshot = policy.snapshot();
+        return {
+          initialized: snapshot.initialized,
+          models: snapshot.models.map((model) => ({
+            modelKey: model.modelKey,
+            enabled: model.enabled,
+            ...(model.tombstone === true ? { tombstone: true } : {})
+          }))
+        };
+      }
+    };
     ctx.provide("generation", service);
     ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.generationModels, createModelsApi(ctx, service, policy, readRuntimeModelViews(env.WOOHAA3_RUNTIME_MODELS_PATH))));
   }

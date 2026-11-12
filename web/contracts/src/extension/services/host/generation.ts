@@ -339,4 +339,30 @@ export type HostGenerationService = {
   /** 注册「转为片场」转换提供方；返回注销函数。 */
   list(): readonly GenerationProvider[];
   resolve(providerId: string): GenerationProvider | undefined;
+  /**
+   * 本机模型启停策略的**只读**快照（可选能力）。
+   *
+   * 为什么扩展需要它：任何把上游模型目录投影给用户的地方（例如远端助手的连接视图）
+   * 都必须与设置页的启停开关给出同一个答案。只读上游 `/v1/models` 会让用户在下拉里
+   * 看到自己关掉的模型——那不是"目录不全"，而是两个界面说了相反的话。
+   *
+   * 只读且不初始化：返回 `initialized=false` 表示策略库还没有任何行，调用方按
+   * 「未初始化 = 全开」处理（与 catalog 同一语义）。旧宿主没有这个方法时同样按全开。
+   */
+  policySnapshot?(): GenerationModelPolicySnapshot;
+};
+
+/** 一条模型启停策略事实（与设置页「生成的模型」同源）。 */
+export type GenerationModelPolicyRow = {
+  /** `<providerId>:<providerModelId>`。 */
+  modelKey: string;
+  enabled: boolean;
+  /** 已被移除的模型：即使 enabled 为真也不该出现在任何可选列表里。 */
+  tombstone?: boolean;
+};
+
+/** 策略快照。`initialized=false` 表示库是空的，调用方按全部可用处理。 */
+export type GenerationModelPolicySnapshot = {
+  initialized: boolean;
+  models: readonly GenerationModelPolicyRow[];
 };

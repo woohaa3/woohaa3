@@ -771,7 +771,9 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
        */
       const remoteAssistant = createRemoteAssistant({
         fetchImpl,
-        session: () => sessionSource.current()
+        session: () => sessionSource.current(),
+        // 模型启停策略：与设置页「生成的模型」同源。宿主不提供时按全部可用处理。
+        policy: () => ctx.generation?.policySnapshot?.()
       });
       if (ctx.capabilities) {
         // 与 canvasUpstream 同一注册面：返回注销函数，交给 Cordis 托管。
