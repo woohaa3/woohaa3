@@ -257,3 +257,35 @@ it("configured site provider revives its removed source after the key is added",
     expect(await f.registry.list(admin)).toContainEqual(expect.objectContaining({ serviceConnectionId: disabled!.serviceConnectionId, removed: false, name: "RunningHub" }));
   } finally { f.close(); }
 });
+
+it("does not persist a tombstone when a provider briefly disappears and restores the source with unchanged revision", async () => {
+  const f = fixture();
+  let reachable = true;
+  const snapshot = () => ({
+    legacyId: "grsai", scope: "site" as const, kind: "api" as const, name: "grsai", endpoints: input.endpoints,
+    capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+    bindings: [{ ...binding, bindingId: "provider", consumerId: "grsai" }],
+    enabled: true, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
+    credentialFingerprint: "key",
+  });
+  const adapter = { id: "site:grsai", scope: "site" as const, get: async () => (reachable ? snapshot() : null), list: async () => (reachable ? [snapshot()] : []) };
+  try {
+    f.registry.forExtension("provider").registerSource(adapter);
+    const [published] = await f.registry.list(admin);
+    const batch = vi.spyOn(f.documents, "batch");
+    reachable = false;
+    expect(await f.registry.list(admin)).toEqual([]);
+    expect(await f.registry.get(admin, published!.serviceConnectionId)).toMatchObject({ removed: true, enabled: false, credentialConfigured: false });
+    // 暂时不可用只影响当次读取投影，不向持久层写入 tombstone。
+    expect(batch).not.toHaveBeenCalled();
+    // Key 与模型目录都没变：恢复可用后必须回到列表，且代次不变。
+    reachable = true;
+    expect(await f.registry.list(admin)).toContainEqual(expect.objectContaining({
+      serviceConnectionId: published!.serviceConnectionId,
+      name: "grsai",
+      removed: false,
+      configRevision: published!.configRevision,
+      credentialEpoch: published!.credentialEpoch,
+    }));
+  } finally { f.close(); }
+});

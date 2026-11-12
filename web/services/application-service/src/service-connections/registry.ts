@@ -97,7 +97,12 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
     // The fingerprint covers the adapter snapshot, including model identities. Stored
     // metadata also contains host-added bindings/endpoints: comparing it directly to
     // the snapshot would republish every read and invalidate active turns.
-    if (found?.source.originFingerprint === fingerprint) return found.source;
+    //
+    // 但「来源暂时消失」留下的 tombstone 不能走这条近路：它的内容与快照仍然相同，直接返回
+    // 会让 Provider 恢复后永远停在 removed（`refresh()` 打 tombstone 时并不记录
+    // `removedFingerprint`，那是只有显式移除才写下的「用户意图」）。显式移除仍然照旧粘住。
+    const removedWithoutIntent = found?.source.removed === true && !found.source.removedFingerprint;
+    if (found?.source.originFingerprint === fingerprint && !removedWithoutIntent) return found.source;
     const { legacyId, credentialFingerprint, ...data } = snapshot;
     const extraCapabilities = (found?.source.extraCapabilities ?? []).map(normalizeExtraCapability);
     const extraBindings = (found?.source.extraBindings ?? []).map(normalizeExtraBinding);
@@ -135,11 +140,7 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
     if (!registered || !registered.active && !registered.adapter.retainAuthorityOnDispose) return { ...source, enabled: false };
     const snapshot = await registered.adapter.get(actor.owner, source.origin.legacyId);
     if (snapshot) return sync(actor, registered.extensionId, registered.adapter, snapshot);
-    const current = await read(source.serviceConnectionId);
-    if (!current || current.source.removed) return current?.source ?? source;
-    const tombstone = { ...current.source, enabled: false, removed: true, credentialConfigured: false, configRevision: current.source.configRevision + 1, credentialEpoch: current.source.credentialEpoch + 1 };
-    await write([{ op: "set", key: sourceKey(source.serviceConnectionId), value: json(tombstone), expectedRevision: current.revision }]);
-    return tombstone;
+    return { ...source, enabled: false, removed: true, credentialConfigured: false };
   };
   const get = async (actor: ServiceConnectionActor, id: string) => {
     requireActor(actor);
@@ -324,9 +325,9 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       requireActor(actor);
       const original = await read(id);
       if (!original || !mayWrite(actor, original.source)) throw new ServiceConnectionError("forbidden", "无权绑定来源");
-      await refresh(actor, original.source);
+      const current = await refresh(actor, original.source);
       const found = (await read(id))!;
-      if (found.source.configRevision !== expected.configRevision || found.source.credentialEpoch !== expected.credentialEpoch) throw new ServiceConnectionError("stale", "来源代次已变化");
+      if (current.removed || found.source.configRevision !== expected.configRevision || found.source.credentialEpoch !== expected.credentialEpoch) throw new ServiceConnectionError("stale", "来源代次已变化");
       // Replaying the same auto binding is not a new configuration: keep the published revision.
       const existing = found.source.bindings.find(item => item.bindingId === binding.bindingId);
       if (existing && digest(existing) === digest(binding) && (!capabilities || digest(capabilities) === digest(found.source.capabilities))) return view(found.source, actor);
