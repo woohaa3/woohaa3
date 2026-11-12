@@ -24,7 +24,19 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
     },
     async activate(definition: ApplicationBackendExtensionDefinition, version: number): Promise<{ service: ApplicationExtensionExecutorFacade; dispose(reason?: ExecutorDisposeReason): Promise<void> } | undefined> {
       if (!definition.executors?.length) return undefined;
-      if (!options?.hostCalls) throw new Error("宿主未配置扩展独立执行器");
+      /**
+       * 宿主没配独立执行器：**不阻断扩展激活**，只让执行器能力缺席。
+       *
+       * 声明 `executors` 的扩展通常还有不依赖执行器的能力——最典型的是
+       * `agent-connection-provider`（连接发现、目录投影）。此前这里直接抛错，
+       * 整个扩展被回滚，于是 `/connections` 里只剩没有执行器的 `remote-server`，
+       * 文本节点与导演台看不到任何 Provider 语言模型（线上实测 sdk-agent /
+       * local-agent / oauth-agent 三个同时 `activation-failed`）。
+       *
+       * 语义与 `services.executor` 缺省一致：扩展照常激活，需要执行器的那条路径
+       * 在真正调用时按「宿主不支持」失败，而不是让整个插件消失。
+       */
+      if (!options?.hostCalls) return undefined;
       const client = createExecutorClient(options);
       const registrationId = `${definition.extensionId}:${version}:${randomUUID()}`;
       const ids = new Set(definition.executors.map(item => item.id));

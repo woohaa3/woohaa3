@@ -88,7 +88,22 @@ it("a bad module cannot leave a partial registration, and missing daemon never e
   const f = await fixture(`export const createExecutor = () => ({ id: "wrong-id", kind: "agent", async run() { return {status:"succeeded"}; } });`);
   await expect(f.runtime.activate(f.definition, 1)).rejects.toThrow("Invalid executor module");
   expect(await f.client.call("executor.list")).toEqual({ executors: [] });
-  await expect(createExtensionExecutorRuntime(undefined).activate(f.definition, 1)).rejects.toThrow("未配置");
+});
+
+/**
+ * 宿主没配独立执行器时，扩展必须照常激活。
+ *
+ * 线上事故：web host 没有 `WOOHAA3_AGENT_RUNTIME_SOCKET/TOKEN/WORKSPACE_KEY`，
+ * 于是 sdk-agent / local-agent / oauth-agent 三个声明了 `executors` 的扩展全部
+ * `activation-failed`，`/connections` 只剩没有执行器的 remote-server——文本节点与
+ * 导演台的模型选择器里一条 Provider 语言模型都没有。声明执行器 ≠ 只能当执行器用：
+ * 这些扩展还用 `agent-connection-provider` 提供连接发现。
+ */
+it("宿主未配置执行器时返回 undefined 而不是让整个扩展激活失败", () => {
+  const runtime = createExtensionExecutorRuntime(undefined);
+  const definition = { extensionId: "sdk-agent", executors: [{ id: "sdk-agent", module: "./executor", export: "createExecutor" }], activate: () => undefined };
+  // 不抛错、也没有执行器能力：扩展层照常继续 activate，执行器缺席只影响真正执行的那条路径。
+  return expect(runtime.activate(definition, 1)).resolves.toBeUndefined();
 });
 
 it("explicit cancellation revokes host calls immediately and waits for cleanup", async () => {
