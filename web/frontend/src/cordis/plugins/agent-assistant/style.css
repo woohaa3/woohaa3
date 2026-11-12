@@ -35,7 +35,7 @@
 .agent-assistant__list li:last-child { border-bottom: 0; }
 .agent-assistant__capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .agent-assistant__capability-card { display: flex; flex-direction: column; align-items: stretch; min-width: 0; min-height: 192px; padding: 20px; border: 1px solid var(--app-web-border); border-radius: 14px; background: var(--app-web-panel); color: var(--app-web-text-primary); text-align: left; font: inherit; cursor: pointer; transition: border-color .16s ease-out, background-color .16s ease-out; }
-.agent-assistant__capability-card:not([data-actions="true"]):hover { border-color: var(--app-interaction-accent); background: color-mix(in srgb, var(--app-interaction-accent-soft) 24%, var(--app-web-panel)); }
+.agent-assistant__capability-card:hover { border-color: var(--app-interaction-accent); background: color-mix(in srgb, var(--app-interaction-accent-soft) 24%, var(--app-web-panel)); }
 .agent-assistant__capability-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 19px; color: var(--app-interaction-accent); }
 .agent-assistant__capability-card-top > svg + svg { color: var(--assistant-secondary); }
 .agent-assistant__capability-card > strong { font-size: 22px; line-height: 1.3; font-weight: 600; }
@@ -45,13 +45,9 @@
 .agent-assistant__capability-count[data-split="true"] { display: grid; gap: 3px; text-decoration: none; }
 .agent-assistant__capability-count[data-split="true"] > span { width: fit-content; border-bottom: 1px dotted currentColor; padding-bottom: 1px; }
 .agent-assistant__capability-card[data-empty="true"] { border-style: dashed; border-color: color-mix(in srgb, var(--app-interaction-accent) 40%, var(--app-web-border)); }
-.agent-assistant__capability-card[data-empty="true"]:not([data-actions="true"]):hover { border-color: var(--app-interaction-accent); }
+.agent-assistant__capability-card[data-empty="true"]:hover { border-color: var(--app-interaction-accent); }
 .agent-assistant__capability-add { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; min-height: 32px; margin-top: auto; padding: 0 10px; border-radius: 8px; background: color-mix(in srgb, var(--app-interaction-accent-soft) 65%, var(--app-web-panel)); color: var(--app-interaction-accent-pressed); font-size: 12px; font-weight: 600; transition: background-color .16s ease-out; }
-.agent-assistant__capability-card[data-empty="true"]:not([data-actions="true"]):hover .agent-assistant__capability-add,
-.agent-assistant__capability-add-actions .agent-assistant__capability-add:hover { background: var(--app-interaction-accent-soft); }
-.agent-assistant__capability-card[data-actions="true"] { cursor: default; }
-.agent-assistant__capability-add-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 16px; }
-.agent-assistant__capability-add-actions .agent-assistant__capability-add { margin-top: 0; white-space: nowrap; border: 0; }
+.agent-assistant__capability-card[data-empty="true"]:hover .agent-assistant__capability-add { background: var(--app-interaction-accent-soft); }
 .agent-assistant__capability-card[data-placeholder="true"] { background: var(--app-web-subtle); }
 .agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-card-top,
 .agent-assistant__capability-card[data-placeholder="true"] .agent-assistant__capability-count { color: var(--assistant-secondary); }
