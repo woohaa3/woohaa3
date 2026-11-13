@@ -16,6 +16,7 @@ import { createModel3DNodeData, model3DNodeDataFields } from "./animation-snapsh
 import { MODEL_SCRIPT_V2_VERSION } from "./model-script.js";
 import { isModelAuthoringNodeType } from "./domain/core/input-role.js";
 import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
+import { newWorldInstance } from "./creation-scopes-ui.js";
 
 /** 对外暴露的语义节点种类。`model` 是自包含的 3D 内容节点。 */
 export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "model";
@@ -100,25 +101,39 @@ export function agentDescriptorForCanonicalType(canonicalType: string, nodeData?
 }
 
 /**
+ * `model3d` 的世界实例输入：画布点被投影到 h=0 地面，实例身份由调用方预先决定。
+ *
+ * 模型没有卡片位置；`sharedWorldInstance` 是受支持模型的唯一位置来源
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
+ */
+export type AgentModelWorld = { instanceId: string; point: { x: number; y: number } };
+
+/**
  * 语义种类的默认 nodeData。
  *
  * 任务节点（text/image/video/audio）带 `taskKind` 与 `taskStatus: "idle"`；`model`
- * （canonical model3d）携带合法占位模型，不预填任务字段。
+ * （canonical model3d）携带合法空模型定义与共享世界实例，不预填任务字段。
  */
-export function defaultAgentNodeData(kind: string): CanvasNodeData | undefined {
+export function defaultAgentNodeData(kind: string, world?: AgentModelWorld): CanvasNodeData | undefined {
   const descriptor = findAgentNodeDescriptor(kind);
-  if (descriptor?.canonicalType === "model3d" || descriptor?.canonicalType === COMPOSITE_ASSET_NODE_TYPE) {
-    return defaultSelfContained3DNodeData(descriptor.canonicalType);
-  }
+  if (descriptor?.canonicalType === "model3d") return defaultSelfContained3DNodeData(descriptor.canonicalType, world);
+  if (descriptor?.canonicalType === COMPOSITE_ASSET_NODE_TYPE) return defaultSelfContained3DNodeData(descriptor.canonicalType);
   if (!descriptor?.taskKind || !descriptor.defaultTaskStatus) return undefined;
   return { taskKind: descriptor.taskKind, taskStatus: descriptor.defaultTaskStatus };
 }
 
-/** 浏览器与 MCP 新建 3D 节点共用完整、合法的本地定义。 */
-export function defaultSelfContained3DNodeData(nodeType: string): CanvasNodeData | undefined {
+/**
+ * 浏览器与 MCP 新建 3D 节点共用完整、合法的本地定义。
+ *
+ * `model3d` 必须给出世界实例（缺少实例的定义只属于旧卡片，不能再被创建）；
+ * 复合资产仍使用自身的内容矩形。
+ */
+export function defaultSelfContained3DNodeData(nodeType: string, world?: AgentModelWorld): CanvasNodeData | undefined {
   const model = { modelScript: "", modelScriptVersion: MODEL_SCRIPT_V2_VERSION };
   if (nodeType === "model3d") {
-    return model3DNodeDataFields(createModel3DNodeData({ title: "3D 模型", model })) as CanvasNodeData;
+    if (!world) throw new Error("model3d 需要 sharedWorldInstance：模型不再有卡片，必须提供世界实例输入");
+    const fields = model3DNodeDataFields(createModel3DNodeData({ title: "3D 模型", model })) as CanvasNodeData;
+    return { ...fields, sharedWorldInstance: newWorldInstance(world.instanceId, world.point) } as CanvasNodeData;
   }
   return undefined;
 }

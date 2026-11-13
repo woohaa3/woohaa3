@@ -3,7 +3,7 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import { z } from "zod";
-import { decodeModelCameras, MODEL_CAMERA_ASPECTS, type CanvasCommand } from "@woohaa3/contracts";
+import type { CanvasCommand } from "@woohaa3/contracts";
 import type { AgentPlanOperation } from "@woohaa3/contracts";
 import { runToolPlan } from "../agent-authoring/tools.js";
 import { buildModelApiGuideText, createToolRegistrar } from "./guide.js";
@@ -41,7 +41,7 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
     {
       title: "读取 3D 模型节点",
       description:
-        "从权威画布读取指定节点当前的真实 nodeType、modelContentVersion、placement、提示词、modelScript、语言版本、应用状态、规范化镜头集合（cameras），以及该节点的前序参考输入（连入的文本内容与图片/视频/音频的稳定引用）。生成模型前先调用它了解可用素材。" +
+        "从权威画布读取指定节点当前的真实 nodeType、modelContentVersion、placement、提示词、modelScript、语言版本、应用状态、以及该节点的前序参考输入（连入的文本内容与图片/视频/音频的稳定引用）。生成模型前先调用它了解可用素材。" +
         "需要与聚焦面板一致的点数/面数时传 includeStatistics=true；不要按 API 成本表自行推算。",
       inputSchema: z.object({
         canvasId: z.string().min(1).describe("画布 ID"),
@@ -84,25 +84,6 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
       });
       if (!outcome.ok) return toolError(outcome.message, outcome.code);
       return jsonResult(outcome);
-    }
-  );
-
-  registerToolWithGrant(
-    "get_model_cameras",
-    {
-      title: "读取模型节点镜头",
-      description:
-        "读取指定 3D 模型节点当前的规范化镜头集合（id/name/order/azimuth/distance/aspect/focusOffset）。单条增删改前先调用它了解现有镜头与 id；读取不推进画布 revision。",
-      inputSchema: z.object({
-        canvasId: z.string().min(1).describe("画布 ID"),
-        nodeId: z.string().min(1).describe("model3d 节点 ID")
-      })
-    },
-    async ({ canvasId, nodeId }) => {
-      if (!options.service) return toolError("模型 MCP 当前不可用");
-      const outcome = await options.service.getModelNode({ canvasId, nodeId });
-      if (!outcome.ok) return toolError(outcome.message, outcome.code);
-      return jsonResult({ ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, cameras: outcome.cameras });
     }
   );
 
@@ -152,12 +133,11 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
         width: z.number().int().min(64).max(2048).optional().describe("预览宽度（像素）"),
         height: z.number().int().min(64).max(2048).optional().describe("预览高度（像素）"),
         background: z.string().optional().describe("背景：transparent 或 #rrggbb"),
-        cameraPreset: z.enum(["dimetric", "initial"]).optional().describe("相机 preset：dimetric 几何检查 / initial 保存镜头"),
         clipId: z.string().min(1).optional().describe("镜头片段 ID（可选）"),
         timeSeconds: z.number().min(0).optional().describe("动画采样时刻（秒）；缺省 0")
       })
     },
-    async ({ canvasId, nodeId, width, height, background, cameraPreset, timeSeconds, clipId }) => {
+    async ({ canvasId, nodeId, width, height, background, timeSeconds, clipId }) => {
       if (!options.service) return toolError("模型 MCP 当前不可用");
       if (!options.service.renderPreview) return toolError("模型预览当前不可用", "renderer-unavailable");
       const outcome = await options.service.renderPreview({
@@ -166,7 +146,6 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
         ...(width !== undefined ? { width } : {}),
         ...(height !== undefined ? { height } : {}),
         ...(background !== undefined ? { background } : {}),
-        ...(cameraPreset !== undefined ? { cameraPreset } : {}),
         ...(timeSeconds !== undefined ? { timeSeconds } : {}),
         ...(clipId ? { clipId } : {})
       });
@@ -202,40 +181,6 @@ export function registerModelTools(reg: ToolRegistration, options: ModelMcpHttpO
     }
   );
 
-  registerToolWithGrant(
-    "set_model_camera",
-    {
-      title: "设置模型节点镜头",
-      description:
-        "整体替换 3D 模型节点的 canonical 镜头子资源 nodeData.modelCameras。单条增删改优先用 create/update/delete/rename/reset_model_camera，避免回传完整数组。",
-      inputSchema: z.object({
-        canvasId: z.string().min(1).describe("画布 ID"),
-        nodeId: z.string().min(1).describe("model3d 节点 ID"),
-        cameras: z
-          .array(
-            z.object({
-              id: z.string().min(1),
-              name: z.string().min(1),
-              order: z.number().int().nonnegative(),
-              azimuth: z.number(),
-              elevation: z.number().min(-Math.PI / 2).max(Math.PI / 2).describe("仰角（弧度，[-90°, +90°]）"),
-              distance: z.number().positive(),
-              aspect: z.enum(MODEL_CAMERA_ASPECTS),
-              focusOffset: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional()
-            })
-          )
-          .describe("完整镜头集合；按 order 持久化")
-      })
-    },
-    async ({ canvasId, nodeId, cameras }) => {
-      const decoded = decodeModelCameras(cameras);
-      if (!decoded.ok) return toolError(decoded.reason, "malformed-request");
-      const commands: CanvasCommand[] = [
-        { type: "nodeData.patch", nodeId, value: { modelCameras: decoded.value } as never }
-      ];
-      return applyIntent(options, canvasId, { tool: "set_model_camera", nodeId, cameras: decoded.value }, commands);
-    }
-  );
 }
 
 /**

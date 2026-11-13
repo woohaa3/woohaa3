@@ -3,5 +3,6 @@
   "extensionId": "fal-provider",
   "metadata": { "module": "./shared", "export": "FAL_PLUGIN_METADATA", "order": 28 },
   "hostPlugin": { "module": "./backend", "factory": "createFalProviderPlugin", "features": ["provider"], "order": 18 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "1.0.0"
 }

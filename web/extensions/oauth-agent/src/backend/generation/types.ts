@@ -6,6 +6,8 @@ import type { ChatGptGenerateRequest, ChatGptGenerationMode, ChatGptGenerationRe
 
 export type GenerateRequest = ChatGptGenerateRequest & {
   ownerId: string;
+  /** 宿主准备的规范角色回合（host-only；浏览器请求只带 roleId）。 */
+  prepared: import("@woohaa3/contracts").PreparedAgentRoleTurn;
 };
 
 export type GenerationProgress = (event: {
@@ -36,6 +38,7 @@ export function identityOf(input: GenerateRequest): string {
     model: input.model,
     prompt: input.prompt,
     expectedContentHash: input.expectedContentHash ?? null,
+    preparedHash: input.prepared?.preparedHash ?? null,
     selectedCameraId: input.selectedCameraId ?? null,
     clipId: input.clipId ?? null,
     itemId: input.itemId ?? null,

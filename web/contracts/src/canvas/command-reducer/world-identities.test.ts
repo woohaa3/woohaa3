@@ -71,8 +71,9 @@ describe("world identities", () => {
   });
 
   it("survives reducer, aggregate parsing and encoded Yjs reload", () => {
+    const instance = { kind: "world-instance", version: "shared-world-v1", instanceId: "model-instance", transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } };
     const result = applyCanvasCommands(createEmptyWoohaa3ServerCanvas("x", now), [
-      { type: "node.add", node: node("model", "model3d") },
+      { type: "node.add", node: { ...node("model", "model3d"), position: undefined }, nodeData: { sharedWorldInstance: instance } },
       { type: "node.add", node: node("group", "workflow-group-2d"), nodeData: { workflowGroup2d: group } },
       { type: "node.add", node: node("area", "scene-area"), nodeData: { sceneArea: area } },
       { type: "node.add", node: node("camera", "world-camera"), nodeData: { worldCamera: camera } }

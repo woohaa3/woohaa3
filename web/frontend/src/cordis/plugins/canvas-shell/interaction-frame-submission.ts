@@ -6,7 +6,6 @@ import { sharedCanvasNodeIndex, type CanvasNodeIndex } from "./canvas-node-index
 import { changedPreviewPositions, expandPositionPreviews } from "./position-preview-plan.js";
 import { shouldRouteViewportOnly, shouldRouteObserverOnly, commitViewportUpdate } from "./interaction-frame-plan.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
-import { modelPreviewStore } from "../../services/model-preview-store.js";
 import type { InteractionState, Map2D, Viewport } from "./interaction-core.js";
 import type { InteractionControllerOptions } from "./interaction-types.js";
 
@@ -84,7 +83,6 @@ export function createFrameSubmission(deps: {
         const input = {
           baseSceneGeneration: runtime.baseSceneGeneration(),
           nodeId: focus.nodeId,
-          preview: modelPreviewStore.get(focus.nodeId),
           yaw: focus.yaw, pitch: focus.pitch, distance: focus.distance, target: focus.target
         };
         noteSceneSubmitRoute("observer", reasons);
@@ -147,7 +145,7 @@ export function createFrameSubmission(deps: {
       const rows = deps.options.textureSync.resourceStateChanges();
       const safe = rows.every(row => {
         const node = mirror.node(baseline!.scene, row.id);
-        return node?.type === "image" && !node.model && !node.modelPreview && !node.ghost;
+        return node?.type === "image" && !node.model && !node.ghost;
       });
       if (safe) {
         try {

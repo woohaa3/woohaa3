@@ -38,9 +38,9 @@ export type SelectionPressState = {
   previousSelectionPress: SelectionPressRecord | null;
 };
 
-/** 画布按下时统一后的节点目标（2D 卡片 / 模型预览 / 共享世界对象）。 */
+/** 画布按下时统一后的节点目标（2D 卡片 / 共享世界对象）。 */
 export type NodePointerTarget = {
-  kind: "card" | "model-preview" | "world-object";
+  kind: "card" | "world-object";
   nodeId: string;
   via: "card" | "pick";
   scopeId: string | null;

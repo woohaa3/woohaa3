@@ -14,7 +14,7 @@ import { discoverGrsaiModels, grsaiModelDefinitions, type GrsaiModel } from "./d
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { createGrsaiProvider, type GrsaiCatalog } from "./provider.js";
 import { describeGrsaiModel } from "./schema.js";
-import { DEFAULT_GRSAI_BASE_URL, GRSAI_PLUGIN_ID, GRSAI_PROVIDER_ID, grsaiOrigin } from "./shared.js";
+import { DEFAULT_GRSAI_BASE_URL, GRSAI_PLUGIN_ID, GRSAI_PROVIDER_ID, GRSAI_UPLOAD_TOKEN_PATH, grsaiOrigin } from "./shared.js";
 import { uploadGrsaiReference } from "./upload.js";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -130,6 +130,36 @@ export function createGrsaiProviderPlugin(deps: GrsaiPluginDependencies = {}): E
           message: apiKey === "" ? "未配置 API Key，grsai 模型当前不可执行" : "API 地址为空，grsai 模型当前不可执行"
         }]
       };
+    },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      const baseUrl = (config.baseUrl ?? DEFAULT_GRSAI_BASE_URL).trim();
+      if (!apiKey || !baseUrl) return { ok: false, message: "请先填写 grsai API Key 和地址" };
+      const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+      const origin = grsaiOrigin(baseUrl);
+      try {
+        const tokenResp = await fetchImpl(`${origin}${GRSAI_UPLOAD_TOKEN_PATH}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ sux: "png" }),
+          signal: AbortSignal.timeout(10_000)
+        });
+        if (!tokenResp.ok) return { ok: false, message: `grsai API Key 验证失败（HTTP ${tokenResp.status}）` };
+        const payload = (await tokenResp.json().catch(() => null)) as { code?: unknown; msg?: unknown; data?: Record<string, unknown> } | null;
+        if (payload?.code !== undefined && payload.code !== 0 && payload.code !== "0") {
+          return { ok: false, message: typeof payload.msg === "string" && payload.msg.trim() ? payload.msg.trim() : "grsai API Key 无效" };
+        }
+      } catch (error) {
+        return { ok: false, message: `grsai 连接失败：${error instanceof Error ? error.message : String(error)}` };
+      }
+      const discovered = await discoverGrsaiModels({
+        baseUrl,
+        apiKey,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!discovered.ok) return { ok: false, message: discovered.message };
+      return { ok: true, message: `测试通过，已发现 ${discovered.models.length} 个模型` };
     },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";

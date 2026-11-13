@@ -135,6 +135,15 @@ export const REMOTE_SERVER_LOCAL_CONFIG = "config.local.json";
 export const REMOTE_SERVER_URL_ENV = "WOOHAA3_REMOTE_SERVER_URL";
 export const REMOTE_SERVER_DEVICE_TOKEN_ENV = "WOOHAA3_REMOTE_SERVER_DEVICE_TOKEN";
 
+/**
+ * 远端助手的稳定 adapter id。
+ *
+ * 放在 `shared` 而不是 backend 目录：前端要拿它做两件事——注册 `authoring.generate`
+ * 来源贡献（`sourceId` 必须等于 adapterId，否则宿主判定「来源已停用」），以及在
+ * 连接选择里对上号。半边分离下前端不能 import backend 代码。
+ */
+export const REMOTE_ASSISTANT_ADAPTER_ID = "remote-assistant";
+
 export const REMOTE_SERVER_METADATA: ApplicationExtensionMetadata = {
   extensionId: REMOTE_SERVER_EXTENSION_ID,
   name: "服务端接入",

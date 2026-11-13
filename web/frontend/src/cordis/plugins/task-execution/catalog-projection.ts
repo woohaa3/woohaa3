@@ -60,6 +60,8 @@ export function modelOptionForCatalog(model: CanvasTaskCatalogModel): ExecutionP
   return {
     value: model.modelKey,
     label: model.title || model.providerModelId,
+    sourceIdentity: model.providerId,
+    modelId: model.providerModelId,
     provider: model.providerId
   };
 }

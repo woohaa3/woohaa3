@@ -437,8 +437,8 @@ it("describes the default 4x4 area and the resize prerequisite", async () => {
   expect(describe("resize_scene_area")).toContain("重新 get_world_context");
 });
 
-it("rejects rig and scene sample tools when camera or 2D grants omit them", async () => {
-  for (const scope of [{kind:"world-camera",cameraId:"camera"},{kind:"workflow-group-2d",groupId:"group"}] as const) {
+it("rejects rig and scene sample tools when a camera grant omits them", async () => {
+  for (const scope of [{kind:"world-camera",cameraId:"camera"}] as const) {
     const issued = grant();
     issued.world!.scope = {scope,scopeVersion:"scope-1"};
     issued.tools = [...assistantWorldToolsForScope(scope)];

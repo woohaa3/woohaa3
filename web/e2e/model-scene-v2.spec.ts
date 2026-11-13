@@ -13,7 +13,7 @@
  */
 import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
-import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession, sendCommands, waitForCommandsSettled } from "./helpers.js";
+import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession, worldModelClientPoint } from "./helpers.js";
 
 const CANVAS = "woohaa3-default-canvas";
 
@@ -188,18 +188,7 @@ async function foregroundStatsIn(
   }, base64);
 }
 
-/** 取实际渲染节点中心，适配模型卡片居中布局。 */async function modelClientPoint(page: Page, nodeId: string): Promise<{ x: number; y: number }> {
-  return page.evaluate((id) => {
-    const scene = (window as any).__bevyRuntime.lastScene();
-    const node = scene.nodes.find((entry: any) => entry.id === id);
-    if (!node) throw new Error("node not found");
-    const viewport = scene.viewport;
-    const rect = (document.querySelector("#bevy-canvas") as HTMLCanvasElement).getBoundingClientRect();
-    const worldX = (node.x + node.width / 2) * viewport.zoom + viewport.x;
-    const worldY = (node.y + node.height / 2) * viewport.zoom + viewport.y;
-    return { x: worldX + rect.left, y: worldY + rect.top };
-  }, nodeId);
-}
+/** 共享世界模型的实际渲染包围盒中心（模型没有卡片，见 `worldModelClientPoint`）。 */
 
 test.describe("V2 连续人物 WASM 视觉回归", () => {
   test("桌面视口：模型非空、主要肢体连通、正确取景", async ({ page }) => {
@@ -274,9 +263,6 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
       scene.sphere({ id: "hand", parent: "arm", radius: 0.16, position: [0.25, -1.7, 0], color: "#e8c39e" });
       scene.rotate("arm", { axis: "z", speed: 1.5 });
     `;
-    // 模型按节点矩形适配；使用足够大的矩形保持像素判定的信噪比。
-    expect((await sendCommands(page, [{ type: "node.update", nodeId: "model-v2-anim", width: 320, height: 320 }])).ok).toBe(true);
-    await waitForCommandsSettled(page);
     await submitModelScript(page, "model-v2-anim", animated);
     await waitForModelRendered(page, "model-v2-anim");
 
@@ -290,7 +276,7 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
     expect(idleB).toEqual(idleA);
 
     // hover 模型：前景包围框随时间变化（动画播放）。
-    const point = await modelClientPoint(page, "model-v2-anim");
+    const point = await worldModelClientPoint(page, "model-v2-anim");
     await page.mouse.move(point.x, point.y);
     await page.waitForTimeout(300);
     const hoveredA = await foregroundStats(page);
@@ -328,21 +314,20 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
       scene.rotate("body", { axis: "${axis}", speed: 3.0 });
     `;
     // 两个模型节点相距足够远，互不重叠。
+    // 两个世界模型：画布点投影成彼此分开的 h=0 世界实例。
     for (const [id, x, axis] of [
       ["anim-a", 200, "y"],
       ["anim-b", 900, "z"]
     ] as const) {
       const created = await createNode(page, { nodeType: "model3d", position: { x, y: 150 }, nodeId: id });
       expect(created.ok).toBe(true);
-      expect((await sendCommands(page, [{ type: "node.update", nodeId: id, width: 320, height: 320 }])).ok).toBe(true);
-      await waitForCommandsSettled(page);
       await submitModelScript(page, id, animated(axis));
       await waitForModelRendered(page, id);
     }
 
     // 两个节点都在视口内：整体前景是两个稳定模型。
-    const pointA = await modelClientPoint(page, "anim-a");
-    const pointB = await modelClientPoint(page, "anim-b");
+    const pointA = await worldModelClientPoint(page, "anim-a");
+    const pointB = await worldModelClientPoint(page, "anim-b");
     await page.mouse.move(20, 700);
     await page.waitForTimeout(400);
     const idle = await foregroundStats(page);
@@ -372,4 +357,19 @@ test.describe("V2 连续人物 WASM 视觉回归", () => {
     // 模型仍可见（未因切换被隐藏/删除）。
     expect(settled.ratio).toBeGreaterThanOrEqual(idle.ratio * 0.9);
   });
+});
+
+test("世界模型塔高按真实尺度绘制：单节点非空且不被裁切", async ({ page }) => {
+  test.setTimeout(120000);
+  await resetCanvasStorage(page);
+  await waitForCanvasSession(page);
+  const created = await createNode(page, { nodeType: "model3d", position: { x: 380, y: 140 }, nodeId: "world-tower" });
+  expect(created.ok).toBe(true);
+  await submitModelScript(page, "world-tower",
+    "for(let i=0;i<8;i+=1){scene.box({id:'t'+i,position:[0,i*0.6,0],size:[0.5,0.55,0.5],color:'#c02a2a'});}");
+  await waitForModelRendered(page, "world-tower");
+  const stats = await foregroundStats(page);
+  expect(stats.ratio).toBeGreaterThan(0.0005);
+  expect(stats.minX).toBeGreaterThanOrEqual(0);
+  expect(stats.maxX).toBeLessThan(stats.width);
 });

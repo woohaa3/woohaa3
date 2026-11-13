@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { ApplicationExtensionAssistantFacade, ApplicationExtensionServices } from "@woohaa3/contracts";
 import type { AgentConversationService } from "./agent-conversation-service.js";
+import type { AgentRoleRegistry } from "../agent-roles/registry.js";
 
 /** One ledger identity per extension request; no transport, credentials or agent loop lives here. */
 export function createExtensionAssistants(extensionId: string, services: ApplicationExtensionServices,
-  conversations: () => AgentConversationService): ApplicationExtensionAssistantFacade {
+  conversations: () => AgentConversationService, agentRoles?: () => AgentRoleRegistry | undefined): ApplicationExtensionAssistantFacade {
   const key = (id: string) => `extension-${createHash("sha256").update(JSON.stringify([extensionId, id])).digest("hex")}`;
   type Identity = Parameters<ApplicationExtensionAssistantFacade["query"]>[0];
   const authorize = async (input: Identity) => {
@@ -16,17 +17,22 @@ export function createExtensionAssistants(extensionId: string, services: Applica
     return found.ok && found.turn.target.canvasId === input.canvasId && found.turn.target.nodeId === input.nodeId ? found : null;
   };
   return {
-    async submit(input) {
+    async submitRole(input) {
       if (!await authorize(input)) return { ok: false, code: "authorization-unavailable", message: "无法授权助手访问当前画布。" };
+      if (!agentRoles?.()) return { ok: false, code: "role-unavailable", message: "宿主未启用 Agent 角色注册表" };
       const service = conversations();
       const resolved = await service.resolveConnectionBinding({ owner: input.subject, adapterId: input.connection.adapterId, connectionId: input.connection.connectionId });
       if (!resolved.ok) return { ok: false, ...resolved.error };
       const binding = resolved.binding;
-      if (!binding || binding.configRevision !== input.connection.configRevision || binding.credentialEpoch !== input.connection.credentialEpoch) {
+      const frozenMatches = (candidate: typeof binding | undefined) => !!candidate
+        && candidate.connectionId === input.connection.connectionId && candidate.adapterId === input.connection.adapterId
+        && candidate.configRevision === input.connection.configRevision && candidate.credentialEpoch === input.connection.credentialEpoch;
+      // 解析时可能刚完成执行器版本迁移并推进了版本；迁移前冻结的选择仍然接受，本回合按迁移后身份冻结。
+      if (!binding || (!frozenMatches(binding) && !frozenMatches(resolved.upgradedFrom))) {
         return { ok: false, code: "connection-unavailable", message: "助手连接已更新，请重新选择助手。" };
       }
       const images = [];
-      for (const ref of input.references) {
+      for (const ref of input.references ?? []) {
         if (!services.media.resources || !services.media.verify) return { ok: false, code: "media-unavailable", message: "宿主无法读取助手参考图。" };
         const verified = await services.media.verify(ref.storageKey, input.canvasId);
         if (!verified.exists || verified.metadata.checksum !== ref.checksum || !verified.metadata.contentType.startsWith("image/")) {
@@ -43,12 +49,25 @@ export function createExtensionAssistants(extensionId: string, services: Applica
         : service.createConversation({ owner: input.subject, canvasId: input.canvasId, nodeId: input.nodeId,
           adapterId: binding.adapterId, connectionId: binding.connectionId });
       if (!conversation.ok) return { ok: false, ...conversation.error };
-      const candidate = { images, outputSchema: input.outputSchema, referenceIdentity: input.references };
-      const accepted = service.acceptStructuredTurn({ owner: input.subject, conversationId: conversation.conversation.conversationId,
-        requestId, connection: binding, candidate, entry: { action: "discuss", canvasId: input.canvasId, nodeId: input.nodeId,
-          prompt: input.prompt, ...(input.model ? { model: input.model } : {}), ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}) } });
+      const candidate = { images, outputSchema: {}, referenceIdentity: input.references ?? [] };
+      const accepted = service.acceptStructuredTurn({
+        owner: input.subject,
+        conversationId: conversation.conversation.conversationId,
+        requestId,
+        connection: binding,
+        candidate,
+        trustedRole: { input: input.roleInput, context: input.roleContext },
+        entry: {
+          action: "discuss",
+          roleId: input.roleId,
+          canvasId: input.canvasId,
+          nodeId: input.nodeId,
+          prompt: typeof (input.roleInput as { prompt?: unknown })?.prompt === "string" ? (input.roleInput as { prompt: string }).prompt : JSON.stringify(input.roleInput ?? null),
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {})
+        }
+      });
       if (!accepted.ok) return { ok: false, ...accepted.error };
-      // Replays only observe the existing ledger, including queued/unknown turns after a restart.
       if (!accepted.reused) void service.dispatchStructuredTurn(accepted.turn.turnId, candidate);
       return { ok: true, conversation: { conversationId: accepted.turn.conversationId, requestId: accepted.turn.requestId } };
     },

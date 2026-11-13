@@ -26,10 +26,7 @@ export function derivePanelDraft(
 ): { prompt: string; parameters: Record<string, unknown> } {
   return {
     prompt: draft?.prompt ?? (typeof nodeData.prompt === "string" ? nodeData.prompt : ""),
-    parameters: {
-      ...(nodeData.parameters ?? {}),
-      ...(draft?.parameters ?? {})
-    }
+    parameters: { ...(draft?.parameters ?? nodeData.parameters ?? {}) }
   };
 }
 

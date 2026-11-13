@@ -2,7 +2,6 @@ import type { Woohaa3CanvasDocument,
   Woohaa3CanvasJsonObject,
   Woohaa3CanvasNodeDataMap } from "./core";
 import type { VideoEditIntent } from "../../video/video-edit.js";
-import type { ModelCamera } from "../model-cameras.js";
 import type { ImageEditDocument } from "../image-edit.js";
 
 export type GenerationKind = "text" | "image" | "video" | "audio";
@@ -122,14 +121,7 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
    * `null` 显式清除（恢复纯媒体版本时）。
    */
   imageEdit?: ImageEditDocument | null;
-  /**
-   * 模型节点的镜头子资源（change: add-model-editor-gizmo-shot-capture，design D2）。
-   *
-   * 只保存 `id/name/order/azimuth/distance`；固定仰角、派生 AABB focus、投影与 fit span
-   * 是版本化行为。由 `decodeModelCameras` / runtime allowlist 强制校验，绝不写入
-   * selection、preview URL、Blob 或 GPU 对象。
-   */
-  modelCameras?: ModelCamera[];
+
   parameters?: Record<string, unknown>;
 };
 

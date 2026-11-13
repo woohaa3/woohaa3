@@ -11,7 +11,6 @@
  * "这类输入有多慢"被单事件噪声淹没。所以按空闲间隔合并：第一下开门，同一段内继续累加，
  * 空闲 `WHEEL_BURST_IDLE_MS` 后结算。被门禁拒绝的 wheel 连门都不开（spec: 拒绝输入不发）。
  */
-import { modelPreviewWheel } from "./model-preview.js";
 import { createPerfInputRecorder, type PerfMoment } from "./perf-interaction.js";
 import type { InteractionCore } from "../interaction-core.js";
 import type { createWheelViewport } from "../interaction-viewport.js";
@@ -111,7 +110,6 @@ export function createWheelEntryHandler(
       event.preventDefault();
       return;
     }
-    if (modelPreviewWheel(core, event)) return;
     const bounds = canvas.getBoundingClientRect();
     consume(event, { left: bounds.left, top: bounds.top });
   };

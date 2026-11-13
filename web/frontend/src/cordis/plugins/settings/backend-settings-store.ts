@@ -6,11 +6,13 @@
 import type { SettingsIssue, SettingsSnapshot, SettingsWriteValue } from "@woohaa3/contracts";
 
 type RemoteResult = { ok: true; snapshot: SettingsSnapshot } | { ok: false; code: string; error: string; issues?: SettingsIssue[] };
+export type RemoteTestResult = { ok: true; message: string } | { ok: false; error: string; issues?: SettingsIssue[] };
 
 export type BackendSettingsRemote = {
   fetchSnapshot(): Promise<RemoteResult>;
   setExtensionInstalled?(extensionId: string, installed: boolean): Promise<RemoteResult>;
   write(values: Record<string, SettingsWriteValue>): Promise<RemoteResult>;
+  test?(values: Record<string, SettingsWriteValue>): Promise<RemoteTestResult>;
 };
 
 export type BackendSettingsState =
@@ -20,6 +22,7 @@ export type BackendSettingsState =
   | { status: "ready"; snapshot: SettingsSnapshot };
 
 export type BackendSettingsSaveResult = { ok: true } | { ok: false; error: string; issues: SettingsIssue[] };
+export type BackendSettingsTestResult = { ok: true; message: string } | { ok: false; error: string; issues: SettingsIssue[] };
 
 export type BackendSettingsStore = {
   getState(): BackendSettingsState;
@@ -28,6 +31,7 @@ export type BackendSettingsStore = {
   load(): Promise<void>;
   setExtensionInstalled?(extensionId: string, installed: boolean): Promise<BackendSettingsSaveResult>;
   save(values: Record<string, SettingsWriteValue>): Promise<BackendSettingsSaveResult>;
+  test?(values: Record<string, SettingsWriteValue>): Promise<BackendSettingsTestResult>;
 };
 
 /**
@@ -44,6 +48,7 @@ export function withRuntimeStateRefresh(
   return {
     fetchSnapshot: () => remote.fetchSnapshot(),
     setExtensionInstalled: remote.setExtensionInstalled?.bind(remote),
+    ...(remote.test ? { test: remote.test.bind(remote) } : {}),
     async write(values) {
       const result = await remote.write(values);
       if (result.ok) {
@@ -89,6 +94,12 @@ export function createBackendSettingsStore(remote: BackendSettingsRemote): Backe
         return { ok: true };
       }
       if (result.code === "unauthorized") set({ status: "unauthorized" });
+      return { ok: false, error: result.error, issues: result.issues ?? [] };
+    },
+    async test(values) {
+      if (!remote.test) return { ok: true, message: "测试通过" };
+      const result = await remote.test(values);
+      if (result.ok) return { ok: true, message: result.message };
       return { ok: false, error: result.error, issues: result.issues ?? [] };
     }
   };

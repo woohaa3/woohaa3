@@ -10,6 +10,7 @@ import {
   type AssistantTextPort,
   type AssistantExecutionRef,
   type AssistantTextRun,
+  type PreparedAgentRoleTurn,
 } from "@woohaa3/contracts";
 import {
   UNCONFIRMED_RESULT_ERROR_CODE,
@@ -23,6 +24,7 @@ import type {
 import { isDefiniteFailureCode } from "./agent-conversation-service.js";
 import type { AgentConnectionRegistry } from "./agent-connection-registry.js";
 import type { AgentAdapterRegistry } from "./agent-adapter-registry.js";
+import type { AgentRoleRegistry } from "../agent-roles/registry.js";
 import type {
   AssistantTextStore,
   AssistantTextRecord,
@@ -55,6 +57,9 @@ export class AssistantTextService {
       connections: AgentConnectionRegistry;
       registry: AgentAdapterRegistry;
       canvas?: AssistantTextPort;
+      /** 文本业务入口的显式角色绑定（change: 2026-11-07-add-pluggable-agent-roles）。 */
+      agentRoles?: AgentRoleRegistry;
+      roleId?: string;
     },
   ) {}
   peek(owner: string, requestId: string) {
@@ -312,6 +317,38 @@ export class AssistantTextService {
         .finally(() => this.active.delete(record.run.runId));
     return { ...accepted, turn: { ...accepted.turn, runId: record.run.runId } };
   }
+  /** 准备冻结的文本角色回合；无注册表/角色失配时返回明确原因。 */
+  private prepareRoleTurn(
+    record: AssistantTextRecord,
+    capabilities: { imageInput: boolean; maxImages: number },
+  ): PreparedAgentRoleTurn {
+    const registry = this.deps.agentRoles;
+    const roleId = record.entry.roleId;
+    if (!registry) failure("role-unavailable", "宿主未启用 Agent 角色注册表");
+    if (!roleId) failure("role-not-found", "文本请求没有选择角色");
+    const result = registry.prepare({
+      roleId,
+      input: { prompt: record.prepared.prompt, action: "generate", mode: "text" },
+      context: { prompt: record.prepared.prompt, baseline: record.prepared.baseline },
+      target: { canvasId: record.prepared.canvasId, nodeId: record.prepared.nodeId, mode: "text" },
+      requestId: record.requestId,
+      channel: {
+        toolCalling: false,
+        imageInput: capabilities.imageInput,
+        structuredOutput: "validated-json",
+        nativeCapabilities: [],
+      },
+    });
+    if (!result.ok) failure(result.code, result.message);
+    const recorded = this.deps.conversations.recordPrepared({
+      owner: record.owner,
+      requestId: record.requestId,
+      prepared: result.turn,
+    });
+    if (!recorded.ok) failure(recorded.error.code, recorded.error.message);
+    return result.turn;
+  }
+
   private async execute(
     record: AssistantTextRecord,
     context: Parameters<
@@ -319,7 +356,8 @@ export class AssistantTextService {
     >[0],
   ): Promise<AgentAdapterRunOutcome> {
     try {
-      const { adapter } = await this.validate(record);
+      const { adapter, capabilities } = await this.validate(record);
+      const roleTurn = this.prepareRoleTurn(record, capabilities);
       const images = await this.deps.canvas!.readImages({
         owner: record.owner,
         prepared: record.prepared,
@@ -335,13 +373,19 @@ export class AssistantTextService {
         conversationId: record.run.runId,
         turnId: record.turnId!,
         requestId: record.requestId,
+        prepared: roleTurn,
         history: context.history,
         intent: {
           ...record.entry,
           action: "discuss",
-          prompt: `${record.prepared.prompt}\nReturn only JSON matching this schema. The text field is the complete artwork, preserving Markdown.\n${JSON.stringify(assistantTextCandidateSchema)}`,
+          prompt: record.prepared.prompt,
         },
-        candidate: { images, outputSchema: assistantTextCandidateSchema },
+        candidate: {
+          images,
+          outputSchema: roleTurn.output.kind === "candidate"
+            ? roleTurn.output.schema
+            : assistantTextCandidateSchema,
+        },
         signal: context.signal,
         emit: context.emit,
       });
@@ -593,6 +637,7 @@ export class AssistantTextService {
             connectionId: selected.connection.connectionId,
             connection: selected.connection,
             model: selected.model,
+            ...(this.deps.roleId ? { roleId: this.deps.roleId } : {}),
             ...(selected.reasoningEffort
               ? { reasoningEffort: selected.reasoningEffort }
               : {}),

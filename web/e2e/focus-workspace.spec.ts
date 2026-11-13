@@ -80,8 +80,7 @@ for (const width of [1440, 390]) {
         // 普通模型聚焦只保留 AI 修改与模型信息（change: 2026-10-18-simplify-model-focus-panel）：
         // 不出现镜头工具、镜头预览或截图，内容区仍不被右侧检查器遮挡。
         await expect(page.getByRole("button", { name: "添加镜头", exact: true })).toHaveCount(0);
-        await expect(page.locator(".model-camera-preview")).toHaveCount(0);
-        await expect(page.locator(".model-info")).toBeVisible();
+              await expect(page.locator(".model-info")).toBeVisible();
         await assertNoOverlap(page);
       }
       await page.locator(".model-focus-history").click();
@@ -93,8 +92,7 @@ for (const width of [1440, 390]) {
         await expect(page.locator(".model-editor-dock")).toBeHidden();
         await page.locator('.node-history__card[data-current="false"] .node-history__select').last().click();
         await expect(page.locator('.app[data-focus-owner="history"]')).toBeVisible();
-        await expect(page.locator(".model-camera-preview")).toHaveCount(0);
-        await assertNoOverlap(page);
+              await assertNoOverlap(page);
         await page.locator(".node-history__list--current .node-history__select").click();
         await expect(page.locator('.app[data-focus-owner="direct"][data-focus-panel="history"]')).toBeVisible();
       }

@@ -2,7 +2,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { recordGeneratedImage } from "@woohaa3/contracts";
+import { readRuntimeGeneratedImages } from "@woohaa3/application-service";
+vi.mock("@woohaa3/application-service", () => ({ readRuntimeGeneratedImages: vi.fn() }));
 import { withCanvasGroupScope } from "@woohaa3/canvas-service";
 import type { HostContext } from "../context.js";
 
@@ -88,7 +89,7 @@ describe("Codex generated image import uses the trusted 2D group scope", () => {
       mkdirSync(dir, { recursive: true });
       const file = path.join(dir, "a.png");
       writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-      recordGeneratedImage("req-import", file, codexHome);
+      vi.mocked(readRuntimeGeneratedImages).mockResolvedValue({ paths: [file], codexHome });
 
       const canvas = {
         id: "c",
@@ -132,6 +133,7 @@ describe("Codex generated image import uses the trusted 2D group scope", () => {
       }, () => options.agentClient.importGeneratedImage({ requestId: "req-import", index: 0 }));
 
       expect(result.ok).toBe(true);
+      expect(readRuntimeGeneratedImages).toHaveBeenCalledWith(expect.any(Object), "dev-admin", "req-import");
       const added = commands.find(command => command.type === "node.add");
       const patched = commands.find(command => command.type === "nodeData.patch");
       expect(added?.node?.id).toBeTruthy();

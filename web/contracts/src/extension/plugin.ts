@@ -90,7 +90,9 @@ export type ExtensionPlugin<F extends HostConfigFields = HostConfigFields> = {
   /**
    * 模型目录刷新入口声明：设置页据此显示「可用模型」一节（说明 + 刷新按钮）。
    *
-   * `path` 由插件自己在 `apply` 里用 `ctx.webServer.route`（或 `ctx.gateway.route`）注册并鉴权；
+   * `path` 由插件自己注册并鉴权：用 `@woohaa3/provider-sdk` 的 `registerModelRefreshRoute`
+   * （鉴权与响应形状统一），或自行用 `ctx.webServer.registerHttp` / `registerRawHttp`。
+   * 扩展可见的服务面里**没有** `gateway`，不要按 `ctx.gateway.route` 写。
    * 宿主只把声明透传给设置面，MUST NOT 在管理面硬编码具体 Provider（见 application-extension-runtime 规范）。
    */
   readonly modelRefresh?: { readonly path: string; readonly hint: string };
@@ -118,6 +120,10 @@ export type ExtensionPlugin<F extends HostConfigFields = HostConfigFields> = {
    * 方法签名保持双变（与 `apply` 一致），`AnyExtensionPlugin` 才继续成立。
    */
   health?(config: HostConfigValues<F>): ApplicationBackendExtensionHealth | undefined;
+  /**
+   * 连接与凭据测试（不落盘）：用候选配置验证 API Key 与服务地址是否可用。
+   */
+  testConnection?(config: HostConfigValues<F>): Promise<{ readonly ok: boolean; readonly message?: string }>;
   apply(ctx: HostExtensionContext, config: HostConfigValues<F>): void | Promise<void>;
 };
 

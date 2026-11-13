@@ -7,6 +7,7 @@ import {
 import {
   configureModelService,
   normalizeModelBaseUrl,
+  testModelServiceConnection,
 } from "./configure-service.js";
 
 function fixture() {
@@ -36,8 +37,11 @@ function fixture() {
   return { service, secrets, fetchImpl, deployment, input };
 }
 describe("地址与 Key 一步设置", () => {
-  it("接受主流 Base URL 与完整接口地址", () => {
+  it("接受主流 Base URL 与完整接口地址，不强制帮补 /v1", () => {
     expect(normalizeModelBaseUrl(" https://api.example/ ")).toBe(
+      "https://api.example",
+    );
+    expect(normalizeModelBaseUrl(" https://api.example/ ", "/v1")).toBe(
       "https://api.example/v1",
     );
     expect(normalizeModelBaseUrl("https://api.example/v1/responses/")).toBe(
@@ -53,11 +57,13 @@ describe("地址与 Key 一步设置", () => {
       normalizeModelBaseUrl("https://api.example/v1?key=secret"),
     ).toThrow();
   });
-  it("仅保留目录明确提供的模型工具能力，未知能力不伪造成已授权", async () => {
+  it("保存目录模型，不再写入逐模型工具证据（所有文本模型都按支持工具处理）", async () => {
     const { service, fetchImpl, deployment, input } = fixture();
-    fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "discussion-only", capabilities: { tools: false } }, { id: "unknown" }] })));
+    fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "catalog-model", capabilities: { tools: false } }, { id: "unknown" }] })));
     expect((await configureModelService(service, deployment, "u1", input)).status).toBe(200);
-    expect((await service.list("u1"))[0]?.modelCapabilities).toEqual({ "discussion-only": { tools: false } });
+    const [record] = await service.list("u1");
+    expect(record?.models).toEqual(["catalog-model", "unknown"]);
+    expect(Object.hasOwn(record!, "modelCapabilities")).toBe(false);
   });
   it("一次保存 Key 并 GET 模型，不生成、不回读秘密，重复保存复用服务", async () => {
     const { service, fetchImpl, deployment, input } = fixture();
@@ -156,6 +162,23 @@ describe("地址与 Key 一步设置", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+  it("目录保留模型级 reasoning 元数据；失败时保留上次成功快照", async () => {
+    const { service, deployment, fetchImpl, input } = fixture();
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ data: [
+      { id: "deepseek-exact", model_info: { supports_reasoning: true, reasoning_efforts: ["low", "high"] } },
+      { id: "deepseek-boolean", model_info: { supports_reasoning: true } }
+    ] })));
+    await configureModelService(service, deployment, "u1", input);
+    const saved = (await service.list("u1"))[0];
+    expect(saved?.modelCatalog?.models).toEqual([
+      expect.objectContaining({ id: "deepseek-exact", reasoning: expect.objectContaining({ state: "supported", efforts: [{ id: "low" }, { id: "high" }] }) }),
+      expect.objectContaining({ id: "deepseek-boolean", reasoning: expect.objectContaining({ state: "supported", efforts: [{ id: "low" }, { id: "medium" }, { id: "high" }] }) })
+    ]);
+    fetchImpl.mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const refreshed = await configureModelService(service, deployment, "u1", { ...input, connectionId: saved!.connectionId });
+    expect(refreshed).toMatchObject({ status: 200, body: { models: ["deepseek-exact", "deepseek-boolean"], modelsError: expect.any(String) } });
+    expect((await service.list("u1"))[0]?.modelCatalog?.models[0]?.reasoning).toMatchObject({ state: "supported", efforts: [{ id: "low" }, { id: "high" }] });
+  });
   it("换地址不得复用旧 Key；其他用户无法编辑，旧版本不能覆盖", async () => {
     const { service, deployment, input } = fixture();
     await configureModelService(service, deployment, "u1", input);
@@ -240,5 +263,23 @@ describe("地址与 Key 一步设置", () => {
       secret: "sk-proxy-key",
     });
     expect(result.status).toBe(200);
+  });
+
+  it("testModelServiceConnection 探测目录成功或失败均不写入连接存储", async () => {
+    const { service, deployment, fetchImpl, input } = fixture();
+    const okResult = await testModelServiceConnection(service, deployment, "u1", input);
+    expect(okResult).toMatchObject({
+      status: 200,
+      body: { ok: true, models: ["model-a", "model-b"] },
+    });
+    expect(await service.list("u1")).toHaveLength(0);
+
+    fetchImpl.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    const failResult = await testModelServiceConnection(service, deployment, "u1", input);
+    expect(failResult).toMatchObject({
+      status: 200,
+      body: { ok: false, message: expect.stringContaining("HTTP 401") },
+    });
+    expect(await service.list("u1")).toHaveLength(0);
   });
 });

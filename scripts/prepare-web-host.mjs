@@ -28,18 +28,21 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';import {
+import { createRequire, builtinModules } from 'node:module';
+import {
   copyRuntimeFiles,
   copyRuntimePackage,
   attachRuntimePackage,
   assertPortableTree,
   linkRuntimePackage,
-  isExternalDesktopDependency
+  isExternalDesktopDependency,
+  copyNpmCli
 } from './lib/desktop-host-package.mjs';
 import { prepareWebHostNode, webNodeArtifact } from './lib/web-host-node.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
 import { loadBuildProfile, buildDefines, describeBuildProfile } from './lib/build-profile.mjs';
 import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
+import { assertRuntimeNpmLockCurrent, auditRuntimeNpmScripts } from './lib/runtime-npm-manifest.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_ROOT = path.resolve(HERE, '..');
@@ -110,10 +113,68 @@ function readDefines(env = process.env) {
   return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, JSON.stringify(value)]));
 }
 
+/**
+ * 必须与扩展**共享同一个模块实例**的包（不内联，改由运行期从 `packages/` 解析）。
+ *
+ * 为什么：这些包的语义建立在**模块级单例**上。`@sdppp/pptask` 的执行事实总线是
+ * `const listeners = new Set()`，`subscribePptaskExecutions` 的文档写明它是
+ * "process-wide feed"——只有进程内只有一个该模块实例时才成立。
+ *
+ * 宿主 `bundleBackend` 默认把除 `node:*` 之外的全部依赖内联，于是宿主持有自己那份
+ * `listeners`；而 Provider 扩展（`remote-server` / `*-provider`）按 `build-package.mjs`
+ * 把 `dependencies` 一律 external，运行期从 `packages/` 解析到**另一份**。两份各有一个
+ * Set，扩展发出的 `succeeded + result` 永远到不了宿主订阅者：
+ * Task 的 stable-media 分支不执行、history 只留调度侧的终态、画布投影按「成功但无产物」
+ * 收场（2026-11-13 现场 run-ba2b6889）。
+ *
+ * 源码级"同源"不等于运行期"同实例"。这里把这类包改回外部共享，才是真正的构建期保证。
+ */
+export const SHARED_RUNTIME_PACKAGES = ['@sdppp/pptask', '@woohaa3/runtime-components'];
+
+/**
+ * 允许在宿主与扩展里各持一份的包（不参与门禁）。
+ *
+ * 判据是「有没有跨调用共享的**可变**运行状态」，不是「有没有 `new Set()`」：
+ * - `@woohaa3/contracts` 的 Set/Map 全是常量查找表或纯函数缓存（设计上明确无 I/O、无装配），
+ *   分裂只影响缓存命中率，不影响正确性；它也被 `build-package.mjs` 有意内联进各产物。
+ * - 加入这里必须能说明「分裂为什么无害」，否则应当进 SHARED_RUNTIME_PACKAGES。
+ */
+export const INSTANCE_SPLIT_ALLOWED = [
+  '@woohaa3/contracts',
+  '@woohaa3/ui',
+  '@woohaa3/frontend',
+  '@woohaa3/provider-sdk',
+  // `yjs` 的两份实例互不交换对象：宿主（canvas-service）持有权威 Y.Doc，
+  // `infinspire-migration` 只用它把旧格式 checkpoint/updates 解码成普通对象，
+  // 建的是自己的 `Y.Doc`，不把 Y 类型实例传回宿主。没有跨实例的 `instanceof` 或
+  // 结构校验，因此分裂无害 —— 与 pptask 的事件总线（必须共享同一 Set）性质不同。
+  'yjs'
+];
+
 export async function bundleBackend({ entry, outfile, sourcemap = true, env = process.env }) {
   // esbuild 只装在 `web/` workspace 里（客户端的打包口径都在那边）；client 根没有它的依赖。
   const requireFromWeb = createRequire(path.join(CLIENT_ROOT, 'web/package.json'));
   const esbuild = requireFromWeb('esbuild');
+  // 共享包及其子路径留成外部说明符（与扩展产物同一形态），运行期由资源根的
+  // `node_modules/` 解析到装配出的 `packages/` 目录，保证宿主与扩展拿到同一模块实例。
+  const sharedExternals = SHARED_RUNTIME_PACKAGES.flatMap((name) => [name, `${name}/*`]);
+  // 记录被**内联**的裸说明符（`@sdppp/pptask` 这类若被内联，就是装配期门禁要拦的实例分裂）。
+  // 不能用 metafile 的 inputs 路径反推包名：workspace 包的真实路径是 `web/vendor/pptask/...`，
+  // 里面根本不出现 `@sdppp/pptask` 字面量，按路径匹配永远落空（已实测）。因此在 resolve 阶段记录。
+  const bundledSpecifiers = new Set();
+  const recordBundledPlugin = {
+    name: 'woohaa-record-bundled-specifiers',
+    setup(build) {
+      build.onResolve({ filter: /^[^./]/ }, (args) => {
+        if (args.kind === 'entry-point') return undefined;
+        const specifier = args.path;
+        if (specifier.startsWith('node:')) return undefined;
+        const parts = specifier.split('/');
+        bundledSpecifiers.add(specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
+        return undefined;
+      });
+    }
+  };
   const result = await esbuild.build({
     entryPoints: [entry],
     bundle: true,
@@ -123,21 +184,29 @@ export async function bundleBackend({ entry, outfile, sourcemap = true, env = pr
     outfile,
     sourcemap,
     // 内建模块必须留成 require，esbuild 不会也不需要打包它们。
-    external: ['node:*'],
+    external: ['node:*', ...sharedExternals],
     mainFields: ['module', 'main'],
     conditions: ['import', 'module', 'default'],
     loader: { '.css': 'empty', '.node': 'empty' },
     // 构建期常量（公开桶、官方信任根、默认设置）。与 build-package.mjs 同一来源。
     define: readDefines(env),
     logLevel: 'error',
-    metafile: true
+    metafile: true,
+    plugins: [recordBundledPlugin]
   });
-  const external = Object.keys(result.metafile.inputs).filter((key) => key.startsWith('external'));
+  const external = Object.keys(result.metafile.inputs)
+    .filter((key) => key.startsWith('external'))
+    .filter((key) => {
+      const specifier = key.slice('external:'.length);
+      return !SHARED_RUNTIME_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`));
+    });
   if (external.length > 0) {
     throw new Error(`后端仍有未内联的外部依赖：${external.slice(0, 5).join(', ')}`);
   }
   const size = fs.statSync(outfile).size;
-  return { outfile, size, modules: Object.keys(result.metafile.inputs).length };
+  // 被内联进宿主产物的包名清单：装配期门禁据此判断「某包是否被宿主自带了一份」。
+  // 共享包留成 external，不会出现在这里（那正是要的结果）。
+  return { outfile, size, modules: Object.keys(result.metafile.inputs).length, bundledPackages: [...bundledSpecifiers].sort() };
 }
 
 /** 递归列出目录下的 `.js` / `.mjs`（扩展产物只有这类需要检查）。 */
@@ -150,6 +219,144 @@ function listScripts(dir) {
     else if (/\.(?:js|mjs|cjs)$/.test(entry.name)) found.push(full);
   }
   return found;
+}
+
+/**
+ * 把 `SHARED_RUNTIME_PACKAGES` 收进 `packages/`，返回解析到的目录。
+ *
+ * 复用扩展装配的那套收集器与**同一个 `state`**：`copyRuntimePackage` 以 realpath 为键去重，
+ * 因此宿主要的这份与各扩展链接到的 `packages/<name>-<hash>` 是同一个目录。这正是
+ * 「同一模块实例」的物理保证 —— 只靠源码同源是不够的。
+ */
+function collectSharedRuntimePackages({ output, clientRoot, state }) {
+  const collected = [];
+  const webRoot = path.join(clientRoot, 'web');
+  for (const name of SHARED_RUNTIME_PACKAGES) {
+    // 共享包是 workspace 成员（`workspace:*`），从 pnpm 的 node_modules 找真实目录。
+    // 注意不能用 `resolve(`${name}/package.json`)`：这些包的 `exports` 只声明了入口
+    // 与少数子路径，没声明 `./package.json`（会报 ERR_PACKAGE_PATH_NOT_EXPORTED）。
+    // 这里按包名定位 node_modules 下的链接，再 realpath 到 workspace 源目录。
+    let source = null;
+    const segments = name.split('/');
+    // 锚点覆盖声明方与自身目录：`@woohaa3/runtime-components` 不在 backend 的
+    // node_modules 里（它是通过 workspace 直接引用的），要看它自己的目录。
+    const anchors = [
+      path.join(webRoot, 'backend'),
+      path.join(webRoot, 'services', 'task-service'),
+      ...(name.startsWith('@woohaa3/') ? [path.join(webRoot, name.slice('@woohaa3/'.length))] : [])
+    ];
+    for (const anchor of anchors) {
+      const candidate = path.join(anchor, 'node_modules', ...segments);
+      if (fs.existsSync(path.join(candidate, 'package.json'))) {
+        source = fs.realpathSync(candidate);
+        break;
+      }
+    }
+    // workspace 包也可能直接就在该目录（没有经过 node_modules 链接）。
+    if (source === null && name.startsWith('@woohaa3/')) {
+      const direct = path.join(webRoot, name.slice('@woohaa3/'.length));
+      if (fs.existsSync(path.join(direct, 'package.json'))) source = fs.realpathSync(direct);
+    }
+    if (source === null) {
+      throw new Error(`共享运行时包 ${name} 无法解析：确认它声明在 web/backend 的 dependencies 里`);
+    }
+    const target = copyRuntimePackage(source, output, state);
+    collected.push({ name, target });
+  }
+  return collected;
+}
+
+/**
+ * 门禁：同一包不得「宿主内联 + 扩展外部引用」并存。
+ *
+ * 这类分裂不会报错，只会在运行期让模块级单例静默失效：宿主的 `listeners` 与扩展的
+ * `listeners` 是两个 Set，扩展发出的执行事实永远到不了宿主。表现是「任务成功但产物没落地」，
+ * 排查成本极高（2026-11-13 现场）。所以装配期当场失败，与 `findUnreplacedDefines` 同一姿态。
+ */
+function assertNoSplitInstances({ output, backendFile, backendInputs, sharedPackages, installed }) {
+  const backend = fs.readFileSync(backendFile, 'utf8');
+  const split = [];
+
+  // 1) 白名单内的包：宿主必须留成外部依赖（不能又被内联回去）。
+  for (const { name, target } of sharedPackages) {
+    if (!backend.includes(`require("${name}")`) && !backend.includes(`require('${name}')`)) {
+      split.push(`${name}：宿主 backend.cjs 没有把它留成外部依赖（期望 require("${name}")）`);
+      continue;
+    }
+    const link = path.join(output, 'node_modules', name);
+    if (!fs.existsSync(link)) {
+      split.push(`${name}：资源根下缺少 node_modules/${name}，宿主 require 会失败`);
+      continue;
+    }
+    if (fs.realpathSync(link) !== fs.realpathSync(target)) {
+      split.push(`${name}：宿主链接到 ${path.relative(output, fs.realpathSync(link))}，与收集出的 ${path.relative(output, target)} 不是同一份`);
+    }
+  }
+
+  // 2) 反向检查（这道才是真正防复发的）：任何被**扩展产物**留成外部说明符、且宿主**也**
+  //    以某种方式持有它的包，都必须与扩展解析到同一份目录。
+  //
+  //    判断「宿主是否持有」用 `bundleBackend` 在 resolve 阶段记录的 `bundledPackages`
+  //    （真正被内联的包名清单），而不是白名单——白名单被清空时这里仍然会命中。
+  const extensionExternals = new Map();
+  const BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
+  for (const extensionId of installed) {
+    const distDirs = [
+      path.join(output, 'extensions', extensionId, 'dist'),
+      path.join(output, 'extensions', extensionId, 'backend-dist'),
+      path.join(output, 'extensions', extensionId, 'browser-dist')
+    ];
+    for (const file of distDirs.flatMap((dir) => listScripts(dir))) {
+      const text = fs.readFileSync(file, 'utf8');
+      // 只认真正的 ESM 说明符：`import ... from "x"` / `export ... from "x"` / `import "x"`。
+      // 此前用宽泛的 `from "..."` 会把 `from "node:fs"` 甚至裸标识符误当成包名。
+      for (const match of text.matchAll(/(?:^|\n)\s*(?:import|export)\s[^;]*?from\s+["']([^"']+)["']/g)) {
+        const specifier = match[1];
+        if (specifier.startsWith('.') || specifier.startsWith('node:') || BUILTINS.has(specifier)) continue;
+        // 取包名：`@scope/name/sub` → `@scope/name`；`name/sub` → `name`
+        const parts = specifier.split('/');
+        const name = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+        if (!extensionExternals.has(name)) extensionExternals.set(name, new Set());
+        extensionExternals.get(name).add(extensionId);
+      }
+    }
+  }
+
+  const inlinedInHost = new Set(backendInputs);
+
+  for (const [name, extensions] of extensionExternals) {
+    if (!inlinedInHost.has(name)) continue; // 宿主没有内联它，不构成分裂
+    if (INSTANCE_SPLIT_ALLOWED.includes(name)) continue; // 已论证分裂无害（见白名单注释）
+    for (const extensionId of extensions) {
+      const link = path.join(output, 'extensions', extensionId, 'node_modules', name);
+      if (!fs.existsSync(link)) {
+        split.push(
+          `${name}：宿主内联了一份，而扩展 ${extensionId} 没有共享链接（各自持有一份副本）`
+        );
+        continue;
+      }
+      const hostLink = path.join(output, 'node_modules', name);
+      if (!fs.existsSync(hostLink)) {
+        split.push(`${name}：宿主内联了一份，但资源根没有共享链接（扩展解析到的是另一份）`);
+        continue;
+      }
+      if (fs.realpathSync(link) !== fs.realpathSync(hostLink)) {
+        split.push(
+          `${name}：扩展 ${extensionId} 解析到 ${path.relative(output, fs.realpathSync(link))}，` +
+            `宿主共享链接是 ${path.relative(output, fs.realpathSync(hostLink))}`
+        );
+      }
+    }
+  }
+
+  if (split.length > 0) {
+    throw new Error(
+      `共享运行时包存在「源码一份、实例两份」的装配：\n  ${split.join('\n  ')}\n` +
+        '  这些包依赖模块级单例（事件总线 / 注册表），分裂后宿主的订阅者收不到扩展发出的事实，\n' +
+        '  且运行期不报错，只表现为「任务成功但产物没落地」。\n' +
+        `  需保持共享的包：${SHARED_RUNTIME_PACKAGES.join('、')}（见 SHARED_RUNTIME_PACKAGES）。`
+    );
+  }
 }
 
 /** 复制 `scripts/` 目录（排除测试与本地状态）—— 扩展宿主按整目录相互 import，不能挑文件。 */
@@ -309,7 +516,24 @@ export async function prepareWebHost({
 
   // 5) 扩展：逐扩展自包含目录
   const siteDefaults = buildProfile.resolved.siteExtensionDefaults;
-  const scan = scanExtensions({ repoRoot: clientRoot, env: {} });
+  const extensionDefaults = buildProfile.resolved.extensionDefaults;
+  // 尊重 `WOOHAA3_EXTENSION_DIRS`：父仓 `scripts/deploy-web-host.mjs` 会在装配前注入全部扫描根
+  // （含父仓私有 `extensions/`），内建扩展必须与发布形态一致地进入产物。
+  //
+  // 这里曾经写死 `env: {}`，于是只扫 client 自己的两个根：`extensions/litellm-provider` 这类
+  // 父仓私有扩展在 web host 上**不存在内建副本**，只能从市场安装——而市场版本落后于宿主时
+  // （删过 ctx 能力），装上去就是一个启动不了的插件。公开 client 不能反向读父仓配置，
+  // 所以根仍由父仓显式注入，这里只负责不要吞掉它。
+  //
+  // **但受管安装根必须排除**：`scanExtensions` 还会按 `installations.json` 取 `.woohaa3/extensions`
+  // 里本机从市场装过的版本。那是**部署侧数据**，不是 release 内容——带上它等于把打包机本机的
+  // 市场安装（`sourceId: github-release`，带 FILES.json/SIGNATURE）悄悄混进发行包，
+  // 用户会看到一个从没申请过、也没有出厂默认值的「示例插件」。装配只看源码根。
+  const scan = scanExtensions({
+    repoRoot: clientRoot,
+    // 指向一个不存在的目录：受管根是装配期应当忽略的来源，扫描器对「不存在」只跳过、不报错。
+    env: { ...process.env, WOOHAA3_EXTENSION_MANAGED_DIR: path.join(clientRoot, ".local/extension-managed-unused") }
+  });
   // 扫描根可能是三类，处理方式不同：
   // - 源码根（`web/extensions`、`extensions`）：workspace 成员，用 `pnpm deploy --prod` 装自包含目录；
   // - 运行时受管根（`.woohaa3/extensions`，市场/本地安装）：目录本身**就是**已构建的版本化产物，
@@ -338,6 +562,12 @@ export async function prepareWebHost({
       stdio: 'inherit'
     });
   });
+
+  // 共享运行时包先于扩展收集：两者共用同一个 `state`，`copyRuntimePackage` 以 realpath 为键
+  // 去重，所以宿主侧与各扩展链接到的 `packages/<name>-<hash>` 是同一份目录（同一模块实例）。
+  // 顺序很重要：若扩展先跑，它仍会得到同一个 target，但这里的返回值就不是「首个」写入者。
+  const sharedPackages = collectSharedRuntimePackages({ output, clientRoot, state });
+
   for (const extension of selected) {
     const pkgFile = path.join(extension.dir, 'package.json');
     if (!fs.existsSync(pkgFile)) continue;
@@ -375,6 +605,24 @@ export async function prepareWebHost({
     if (siteDefaults[extension.extensionId] !== undefined) {
       applySiteDefaultEnabled({ extensionDir: target, enabled: siteDefaults[extension.extensionId] });
     }
+    // browser-local 扩展的出厂启停走 artifact metadata（契约禁止它们声明 site.defaultEnabled）。
+    //
+    // 这条通道此前只在 `assemble-extension-release.mjs` 接上过，而 web host 装配会把那份构建期
+    // release 目录删掉、由宿主按扩展目录重建——于是 profile 的 `extensions.defaultEnabled`
+    // 在 web host / 桌面形态里**完全不生效**，写进 profile 也没有任何效果。这里在装配时直接
+    // 改写产物的 `browser-dist/artifact-manifest.json`，宿主重建 catalog 时读到的就是带默认值的 metadata。
+    if (extensionDefaults[extension.extensionId] !== undefined) {
+      const manifestFile = path.join(target, 'browser-dist', 'artifact-manifest.json');
+      if (!fs.existsSync(manifestFile)) {
+        throw new Error(
+          `profile 指定了 ${extension.extensionId} 的出厂启停，但产物里没有 browser-dist/artifact-manifest.json：\n` +
+            `  该扩展不是 browser-local 入口，站点级扩展请改用 extensions.siteDefaultEnabled`
+        );
+      }
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      manifest.metadata = { ...manifest.metadata, defaultEnabled: extensionDefaults[extension.extensionId] };
+      fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    }
     // 扩展产物自己也可能内联了构建期常量（当前只有 `local-storage` 消费公开桶）。
     // 它们由各包自己的 `build` → `build-package.mjs` 构建，只有**那条链路带
     // WOOHAA3_DEFINES** 时才会替换。产物里残留未替换标识符说明它是在缺注入的环境里
@@ -397,12 +645,49 @@ export async function prepareWebHost({
   }
   if (installed.length === 0) throw new Error('没有装配到任何扩展：检查 extensions.config.json 的扫描根与扩展产物');
 
+  // 宿主是 CJS（`backend.cjs`），它的 `require("@sdppp/pptask")` 从资源根逐级向上找
+  // `node_modules`。这里把共享包链接到 `<output>/node_modules/<name>`，与扩展侧
+  // `extensions/<id>/node_modules/<name>` 指向同一个 `packages/<name>-<hash>`。
+  //
+  // 不依赖 NODE_PATH：`buildWebHostEnvironment` 会显式清掉它（隔离设计），而资源根下的
+  // `node_modules` 是 Node 的标准解析路径，不需要任何环境变量。
+  for (const { name, target } of sharedPackages) {
+    // 不用 linkRuntimePackage：它在 Windows 上走 `deferLinks` 只记清单，而本形态没有
+    // 消费 `runtime-links.json` 的解包步骤，宿主要求的是**当场可解析**的链接。
+    const link = path.join(output, 'node_modules', name);
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    if (!fs.existsSync(link)) {
+      fs.symlinkSync(path.relative(path.dirname(link), fs.realpathSync(target)), link, process.platform === 'win32' ? 'junction' : 'dir');
+    }
+  }
+
+  // 共享运行时包的装配门禁：同一包不得既被宿主内联、又被扩展留成外部说明符。
+  // 必须放在链接之后——门禁要验证链接确实指向收集出的同一份目录。
+  // 命中说明「源码一份、实例两份」，症状是模块级单例（事件总线、注册表）静默不共享，
+  // 2026-11-13 的生成产物不落地就是它。
+  assertNoSplitInstances({
+    output,
+    backendFile: path.join(output, 'backend.cjs'),
+    backendInputs: backend.bundledPackages ?? [],
+    sharedPackages,
+    installed
+  });
+
   // 6) Node 运行时
   fs.mkdirSync(path.join(output, 'node'), { recursive: true });
   const nodeTarget = path.join(output, 'node', process.platform === 'win32' ? 'woohaa-node.exe' : 'woohaa-node');
   fs.copyFileSync(node.binary, nodeTarget);
   fs.chmodSync(nodeTarget, 0o755);
   if (node.license) fs.copyFileSync(node.license, path.join(output, 'node/NODE_LICENSE'));
+  // npm registry runtime 安装所需的 app-local npm CLI；与桌面装配同一份来源和口径。
+  const npmCli = copyNpmCli(node.extracted, path.join(output, 'tools'));
+  const npmLock = assertRuntimeNpmLockCurrent({ clientRoot });
+  fs.writeFileSync(path.join(output, 'runtime-npm-lock.json'), `${JSON.stringify(npmLock, null, 2)}\n`);
+  const scriptAudit = auditRuntimeNpmScripts({ clientRoot, lock: npmLock });
+  fs.writeFileSync(path.join(output, 'runtime-npm-scripts.audit.json'), `${JSON.stringify(scriptAudit, null, 2)}\n`);
+  // 与桌面同一份 CDN 缺省/组件版本锁（Web host 可能只用 npm registry，但缺省值必须一致）。
+  fs.copyFileSync(path.join(clientRoot, 'desktop/runtime-downloads.json'), path.join(output, 'runtime-downloads.json'));
+  fs.copyFileSync(path.join(clientRoot, 'desktop/runtime-components.lock.json'), path.join(output, 'runtime-components.lock.json'));
 
   // 7) 启动器与清单
   fs.copyFileSync(path.join(layout.scriptsDir, 'web-host.mjs'), path.join(output, 'web-host.mjs'));
@@ -416,6 +701,8 @@ export async function prepareWebHost({
     arch: process.arch,
     backend: { entry: 'backend.cjs', bytes: backend.size, modules: backend.modules },
     frontend: path.basename(frontendDir),
+    tools: { npm: path.relative(output, npmCli.npmCli).split(path.sep).join('/') },
+    runtime: { npmLock: 'runtime-npm-lock.json' },
     extensions: installed,
     // 版本标识：`--status` 与部署脚本靠它回答「目标机上跑的是哪一版」。
     // 部署脚本用 `--commit` 显式传入（与它校验的工作区一致），避免「打包时的 HEAD」
@@ -428,7 +715,7 @@ export async function prepareWebHost({
   for (const map of ['backend.cjs.map']) fs.rmSync(path.join(output, map), { force: true });
 
   assertPortableTree(output);
-  return { output, node: nodeTarget, nodeVersion: artifact.version, backend, extensions: installed };
+  return { output, node: nodeTarget, nodeVersion: artifact.version, backend, extensions: installed, npmCli: path.join(output, 'tools/npm/bin/npm-cli.js') };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

@@ -55,6 +55,8 @@ export type ToolGrantRegistry = {
    * 生命周期、权限与范围代次决定。
    */
   authorize: (input: { token: string; tool: string; canvasId?: string; nodeId?: string; cameraId?: string; clipId?: string; itemId?: string }) => { ok: true } | { ok: false; reason: string };
+  /** 可选：释放持久化连接（宿主关闭时）。 */
+  close?: () => void;
 };
 
 /** MCP `tools/list` 的本轮目录：有 grant 就只暴露其 tools，无 token 才给全量发现。 */
@@ -62,12 +64,29 @@ export function catalogToolsForGrant(grant: { tools: readonly string[] } | null 
   return grant ? grant.tools : undefined;
 }
 
-export function createToolGrantRegistry(): ToolGrantRegistry {
+export function createToolGrantRegistry(options: {
+  /**
+   * 持久 grant 存储（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）。
+   *
+   * 提供时启动加载未撤销 grant 到内存缓存；签发与撤销同时写库，宿主重启后仍可校验。
+   * 撤销写库后立刻从缓存移除，即使旧 journal 继续调用也 fail closed。
+   */
+  store?: import("./tool-grant-store.js").ToolGrantStore;
+  now?: () => string;
+} = {}): ToolGrantRegistry {
   const grants = new Map<string, ApplicationToolGrant>();
+  const store = options.store;
+  const now = options.now ?? (() => new Date().toISOString());
+  for (const entry of store?.load() ?? []) {
+    if (entry.revokedAt !== null) continue;
+    grants.set(entry.grant.token, { ...entry.grant, subject: entry.subject });
+  }
   return {
     subject: token => grants.get(token)?.subject,
     issue(grant, subject) {
-      grants.set(grant.token, { ...grant, ...(subject ? { subject } : {}) });
+      const value = { ...grant, ...(subject ? { subject } : {}) };
+      grants.set(grant.token, value);
+      store?.put(value, subject ?? grant.subject ?? "");
     },
     verify(token) {
       return grants.get(token) ?? null;
@@ -79,6 +98,7 @@ export function createToolGrantRegistry(): ToolGrantRegistry {
       for (const [token, grant] of grants) {
         if (grant.workId === workId && (subject === undefined || subject === grant.subject)) grants.delete(token);
       }
+      store?.revoke(workId, subject, now());
     },
     authorize(input) {
       const grant = grants.get(input.token);
@@ -95,7 +115,8 @@ export function createToolGrantRegistry(): ToolGrantRegistry {
       }
       if (grant.cameraId && !input.tool.startsWith("get_") && input.cameraId !== grant.cameraId) return { ok: false, reason: "camera-not-allowed" };
       return { ok: true };
-    }
+    },
+    ...(store ? { close: () => store.close() } : {})
   };
 }
 
@@ -132,7 +153,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
         })),
         ...(node.modelContentVersion ? { modelContentVersion: node.modelContentVersion } : {}),
         ...(node.snapshotHash ? { snapshotHash: node.snapshotHash } : {}),
-        cameras: node.cameras
       } as ApplicationAuthoringNodeRead;
     },
     async submitModel(input): Promise<ApplicationAuthoringWriteOutcome> {
@@ -148,19 +168,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
       });
       if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message };
       return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.idempotent, noop: outcome.idempotent };
-    },
-    async mutateCamerasBatch(input): Promise<ApplicationAuthoringWriteOutcome> {
-      delegateOrThrow(input.delegation, log);
-      const modelMcp = deps.canvas.mcpServices().modelMcp;
-      if (!modelMcp?.mutateCamerasBatch) return { ok: false, code: "unavailable", message: "镜头端口当前不可用" };
-      const outcome = await modelMcp.mutateCamerasBatch({
-        canvasId: input.canvasId,
-        nodeId: input.nodeId,
-        requestId: input.operationId,
-        mutations: input.mutations
-      });
-      if (!outcome.ok) return { ok: false, code: outcome.code, message: outcome.message, ...(outcome.failedIndex !== undefined ? { failedIndex: outcome.failedIndex } : {}) };
-      return { ok: true, canvasId: outcome.canvasId, nodeId: outcome.nodeId, commandId: outcome.commandId, duplicate: outcome.duplicate, noop: outcome.noop };
     },
     async receipt(input) {
       delegateOrThrow(input.delegation, log);

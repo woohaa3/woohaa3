@@ -6,6 +6,7 @@
  * 前端静态资源由部署侧入口（`scripts/serve-web.mjs`）加载并把同源 API/WS 交给本进程。
  */
 import http from "node:http";
+import { applyHostHttpTiming } from "./http-timing.js";
 import fs from "node:fs";
 import { HOST_RESTART_EXIT_CODE } from "./api/host-restart-api.js";
 import { createBackendService } from "./composition.js";
@@ -99,6 +100,11 @@ async function main(): Promise<void> {
       }
     });
   });
+
+  // 本机宿主的长空闲是正常形态：导入大场景、等用户在文件框里操作，都会让连接空上十几秒。
+  // Node 缺省的 5s keep-alive 会在空档里关掉连接，浏览器连接池复用到死连接就是 ECONNRESET
+  // （服务端日志里看不到异常）。见 http-timing.ts。
+  applyHostHttpTiming(server);
 
   if (service.upgrade) {
     server.on("upgrade", (req, socket, head) => {

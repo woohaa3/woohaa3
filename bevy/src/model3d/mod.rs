@@ -103,9 +103,6 @@ pub(crate) use scene::{derive_aabb, derive_extent, prepare_snapshot, preview_foc
 #[cfg(feature = "canvas-core")]
 pub(crate) use layout::model_bounds_for_node;
 
-/// 模型单位（自然单位 × 节点矩形容器适配）。
-pub(crate) use layout::model_unit;
-
 use bevy::camera::visibility::RenderLayers;
 
 /// 模型实体渲染层：主画布（0）+ 截图（7）+ 拍摄世界内容（11），不含编辑辅助。

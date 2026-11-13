@@ -90,6 +90,8 @@ export interface SceneAreaData {
    * center (the same point new areas are created with).
    */
   animationOrigin?: GroundPoint;
+  /** Clockwise quarter turns of area-relative animation position tracks; absent means zero. */
+  animationQuarterTurns?: number;
   /** 导演区统一动画脚本（模型实例 + 镜头）；位置轨道相对 `animationOrigin`，播放时钟属于浏览器本地，不写回规范数据。 */
   animationScript?: WorldAnimationScript;
 }
@@ -204,18 +206,9 @@ export interface WorldCaptureVersionKey { canvasId: WorldId; cameraId: WorldId; 
 export interface WorldCaptureInput { key: WorldCaptureVersionKey; mediaId: WorldId; checksum: string }
 export type SharedWorldFailureCode = "unsupported-version" | "invalid-data" | "not-ready" | "version-conflict" | "lease-conflict" | "stale-epoch" | "outside-scope" | "target-unavailable" | "capture-stale" | "cancelled";
 
-/** Each legacy model node maps to a caller-assigned new instance ID. Node and instance
- * IDs must each be unique in the batch; instance IDs must not already be in use.
- * The node version and document sourceVersion are checked before any writes. A retry
- * with the same operationId must carry the same sourceVersion and mappings and return
- * the original result; reuse with different intent is rejected. Conversion retains the
- * node identity and attaches its new instance identity atomically. */
-export interface LegacyWorldConversionTarget { nodeId: WorldId; nodeVersion: WorldVersion; instanceId: WorldId }
-
 /** Commands describe atomic intent; implementation, authorization and undo are downstream.
  * For single-object writes the lease target must equal the command target. */
 export type SharedWorldCommand =
-  | { kind: "convert-to-shared-world"; operationId: WorldId; sourceVersion: WorldVersion; targets: LegacyWorldConversionTarget[] }
   | { kind: "set-world-transform"; operationId: WorldId; target: Extract<WorldObjectVersion, { kind: "instance" }>; transform: WorldTransform; lease: SpatialLeaseIdentity }
   | { kind: "move-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; targets: WorldObjectVersion[]; delta: GroundPoint }
   | { kind: "resize-scene-area"; operationId: WorldId; areaId: WorldId; scopeVersion: WorldVersion; bounds: GroundAabb }

@@ -107,7 +107,7 @@ pub(super) fn sync_models(
     capture: Res<model3d::capture::ShotCaptureRouting>,
     (_main_thread, render_work): (
         bevy::ecs::system::NonSendMarker,
-        Res<crate::model_preview::render_work::RenderWork>,
+        Option<Res<crate::render_work::RenderWork>>,
     ),
     opacity: Query<(
         Entity,
@@ -187,7 +187,6 @@ pub(super) fn sync_models(
         rig.focus_node.as_deref(),
         now,
         &pins,
-        &capture_pins,
     );
     if quality_changed {
         models.trim_resources(&mut meshes, &mut materials);
@@ -219,10 +218,12 @@ pub(super) fn sync_models(
         visuals.set_visible_focus(&mut commands, rig.focus_node.as_deref(), &scene.0);
         *visible_focus = rig.focus_node.clone();
     }
-    render_work.startup_models(
-        scene.0.animation_playback.as_ref(),
-        started.elapsed().as_secs_f64() * 1000.0,
-    );
+    if let Some(render_work) = render_work.as_deref() {
+        render_work.startup_models(
+            scene.0.animation_playback.as_ref(),
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
 }
 
 pub(super) fn sync_editor_gizmo(
@@ -397,7 +398,7 @@ fn rig_preview_rect(content_width: f32, height: f32, aspect: f32) -> Vec4 {
     )
 }
 
-/// 观察相机始终铺满主画面，用来看 rig 和模型。它没有可画的本体。
+/// 观察相机使用 sync_surface 对齐的画布视口，用来看 rig 和模型。
 pub(super) fn drive_observer_from_shot(
     scene: Res<CurrentScene>,
     rig: Res<FocusRig>,
@@ -413,7 +414,9 @@ pub(super) fn drive_observer_from_shot(
             .as_ref()
             .is_some_and(|p| p.view_mode == "focus-preview");
         camera.order = 0;
-        camera.viewport = None;
+        // sync_surface owns the DOM-aligned viewport. Clearing it here stretches
+        // 3D content over the native window (including chrome), while picking
+        // and director-area resize handles still use canvas-local CSS pixels.
         *layers = bevy::camera::visibility::RenderLayers::from_layers(&[
             0,
             crate::preview_layers::GRID_LAYER,
@@ -499,7 +502,7 @@ mod grid_tests {
             .init_resource::<AnimationCameraState>()
             .init_resource::<Time>()
             .init_resource::<model3d::capture::ShotCaptureRouting>()
-            .init_resource::<crate::model_preview::render_work::RenderWork>()
+            .init_resource::<crate::render_work::RenderWork>()
             .init_resource::<super::super::NodeIndex>()
             .init_resource::<SurfaceState>()
             .init_resource::<super::super::positions::PositionIndex>()
@@ -559,7 +562,6 @@ mod grid_tests {
             resource_key: key.clone(),
             scene_version: descriptor.scene_version.clone(),
             signature: descriptor.signature.clone(),
-            placement: ModelPlacement::default(),
         });
         bridge::queue_scene(crate::protocol::Scene {
             nodes: vec![node.clone()],

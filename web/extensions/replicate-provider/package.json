@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-replicate-provider",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Replicate 生成 Provider：按 owner/name 读取模型输入定义，图片、视频、音频与文本都走预测接口。",

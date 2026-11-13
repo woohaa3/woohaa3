@@ -4,7 +4,7 @@
  * 任务面板规格与参数字段，不依赖画布运行时，
  * 使其可独立渲染（组件库查看页、后续接入画布运行时均可复用）。
  */
-import type { PptaskParameterControl } from "@woohaa3/contracts";
+import type { GenerationParameterField } from "@woohaa3/ui/assistant";
 import type { ExecutionPanelPresentation } from "../../../navigation/contracts.js";
 
 /** 生成任务类型。 */
@@ -28,56 +28,11 @@ export type ExecutionPanelStatus =
 	| "failed";
 
 /** 单个生成参数。 */
-export interface ExecutionPanelParameterField {
-	key: string;
-	label: string;
-	type?: "select" | "number" | "text" | "boolean" | "textarea";
-	/** `slider` 时用 range 呈现（配合 minimum/maximum/step）。 */
-	control?: "slider";
-	options?: ReadonlyArray<{ value: string; label: string }>;
-	defaultValue?: string | number | boolean;
-	/**
-	 * Provider schema 标记为必填（`inputSchema.required`）。
-	 *
-	 * 缺省 false。必填字段在提交前必须已经解析出值（默认值也算），否则面板就地报可读错误，
-	 * 不把请求发给 Provider 再等它回一句英文错误（A9）。
-	 */
-	required?: boolean;
-	minimum?: number;
-	maximum?: number;
-	step?: number;
-	unit?: string;
-	/**
-	 * Provider 声明的控件语义（`x-pptask-control`）。
-	 *
-	 * 面板据此选控件：`aspect-ratio` → 比例瓦片，`resolution` → 等宽分段，`quality` → 普通分段。
-	 * 缺省时沿用旧的结构启发式（枚举全为比例才当比例字段），不按 key 名猜测。
-	 */
-	semantic?: PptaskParameterControl;
-	/**
-	 * 「自适应」选项的取值（`x-pptask-adaptive`）。
-	 *
-	 * 只有标记过才存在；比例控件优先用它识别自适应项，未标记时按 `auto`/`adaptive` 兜底。
-	 */
-	adaptiveValue?: string;
-	/** 命中任一规则时隐藏该字段。 */
-	hiddenWhen?: ReadonlyArray<{
-		field: string;
-		equals: string | number | boolean;
-	}>;
-	/**
-	 * 每个选项的联动约束（`x-pptask-requires`）：选中它就要把别的字段改成某值。
-	 *
-	 * 典型是「透明背景要求 PNG 输出」。面板选中该选项时**先改写目标字段再落值**，
-	 * 并把目标字段显示为锁定态——让用户看见「因为选了透明，格式被固定成 PNG」，
-	 * 而不是提交后收到上游 400。
-	 */
-	requiresByValue?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-}
+export interface ExecutionPanelParameterField extends GenerationParameterField {}
 
 /** 模型选项与参数模式。 */
 export interface ExecutionPanelModelConfig {
-	modelOptions: ReadonlyArray<{ value: string; label: string; detail?: string; provider?: string }>;
+	modelOptions: ReadonlyArray<{ value: string; label: string; detail?: string; provider?: string; sourceIdentity?: string; modelId?: string }>;
 	defaultModel: string;
 	parameterSchemaByModel?: Record<
 		string,
@@ -146,6 +101,7 @@ export interface ExecutionPanelRunSnapshot {
 }
 
 export interface ExecutionPanelProps {
+  modelSelectorSlot?: React.ReactNode;
 	/** 任务类型；决定可用技能与默认文案。 */
 	taskKind: ExecutionPanelTaskKind;
 	/** 模型与参数配置。 */

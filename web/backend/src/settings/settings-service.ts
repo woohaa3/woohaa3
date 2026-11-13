@@ -20,6 +20,7 @@ import {
   diffSettings,
   extensionToggleKey,
   legacyEnvInUse,
+  parseSettingValue,
   providerIdFromConfigPrefix,
   resolveSettings,
   type HostConfigFields,
@@ -108,7 +109,22 @@ export type SettingsPluginRegistration = {
   siteManaged?: boolean;
   /** 插件声明的模型目录刷新入口（路径由插件自己注册）；设置面只透传。 */
   modelRefresh?: { path: string; hint: string };
+  /** 连接与凭据测试（不落盘）：用合并后的配置段验证 API Key 与地址是否可用。 */
+  testConnection?: (config: SettingsSection) => Promise<{ readonly ok: boolean; readonly message?: string }>;
 };
+
+/**
+ * 非站点扩展层插件的启动失败说明（装载器写入，设置面只读）。
+ *
+ * 这类插件（Provider / 存储后端）不进站点控制面，也没有 `actualState`；`apply` 抛错时
+ * 过去只有一行日志，设置页照旧显示「还没有模型」——把「插件没启动」说成「没有模型」，
+ * 用户只能去翻日志。这里保留最近一次失败原因，激活成功时清空。
+ */
+export type PluginActivationFailure = string | null;
+
+export type SettingsTestResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string; issues?: SettingsIssue[] };
 
 export type SettingsService = SettingsReader & {
   readonly configFile: string;
@@ -117,6 +133,13 @@ export type SettingsService = SettingsReader & {
   describe(): Array<SettingDescription & { pendingRestart: boolean }>;
   /** 登记一个插件（设置页「插件配置」的清单来源）：宿主三层插件树与扩展都走这里。返回注销函数。 */
   registerPlugin(plugin: SettingsPluginRegistration): () => void;
+  /**
+   * 记录非站点扩展层插件的启动失败原因（`null` 清除）。
+   *
+   * 只对**不进站点控制面**的插件有意义：它们没有 `actualState`，失败只能靠这里曝光。
+   * 站点插件由控制面的 `desiredEnabled` / `actualState` / `diagnostics` 表达，不走这条。
+   */
+  setPluginActivationFailure(pluginId: string, reason: PluginActivationFailure): void;
   /** 当前插件树；`settingCount` 按已登记的定义表统计，「插件配置」据此显示每个插件有几项可配置。 */
   plugins(): SettingPluginView[];
   pendingRestart(): string[];
@@ -133,6 +156,8 @@ export type SettingsService = SettingsReader & {
   reload(): Promise<SettingsUpdateResult>;
   /** 写配置项（普通项写配置文件、敏感项写密钥文件）；`null` 表示删除该项。 */
   update(patch: SettingsPatch): Promise<SettingsUpdateResult>;
+  /** 测试配置项（不落盘）：校验补丁并调用所属插件的 `testConnection`。 */
+  test?(patch: SettingsPatch): Promise<SettingsTestResult>;
   /**
    * 扩展的启停状态：`extensions.<id>.enabled`（**所有**扩展共用，不区分 site / host）。
    *
@@ -208,6 +233,8 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
   );
   /** 插件清单：按登记顺序排列（设置页「插件配置」的展示顺序）。 */
   const pluginRegistry = new Map<string, SettingsPluginRegistration>();
+  /** 非站点扩展层插件的最近一次启动失败原因（见 {@link PluginActivationFailure}）。 */
+  const activationFailures = new Map<string, string>();
 
   /**
    * 产品/构建默认里表示「用内置」的 `exposer.primary = local-public` 迁移为自动。
@@ -320,8 +347,16 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     pluginRegistry.set(plugin.id, plugin);
     return () => {
       // 扩展重启会重新登记；只有当前登记的还是自己时才注销，免得误删后来者。
-      if (pluginRegistry.get(plugin.id) === plugin) pluginRegistry.delete(plugin.id);
+      if (pluginRegistry.get(plugin.id) === plugin) {
+        pluginRegistry.delete(plugin.id);
+        activationFailures.delete(plugin.id);
+      }
     };
+  };
+
+  const setPluginActivationFailure: SettingsService["setPluginActivationFailure"] = (pluginId, reason) => {
+    if (reason === null) activationFailures.delete(pluginId);
+    else activationFailures.set(pluginId, reason);
   };
 
   const plugins = (): SettingPluginView[] =>
@@ -342,7 +377,9 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
         settingCount: count,
         siteManaged: plugin.siteManaged ?? false,
         provider: providerIdFromConfigPrefix(prefix) !== null,
-        ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {})
+        ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
+        // 只报「这个插件最近启动失败过」，不猜它「应该有什么」：站点插件的状态走控制面。
+        ...(activationFailures.has(plugin.id) ? { activationFailure: activationFailures.get(plugin.id)! } : {})
       };
     });
 
@@ -368,7 +405,7 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
   };
 
   /**
-   * 写 `extensions.frontend.<id>.enabled`（与普通项同一次串行写入、同样保留注释与顺序）。
+   * 写 `extensions.<id>.enabled`（与普通项同一次串行写入、同样保留注释与顺序）。
    *
    * 不经过 `update()` 的定义表校验路径：这里的键是运行期发现的，写之前只校验 ID 形态。
    */
@@ -468,6 +505,76 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     return { ok: true, changed };
   };
 
+  const test = async (patch: SettingsPatch): Promise<SettingsTestResult> => {
+    const issues: SettingsIssue[] = [];
+    const parsedPatch: Record<string, SettingPrimitive | null> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      const definition = definitions[key];
+      if (!definition) {
+        issues.push({ key, layer: "file", message: "未知配置项" });
+        continue;
+      }
+      const layer = definition.secret ? "secrets" : "file";
+      if (latest.sources[key] === "env") {
+        issues.push({ key, layer, message: `由环境变量 ${definition.legacyEnv} 锁定，先移除该环境变量` });
+        continue;
+      }
+      if (value === null || value === undefined || value === "") {
+        parsedPatch[key] = null;
+        continue;
+      }
+      const parsed = parseSettingValue(definition, value);
+      if (!parsed.ok) {
+        issues.push({ key, layer, message: parsed.message });
+        continue;
+      }
+      parsedPatch[key] = parsed.value;
+    }
+    if (issues.length > 0) {
+      return {
+        ok: false,
+        message: issues.map((issue) => `${issue.key || "(根)"}：${issue.message}`).join("；"),
+        issues
+      };
+    }
+
+    const matchedPlugins = [...pluginRegistry.values()].filter(
+      (plugin) =>
+        plugin.configPrefix &&
+        Object.keys(patch).some((key) => key === plugin.configPrefix || key.startsWith(`${plugin.configPrefix!}.`))
+    );
+    for (const plugin of matchedPlugins) {
+      if (!plugin.testConnection || !plugin.configPrefix) continue;
+      const prefix = plugin.configPrefix;
+      const head = `${prefix}.`;
+      const mergedSection: SettingsSection = { ...section(prefix) };
+      for (const [key, value] of Object.entries(parsedPatch)) {
+        if (!key.startsWith(head)) continue;
+        const field = key.slice(head.length);
+        if (value === null) {
+          const def = definitions[key];
+          if (def?.default !== undefined) mergedSection[field] = def.default;
+          else delete mergedSection[field];
+        } else {
+          mergedSection[field] = value;
+        }
+      }
+      try {
+        const result = await plugin.testConnection(mergedSection);
+        if (!result.ok) {
+          return { ok: false, message: result.message || `${plugin.label} 连接测试未通过` };
+        }
+        return { ok: true, message: result.message || `${plugin.label} 测试通过` };
+      } catch (error) {
+        return {
+          ok: false,
+          message: `${plugin.label} 连接测试失败：${error instanceof Error ? error.message : String(error)}`
+        };
+      }
+    }
+    return { ok: true, message: "配置校验通过" };
+  };
+
   let watchers: fs.FSWatcher[] = [];
   let debounce: ReturnType<typeof setTimeout> | null = null;
   if (options.watch ?? true) {
@@ -514,10 +621,12 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
     unknownKeys: () => latest.unknown,
     register,
     registerPlugin,
+    setPluginActivationFailure,
     plugins,
     section,
     reload: () => serialize(reload),
     update: (patch) => serialize(() => update(patch)),
+    test: (patch) => test(patch),
     extensionToggles,
     setExtensionToggle: (extensionId, enabled) => serialize(() => setExtensionToggle(extensionId, enabled)),
     close() {

@@ -529,6 +529,14 @@ export type SettingPluginView = {
    * 宿主只透传，不在管理面硬编码具体 Provider。
    */
   modelRefresh?: { path: string; hint: string };
+  /**
+   * 非站点扩展层插件最近一次启动失败的原因（Provider / 存储后端）。
+   *
+   * 这类插件没有 `actualState`：不进站点控制面，`apply` 抛错时宿主只记日志。带上这一项，
+   * 设置页才能在「还没有模型」旁边说清「插件没启动起来」以及为什么，而不是让人去翻日志。
+   * 站点插件的失败原因走 `plugins` 的 `actualState` / `diagnostics`，不用这个字段。
+   */
+  activationFailure?: string;
 };
 
 

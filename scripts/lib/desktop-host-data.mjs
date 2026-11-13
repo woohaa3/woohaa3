@@ -17,7 +17,7 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  Object.assign(env,{
  PATH:path.join(resourceRoot,'tools')+path.delimiter+(env.PATH??'/usr/bin:/bin'),
  NODE_ENV:'production', WOOHAA3_BASE_PATH:'/',
- WOOHAA3_RUNTIME_DATA_DIR:dataDir, WOOHAA3_RUNTIME_DEFAULTS_FILE:path.join(resourceRoot,'runtime-downloads.json'), WOOHAA3_RUNTIME_LOCK_FILE:path.join(resourceRoot,'runtime-components.lock.json'), WOOHAA3_REPO_ROOT:resourceRoot,
+ WOOHAA3_RUNTIME_DATA_DIR:dataDir, WOOHAA3_RUNTIME_DEFAULTS_FILE:path.join(resourceRoot,'runtime-downloads.json'), WOOHAA3_RUNTIME_LOCK_FILE:path.join(resourceRoot,'runtime-components.lock.json'), WOOHAA3_RUNTIME_NPM_LOCK_FILE:path.join(resourceRoot,'runtime-npm-lock.json'), WOOHAA3_RUNTIME_TOOLS_DIR:path.join(resourceRoot,'tools'), WOOHAA3_RUNTIME_INSTALL:baseEnv.WOOHAA3_DESKTOP_RUNTIME_INSTALL==='disabled'?'disabled':'enabled', WOOHAA3_REPO_ROOT:resourceRoot,
  WOOHAA3_TASK_STORE_PATH:path.join(dataDir,'stores/task.sqlite'), WOOHAA3_APPLICATION_STORE_PATH:path.join(dataDir,'stores/application.sqlite'),
  WOOHAA3_CANVAS_STORAGE_BACKEND:'sqlite', WOOHAA3_CANVAS_STORAGE_SQLITE_PATH:path.join(dataDir,'stores/canvas.sqlite'),
  WOOHAA3_APPLICATION_DOCUMENT_STORE_BACKEND:'sqlite', WOOHAA3_CONFIG_FILE:path.join(dataDir,'config/woohaa.config.yml'), WOOHAA3_SECRETS_FILE:path.join(dataDir,'config/woohaa.secrets.yml'),
@@ -30,7 +30,7 @@ export function desktopEnvironment({ dataDir, resourceRoot, baseEnv = {}, platfo
  });
  // Development resolves installed SDKs and local tools; never let download configuration
  // intercept dev:desktop, including inherited desktop runtime environment variables.
- if(development)for(const key of ['WOOHAA3_RUNTIME_DATA_DIR','WOOHAA3_RUNTIME_DEFAULTS_FILE','WOOHAA3_RUNTIME_LOCK_FILE'])delete env[key];
+ if(development)for(const key of ['WOOHAA3_RUNTIME_DATA_DIR','WOOHAA3_RUNTIME_DEFAULTS_FILE','WOOHAA3_RUNTIME_LOCK_FILE','WOOHAA3_RUNTIME_NPM_LOCK_FILE','WOOHAA3_RUNTIME_TOOLS_DIR','WOOHAA3_RUNTIME_INSTALL'])delete env[key];
  const trustConfig=path.join(resourceRoot,"extension-trust.json");
  if(fs.existsSync(trustConfig))env.WOOHAA3_EXTENSION_TRUST_CONFIG=trustConfig;
  else if(development&&baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG)env.WOOHAA3_EXTENSION_TRUST_CONFIG=path.resolve(baseEnv.WOOHAA3_EXTENSION_TRUST_CONFIG);

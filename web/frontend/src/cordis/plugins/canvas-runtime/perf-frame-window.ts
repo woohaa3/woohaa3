@@ -28,8 +28,6 @@ type RenderCounters = {
   readonly stageModelMs?: number;
   readonly stageModelFrames?: number;
   readonly pacing?: string;
-  /** 预览卡片规模（`d`=延迟队列、`v`=可见、`l`=在途、`r`=就绪、`b`=纹理 MB）。 */
-  readonly previews?: string;
 };
 
 /** 渲染三阶段/实例数的累计字段；逐项校验，缺项不补 0。 */
@@ -75,7 +73,6 @@ function runtimeCounters(render: RenderCounters): Partial<PerfFrameCounters> {
     if (typeof value === "number" && Number.isFinite(value)) counters[key] = value;
   }
   if (render.pacing !== undefined) counters.pacing = render.pacing;
-  if (render.previews !== undefined) counters.previews = render.previews;
   return counters;
 }
 

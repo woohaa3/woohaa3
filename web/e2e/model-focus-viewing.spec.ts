@@ -13,7 +13,7 @@
  */
 import { expect, test } from "./review-browser.js";
 import type { Page } from "@playwright/test";
-import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession } from "./helpers.js";
+import { installPageHelpers, resetCanvasStorage, createNode, waitForCanvasSession, worldModelClientPoint } from "./helpers.js";
 
 const CANVAS = "woohaa3-default-canvas";
 
@@ -94,17 +94,8 @@ async function focusState(page: Page) {
 	});
 }
 
-/** 计算模型卡片下方模型中心的 client 坐标（用于双击命中模型 AABB）。 */
-async function modelClientPoint(page: Page, nodeId: string) {
-  return page.evaluate(id => {
-    const s = (window as any).__bevyRuntime.lastScene();
-    const n = s.nodes.find((entry: any) => entry.id === id);
-    if (!n) throw new Error("node not rendered");
-    const r = document.querySelector("#bevy-canvas")!.getBoundingClientRect();
-    return {x:r.x+(n.x+n.width/2)*s.viewport.zoom+s.viewport.x,
-      y:r.y+(n.y+n.height/2)*s.viewport.zoom+s.viewport.y};
-  }, nodeId);
-}
+/** 共享世界模型包围盒中心的 client 坐标（模型没有卡片）。 */
+const modelClientPoint = worldModelClientPoint;
 
 test.describe("模型聚焦查看（change: add-model-focus-viewing）", () => {
 	test("双击模型进入聚焦且不打开 Dialog", async ({ page }) => {

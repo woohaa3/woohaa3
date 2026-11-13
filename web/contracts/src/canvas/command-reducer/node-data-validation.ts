@@ -9,7 +9,6 @@ import { CREATURE_VIDEO_ASSETS_EXTENSION_ID, isCompositeAssetNodeType, readCompo
  */
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
 import { decodeModel3DNodeData } from "../canvas-node-model.js";
-import { decodeModelCameras } from "../model-cameras.js";
 import { decodeImageEditDocument } from "../image-edit.js";
 import { decodeModelContentVersion, GLB_MODEL_SOURCE_KIND, isGlbModelNodeData, normalizeGlbModelReference, normalizeModelDefinition } from "../model-definition.js";
 import type { CanvasNodeData } from "../domain/index.js";
@@ -33,22 +32,6 @@ export function validateVideoEditIntentsPatch(value: CanvasNodeData): CommandApp
   return null;
 }
 
-/**
- * 在命令应用器的 canonical 边界校验 `modelCameras`
- * （change: add-model-editor-gizmo-shot-capture，design D2）。
- *
- * 重复 ID、非法类型、非有限数值、非正 distance、超限等使整批命令以稳定错误失败，而不是被
- * 静默丢弃后执行语义不同的写入。校验通过后写回归一化（稳定排序）值。
- */
-export function validateModelCamerasPatch(value: CanvasNodeData): CommandApplyResult | null {
-  if (value.modelCameras === undefined) return null;
-  const normalized = decodeModelCameras(value.modelCameras);
-  if (!normalized.ok) {
-    return reject("invalid-model-cameras", normalized.reason);
-  }
-  value.modelCameras = normalized.value;
-  return null;
-}
 
 /**
  * 在命令应用器的 canonical 边界校验 `imageEdit`

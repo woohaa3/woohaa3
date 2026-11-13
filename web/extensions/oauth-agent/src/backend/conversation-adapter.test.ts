@@ -1,3 +1,4 @@
+import { buildTestPreparedTurn } from "@woohaa3/test-fixtures-agent-role-turns";
 import { describe, expect, it, vi } from "vitest";
 import { createChatGptConversationAdapter } from "./conversation-adapter.js";
 
@@ -7,7 +8,7 @@ describe("OAuth structured candidate", () => {
     const adapter = createChatGptConversationAdapter({ service: { enabled: true, converse } as never });
     const bytes = Uint8Array.from([1, 2, 3]);
     const schema = { type: "object" };
-    const result = await adapter.run({ owner: "owner", canvasId: "canvas", conversationId: "conversation", turnId: "turn", requestId: "request", intent: { action: "discuss", canvasId: "canvas", model: "model", prompt: "create" }, candidate: { images: [{ bytes, contentType: "image/png" }], outputSchema: schema }, history: [], signal: new AbortController().signal, emit: () => {} });
+    const result = await adapter.run({ owner: "owner", canvasId: "canvas", conversationId: "conversation", turnId: "turn", requestId: "request", prepared: buildTestPreparedTurn({ requestId: "request", target: { canvasId: "canvas" }, prompt: "create", tools: [], output: { kind: "candidate", schema } }), intent: { action: "discuss", canvasId: "canvas", model: "model", prompt: "create" }, candidate: { images: [{ bytes, contentType: "image/png" }], outputSchema: schema }, history: [], signal: new AbortController().signal, emit: () => {} });
     expect(result.status).toBe("succeeded");
     expect(converse).toHaveBeenCalledWith(expect.objectContaining({ images: [expect.objectContaining({ bytes, mimeType: "image/png" })], outputSchema: schema }));
     expect(converse.mock.calls[0]![0]).not.toHaveProperty("mcp");

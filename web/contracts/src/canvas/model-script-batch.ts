@@ -7,7 +7,6 @@
  *
  * 保留的 `MODEL_BATCH_PAGING` 只是读取分页参数（可继续读取，不是总量截断）。
  */
-import type { ModelCamera } from "./model-cameras.js";
 import type { ModelContentVersion } from "./model-definition.js";
 
 /** 批次读取的分页参数（传输语义；大响应可继续读取）。 */
@@ -21,10 +20,6 @@ export type ModelScriptBatchItem = {
   /** Appended after commonSource with a newline, in an independent scene execution. */
   source: string;
   expectedModelContentHash?: string;
-  /** Replace the whole camera set; omission preserves it. */
-  cameras?: ModelCamera[];
-  /** Required when cameras is supplied; obtain from get_model_nodes. */
-  expectedCamerasHash?: string;
 };
 export type ModelScriptBatchRequest = {
   canvasId: string;
@@ -54,13 +49,10 @@ export type ModelBatchNodeSummary = {
     max: number[] | null;
     operationCount: number;
   };
-  cameraCount: number;
-  camerasHash: string;
 };
 /** Stored with the command in the same transaction, without source text. */
 export type ModelScriptBatchMeta = {
   submissionHash: string;
-  worldConversion?: import("./world-conversion.js").WorldConversionReceipt;
   imageDirectorScene?: import("./image-director-scene.js").ImageDirectorSceneReceipt;
   imageDirectorReservation?: import("./image-director-scene.js").ImageDirectorSceneReservation;
   statistics?: import("./scene-ir-v2/stats.js").ModelSceneStatistics;
@@ -100,8 +92,6 @@ export type ModelNodesOutcome =
         source?: string;
         version?: string;
         status?: "ok" | "failed";
-        cameras: ModelCamera[];
-        camerasHash: string;
-        references: import("./domain/model-reference-inputs.js").ModelReferenceInput[];
+              references: import("./domain/model-reference-inputs.js").ModelReferenceInput[];
       }>;
     };

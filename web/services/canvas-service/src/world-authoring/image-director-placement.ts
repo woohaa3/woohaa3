@@ -1,9 +1,9 @@
 import { canvasPointToGround, decodeSceneAreaData, decodeWorldCamera, decodeWorldInstanceData, v2SceneAabb, worldToCanvasPoint, worldToRendererPosition, type GroundAabb, type GroundPoint, type ServerCanvas } from "@woohaa3/contracts";
-import type { PreparedImageDirectorCandidate } from "./image-director-candidate.js";
 import { executeSceneIr } from "../model-mcp/script-executor.js";
 import { instanceFootprint } from "./authority.js";
 
 export type ImageDirectorPlacement = { delta: GroundPoint; bounds: GroundAabb };
+export type PreparedImageDirectorCandidate = { footprints: GroundAabb[]; camera: { position: { u: number; v: number } } };
 
 function projectedBounds(bounds: GroundAabb) {
   const points = [bounds.min.u, bounds.max.u].flatMap(u => [bounds.min.v, bounds.max.v].map(v => worldToCanvasPoint([...worldToRendererPosition({ u, v, h: 0 })])));
@@ -49,7 +49,7 @@ export async function imageDirectorOccupancy(canvas: ServerCanvas, signal?: Abor
 export function planImageDirectorPlacement(prepared: PreparedImageDirectorCandidate, occupied: readonly (GroundAabb | null)[], origin: GroundPoint, alignment: "min" | "below-image" = "min"): ImageDirectorPlacement | null {
   const valid = (b: GroundAabb) => [b.min.u, b.min.v, b.max.u, b.max.v].every(Number.isFinite) && b.min.u <= b.max.u && b.min.v <= b.max.v;
   if (!Number.isFinite(origin.u) || !Number.isFinite(origin.v) || !prepared.footprints.length || prepared.footprints.some(b => !valid(b)) || occupied.some(b => !b || !valid(b))) return null;
-  const camera = prepared.candidate.camera.position;
+  const camera = prepared.camera.position;
   const all = [...prepared.footprints, { min: { u: camera.u, v: camera.v }, max: { u: camera.u, v: camera.v } }];
   const padding = 0.5;
   const base = {

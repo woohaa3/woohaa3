@@ -8,21 +8,21 @@ const alice = { owner: "alice", administrator: false, canUseSite: true };
 const bob = { ...alice, owner: "bob" };
 const admin = { ...alice, owner: "admin", administrator: true };
 const input: ServiceConnectionSave = { operationId: "create", expectedRevision: 0, expectedCredentialEpoch: 0, name: "Relay", endpoints: [{ protocol: "responses", baseUrl: "https://relay.example/v1" }], secret: "private-key" };
-const binding: ServiceConsumerBinding = { bindingId: "sdk:1", extensionId: "sdk", consumer: "agent", consumerId: "conn-1", purposes: ["discussion"], modelKeys: ["model-1"] };
+const binding: ServiceConsumerBinding = { bindingId: "sdk:1", extensionId: "sdk", consumer: "agent", consumerId: "conn-1", purposes: ["text"], modelKeys: ["model-1"] };
 function fixture() {
   const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
   const documents = store.forExtension("sources")!;
   const secrets = createInMemorySecretStore();
   const read = vi.spyOn(secrets, "read");
-  const options = { documents, secrets, checkEndpoint: (url: string) => url === "https://relay.example/v1", validateBinding: (candidate: ServiceConsumerBinding) => candidate.extensionId === "sdk" && candidate.purposes.every(purpose => purpose === "discussion") };
+  const options = { documents, secrets, checkEndpoint: (url: string) => url === "https://relay.example/v1", validateBinding: (candidate: ServiceConsumerBinding) => candidate.extensionId === "sdk" && candidate.purposes.every(purpose => purpose === "text") };
   const registry = createServiceConnectionRegistry(options);
   return { registry, options, documents, secrets, read, close: () => store.close() };
 }
 async function usable(f: ReturnType<typeof fixture>) {
   let connection = (await f.registry.save(alice, input)).connection;
-  connection = await f.registry.publishCapabilities(alice, connection.serviceConnectionId, connection, [{ purpose: "discussion", protocol: "responses", modelId: "model-1", imageInput: false, evidence: "adapter" }]);
+  connection = await f.registry.publishCapabilities(alice, connection.serviceConnectionId, connection, [{ purpose: "text", protocol: "responses", modelId: "model-1", imageInput: false, evidence: "adapter" }]);
   connection = await f.registry.bind(alice, connection.serviceConnectionId, binding, connection);
-  return { ...connection, bindingId: binding.bindingId, purpose: "discussion" as const, protocol: "responses", endpoint: input.endpoints[0].baseUrl, modelId: "model-1" };
+  return { ...connection, bindingId: binding.bindingId, purpose: "text" as const, protocol: "responses", endpoint: input.endpoints[0].baseUrl, modelId: "model-1" };
 }
 describe("service source authority", () => {
   it("isolates owners and scopes and never returns credentials or internal references", async () => {
@@ -107,7 +107,7 @@ describe("registered source adapters", () => {
     let epoch = 1;
     const get = async (owner: string, id: string) => secrets.has(`${owner}:${id}`) ? {
       legacyId: id, scope: "personal" as const, kind: "api" as const, name: id,
-      endpoints: input.endpoints, capabilities: [{ purpose: "discussion" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+      endpoints: input.endpoints, capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
       bindings: [{ ...binding, consumerId: id, bindingId: id }], enabled: true, removed: false, locked: false,
       credentialConfigured: true, configRevision: 1, credentialEpoch: epoch,
     } : null;
@@ -121,7 +121,7 @@ describe("registered source adapters", () => {
       expect(sources).toHaveLength(2);
       expect(await port.list("bob")).toEqual([]);
       expect(readSecret).not.toHaveBeenCalled();
-      const call = { ...sources[0], bindingId: "a", purpose: "discussion" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
+      const call = { ...sources[0], bindingId: "a", purpose: "text" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
       expect(await port.resolve("alice", call)).toMatchObject({ secret: "first" });
       epoch++;
       readSecret.mockClear();
@@ -135,13 +135,40 @@ describe("registered source adapters", () => {
       expect(JSON.stringify(await restarted.list("alice"))).not.toMatch(/first|second|origin|credentialKey/);
     } finally { f.close(); }
   });
+  it("rewrites changed model identities even when the adapter revision stays unchanged", async () => {
+    const f = fixture();
+    // Snapshot fingerprints cover model identities independently of the adapter revision.
+    let modelId = "llm/deepseek/deepseek-v4-flash";
+    const snapshot = () => ({
+      legacyId: "a", scope: "personal" as const, kind: "api" as const, name: "source-a", endpoints: input.endpoints,
+      capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId, imageInput: false, evidence: "adapter" as const }],
+      bindings: [{ ...binding, bindingId: "a", consumerId: "a", modelKeys: [modelId] }],
+      enabled: true, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
+    });
+    const adapter = { id: "mapped", scope: "personal" as const, get: async () => snapshot(), list: async () => [snapshot()], readSecret: async () => "private-key" };
+    try {
+      const port = f.registry.forExtension("sdk");
+      port.registerSource(adapter);
+      const [before] = await port.list("alice");
+      expect(before.capabilities).toContainEqual(expect.objectContaining({ modelId: "llm/deepseek/deepseek-v4-flash" }));
+
+      modelId = "deepseek/deepseek-v4-flash";
+      const [after] = await port.list("alice");
+      expect(after.serviceConnectionId).toBe(before.serviceConnectionId);
+      expect(after.capabilities).toContainEqual(expect.objectContaining({ modelId: "deepseek/deepseek-v4-flash" }));
+      expect(after.bindings.find(item => item.bindingId === "a")?.modelKeys).toEqual(["deepseek/deepseek-v4-flash"]);
+      // 授权按新 ID 通过，旧身份不再可用。
+      const call = { ...after, bindingId: "a", purpose: "text" as const, protocol: "responses", modelId: "deepseek/deepseek-v4-flash", endpoint: input.endpoints[0].baseUrl };
+      expect(await port.resolve("alice", call)).toMatchObject({ secret: "private-key" });
+    } finally { f.close(); }
+  });
   it("removes a disabled adapter source and republishes it only after the adapter content changes", async () => {
     const f = fixture();
     let enabled = true;
     let name = "source-a";
     const snapshot = () => ({
       legacyId: "a", scope: "personal" as const, kind: "api" as const, name, endpoints: input.endpoints,
-      capabilities: [{ purpose: "discussion" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+      capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
       bindings: [{ ...binding, bindingId: "a", consumerId: "a" }],
       enabled, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
     });
@@ -171,9 +198,9 @@ it("adds a protocol without copying credentials, invalidates every use on disabl
   try {
     let source = (await f.registry.save(alice, input)).connection;
     const port = f.registry.forExtension("sdk-agent");
-    port.registerConsumer({ protocols: ["responses"], purposes: ["discussion"] });
+    port.registerConsumer({ protocols: ["responses"], purposes: ["text"] });
     source = await f.registry.addProtocol(alice, source.serviceConnectionId, source, input.endpoints[0], ["model-1"]);
-    const call = { ...source, bindingId: `protocol:${source.serviceConnectionId}:responses`, purpose: "discussion" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
+    const call = { ...source, bindingId: `protocol:${source.serviceConnectionId}:responses`, purpose: "text" as const, protocol: "responses", modelId: "model-1", endpoint: input.endpoints[0].baseUrl };
     f.read.mockClear();
     expect(await port.resolve("alice", call)).toMatchObject({ secret: "private-key" });
     await expect(port.resolve("alice", { ...call, purpose: "image" })).rejects.toMatchObject({ code: "forbidden" });
@@ -206,5 +233,59 @@ it("only explicitly merges drained compatible sources, atomically rebinds and re
     expect(await restarted.merge(alice, merge)).toEqual(merged);
     await expect(restarted.merge(bob, { ...merge, operationId: "steal" })).rejects.toMatchObject({ code: "forbidden" });
     await expect(restarted.merge(alice, { ...merge, retained: { ...merge.retained, configRevision: merge.retained.configRevision + 1 } })).rejects.toMatchObject({ code: "conflict" });
+  } finally { f.close(); }
+});
+
+it("configured site provider revives its removed source after the key is added", async () => {
+  const f = fixture();
+  let configured = false;
+  const snapshot = () => ({
+    legacyId: "runninghub", scope: "site" as const, kind: "api" as const, name: "RunningHub", endpoints: input.endpoints,
+    capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+    bindings: [{ ...binding, bindingId: "provider", consumerId: "runninghub" }],
+    enabled: configured, removed: false, locked: false, credentialConfigured: configured, configRevision: 1, credentialEpoch: 1,
+    credentialFingerprint: configured ? "key" : undefined
+  });
+  const adapter = { id: "site:runninghub", scope: "site" as const, get: async () => snapshot(), list: async () => [snapshot()] };
+  try {
+    f.registry.forExtension("provider").registerSource(adapter);
+    const [disabled] = await f.registry.list(admin);
+    const removed = await f.registry.remove(admin, disabled!.serviceConnectionId, disabled!);
+    expect(removed.removed).toBe(true);
+    configured = true;
+    // Provider 恢复可用且 Key 已配置：下一次读取自动恢复，而不是永久 tombstone。
+    expect(await f.registry.list(admin)).toContainEqual(expect.objectContaining({ serviceConnectionId: disabled!.serviceConnectionId, removed: false, name: "RunningHub" }));
+  } finally { f.close(); }
+});
+
+it("does not persist a tombstone when a provider briefly disappears and restores the source with unchanged revision", async () => {
+  const f = fixture();
+  let reachable = true;
+  const snapshot = () => ({
+    legacyId: "grsai", scope: "site" as const, kind: "api" as const, name: "grsai", endpoints: input.endpoints,
+    capabilities: [{ purpose: "text" as const, protocol: "responses" as const, modelId: "model-1", imageInput: false, evidence: "adapter" as const }],
+    bindings: [{ ...binding, bindingId: "provider", consumerId: "grsai" }],
+    enabled: true, removed: false, locked: false, credentialConfigured: true, configRevision: 1, credentialEpoch: 1,
+    credentialFingerprint: "key",
+  });
+  const adapter = { id: "site:grsai", scope: "site" as const, get: async () => (reachable ? snapshot() : null), list: async () => (reachable ? [snapshot()] : []) };
+  try {
+    f.registry.forExtension("provider").registerSource(adapter);
+    const [published] = await f.registry.list(admin);
+    const batch = vi.spyOn(f.documents, "batch");
+    reachable = false;
+    expect(await f.registry.list(admin)).toEqual([]);
+    expect(await f.registry.get(admin, published!.serviceConnectionId)).toMatchObject({ removed: true, enabled: false, credentialConfigured: false });
+    // 暂时不可用只影响当次读取投影，不向持久层写入 tombstone。
+    expect(batch).not.toHaveBeenCalled();
+    // Key 与模型目录都没变：恢复可用后必须回到列表，且代次不变。
+    reachable = true;
+    expect(await f.registry.list(admin)).toContainEqual(expect.objectContaining({
+      serviceConnectionId: published!.serviceConnectionId,
+      name: "grsai",
+      removed: false,
+      configRevision: published!.configRevision,
+      credentialEpoch: published!.credentialEpoch,
+    }));
   } finally { f.close(); }
 });

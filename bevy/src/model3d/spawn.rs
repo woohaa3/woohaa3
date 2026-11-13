@@ -8,7 +8,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use crate::canvas_ecs::components::{ModelBatch, ModelOwner, ModelPart};
-use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
+use crate::protocol::{GraphNode, ModelOp, ModelSnapshot};
 
 use super::animation::{
     self, TransformAnimation, TransformAnimationKind, TransformAnimationPlayback,
@@ -28,13 +28,13 @@ pub(super) fn spawn_model(
     materials: &mut Assets<StandardMaterial>,
     node: &GraphNode,
     model: &ModelSnapshot,
-    placement: &ModelPlacement,
     quality: Quality,
     shared: &mut SharedResources,
     batched: bool,
     strategy: super::batch_strategy::BatchStrategy,
-) -> ModelRoot {
-    let transform = model_root_transform(node, model, placement);
+) -> Option<ModelRoot> {
+    // 世界根只读 `sharedWorldInstance`：没有实例的旧卡片节点不创建模型根。
+    let transform = model_root_transform(node)?;
     let mut root = spawn_v2(
         commands,
         meshes,
@@ -50,7 +50,7 @@ pub(super) fn spawn_model(
         &HashSet::new(),
     );
     root.content_signature = model.signature.clone();
-    root
+    Some(root)
 }
 
 /// 一次性预览根的句柄：只有「建起来的是哪些实体/资产」与「用完怎么拆」。
@@ -374,8 +374,9 @@ pub(super) fn spawn_v2(
         content_signature: String::new(),
         texture_revision: crate::model3d::model_textures::revision(),
         resource: std::sync::Arc::new(ModelSnapshot::default()),
-        placement: ModelPlacement::default(),
+
         layout: ModelRootLayout::V2 { root },
+        aabb: None,
         mesh_handles: mesh_cache.values().cloned().collect(),
         active_mesh_handles: mesh_cache.values().cloned().collect(),
         geometries,

@@ -1,7 +1,7 @@
 /** CodeBuddy 2.x ACP: GET opens a connection, JSON-RPC POST replies may also stream. */
 import { assertCodeBuddyWriteScope } from "../protocol/codebuddy-acp.js";
 import type { LocalAgentTransport, LocalAgentTransportInput, LocalAgentTransportResult } from "./transport.js";
-import { canvasToolName, consumeSse, loopbackHttp, toolResultFailed } from "./loopback-http.js";
+import { canvasToolName, consumeSse, loopbackHttp, toolResultDetail, toolResultFailed } from "./loopback-http.js";
 
 export type CodeBuddyTransportOptions = {
   fetchImpl?: typeof globalThis.fetch;
@@ -65,7 +65,14 @@ export function createCodeBuddyTransport(options: CodeBuddyTransportOptions = {}
               toolNames.set(update.toolCallId, name);
               input.onEvent({ type: "tool-started", tool: name, callId: update.toolCallId });
             }
-            if (update.status === "completed" || update.status === "failed") input.onEvent({ type: "tool-completed", tool: toolNames.get(update.toolCallId) ?? name, callId: update.toolCallId, ok: update.status === "completed" && !toolResultFailed(update.rawOutput) && !toolResultFailed(update.content) });
+            if (update.status === "completed" || update.status === "failed") {
+              const failed = update.status !== "completed" || toolResultFailed(update.rawOutput) || toolResultFailed(update.content);
+              // 失败时保留真实原因（结构化 code/message、工具输出或协议错误），不退回通用占位。
+              const detail = failed
+                ? toolResultDetail(update.rawOutput) ?? toolResultDetail(update.content) ?? (typeof update.error?.message === "string" ? update.error.message : undefined)
+                : undefined;
+              input.onEvent({ type: "tool-completed", tool: toolNames.get(update.toolCallId) ?? name, callId: update.toolCallId, ok: !failed, ...(detail ? { summary: detail } : {}) });
+            }
           }
         } else if (message.method && message.id !== undefined) {
           const call = message.params?.toolCall;

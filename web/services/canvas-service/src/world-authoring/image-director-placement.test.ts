@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canvasPointToGround, createEmptyWoohaa3ServerCanvas, effectiveCanvasNodeSize, IMAGE_DIRECTOR_SCENE_VERSION, SHARED_WORLD_VERSION, worldToCanvasPoint, worldToRendererPosition, type GroundAabb } from "@woohaa3/contracts";
+import { canvasPointToGround, createEmptyWoohaa3ServerCanvas, effectiveCanvasNodeSize, worldToCanvasPoint, worldToRendererPosition, type GroundAabb } from "@woohaa3/contracts";
 import { imageDirectorOccupancy, imageDirectorPlacementAnchor, planImageDirectorPlacement } from "./image-director-placement.js";
 import { imageDirectorSourceGround } from "./image-director-reservation.js";
-import type { PreparedImageDirectorCandidate } from "./image-director-candidate.js";
+import type { PreparedImageDirectorCandidate } from "./image-director-placement.js";
 
 const prepared: PreparedImageDirectorCandidate = {
-  candidate: { version: IMAGE_DIRECTOR_SCENE_VERSION, models: [{ key: "a", name: "a", script: "x", transform: { version: SHARED_WORLD_VERSION, position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } }], camera: { position: { u: -2, v: 0, h: 1 }, rotation: [0, 0, 0, 1], projection: { kind: "perspective", verticalFovRadians: 1, nearMeters: 0.1, farMeters: 10 } } },
+  camera: { position: { u: -2, v: 0 } },
   footprints: [{ min: { u: 0, v: 0 }, max: { u: 1, v: 1 } }]
 };
 describe("image director placement", () => {

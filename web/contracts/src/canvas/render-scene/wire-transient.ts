@@ -7,7 +7,7 @@
  */
 import type { ModelFocusProjection } from "../model-focus.js";
 import type { MotionIr } from "../motion-ir.js";
-import type { ModelCameraAspect } from "../model-cameras.js";
+import type { CameraAspect } from "../camera-aspect.js";
 import type { AppThemeSnapshot } from "../../theme/index.js";
 import type { AggregateConnectDirection, DragAttachMode } from "./node-geometry.js";
 
@@ -241,6 +241,17 @@ export type GizmoHandleName = "x" | "y" | "z" | "center" | "yaw-ring" | "scale" 
 export type GizmoFeedback = { hover?: GizmoHandleName; active?: GizmoHandleName; epoch: number };
 export type GizmoYawConstraint = { origin: [number, number, number]; u: [number, number, number]; v: [number, number, number]; normal: [number, number, number]; startAngle: number; mode: "plane" | "tangent"; direction: [number, number]; radiansPerPixel: number };
 
+/** 兼容旧 gizmo 手势的瞬态相机形状；当前没有 UI 写入。 */
+export type BevyShotCamera = {
+  position: [number, number, number];
+  focus: [number, number, number];
+  fov: number;
+  azimuth: number;
+  elevation: number;
+  distance: number;
+  aspect: CameraAspect;
+};
+
 export type BevyModelEditor = {
   /** schema 版本；Bevy 据此校验。 */
   version: ModelEditorVersion;
@@ -257,28 +268,16 @@ export type BevyModelEditor = {
    * orbit/elevation/distance 允许主按钮在画布任意处拖动编辑选中镜头；focus 只操作注视点 gizmo。
    */
   cameraTool?: "orbit" | "elevation" | "distance" | "focus";
-  /** 选中镜头 id（camera 模式）。 */
+  /** 兼容旧 gizmo 手势的瞬态字段；当前没有 UI 写入。 */
   cameraId?: string;
+  shot?: BevyShotCamera;
   /** 聚焦模型 focus（世界坐标，placement 后 AABB 中心）。 */
   focus: [number, number, number];
   /** 模型包围球半径（gizmo 尺寸）。 */
   radius: number;
-  /** 选中镜头的派生正交相机（camera 模式）。 */
-  shot?: BevyShotCamera;
 };
 
-/** 选中镜头的派生透视相机（design D3；由 `resolveShotCamera` 生成；change: switch-shot-camera-to-perspective）。 */
-export type BevyShotCamera = {
-  position: [number, number, number];
-  focus: [number, number, number];
-  /** 透视垂直 FOV（弧度）。 */
-  fov: number;
-  azimuth: number;
-  elevation: number;
-  distance: number;
-  /** 镜头画幅（change: fix-model-focus-navigation-and-camera-parity，design D8）。 */
-  aspect: ModelCameraAspect;
-};
+
 
 /**
  * 活动动画节点播放瞬时投影（change: 2026-10-05-bind-model-animation-to-shots，任务 4.1）。

@@ -27,6 +27,24 @@ export type ServiceConnectionRegistryOptions = {
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as ExtensionDocumentValue;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const sourceKey = (id: string) => `sources/${id}`;
+/** 旧版 Agent 用途（discussion / target-execution）在读取旧来源时并入 text，避免旧数据卡住。 */
+const LEGACY_AGENT_PURPOSES = new Set(["discussion", "target-execution"]);
+const normalizePurpose = (purpose: string): ServiceConnectionPurpose =>
+  LEGACY_AGENT_PURPOSES.has(purpose) ? "text" : purpose as ServiceConnectionPurpose;
+const normalizeExtraCapability = (capability: ServiceConnectionCapability): ServiceConnectionCapability =>
+  LEGACY_AGENT_PURPOSES.has(String(capability.purpose)) ? { ...capability, purpose: "text" } : capability;
+const normalizeExtraBinding = (binding: ServiceConsumerBinding): ServiceConsumerBinding => ({
+  ...binding, purposes: [...new Set(binding.purposes.map(purpose => normalizePurpose(String(purpose))))]
+});
+const dedupeCapabilities = (capabilities: readonly ServiceConnectionCapability[]) => {
+  const seen = new Set<string>();
+  return capabilities.filter(capability => {
+    const key = `${capability.purpose}\u0000${capability.protocol}\u0000${capability.modelId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 /** Persistent source authority. Secrets are immutable and invisible until metadata CAS publishes them.
  * A pending operation is recoverable after a process crash without touching the old active secret.
@@ -68,17 +86,33 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       // (a new snapshot fingerprint) is an explicit new intent and may republish the same identity.
       const oauthRefresh = snapshot.kind === "oauth" && found.source.origin?.version.credentialEpoch !== snapshot.credentialEpoch;
       const reconfigured = !!found.source.origin && !!found.source.removedFingerprint && found.source.removedFingerprint !== fingerprint;
-      if (!oauthRefresh && !reconfigured) return found.source;
+      // Site provider sources are configuration-derived (key + catalog), so a configured provider
+      // must reappear even if an old removal tombstone exists. A personal source additionally
+      // requires a new credential fingerprint, so an explicit remove still sticks until reconfigured.
+      const configuredSite = snapshot.scope === "site" && snapshot.enabled && snapshot.credentialConfigured;
+      const credentialRestored = snapshot.scope === "personal" && snapshot.enabled && snapshot.credentialConfigured &&
+        found.source.originCredentialFingerprint !== snapshot.credentialFingerprint;
+      if (!oauthRefresh && !reconfigured && !configuredSite && !credentialRestored) return found.source;
     }
-    if (found?.source.originFingerprint === fingerprint) return found.source;
+    // The fingerprint covers the adapter snapshot, including model identities. Stored
+    // metadata also contains host-added bindings/endpoints: comparing it directly to
+    // the snapshot would republish every read and invalidate active turns.
+    //
+    // 但「来源暂时消失」留下的 tombstone 不能走这条近路：它的内容与快照仍然相同，直接返回
+    // 会让 Provider 恢复后永远停在 removed（`refresh()` 打 tombstone 时并不记录
+    // `removedFingerprint`，那是只有显式移除才写下的「用户意图」）。显式移除仍然照旧粘住。
+    const removedWithoutIntent = found?.source.removed === true && !found.source.removedFingerprint;
+    if (found?.source.originFingerprint === fingerprint && !removedWithoutIntent) return found.source;
     const { legacyId, credentialFingerprint, ...data } = snapshot;
+    const extraCapabilities = (found?.source.extraCapabilities ?? []).map(normalizeExtraCapability);
+    const extraBindings = (found?.source.extraBindings ?? []).map(normalizeExtraBinding);
     const next: Source = { ...data, serviceConnectionId: id, owner: adapter.scope === "personal" ? actor.owner : null,
       endpoints: [...data.endpoints, ...(found?.source.extraEndpoints ?? []).filter(endpoint => !data.endpoints.some(candidate => candidate.protocol === endpoint.protocol))], extraEndpoints: found?.source.extraEndpoints ?? [],
       enabled: data.enabled && found?.source.enabledOverride !== false, ...(found?.source.enabledOverride !== undefined ? { enabledOverride: found.source.enabledOverride } : {}),
       credentialKey: null, managedByAdministrator: false,
-      capabilities: [...data.capabilities, ...(found?.source.extraCapabilities ?? []).filter(capability => data.capabilities.some(candidate => candidate.modelId === capability.modelId && candidate.protocol === capability.protocol) || capability.purpose === "discussion" && (found?.source.extraEndpoints ?? []).some(endpoint => endpoint.protocol === capability.protocol))],
-      extraCapabilities: found?.source.extraCapabilities ?? [],
-      bindings: [...data.bindings, ...(found?.source.extraBindings ?? [])], extraBindings: found?.source.extraBindings ?? [],
+      capabilities: dedupeCapabilities([...data.capabilities, ...extraCapabilities.filter(capability => data.capabilities.some(candidate => candidate.modelId === capability.modelId && candidate.protocol === capability.protocol) || capability.purpose === "text" && (found?.source.extraEndpoints ?? []).some(endpoint => endpoint.protocol === capability.protocol))]),
+      extraCapabilities,
+      bindings: [...data.bindings, ...extraBindings], extraBindings,
       configRevision: (found?.source.configRevision ?? 0) + 1,
       credentialEpoch: (found?.source.credentialEpoch ?? 0) + (!found || (found.source.origin?.version.credentialEpoch !== snapshot.credentialEpoch || found.source.originCredentialFingerprint !== credentialFingerprint) ? 1 : 0),
       origin: { extensionId, adapterId: adapter.id, legacyId, version: { configRevision: snapshot.configRevision, credentialEpoch: snapshot.credentialEpoch } }, originFingerprint: fingerprint, ...(credentialFingerprint ? { originCredentialFingerprint: credentialFingerprint } : {}) };
@@ -106,11 +140,7 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
     if (!registered || !registered.active && !registered.adapter.retainAuthorityOnDispose) return { ...source, enabled: false };
     const snapshot = await registered.adapter.get(actor.owner, source.origin.legacyId);
     if (snapshot) return sync(actor, registered.extensionId, registered.adapter, snapshot);
-    const current = await read(source.serviceConnectionId);
-    if (!current || current.source.removed) return current?.source ?? source;
-    const tombstone = { ...current.source, enabled: false, removed: true, credentialConfigured: false, configRevision: current.source.configRevision + 1, credentialEpoch: current.source.credentialEpoch + 1 };
-    await write([{ op: "set", key: sourceKey(source.serviceConnectionId), value: json(tombstone), expectedRevision: current.revision }]);
-    return tombstone;
+    return { ...source, enabled: false, removed: true, credentialConfigured: false };
   };
   const get = async (actor: ServiceConnectionActor, id: string) => {
     requireActor(actor);
@@ -295,9 +325,9 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       requireActor(actor);
       const original = await read(id);
       if (!original || !mayWrite(actor, original.source)) throw new ServiceConnectionError("forbidden", "无权绑定来源");
-      await refresh(actor, original.source);
+      const current = await refresh(actor, original.source);
       const found = (await read(id))!;
-      if (found.source.configRevision !== expected.configRevision || found.source.credentialEpoch !== expected.credentialEpoch) throw new ServiceConnectionError("stale", "来源代次已变化");
+      if (current.removed || found.source.configRevision !== expected.configRevision || found.source.credentialEpoch !== expected.credentialEpoch) throw new ServiceConnectionError("stale", "来源代次已变化");
       // Replaying the same auto binding is not a new configuration: keep the published revision.
       const existing = found.source.bindings.find(item => item.bindingId === binding.bindingId);
       if (existing && digest(existing) === digest(binding) && (!capabilities || digest(capabilities) === digest(found.source.capabilities))) return view(found.source, actor);
@@ -330,8 +360,8 @@ export function createServiceConnectionRegistry(options: ServiceConnectionRegist
       if (source.origin && source.endpoints.some(item => item.protocol === endpoint.protocol) && !source.extraEndpoints?.some(item => item.protocol === endpoint.protocol)) throw new ServiceConnectionError("invalid", "原有协议请在来源主表单修改，不能创建第二份配置");
       const endpoints = [...source.endpoints.filter(item => item.protocol !== endpoint.protocol), endpoint];
       assertEndpoints(endpoints);
-      const binding: ServiceConsumerBinding = { bindingId: `protocol:${id}:${endpoint.protocol}`, extensionId: "sdk-agent", consumer: "agent", consumerId: `shared:${endpoint.protocol}`, purposes: ["discussion"], modelKeys: models };
-      const capabilities = models.map(modelId => ({ purpose: "discussion" as const, protocol: endpoint.protocol, modelId, imageInput: false, evidence: "adapter" as const }));
+      const binding: ServiceConsumerBinding = { bindingId: `protocol:${id}:${endpoint.protocol}`, extensionId: "sdk-agent", consumer: "agent", consumerId: `shared:${endpoint.protocol}`, purposes: ["text"], modelKeys: models };
+      const capabilities = models.map(modelId => ({ purpose: "text" as const, protocol: endpoint.protocol, modelId, imageInput: false, evidence: "adapter" as const }));
       const candidate: Source = { ...source, capabilities: [...source.capabilities, ...capabilities] };
       if (!bindingAllowed(binding, candidate, actor)) throw new ServiceConnectionError("forbidden", "协议适配器未启用");
       const latest = (await read(id))!;

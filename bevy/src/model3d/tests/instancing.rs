@@ -89,10 +89,8 @@ fn explicit_requests_recover_shadow_capable_entities_and_keep_shared_ownership()
 #[test]
 fn explicit_fallback_playback_keeps_unique_parts_and_standard_materials() {
     use super::playback_representation::{fixture, playback};
+    // Explicit instancing 只保留给共享世界模型（旧卡片预览已删除）。
     let (mut scene, resources) = fixture();
-    scene.nodes[0].model_preview =
-        serde_json::from_value(serde_json::json!({"azimuth":0,"elevation":0.4,"distanceScale":1}))
-            .unwrap();
     let mut world = world_with_resources();
     world.resource_mut::<ModelVisuals>().batching_strategy = BatchStrategy::Explicit;
     run_sync(&mut world, &scene, &resources);

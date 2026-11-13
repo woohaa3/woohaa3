@@ -51,6 +51,7 @@ export * from "./canvas/agent-media-continuation.js";
 export * from "./canvas/canvas-script/index.js";
 export * from "./canvas/domain/index.js";
 export * from "./canvas/model-script.js";
+export * from "./canvas/model-candidate.js";
 export * from "./canvas/model-transform.js";
 export * from "./canvas/content-runtime.js";
 export * from "./canvas/model-definition.js";
@@ -84,8 +85,7 @@ export * from "./canvas/image-edit-session.js";
 export * from "./canvas/model-focus.js";
 export * from "./canvas/model-focus-state.js";
 export * from "./canvas/model-placement.js";
-export * from "./canvas/model-cameras.js";
-export * from "./canvas/shot-camera.js";
+export * from "./canvas/camera-aspect.js";
 export * from "./canvas/gizmo.js";
 export * from "./canvas/canvas-node-model.js";
 export * from "./canvas/animation-snapshot.js";
@@ -123,13 +123,13 @@ export * from "./canvas/ground-anchor.js";
 export type { MediaFormatValidator, MediaFormatRegistry, HostMediaFormatService } from "./extension/services/host/media-formats.js";
 export * from "./canvas/scene-package.js";
 export * from "./canvas/shared-world.js";
+export * from "./canvas/world-quarter-turn.js";
 export * from "./canvas/world-animation-script.js";
 export * from "./canvas/world-walk.js";
 export * from "./canvas/world-animation-spatial.js";
 export * from "./canvas/world-animation-verification.js";
 export * from "./canvas/humanoid-motion-reference.js";
 export * from "./canvas/scene-footprint.js";
-export * from "./canvas/world-conversion.js";
 export * from "./canvas/creation-scopes-ui.js";
 export {
   SharedWorldCodecError,
@@ -236,7 +236,6 @@ export * from "./canvas/group-authoring-scope.js";
 export * from "./canvas/world-authoring-response-codec.js";
 
 // 以下为主干在分叉后新增、而特性线未导出的模块（日志信封、图片资源、人形骨架等）。
-export * from "./canvas/generated-image-registry.js";
 export * from "./canvas/humanoid-rig.js";
 export * from "./canvas/resource-state-update.js";
 export * from "./media/image-resource.js";

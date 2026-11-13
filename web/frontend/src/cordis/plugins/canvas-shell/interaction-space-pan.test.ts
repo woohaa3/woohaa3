@@ -152,7 +152,8 @@ describe("聚焦进出门禁释放 Space 平移闩锁", () => {
   it("进入/退出聚焦时清掉已按下的空格，返回画布后左键仍点选节点", () => {
     const h = focusHarness();
     const point = modelCenter(h.target);
-    const cardPoint = { x: 200 + 98, y: 100 + 32 };
+    // 返回画布后左键点在同一世界模型网格上：共享世界模型没有卡片命中区。
+    const cardPoint = point;
     // 在普通画布按住空格进入聚焦（例如聚焦里要继续按空格播放）。
     h.dom.fireKey("keydown", { code: "Space", key: " " });
     h.dom.fire("dblclick", { clientX: point.x, clientY: point.y });

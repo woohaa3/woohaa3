@@ -3,13 +3,11 @@
  * （自 `node-history-service.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R02）。
  */
 import {
-  decodeModelCameras,
   encodeNodeGenerationIdentity,
   modelContentIdentity,
   modelPlacementSnapshotKey,
   nodeHistoryContentIdentity,
   nodeHistoryEntryId,
-  type ModelCamera,
   type NodeGenerationHistoryEntry,
   type NodeHistoryFailurePayload,
   type NodeHistoryMediaPayload,
@@ -240,16 +238,6 @@ export function buildModelEditEntry(input: RegisterModelEditInput): NodeGenerati
       version: input.version,
       sourceHash: input.sourceHash,
       placement: input.placement,
-      ...(input.modelCameras && input.modelCameras.length > 0 ? { modelCameras: input.modelCameras } : {})
     } satisfies NodeHistoryModelPayload
   };
-}
-
-/**
- * 从节点当前 nodeData 读取规范镜头子资源快照（change: 图片聚焦编辑，design D5）。
- */
-export function readModelCamerasSnapshot(data: Record<string, unknown> | undefined): ModelCamera[] | null {
-  if (!data || data.modelCameras === undefined) return null;
-  const decoded = decodeModelCameras(data.modelCameras);
-  return decoded.ok && decoded.value.length > 0 ? decoded.value : null;
 }

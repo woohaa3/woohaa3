@@ -11,7 +11,7 @@ import {
   unionRects,
   type AlignableNode
 } from "./geometry.js";
-
+import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identity.js";
 
 describe("effectiveNodeSize", () => {
   it("普通类型使用参考尺寸，显式尺寸优先", () => {
@@ -19,12 +19,12 @@ describe("effectiveNodeSize", () => {
     expect(effectiveNodeSize({ type: "text", width: 300, height: 250 })).toEqual({ width: 300, height: 250 });
   });
 
-  it("model3d 紧凑卡片扩展为完整预览卡片，非紧凑卡片保留显式尺寸", () => {
-    // 旧卡片（存储高度 ≤116）视觉上是完整预览卡片，读取时不改写存储值。
-    expect(effectiveNodeSize({ type: "model3d", width: 196, height: 64 })).toEqual({ width: 248, height: 232 });
-    // 已放大过的卡片按显式尺寸，仅恢复预览最小高度。
-    expect(effectiveNodeSize({ type: "model3d", width: 280, height: 180 })).toEqual({ width: 280, height: 180 });
-    expect(effectiveNodeSize({ type: "model3d", width: 320, height: 117 })).toEqual({ width: 320, height: 160 });
+  it("卡片尺寸只服务 2D 卡片：模型不再扩展为 248×232 / 196×64 预览卡片", () => {
+    expect(effectiveNodeSize({ type: "text", width: 248, height: 232 })).toEqual({ width: 248, height: 232 });
+    expect(effectiveNodeSize({ type: COMPOSITE_ASSET_NODE_TYPE, width: 260, height: 195 })).toEqual({ width: 260, height: 195 });
+    // 模型没有卡片：保留显式数值，只按共享最小尺寸收敛，不做模型最小预览高度扩展。
+    expect(effectiveNodeSize({ type: "model3d", width: 196, height: 64 })).toEqual({ width: 196, height: 64 });
+    expect(effectiveNodeSize({ type: "model3d", width: 320, height: 117 })).toEqual({ width: 320, height: 117 });
   });
 
   it("显式尺寸低于共享下限时收敛到下限", () => {
@@ -190,5 +190,17 @@ describe("unionRects", () => {
       { x: 0, y: 0, width: 10, height: 10 },
       { x: 20, y: -5, width: 10, height: 10 }
     ])).toEqual({ x: 0, y: -5, width: 30, height: 15 });
+  });
+});
+
+describe("effectiveCanvasNodeSize 只服务 2D 卡片", () => {
+  it("文本卡片、复合资产与无卡片模型各自取自己的尺寸规则", () => {
+    // 文本卡片：显式尺寸原样保留（不低于下限）。
+    expect(effectiveNodeSize({ type: "text", width: 300, height: 250 })).toEqual({ width: 300, height: 250 });
+    // 复合资产：规范基准矩形（不套用模型卡片扩展）。
+    expect(effectiveNodeSize({ type: "composite-asset" })).toEqual({ width: 260, height: 195 });
+    // 无卡片模型：不再出现 248×232 / 196×64 的卡片扩展或模型最小预览高度。
+    expect(effectiveNodeSize({ type: "model3d", width: 196, height: 64 })).toEqual({ width: 196, height: 64 });
+    expect(effectiveNodeSize({ type: "model3d", width: 320, height: 117 })).toEqual({ width: 320, height: 117 });
   });
 });

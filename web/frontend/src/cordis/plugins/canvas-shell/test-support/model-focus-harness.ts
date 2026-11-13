@@ -15,6 +15,7 @@ import {
   makeFocusProjector,
   makeShotProjector,
   modelGizmoGeometry,
+  newWorldInstance,
   quatRotate,
   screenPointFromWorld,
   screenPointToWorld,
@@ -51,7 +52,7 @@ export function unitBox(): SceneV2Op {
   } as SceneV2Op;
 }
 
-/** 单个 3D 模型节点位于 (200,100)。 */
+/** 单个共享世界模型节点：画布点 (200,100) 投影为 h=0 的世界实例。 */
 export function modelCanvas(): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("c1");
   return {
@@ -59,9 +60,15 @@ export function modelCanvas(): ServerCanvas {
     revision: 1,
     document: {
       ...base.document,
-      nodes: [{ id: "m1", type: "model3d", position: { x: 200, y: 100 }, width: 196, height: 64 }]
+      nodes: [{ id: "m1", type: "model3d" }]
     },
-    nodeData: { m1: { modelScript: "", modelScriptVersion: "woohaa-model-js-v2" } } as never
+    nodeData: {
+      m1: {
+        modelScript: "",
+        modelScriptVersion: "woohaa-model-js-v2",
+        sharedWorldInstance: newWorldInstance("instance-m1", { x: 200, y: 100 })
+      }
+    } as never
   } as ServerCanvas;
 }
 

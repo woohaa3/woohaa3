@@ -8,7 +8,7 @@ describe("image director ledger", () => {
   it("persists a request and rejects the same identity with different input", () => {
     const dir = mkdtempSync(join(tmpdir(), "image-director-"));
     const path = join(dir, "state.sqlite");
-    const record: ImageDirectorSceneRecord = { owner: "owner", canvasId: "canvas", request: { requestId: "request", sourceNodeId: "image", connectionId: "connection", model: "model", variant: null, instructions: "" }, inputHash: "hash", source: { sourceNodeId: "image", assetId: "asset", contentVersion: "version", checksum: "checksum", mimeType: "image/png", width: 1, height: 1 }, imageBase64: "AA==", connectionVersion: "v1", stage: "preparing", attempts: [] };
+    const record: ImageDirectorSceneRecord = { owner: "owner", canvasId: "canvas", request: { requestId: "request", sourceNodeId: "image", connectionId: "connection", model: "model", variant: null, instructions: "" }, inputHash: "hash", source: { sourceNodeId: "image", assetId: "asset", contentVersion: "version", checksum: "checksum", mimeType: "image/png", width: 1, height: 1 }, imageBase64: "AA==", beforeNodeIds: [], connectionVersion: "v1", stage: "preparing" };
     try {
       const store = new ImageDirectorSceneStore(path);
       expect(store.insert(record).reused).toBe(false);

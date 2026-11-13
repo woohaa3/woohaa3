@@ -16,7 +16,7 @@ it.each(["compact", "expanded"] as const)("%s settings preserve empty/nonempty p
   function Panel() {
     const [data, setData] = useState({panelPrompt: value, parameters: {model:"m", size:"small"}});
     return <><ExecutionPanel taskKind="image-generation" surface="dock" presentation={presentation} data={data}
-      modelConfig={{defaultModel:"m", modelOptions:[{value:"m",label:"M"}], parameterSchemaByModel:{m:[{key:"size",label:"尺寸",type:"select",options:[{value:"small",label:"小"},{value:"large",label:"大"}]}]}}}
+      modelConfig={{defaultModel:"m", modelOptions:[{value:"m",label:"M"}], parameterSchemaByModel:{m:[{key:"size",label:"尺寸",presentation:{section:"common"},type:"select",options:[{value:"small",label:"小"},{value:"large",label:"大"}]}]}}}
       promptEditorSlot={({value,onChange}) => <MentionEditor value={value} onChange={onChange} candidates={[]} />}
       onChange={patch => setData(previous => ({...previous,...patch,parameters:{...previous.parameters,...patch.parameters}}))} />
       <button data-outside>外部</button></>;

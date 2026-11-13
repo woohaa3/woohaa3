@@ -204,6 +204,37 @@ const SETTINGS = [
 ];
 
 describe("插件目录管理", () => {
+  it("站点激活失败时可直接展开完整原因，不触发配置导航或启停", async () => {
+    const reasons = ["扩展激活超时（30000ms）", "依赖未就绪\n请检查连接配置"];
+    const { container, onOpen, setSiteEnabled } = await renderSection([], [plugin("ark-provider")], {
+      siteManageable: false,
+      siteRows: [siteRow({ desiredEnabled: true, actualState: "failed", actualStateLabel: "激活失败", diagnostics: reasons })]
+    });
+    const details = query<HTMLDetailsElement>(container, "plugin-failure-ark-provider")!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")?.textContent).toBe("查看失败原因");
+    await act(async () => details.querySelector("summary")!.click());
+    expect(details.open).toBe(true);
+    for (const reason of reasons) expect(details.textContent).toContain(reason);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(setSiteEnabled).not.toHaveBeenCalled();
+  });
+
+  it.each(["无法加载扩展包：HTTP 404", undefined])("浏览器激活失败也有原因入口（%s）", async (failureReason) => {
+    const { container } = await renderSection([], [plugin("browser-test")], {
+      rows: [{ id: "browser-test", name: "浏览器扩展", description: "", required: false, configurable: true, status: "failed", failureReason }]
+    });
+    const details = query<HTMLDetailsElement>(container, "plugin-failure-browser-test")!;
+    await act(async () => details.querySelector("summary")!.click());
+    expect(details.open).toBe(true);
+    expect(details.textContent).toContain(failureReason ?? "插件激活失败，未返回具体原因。");
+  });
+
+  it("正常插件不显示失败原因入口", async () => {
+    const { container } = await renderSection([], [plugin("ark-provider")], { siteRows: [siteRow({ actualState: "active" })] });
+    expect(query(container, "plugin-failure-ark-provider")).toBeNull();
+  });
+
   it("只显示磁盘扩展，隐藏内置插件和旧浏览器条目", async () => {
     const { container } = await renderSection(SETTINGS, PLUGINS, { rows: [
       { id: "node-history", name: "节点历史", description: "", required: false, configurable: true, status: "active" }

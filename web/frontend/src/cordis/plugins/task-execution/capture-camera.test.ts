@@ -49,7 +49,7 @@ class StubCatalogService implements TaskCatalogService {
 }
 
 const CATALOG = catalogFixture([
-  { modelKey: "image-model", modelType: "image", interaction: { id: "test-panel", version: 1 } }
+  { modelKey: "image-model", modelType: "image", interaction: { id: "test-panel", version: 1 }, inputSchema: { type: "object", properties: { prompt: { type: "string" }, seed: { type: "integer" }, referenceImages: { type: "array", items: { type: "string" } } } } }
 ], { image: "image-model" });
 
 type CameraSpec = { nodeId: string; cameraId: string; bound?: string };

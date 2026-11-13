@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-oauth-agent",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Woohaa3 OAuth Agent 来源扩展：前后端入口、共享 metadata 与 /api/oauth-agent/* 公开映射（change: 2026-10-10-unify-extension-frontend-entry）。",
@@ -16,6 +16,10 @@
     "./shared": {
       "types": "./src/shared.ts",
       "import": "./dist/shared.js"
+    },
+    "./executor": {
+      "types": "./src/backend/executor.ts",
+      "import": "./dist/executor.js"
     }
   },
   "files": [
@@ -25,7 +29,7 @@
     "extension.json"
   ],
   "scripts": {
-    "build": "node ../../scripts/build-package.mjs --entry src/frontend/index.ts --outdir dist --platform browser --entry-name frontend && node ../../scripts/build-package.mjs --entry src/backend/index.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "build": "node ../../scripts/build-package.mjs --entry src/frontend/index.ts --outdir dist --platform browser --entry-name frontend && node ../../scripts/build-package.mjs --entry src/backend/index.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared && node ../../scripts/build-package.mjs --entry src/backend/executor.ts --outdir dist --platform node --entry-name executor",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build:browser": "node ../../scripts/build-extension-browser.mjs"
@@ -37,10 +41,12 @@
     "jose": "^6.1.0",
     "react": "^18.3.1",
     "@woohaa3/runtime-components": "workspace:*",
-    "@woohaa3/ui": "workspace:*"
+    "@woohaa3/ui": "workspace:*",
+    "@woohaa3/agent-connections": "workspace:*",
+    "woohaa3-executor": "workspace:*"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.5"
+    "@deepseek-ai/cordis": "4.1.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -48,13 +54,14 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis": "4.1.0",
     "@types/node": "^22.15.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "jsdom": "^30.1.1",
     "react-dom": "^18.3.1",
     "typescript": "^7.0.2",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "@woohaa3/test-fixtures-agent-role-turns": "workspace:*"
   }
 }

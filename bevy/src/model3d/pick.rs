@@ -74,8 +74,10 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                         }
                         continue;
                     };
-                    let placement = &reference.expect("model reference").placement;
-                    let root = super::layout::model_root_transform(node, &model, placement).to_matrix();
+                    let Some(root_transform) = super::layout::model_root_transform(node) else {
+                        continue;
+                    };
+                    let root = root_transform.to_matrix();
                     let motion_revision = if motion.0.as_deref() == Some(&node.id) { motion.2 } else { 0 };
                     let mut revision = motion_revision;
                     if let Some(rotations) = reference.and_then(|r| r.part_rotations.as_ref()) {
@@ -91,7 +93,7 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                         old.swap_remove(index).4
                     } else {
                         let poses = if motion_revision != 0 { Some(&motion.1) } else { None };
-                        let triangles = world_triangles(node, &model, placement, poses);
+                        let triangles = world_triangles(node, &model, poses);
                         let mut min = Vec3::splat(f32::INFINITY);
                         let mut max = Vec3::splat(f32::NEG_INFINITY);
                         for vertex in triangles.iter().flat_map(|triangle| triangle.vertices) {
@@ -131,11 +133,6 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
     });
 }
 
-/// 普通模型 picking 候选资格：非预览卡片、且携带模型引用。
-pub(crate) fn is_model_candidate(node: &GraphNode) -> bool {
-    (node.model_preview.is_none() || node.shared_world_instance.is_some()) && node.model.is_some()
-}
-
 /// 派生普通模型候选世界 AABB；`lookup` 提供不可变资源表（`set_scene` 接受点注入 `bridge`）。
 pub(crate) fn model_candidates(
     scene: &Scene,
@@ -148,10 +145,7 @@ pub(crate) fn model_candidates(
                 .model
                 .as_ref()
                 .and_then(|reference| lookup(&reference.resource_key))
-                .and_then(|model| {
-                    let placement = node.model.as_ref().map(|reference| &reference.placement)?;
-                    super::layout::model_world_aabb_for_node(&model, placement, node)
-                });
+                .and_then(|model| super::layout::model_world_aabb_for_node(&model, node));
             match surface {
                 Some(world) => candidates.push(ModelCandidate {
                     shared_world: true,
@@ -176,39 +170,19 @@ pub(crate) fn model_candidates(
             }
             continue;
         }
-        if !is_model_candidate(node) {
-            continue;
-        }
-        let Some(reference) = &node.model else {
-            continue;
-        };
-        let Some(model) = lookup(&reference.resource_key) else {
-            continue;
-        };
-        let Some(world) =
-            super::layout::model_world_aabb_for_node(&model, &reference.placement, node)
-        else {
-            continue;
-        };
-        candidates.push(ModelCandidate {
-            shared_world: false,
-            empty_marker: false,
-            node_id: node.id.clone(),
-            min: world.min,
-            max: world.max,
-            triangles: None,
-        });
     }
     candidates
 }
 
-fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::protocol::ModelPlacement, poses: Option<&PartPoses>) -> Vec<crate::canvas_query::model_pick::SurfaceTriangle> {
+fn world_triangles(node: &GraphNode, model: &ModelSnapshot, poses: Option<&PartPoses>) -> Vec<crate::canvas_query::model_pick::SurfaceTriangle> {
     let mut combined = poses.cloned().unwrap_or_default();
     if let Some(rotations) = node.model.as_ref().and_then(|m| m.part_rotations.as_ref()) {
         for (id, q) in rotations { combined.entry(id.clone()).or_default().rotation *= Quat::from_array(*q); }
     }
     let poses = Some(&combined);
-    let root = super::layout::model_root_transform(node, model, placement).to_matrix();
+    let Some(root) = super::layout::model_root_transform(node).map(|transform| transform.to_matrix()) else {
+        return Vec::new();
+    };
     let specs = super::scene::build_entity_specs(model);
     let materials = super::scene::collect_materials(model);
     let indices: std::collections::HashMap<_, _> = specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
@@ -249,7 +223,7 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, placement: &crate::p
     triangles
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "canvas-core"))]
 mod tests {
     use super::*;
 
@@ -259,17 +233,18 @@ mod tests {
 
     #[test]
     fn part_rotations_move_surface_vertices_with_parent_and_restore() {
-        let mut node = node(r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"m","partRotations":{}}}"#);
+        let mut node = node(r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"m","partRotations":{}},
+            "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
+                "transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
         let mut model = snapshot();
         model.ops.insert(0, crate::protocol::ModelOp::Group { id: "joint".into(), parent: None, position: [0.;3], rotation: [0.;3], scale: [1.;3] });
         if let crate::protocol::ModelOp::Box { parent, position, .. } = &mut model.ops[1] { *parent = Some("joint".into()); *position = [3.,1.,0.]; }
-        let placement = node.model.as_ref().unwrap().placement.clone();
-        let base = world_triangles(&node, &model, &placement, None);
+        let base = world_triangles(&node, &model, None);
         node.model.as_mut().unwrap().part_rotations.as_mut().unwrap().insert("joint".into(), Quat::from_rotation_z(0.8).to_array());
-        let moved = world_triangles(&node, &model, &placement, None);
+        let moved = world_triangles(&node, &model, None);
         assert_ne!(base[0].vertices, moved[0].vertices);
         node.model.as_mut().unwrap().part_rotations = None;
-        assert_eq!(base[0].vertices, world_triangles(&node, &model, &placement, None)[0].vertices);
+        assert_eq!(base[0].vertices, world_triangles(&node, &model, None)[0].vertices);
     }
 
     fn snapshot() -> ModelSnapshot {
@@ -291,37 +266,24 @@ mod tests {
         )
     }
 
-    /// 普通模型本体与预览卡片语义保持：带模型引用入选，仅预览卡片不入选。
+    /// 只有携带共享世界实例的模型才是拾取候选；旧卡片节点不再有模型候选。
     #[test]
-    fn plain_model_is_candidate_and_preview_card_is_not() {
-        let plain = node(
+    fn only_shared_world_models_are_candidates() {
+        let legacy = node(
             r#"{"id":"m","type":"model3d","x":0,"y":0,"width":260,"height":195,
                 "model":{"resourceKey":"v:sig"}}"#,
         );
-        assert!(is_model_candidate(&plain));
-
-        let preview = node(
-            r#"{"id":"p","type":"model","x":0,"y":0,"width":260,"height":195,
-                "model":{"resourceKey":"v:sig"},
-                "modelPreview":{"azimuth":0.5,"elevation":0.2,"distanceScale":1.2,"targetOffset":[0,0,0]}}"#,
+        let world = node(
+            r#"{"id":"w","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"v:sig"},
+                "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"instance",
+                "transform":{"version":"shared-world-v1","position":{"u":1,"v":2,"h":3},
+                "rotation":[0,0,0,1],"scale":1}}}"#,
         );
-        assert!(!is_model_candidate(&preview));
-
-        let mut world_preview = preview.clone();
-        world_preview.shared_world_instance = serde_json::from_value(serde_json::json!({
-            "kind":"world-instance", "version":"shared-world-v1", "instanceId":"instance",
-            "transform":{"version":"shared-world-v1", "position":{"u":1,"v":2,"h":3},
-                "rotation":[0,0,0,1], "scale":1}
-        })).unwrap();
-        assert!(is_model_candidate(&world_preview));
-
-        let scene = Scene {
-            nodes: vec![plain, preview],
-            ..Scene::default()
-        };
+        let scene = Scene { nodes: vec![legacy, world], ..Scene::default() };
         let candidates = model_candidates(&scene, |_| Some(Arc::new(snapshot())));
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].node_id, "m");
+        assert_eq!(candidates[0].node_id, "w");
+        assert!(candidates[0].shared_world);
         assert!(candidates[0].min[0] < candidates[0].max[0]);
     }
 
@@ -332,7 +294,7 @@ mod tests {
         remember_scene(&scene);
         let asset = Arc::new(snapshot());
         refresh_shared_models(|_| Some(asset.clone()));
-        let triangles = world_triangles(&scene.nodes[0], &asset, &scene.nodes[0].model.as_ref().unwrap().placement, None);
+        let triangles = world_triangles(&scene.nodes[0], &asset, None);
         let mut candidates = model_candidates(&scene, |_| Some(asset.clone()));
         candidates[0].triangles = Some(Arc::new(triangles));
         assert_eq!(candidates[0].triangles.as_ref().unwrap().len(), 12);
@@ -402,7 +364,7 @@ mod tests {
             alpha_mode: "blend".into(), double_sided: true, unlit: false,
             opacity: Some(0.0), base_color_texture: None,
         });
-        assert!(world_triangles(&node, &model, &node.model.as_ref().unwrap().placement, None).is_empty());
+        assert!(world_triangles(&node, &model, None).is_empty());
         remember_scene(&Scene { nodes: vec![node], ..Scene::default() });
         crate::canvas_query::model_pick::accept_models(Vec::new(), 9, Default::default());
         let asset = Arc::new(model);
@@ -424,8 +386,8 @@ mod tests {
         let mut delta = crate::motion::ModelDelta::default();
         delta.opacity = 0.;
         let poses = HashMap::from([("parent".into(), delta)]);
-        assert!(!world_triangles(&node, &model, &node.model.as_ref().unwrap().placement, None).is_empty());
-        assert!(world_triangles(&node, &model, &node.model.as_ref().unwrap().placement, Some(&poses)).is_empty());
+        assert!(!world_triangles(&node, &model, None).is_empty());
+        assert!(world_triangles(&node, &model, Some(&poses)).is_empty());
         crate::bridge::clear_model_assets();
         publish_motion(None, HashMap::new());
         let mut background = node.clone();

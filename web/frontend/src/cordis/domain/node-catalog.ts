@@ -79,12 +79,15 @@ export function connectLabelFor(sourceNodeType: string, targetNodeType: string):
  * 出现（与旧 Godot `_generation_node_data` 等价）。3D 节点携带共享的本地模型定义，
  * 不预填任何任务字段。
  */
-export function defaultNodeDataForType(nodeType: string): CanvasNodeData | undefined {
-  const selfContained = defaultSelfContained3DNodeData(nodeType);
+export function defaultNodeDataForType(
+  nodeType: string,
+  world?: import("@woohaa3/contracts").AgentModelWorld
+): CanvasNodeData | undefined {
+  const selfContained = defaultSelfContained3DNodeData(nodeType, world);
   if (selfContained) return selfContained;
   const descriptor = findAgentNodeDescriptor(nodeType);
   if (!descriptor) return undefined;
-  return defaultAgentNodeData(descriptor.kind);
+  return defaultAgentNodeData(descriptor.kind, world);
 }
 
 /** 连线（拉线创建）时新节点的 nodeData：任务字段 + 指向源节点的输入映射。 */
@@ -94,11 +97,13 @@ export function connectNodeDataFor(
   existingRoles: readonly string[] = [],
   nodeData?: Record<string, CanvasNodeData>
 ): CanvasNodeData | undefined {
-  const base = defaultNodeDataForType(toNodeType);
-  if (!base) return undefined;
   // 自包含 3D 节点不从来源节点取得运行数据：连线只作来源说明，不注入任务 inputMapping
   // （change: 2026-10-05-bind-model-animation-to-shots）；复合资产节点同理。
-  if (toNodeType === "model3d" || toNodeType === "composite-asset") return { ...base };
+  // 模型的世界实例必须由创建方提供，这里不代造。
+  if (toNodeType === "model3d") return undefined;
+  const base = defaultNodeDataForType(toNodeType);
+  if (!base) return undefined;
+  if (toNodeType === "composite-asset") return { ...base };
   const data: CanvasNodeData = { ...base };
   data.inputMapping = [
     {

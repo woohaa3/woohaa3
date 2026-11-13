@@ -15,23 +15,20 @@ import type { ChatGptGenerationMode, ChatGptGenerationReceipt } from "@woohaa3/c
 import type { ChatGptCanvasPorts } from "./ports.js";
 import type { CodexAdapter, CodexRunEvent } from "./codex-adapter.js";
 import type { ChatGptWorkJournal } from "./work-journal.js";
-import { cameraSchema, modelSchema } from "./generation/schemas.js";
 import { parseCandidateText } from "./generation/candidate-codec.js";
-import { buildPrompt, buildToolsPrompt } from "./generation/prompts.js";
-import { commitCameras, commitModel, type CommitContext } from "./generation/commit.js";
+import { AGENT_READ_ONLY_TOOLS } from "@woohaa3/contracts";
+import { preparedPromptText } from "@woohaa3/agent-connections";
+import { commitModel, type CommitContext } from "./generation/commit.js";
 import { priorToReceipt } from "./generation/receipts.js";
 import { identityOf, type GenerateRequest, type GenerationOutcome, type GenerationProgress, type RequestRecord } from "./generation/types.js";
 
 export type { GenerateRequest, GenerationProgress, GenerationOutcome } from "./generation/types.js";
-export { modelSchema, cameraSchema } from "./generation/schemas.js";
-export { parseCandidateText, overwriteGuard, normalizeCameraMutations } from "./generation/candidate-codec.js";
-export { buildPrompt, buildToolsPrompt } from "./generation/prompts.js";
+export { modelSchema } from "./generation/schemas.js";
+export { parseCandidateText, overwriteGuard } from "./generation/candidate-codec.js";
 
 export type ChatGptGenerationOptions = {
   ports: ChatGptCanvasPorts;
   codex: CodexAdapter;
-  /** 受控 MCP 工具面（design D4b）。 */
-  toolsEnabled?: boolean;
   toolGrants?: import("@woohaa3/contracts").ApplicationToolDelegationFacade;
   workJournal?: ChatGptWorkJournal;
   logger?: (event: Record<string, unknown>) => void;
@@ -51,7 +48,6 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
   const codex = options.codex;
   const records = new Map<string, RequestRecord>();
   const active = new Map<string, { controller: AbortController; ownerId: string }>();
-  const toolsEnabled = options.toolsEnabled === true;
   const journal = options.workJournal;
   const log = options.logger ?? (() => undefined);
   const workIds = new Map<string, string>();
@@ -112,28 +108,20 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
 
   const commitCtx: CommitContext = { ports, fail, succeed, partial };
 
-  /** 工具模式回合（design D4b）。 */
+  /** 工具模式回合（design D4b）；模式由角色的输出契约决定，不由部署开关暗中切换。 */
   const runWithTools = async (
-    input: GenerateRequest,
-    read: Extract<Awaited<ReturnType<ChatGptCanvasPorts["readNode"]>>, { ok: true }>,
+    input: GenerateRequest & { prepared: NonNullable<GenerateRequest["prepared"]> },
     record: RequestRecord,
     controller: AbortController,
     onProgress?: GenerationProgress
   ): Promise<GenerationOutcome> => {
-    const WRITE_TOOLS = new Set(input.mode === "camera" ? (input.selectedCameraId ? ["update_model_camera", "reset_model_camera"] : ["create_model_camera"]) : [
-      "submit_model_script",
-      "create_model_camera",
-      "update_model_camera",
-      "delete_model_camera",
-      "rename_model_camera",
-      "reset_model_camera",
-      "set_model_camera"
-    ]);
+    // 写工具 = 角色已准备工具中除去只读工具；角色声明仍是唯一来源。
+    const WRITE_TOOLS = new Set(input.prepared.tools.filter((tool) => !AGENT_READ_ONLY_TOOLS.includes(tool)));
     const applied: string[] = [];
     const failed: Array<{ part: string; code: string; message: string }> = [];
     record.receipt = { status: "running", requestId: input.requestId, stage: "reasoning" };
     onProgress?.({ requestId: input.requestId, stage: "reasoning" });
-    const prompt = buildToolsPrompt(input, read);
+    const prompt = preparedPromptText(input.prepared);
     let grantToken: string | undefined;
     if (options.toolGrants) {
       try {
@@ -142,7 +130,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
           workId: workIds.get(input.requestId) ?? input.requestId,
           canvasId: input.canvasId,
           nodeId: input.nodeId,
-          tools: [...WRITE_TOOLS, "get_model_api", "get_model_node", "get_model_statistics", "get_model_cameras"],
+          tools: [...input.prepared.tools],
           ...(input.selectedCameraId ? { cameraId: input.selectedCameraId } : {}),
           ...(input.clipId ? { clipId: input.clipId } : {}),
           ...(input.itemId ? { itemId: input.itemId } : {})
@@ -154,7 +142,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     }
     try {
       const { finalResponse } = await codex.runStreamed(
-        { ownerId: input.ownerId, model: input.model, prompt, signal: controller.signal,
+        { ownerId: input.ownerId, requestId: input.requestId, prepared: input.prepared, model: input.model, prompt, signal: controller.signal,
           ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
           ...(grantToken ? { mcpGrantToken: grantToken } : {}) },
         (event: CodexRunEvent) => {
@@ -254,17 +242,20 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         const read = await ports.readNode({ ownerId: input.ownerId, canvasId: input.canvasId, nodeId: input.nodeId });
         if (!read.ok) return fail(record, onProgress, read.code, read.message, 409);
         record.clipId = input.clipId;
-        if (input.mode === "camera" && input.selectedCameraId && !read.cameras.some(camera => camera.id === input.selectedCameraId)) return fail(record, onProgress, "unknown-camera", "Selected camera no longer exists", 409);
         if (input.itemId || input.clipId) return fail(record, onProgress, "invalid-target", "片段或对象动作目标已停用，请改为模型或镜头目标。", 409);
-        if (toolsEnabled) {
-          return await runWithTools(input, read, record, controller, onProgress);
+        const prepared = input.prepared;
+        if (!prepared) return fail(record, onProgress, "role-not-found", "缺少宿主准备的角色请求，拒绝从 mode 推断业务模板。", 400);
+        if (prepared.output.kind === "tool-receipts") {
+          return await runWithTools({ ...input, prepared }, record, controller, onProgress);
         }
-        const prompt = buildPrompt(input, read);
-        const schema = input.mode === "camera" ? cameraSchema() : modelSchema();
+        const prompt = preparedPromptText(prepared);
+        // 候选 schema 来自角色输出契约；领域解码仍用它做严格校验。
+        if (prepared.output.kind !== "candidate") return fail(record, onProgress, "role-output-invalid", "目标生成要求候选或工具回执输出", 400);
+        const schema = prepared.output.schema;
         record.receipt = { status: "running", requestId: input.requestId, stage: "reasoning" };
         onProgress?.({ requestId: input.requestId, stage: "reasoning" });
         const { finalResponse } = await codex.runStreamed(
-          { ownerId: input.ownerId, model: input.model, prompt, outputSchema: schema, signal: controller.signal,
+          { ownerId: input.ownerId, requestId: input.requestId, prepared, model: input.model, prompt, outputSchema: schema, signal: controller.signal,
             ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }) },
           (event: CodexRunEvent) => {
             if (event.type === "progress") onProgress?.({ requestId: input.requestId, stage: event.stage, ...(event.detail ? { detail: event.detail } : {}) });
@@ -276,7 +267,6 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
         if (!parsed.ok) return fail(record, onProgress, "invalid-candidate", parsed.message, 422);
 
         onProgress?.({ requestId: input.requestId, stage: "committing" });
-        if (input.mode === "camera") return await commitCameras(commitCtx, input, read, parsed.value, record, onProgress);
         return await commitModel(commitCtx, input, read, parsed.value, record, onProgress);
       } catch (error) {
         if (controller.signal.aborted) return fail(record, onProgress, "cancelled", "生成已取消。", 499);

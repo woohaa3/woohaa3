@@ -63,7 +63,6 @@ export type CanvasImportGuard = {
 };
 
 export type CanvasRequestHandlerOptions = {
-  worldConversion?: import("@woohaa3/contracts").BackendWorldConversionPort;
   worldAuthoring?: import("@woohaa3/contracts").BackendWorldAuthoringPort;
   worldCamera?: import("../../world-authoring/camera-service.js").WorldCameraSettingsService;
   /** T10 framing refresh/freeze routes. Missing means explicit 503. */

@@ -108,6 +108,8 @@ export type ModelPanelProps = {
 };
 
 export type ModelPanelRenderers = {
+  /** Host-owned atomic source/model selection, shared by generic and dedicated interactions. */
+  modelSelector?: () => import("react").ReactNode;
   references?: () => import("react").ReactNode;
   promptEditor?: (args: {
     value: string;

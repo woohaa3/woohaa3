@@ -362,7 +362,7 @@ export function createApplicationExtensionEntryReconciler(
         return {
           extensionId,
           status,
-          missingServices: state.owned ? Object.keys(state.owned.fiber.inject).filter((name) => !state.owned!.fiber.store?.[name]) : [],
+          missingServices: state.owned ? Object.keys(state.owned.fiber.inject).filter((name) => !state.owned!.fiber.committed?.[name]) : [],
           error: state.error
         };
       }),

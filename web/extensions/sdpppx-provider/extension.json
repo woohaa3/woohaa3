@@ -19,5 +19,6 @@
   },
   "metadata": { "module": "./shared", "export": "SDPPPX_PLUGIN_METADATA", "order": 21 },
   "icon": { "asset": "./assets/icon.svg" },
-  "hostPlugin": { "module": "./backend", "factory": "createSdpppxProviderPlugin", "features": ["provider"], "order": 21 }
+  "hostPlugin": { "module": "./backend", "factory": "createSdpppxProviderPlugin", "features": ["provider"], "order": 21 },
+  "version": "0.1.0"
 }

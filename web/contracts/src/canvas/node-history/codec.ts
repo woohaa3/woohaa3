@@ -12,7 +12,6 @@ import {
   isNonNegativeInteger,
   isValidStorageKey
 } from "../../validation.js";
-import { decodeModelCameras, type ModelCamera } from "../model-cameras.js";
 import { decodeImageEditDocument, decodeImageEditProjectObjectRef, isImageProjectDocument } from "../image-edit.js";
 import {
   NODE_GENERATION_HISTORY_VERSION,
@@ -147,12 +146,6 @@ function decodePayload(
     if (typeof sourceHash !== "string" || sourceHash.length === 0) return invalid("模型 payload 缺少 sourceHash");
     const placement = decodeModelPlacement(input.placement);
     if (input.placement !== undefined && placement === null) return invalid("模型 payload placement 非法");
-    let modelCameras: ModelCamera[] | undefined;
-    if (input.modelCameras !== undefined) {
-      const cameras = decodeModelCameras(input.modelCameras);
-      if (!cameras.ok) return invalid(`模型 payload modelCameras 非法：${cameras.reason}`);
-      modelCameras = cameras.value;
-    }
     return {
       ok: true,
       value: {
@@ -162,7 +155,6 @@ function decodePayload(
         version,
         sourceHash,
         ...(placement ? { placement } : {}),
-        ...(modelCameras ? { modelCameras } : {})
       }
     };
   }

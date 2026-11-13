@@ -93,8 +93,7 @@ pub(crate) fn model_bounds_for_node(
         .get(&reference.resource_key)
         .map(|arc| arc.as_ref())
         .unwrap_or(root.resource.as_ref());
-    let placement = &reference.placement;
-    let (local, anchor) = layout::model_bounds_for_node(model, placement, node)?;
+    let (local, anchor) = layout::model_bounds_for_node(model, node)?;
     Some(ModelBounds::from_local_aabb(&local, anchor))
 }
 
@@ -119,6 +118,13 @@ pub(crate) fn sampled_camera_pose(
         camera.distance,
         camera.elevation,
     );
+    // 非有限输入不伪造位置（采样镜头/包围球任一非法即放弃）。
+    if ![focus, position]
+        .into_iter()
+        .all(|value| value.is_finite())
+    {
+        return None;
+    }
     Some((focus, position))
 }
 

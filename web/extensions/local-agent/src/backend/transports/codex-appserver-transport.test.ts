@@ -576,3 +576,18 @@ describe("connection reuse across a host restart", () => {
     expect(fake.requests.map((request) => request.method)).not.toContain("model/list");
   });
 });
+
+
+it.each([false, true])("sets builtin image generation from the prepared capability: %s", async enabled => {
+  const fake = fakeStdio();
+  const result = await transport().run({
+    configDir: "/tmp/config", workDir: "/tmp/work", loopbackUrl: null, stdio: fake.connection,
+    model: "test", prompt: "hello", allowedTools: ["get_model_node", "submit_model_script"],
+    toolToken: "grant", mcpEndpoint: { name: "woohaa", url: "http://127.0.0.1:1" },
+    nativeCapabilities: enabled ? ["generate-image"] : [], resumeNativeId: null,
+    signal: new AbortController().signal, onEvent: () => undefined
+  });
+  expect(result.ok).toBe(true);
+  const config = fake.requests.find(request => request.method === "thread/start")?.params?.config;
+  expect(config).toMatchObject({ "features.image_generation": enabled });
+});

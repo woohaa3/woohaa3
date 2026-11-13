@@ -317,15 +317,15 @@ test("源码内容未变的重复/时间戳通知不重建；真实修改、删�
     watcher.listener("change", "src/index.ts");
     watcher.listener("change", "src/index.ts");
     await controller.idle();
-    assert.deepEqual(steps, ["build"]);
+    assert.deepEqual(steps, ["build", "build:executors"]);
     fs.unlinkSync(file);
     watcher.listener("rename", "src/index.ts");
     await controller.idle();
-    assert.equal(steps.length, 2);
+    assert.equal(steps.length, 4);
     repo.write("web/contracts/src/index.ts", "export const changed = true;");
     watcher.listener("rename", "src/index.ts");
     await controller.idle();
-    assert.equal(steps.length, 3);
+    assert.equal(steps.length, 6);
   } finally { controller.close(); }
 });
 

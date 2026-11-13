@@ -465,12 +465,14 @@ describe("Canvas Service 模型 MCP HTTP contract（integrate-origin-master）",
 
     await fetch(`${base}/api/canvases`, { method: "POST", headers, body: JSON.stringify({ canvasId }) });
 
-    const { createEmptyWoohaa3ServerCanvas } = await import("@woohaa3/contracts");
+    const { createEmptyWoohaa3ServerCanvas, newWorldInstance } = await import("@woohaa3/contracts");
     const { serverCanvasToYDoc, YJS_CANVAS_FORMAT_VERSION } = await import("@woohaa3/contracts/canvas-yjs");
     const Y = await import("yjs");
     const canvas = createEmptyWoohaa3ServerCanvas(canvasId);
-    canvas.document.nodes.push({ id: "model-1", type: "model3d", position: { x: 0, y: 0 } });
+    // 模型没有卡片：以共享世界实例定位（change: 2026-11-10-remove-legacy-model-card-nodes）。
+    canvas.document.nodes.push({ id: "model-1", type: "model3d" });
     canvas.nodeData["model-1"] = {
+      sharedWorldInstance: newWorldInstance("instance-model-1", { x: 0, y: 0 }),
       modelScript: "scene.box({ id: 'seed' });",
       modelScriptLanguage: "javascript",
       modelScriptVersion: "woohaa-model-js-v2",

@@ -39,6 +39,8 @@
     "typecheck": "pnpm -C web run typecheck",
     "build:browser": "pnpm -C web run build:browser",
     "extensions:check": "node scripts/extensions-preflight.mjs",
+    "ext:bump": "node scripts/bump-extension.mjs",
+    "ext:release": "node scripts/release-extension-market.mjs",
     "pack:extension": "node scripts/pack-extension.mjs",
     "assemble:extensions": "node scripts/assemble-extension-release.mjs",
     "dev:extensions": "pnpm -C web run dev:extensions",
@@ -54,6 +56,8 @@
     "config:export": "node scripts/export-config.mjs",
     "task:compact": "node scripts/task-compact.mjs",
     "desktop:runtimes": "node scripts/package-runtime-components.mjs",
+    "runtime:npm:manifest": "node scripts/build-runtime-npm-manifest.mjs --measure",
+    "runtime:npm:check": "node scripts/build-runtime-npm-manifest.mjs --check",
     "build:media-image": "node scripts/build-media-image.mjs"
   },
   "devDependencies": {

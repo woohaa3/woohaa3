@@ -33,7 +33,7 @@ export type AgentSdkRunInput = {
   toolToken?: string;
   toolFacade?: ApplicationToolDelegationFacade;
   /** Woohaa 受控 MCP 工具 endpoint（仅本机回环）。 */
-  mcpEndpoint?: { name: string; url: string };
+  mcpEndpoint?: { name: string; url: string; bearerToken?: string };
   signal: AbortSignal;
   /** 公开文本投递（`delivery`/`streamId` 原样来自传输，宿主据此聚合分片）。 */
   onText?: (text: string, meta?: { delivery: "append" | "replace"; streamId?: string }) => void;
@@ -45,8 +45,8 @@ export type AgentSdkRunInput = {
 };
 
 export type AgentSdkRunResult =
-  | { ok: true; outcome: ModelTurnOutcome; nativeId?: string }
-  | { ok: false; code: string; message: string; nativeId?: string };
+  | { ok: true; outcome: ModelTurnOutcome; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication }
+  | { ok: false; code: string; message: string; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication };
 
 /** 运行时探测结果（缺 CLI/子进程时明确报错，不假装可用）。 */
 export type AgentSdkRuntimeProbe = { ok: true } | { ok: false; code: "runtime-missing"; message: string };
@@ -102,8 +102,8 @@ export type AgentSdkTransportInput = {
 };
 
 export type AgentSdkTransportResult =
-  | { ok: true; assistantText: string; toolCalls: readonly ModelToolCall[]; finishReason: ModelTurnOutcome["finishReason"]; nativeId?: string }
-  | { ok: false; code: string; message: string; nativeId?: string };
+  | { ok: true; assistantText: string; toolCalls: readonly ModelToolCall[]; finishReason: ModelTurnOutcome["finishReason"]; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication }
+  | { ok: false; code: string; message: string; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication };
 
 export type AgentSdkRestrictions = {
   /** 只读沙箱（禁止任意文件写）。 */
@@ -122,7 +122,7 @@ export type AgentSdkRestrictions = {
   /** 显式 API Key 注入变量名（每连接隔离）。 */
   credentialEnvVar: "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "WOOHAA_MODEL_API_KEY";
   /** 隔离配置目录变量（Codex HOME / Claude config / Harness home）。 */
-  configDirEnvVar: "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "XDG_CONFIG_HOME" | "DSH_HOME";
+  configDirEnvVar: "CODEX_HOME" | "CLAUDE_CONFIG_DIR" | "XDG_CONFIG_HOME" | "DSH_HOME" | "OPENCODE_HOME";
 };
 
 /**
@@ -131,6 +131,27 @@ export type AgentSdkRestrictions = {
  * Codex：内建 shell/文件写工具名。Claude：`BUILTIN_TOOL_NAMES` 全量（由调用方按安装版本注入
  * 真实名单；此处为保守基线与测试基线）。任何不在 `allowedTools` 的内建能力都在执行前被禁。
  */
+/**
+ * 运行时自带的 MCP 资源读取工具（`dsh-mcp-resources` 等）。
+ *
+ * 它们只读、不经过领域网关，也不在 `prepared.tools` 里；模型用它们查看画布资源属于合法动作。
+ */
+export const MCP_RESOURCE_TOOL_NAMES: readonly string[] = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"];
+
+/**
+ * MCP clients may return a server-qualified spelling (`mcp__server__tool`)
+ * in their final call list, while the gateway and prepared grant use the
+ * original host tool name. Normalize that spelling before applying the
+ * authorization check so valid calls do not become false violations.
+ */
+function canonicalToolName(name: string, allowed: readonly string[]): string {
+  if (allowed.includes(name) || !name.startsWith("mcp__")) return name;
+  const separator = name.indexOf("__", "mcp__".length);
+  if (separator < 0) return name;
+  const unqualified = name.slice(separator + 2);
+  return allowed.includes(unqualified) ? unqualified : name;
+}
+
 export const CODEX_BUILTIN_TOOLS: readonly string[] = ["shell", "exec", "apply_patch", "write_file", "read_file", "web_search"];
 export const CLAUDE_BUILTIN_TOOLS: readonly string[] = [
   "Bash",
@@ -195,6 +216,9 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
     const observation = createTurnObserver();
     const discussion = (input.toolToken ?? "") === "";
     const allowedToolNames = discussion ? [] : input.tools.map((tool) => tool.name);
+    // MCP 客户端自带的资源读取工具（只读、不写画布）由运行时注入，不在网关领域工具集里；
+    // 模型用它们查看画布资源是合法动作，不能按「越权工具」中止整个回合。
+    const acceptedToolNames = discussion ? [] : [...allowedToolNames, ...MCP_RESOURCE_TOOL_NAMES];
     const restrictions = buildAgentSdkRestrictions({ kind: options.kind, workspaceDir: options.workspaceDir, allowedTools: allowedToolNames });
     const mcp =
       !discussion && input.mcpEndpoint && input.toolToken
@@ -210,7 +234,7 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
     const abort = () => controller.abort();
     input.signal.addEventListener("abort", abort, { once: true });
     if (input.signal.aborted) abort();
-    let toolViolation = false;
+    let toolViolation: string | null = null;
     try {
     const result = await transport.run({
       kind: options.kind,
@@ -240,13 +264,14 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
         if (event.type === "tool-call") {
           // Authorization happens at the MCP gateway before execution, never at this event.
           observation.noteToolCall();
-          if (!allowedToolNames.includes(event.call.name)) {
-            toolViolation = true;
+          const name = canonicalToolName(event.call.name, acceptedToolNames);
+          if (!acceptedToolNames.includes(name)) {
+            toolViolation = event.call.name;
             controller.abort();
             input.onToolResult?.(event.call, { content: "工具不在本轮允许范围", isError: true });
             return;
           }
-          input.onToolCall?.(event.call);
+          input.onToolCall?.(name === event.call.name ? event.call : { ...event.call, name });
           return;
         }
         // Hidden reasoning is never persisted or forwarded as public progress.
@@ -257,13 +282,24 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
       }
     });
 
-    if (toolViolation || (result.ok && result.toolCalls.some(call => !allowedToolNames.includes(call.name)))) return { ok: false, code: "capability-unsupported", message: "助手调用了本轮未授权的工具" };
+    const normalizedToolCalls = result.ok
+      ? result.toolCalls.map(call => {
+        const name = canonicalToolName(call.name, acceptedToolNames);
+        return name === call.name ? call : { ...call, name };
+      })
+      : [];
+    const denied = toolViolation ?? normalizedToolCalls.find(call => !acceptedToolNames.includes(call.name))?.name;
+    if (denied !== undefined && denied !== null) return { ok: false, code: "capability-unsupported", message: `助手调用了本轮未授权的工具：${denied}` };
     if (input.signal.aborted) return { ok: false, code: "cancelled", message: "回合已停止" };
-    if (!result.ok) return { ok: false, code: result.code, message: result.message, ...(result.nativeId ? { nativeId: result.nativeId } : {}) };
-    toolCalls = [...result.toolCalls];
+    const reasoning = result.reasoning ?? (input.reasoningEffort
+      ? { requested: input.reasoningEffort, applied: result.ok }
+      : { applied: "provider-default" as const });
+    if (!result.ok) return { ok: false, code: result.code, message: result.message, reasoning, ...(result.nativeId ? { nativeId: result.nativeId } : {}) };
+    toolCalls = normalizedToolCalls;
     return {
       ok: true,
       outcome: { assistantText: result.assistantText || assistantText, toolCalls, finishReason: result.finishReason },
+      reasoning,
       ...(result.nativeId ? { nativeId: result.nativeId } : {})
     };
     } finally {

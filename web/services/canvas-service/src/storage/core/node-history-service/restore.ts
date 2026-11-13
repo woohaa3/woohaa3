@@ -41,7 +41,6 @@ import {
   readAssetMetaNumber,
   readAssetStorageKey
 } from "./assets.js";
-import { readModelCamerasSnapshot } from "./registration.js";
 import type {
   NodeHistoryRestoreOutcome,
   NodeHistoryServiceContext,
@@ -184,7 +183,6 @@ export async function snapshotCurrentModelEdit(
   const version = typeof data?.modelScriptVersion === "string" ? data.modelScriptVersion : "";
   if (language === "" || version === "") return null;
   const placement = decodeModelPlacement(data?.modelPlacement) ?? { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 };
-  const modelCameras = readModelCamerasSnapshot(data);
   try {
     return await deps.registerModelEdit({
       canvasId,
@@ -194,7 +192,6 @@ export async function snapshotCurrentModelEdit(
       language,
       version,
       placement,
-      ...(modelCameras ? { modelCameras } : {}),
       createdAt: deps.context.now()
     });
   } catch {

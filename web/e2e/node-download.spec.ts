@@ -17,7 +17,7 @@
 import { type Page } from "@playwright/test";
 import { expect, test } from "./review-browser.js";
 import { readFile } from "node:fs/promises";
-import { bevyNodeHistoryActionRect, createModel3DNodeData, model3DNodeDataFields, type CanvasCommand } from "@woohaa3/contracts";
+import { bevyNodeHistoryActionRect, createModel3DNodeData, createHighEntropyId, model3DNodeDataFields, newWorldInstance, type CanvasCommand } from "@woohaa3/contracts";
 import { installPageHelpers, readStoredCanvas, resetCanvasStorage, sendCommands, uploadMedia, waitForCanvasSession, waitForCommandsSettled } from "./helpers.js";
 
 /** 通过运行时镜像选中单个节点（等价于点击选中）。 */
@@ -106,11 +106,12 @@ test("节点顶部横条下载原媒体与静态 GLB，命中由 Rust 判定且�
     } }, { type: "node.add", node: { id, type: mediaKind, position: { x, y: 180 }, width: 248, height: 232 },
       nodeData: { title: id === "image" ? "参考图" : "动作.webm", outputAssetId: `asset-${id}`, resourceKind: mediaKind } });
   }
-  commands.push({ type: "node.add", node: { id: "model", type: "model3d", position: { x: 800, y: 180 }, width: 248, height: 232 },
-    nodeData: model3DNodeDataFields(createModel3DNodeData({ title: "人物", model: { modelScriptVersion: "woohaa-model-js-v2",
+  // 共享世界模型：位置只由 sharedWorldInstance 表达（change: 2026-11-10-remove-legacy-model-card-nodes）。
+  commands.push({ type: "node.add", node: { id: "model", type: "model3d" },
+    nodeData: { ...model3DNodeDataFields(createModel3DNodeData({ title: "人物", model: { modelScriptVersion: "woohaa-model-js-v2",
       modelScript: `scene.group({id:'root',position:[3,2,1],rotation:[0,90,0]});
         scene.box({id:'body',parent:'root',size:[1,2,1],color:'#ed6938'});
-        scene.sphere({id:'head',parent:'root',radius:.5,position:[0,1.5,0],color:'#ffc077'});` } })) },
+        scene.sphere({id:'head',parent:'root',radius:.5,position:[0,1.5,0],color:'#ffc077'});` } })), sharedWorldInstance: newWorldInstance(createHighEntropyId("world-instance"), { x: 800, y: 180 }) },
     { type: "node.add", node: { id: "empty", type: "image", position: { x: 120, y: 500 } } });
   expect((await sendCommands(page, commands)).ok).toBe(true); await waitForCommandsSettled(page);
   await expect.poll(() => page.evaluate(() => (window as any).__bevyRuntime.lastScene().nodes.find((node: any) => node.id === "model")?.model?.resourceKey)).toBeTruthy();

@@ -5,7 +5,7 @@ import {
 import {
   Scene, Group, Mesh, BufferGeometry, Float32BufferAttribute, BoxGeometry,
   SphereGeometry, CylinderGeometry, CapsuleGeometry, MeshStandardMaterial,
-  Object3D, Vector3, Color, DoubleSide, FrontSide
+  Object3D, Vector3, Color, DoubleSide, FrontSide, Texture
 } from "three";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
@@ -92,6 +92,9 @@ export function disposeDownloadScene(scene: Scene): void {
     list.forEach(mat => materials.add(mat as MeshStandardMaterial));
   });
   materials.forEach(mat => mat.dispose());
+  const textures = new Set<Texture>();
+  materials.forEach(mat => Object.values(mat).forEach(value => { if (value instanceof Texture) textures.add(value); }));
+  textures.forEach(texture => texture.dispose());
   scene.clear();
 }
 
@@ -102,10 +105,15 @@ export async function downloadModelBlob(source: string, version: unknown, signal
   if (!result.ok) throw new Error(`模型无法导出：${result.message}`);
   if (!result.scene.ops.some(op => "parent" in op && op.t !== "group")) throw new Error("模型尚无可下载的几何内容");
   const scene = buildDownloadScene(result.scene.ops as SceneV2Op[]);
-  try {
-    const data = await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: false });
-    signal.throwIfAborted();
-    if (!(data instanceof ArrayBuffer)) throw new Error("模型导出未生成 GLB 文件");
-    return new Blob([data], { type: "model/gltf-binary" });
-  } finally { disposeDownloadScene(scene); }
+  try { return await exportDownloadScene(scene, signal); }
+  finally { disposeDownloadScene(scene); }
+}
+
+export async function exportDownloadScene(scene: Scene, signal: AbortSignal): Promise<Blob> {
+  signal.throwIfAborted();
+  scene.updateMatrixWorld(true);
+  const data = await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: false });
+  signal.throwIfAborted();
+  if (!(data instanceof ArrayBuffer)) throw new Error("模型导出未生成 GLB 文件");
+  return new Blob([data], { type: "model/gltf-binary" });
 }

@@ -29,6 +29,7 @@ import {
 } from "../shared.js";
 import { readPromptSkillsConfig, writePromptSkillsConfig } from "./config-store.js";
 import { rewritePromptWithTask } from "./rewrite.js";
+import { promptRewriterRole, PROMPT_REWRITER_ROLE_ID } from "./role.js";
 
 export type PromptSkillsExtensionOptions = {
   /** 覆盖等待上限（测试/自定义部署用）。 */
@@ -76,6 +77,9 @@ export function createPromptSkillsExtension(
         return;
       }
       const documents = host.services.documents;
+      // 角色实现注册（宿主按实际装载 owner 记账，停用/回滚自动收回）。
+      host.registerAgentRole?.(promptRewriterRole);
+      const roleFacade = host.services.agentRoles;
 
       host.registerHttpHandler({
         route: "config",
@@ -162,10 +166,26 @@ export function createPromptSkillsExtension(
               return;
             }
             const timeoutMs = options.timeoutMs;
+            const roleId = PROMPT_REWRITER_ROLE_ID;
+            const prepared = roleFacade
+              ? roleFacade.prepare({
+                  roleId,
+                  input: { skillId: decoded.value.skillId, prompt: decoded.value.prompt, taskKind: decoded.value.taskKind },
+                  context: {},
+                  target: {},
+                  requestId: decoded.value.requestId,
+                  channel: { toolCalling: false, imageInput: false, structuredOutput: "none", nativeCapabilities: [] }
+                })
+              : { ok: false as const, code: "role-unavailable", message: "宿主未提供 Agent 角色准备面" };
+            if (!prepared.ok) {
+              sendJson(res, prepared.code === "role-not-found" ? 400 : 503, { ok: false, error: prepared.message } satisfies PromptSkillRewriteResponse);
+              return;
+            }
             const result = await rewritePromptWithTask(
               { ...decoded.value, modelKey: config.config.model },
               {
                 tasks: host.services.tasks,
+                prepared: prepared.turn,
                 logger: host.logger,
                 ...(timeoutMs !== undefined ? { timeoutMs } : {}),
                 ...(options.pollIntervalMs !== undefined ? { pollIntervalMs: options.pollIntervalMs } : {}),

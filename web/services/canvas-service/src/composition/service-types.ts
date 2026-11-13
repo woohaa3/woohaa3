@@ -227,7 +227,6 @@ export type CanvasService = {
     /** `null` rejects: recovering run information never re-issues write authority. */
     submit(canvasId: string, context: import("../world-authoring/spatial-leases.js").SpatialWriteContext | null, batch: import("@woohaa3/contracts/canvas-yjs").CanvasCommandBatch): Promise<import("../sync/room-types.js").RoomCommandResult>;
   } | null;
-  worldConversion: import("@woohaa3/contracts").BackendWorldConversionPort | null;
   /** T06 scene-area authority semantic entry (prepare/context/execute/undo/redo). */
   worldAuthoring: import("../world-authoring/scene-area-service.js").WorldAuthoringService | null;
   /** T08 world-camera settings, assistant completion history and restore. */

@@ -125,11 +125,10 @@ export type BevyModule = {
  */
 export type PointHit =
   | { kind: "scene-area-playback"; nodeId: string; control: "play" | "loop" | "track" | "body"; track: [number, number, number, number] }
-  | { kind: "model-preview"; nodeId: string }
   | { kind: "node"; nodeId: string }
   | { kind: "history"; nodeId: string }
   | { kind: "port"; nodeId: string; side: "input" | "output" }
-  | { kind: "resize"; nodeId: string; handle?: string }
+  | { kind: "resize"; nodeId: string; handle?: "nw" | "ne" | "sw" | "se" }
   | { kind: "edge"; edgeId: string }
   | { kind: "edge-delete"; edgeId: string }
   /** 多选聚合把手（change: add-multi-select-aggregate-connect）。 */
@@ -349,6 +348,8 @@ export type BevyRuntime = {
     y: number;
     width: number;
     height: number;
+    /** 可选像素裙边：指针紧贴真实露出表面时也算命中，包围盒空域不算。 */
+    tolerance?: number;
   }): QueryResult<{ nodeId: string; target: [number, number, number]; radius: number } | null>;
   /** 世界模型框选：`x/y/width/height` 为 canvas CSS 屏幕矩形；返回节点 id 列表。 */
   queryModelMarquee?(input: {

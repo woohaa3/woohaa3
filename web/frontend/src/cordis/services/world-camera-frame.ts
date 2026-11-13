@@ -3,28 +3,17 @@
  *
  * 镜头姿态与卡片排布本来就分开；用户从卡片操作时，3D 机位可能在 12 m 外、当前视口之外。
  * 这里不修改任何画布数据，只按地面投影点重新计算本地 viewport。
+ * 新建镜头的卡片落点由 `@woohaa3/contracts` 的 `initialCameraCardPosition` 统一给出。
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { CanvasRuntimeService } from "../contract/canvas-runtime.js";
 import {
-  WORLD_CAMERA_CARD_SIZE,
   worldToCanvasPoint,
   worldToRendererPosition,
   type WorldCameraData
 } from "@woohaa3/contracts";
 
 export type WorldCameraCardRect = { x: number; y: number; width: number; height: number };
-
-/** 新建镜头时卡片放在机位右上方，避免默认盖在机位/取景方向上。 */
-export function initialCameraCardPosition(camera: WorldCameraData): { x: number; y: number } {
-  const position = worldToRendererPosition(camera.position);
-  const body = worldToCanvasPoint([position[0], position[1], position[2]]);
-  const gap = 56;
-  return {
-    x: body.x + gap,
-    y: body.y - WORLD_CAMERA_CARD_SIZE.height - gap
-  };
-}
 
 export function revealWorldCamera(
   ctx: Context,

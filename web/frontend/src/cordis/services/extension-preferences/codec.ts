@@ -4,7 +4,7 @@
  *  其后改为配置文件投影：localStorage 只剩一次性迁移读取）。
  *
  * 纯函数、无 React/DOM：
- * - 从宿主配置投影（`extensions.frontend.<id>.enabled`）规范化出**已知可配置 optional ID**
+ * - 从宿主配置投影（`extensions.<id>.enabled`）规范化出**已知可配置 optional ID**
  *   到布尔值的映射；
  * - 读取旧版本遗留在浏览器 localStorage 的 `woohaa:frontend-extensions:v1`，仅供**一次性迁移**
  *   写回宿主配置文件，之后不再写这个键。
@@ -16,7 +16,7 @@
 /**
  * 旧版浏览器偏好键：仅用于**一次性迁移**到宿主配置文件。
  *
- * 新写入一律走宿主配置（`extensions.frontend.<id>.enabled`），本键不再被写入。
+ * 新写入一律走宿主配置（`extensions.<id>.enabled`），本键不再被写入。
  */
 export const LEGACY_FRONTEND_PLUGIN_PREFERENCES_KEY = "woohaa:frontend-extensions:v1";
 
@@ -125,7 +125,7 @@ export function serializePreferences(ids: readonly string[], values: FrontendExt
  * 读取旧版浏览器偏好，返回**需要迁移**的显式选择。
  *
  * 只返回 allowlist 内、且与默认值不同的条目：迁移只为把用户显式改过的开关带到配置文件，
- * 不把默认全启用的噪音写进 `extensions.frontend`。
+ * 不把默认全启用的噪音写进 `extensions`。
  */
 export function readLegacyPreferencesForMigration(
   storage: PreferenceStorage | null,

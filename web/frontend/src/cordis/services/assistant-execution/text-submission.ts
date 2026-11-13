@@ -1,4 +1,6 @@
+import { AGENT_ROLE_BINDINGS } from "../agent-role-bindings.js";
 import type { ConversationSnapshot, ServerCanvas } from "@woohaa3/contracts";
+import { reasoningEffortsOf } from "@woohaa3/contracts";
 import type {
   AgentConversationService,
   AgentConversationSubmitInput,
@@ -159,7 +161,7 @@ export function resolveTextSubmission(
     preference.model === model
       ? preference.reasoningEffort
       : undefined);
-  if (effort && !selectedModel.reasoningEfforts?.includes(effort))
+  if (effort && !reasoningEffortsOf(selectedModel).includes(effort))
     return { eligible: false, reason: "文本成员的 Variant 已失效" };
   return {
     eligible: true,
@@ -170,6 +172,7 @@ export function resolveTextSubmission(
       entry: {
         action: "generate",
         mode: "text",
+        roleId: AGENT_ROLE_BINDINGS.textAuthor,
         canvasId: canvas.id,
         nodeId,
         connectionId: connection.connectionId,

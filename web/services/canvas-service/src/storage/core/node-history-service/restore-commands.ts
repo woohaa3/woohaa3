@@ -45,8 +45,6 @@ export function buildRestoreCommands(
             errorMessage: null,
             // 编辑版本携带摆放则写回；生成版本不携带，保留当前摆放（既有语义）。
             ...(payload.placement ? { modelPlacement: payload.placement } : {}),
-            // 可选规范镜头快照：携带时写回；旧条目缺省保留当前镜头，不伪造。
-            ...(payload.modelCameras ? { modelCameras: payload.modelCameras } : {})
           }
         }
       ]

@@ -153,7 +153,7 @@ export function sdkEngineForAdapter(adapterId: string): {
     case "anthropic-messages": case "claude-agent-sdk":
       return { apiType: "anthropic", engine: "claude-agent-sdk", version: "0.3.301" };
     case "compat-chat":
-      return { apiType: "chat-completions", engine: "dsh-agent-sdk", version: "0.2.1-rc.2" };
+      return { apiType: "chat-completions", engine: "dsh-agent-sdk", version: "0.2.2-rc.1" };
     case "gemini-agent-adk":
       return { apiType: "gemini", engine: "gemini-agent-adk", version: "2.3.0" };
     default: return null;

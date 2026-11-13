@@ -70,7 +70,6 @@ declare module "@deepseek-ai/cordis" {
      * 受控只读画布 facade（change: 2026-10-10-extract-optional-feature-extensions，design D4）。
      * 只读 canonical/working 快照与订阅；MUST NOT import 宿主内部 canvas store。
      */
-    modelWorkspace: import("../extension-api/model-workspace.js").ModelWorkspaceService;
     hoverState: import("../extension-api/model-workspace.js").HoverStateService;
     nodeImplementations: import("../extension-api/node-implementations.js").NodeImplementationRegistry;
     mediaContent: import("../extension-api/media-content.js").MediaContentService;

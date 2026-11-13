@@ -50,7 +50,7 @@ export const MODEL_EDITOR_SERVICE = "modelEditor";
 export type ModelEditorService = {
   session: import("../../extension-api/model-workspace-session.js").ModelEditorSession;
   close(): void;
-  getState(): import("../../extension-api/model-workspace-session.js").ModelEditorSessionState;
+  getState(): import("../../extension-api/model-workspace-session.js").ModelEditorState;
 };
 
 /**

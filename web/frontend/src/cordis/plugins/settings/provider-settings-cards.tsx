@@ -86,14 +86,19 @@ function missingEndpoint(entry: SettingsEntryView): boolean {
 /** 只记录用户编辑的字段，其他 Provider 刷新快照时不覆盖未保存的草稿。 */
 export function ConnectionSettingsForm({ entries, store, onSaved, primaryKeys }: { entries: SettingsEntryView[]; store: BackendSettingsStore; onSaved?: () => void; primaryKeys?: readonly string[] }) {
   const [drafts, setDrafts] = useState<Record<string, SettingsWriteValue>>({});
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<false | "test" | "save" | "save-anyway">(false);
   const [error, setError] = useState<string | null>(null);
+  const [testNotice, setTestNotice] = useState<string | null>(null);
+  const [testFailed, setTestFailed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
   const primary = entries.filter(entry => (primaryKeys ? primaryKeys.includes(entry.key) : entry.key.endsWith(".apiKey")) || entry.lockedBy !== null || entry.pendingRestart || missingEndpoint(entry));
   const advanced = entries.filter(entry => !primary.includes(entry));
+  const hasConfiguredSecret = entries.some(entry => entry.secret && entry.configured);
   const update = (entry: SettingsEntryView, value: SettingsWriteValue) => {
     setSaved(false);
+    setTestNotice(null);
+    setTestFailed(false);
     setDrafts(previous => {
       const next = { ...previous };
       if ((entry.secret && typeof value === "string" && value.trim() === "") || value === entry.value) delete next[entry.key];
@@ -101,14 +106,68 @@ export function ConnectionSettingsForm({ entries, store, onSaved, primaryKeys }:
       return next;
     });
   };
-  const save = async () => {
-    if (busy || Object.keys(drafts).length === 0) return;
-    setBusy(true);
+  const candidateValues = (): Record<string, SettingsWriteValue> =>
+    Object.fromEntries(
+      Object.entries(drafts)
+        .filter(([key]) => entries.some(entry => entry.key === key && entry.lockedBy === null))
+        .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
+    );
+  const probePayload = (values: Record<string, SettingsWriteValue>): Record<string, SettingsWriteValue> => {
+    if (Object.keys(values).length > 0) return values;
+    const anchor = entries.find(entry => entry.key.endsWith(".apiKey")) ?? entries[0];
+    return anchor ? { [anchor.key]: anchor.value ?? "" } : {};
+  };
+  const runTest = async () => {
+    if (busy || !store.test) return;
+    const values = candidateValues();
+    if (Object.keys(values).length === 0 && !hasConfiguredSecret) return;
+    setBusy("test");
     setError(null);
+    setTestNotice(null);
+    setSaved(false);
+    try {
+      const result = await store.test(probePayload(values));
+      if (result.ok) {
+        setTestFailed(false);
+        setTestNotice(result.message || "测试通过");
+      } else {
+        setTestFailed(true);
+        setError(
+          result.issues.map(issue => `${entries.find(entry => entry.key === issue.key)?.label ?? "配置"}：${issue.message}`).join("；") ||
+            result.error ||
+            "连接测试未通过"
+        );
+      }
+    } catch {
+      setTestFailed(true);
+      setError("连接测试失败，请重试。");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = async (force = false) => {
+    if (busy || Object.keys(drafts).length === 0) return;
+    setBusy(force ? "save-anyway" : "save");
+    setError(null);
+    setTestNotice(null);
     setSaved(false);
     // 锁定项不参与写入；空密钥表示保留，只有确认清除才写 null。
-    const values = Object.fromEntries(Object.entries(drafts).filter(([key]) => entries.some(entry => entry.key === key && entry.lockedBy === null)).map(([key, value]) => [key, typeof value === "string" ? value.trim() : value]));
+    const values = candidateValues();
+    const isClearingOnly = Object.values(values).length > 0 && Object.values(values).every(val => val === null);
     try {
+      if (!force && !isClearingOnly && store.test) {
+        const tested = await store.test(values);
+        if (!tested.ok) {
+          setTestFailed(true);
+          setError(
+            tested.issues.map(issue => `${entries.find(entry => entry.key === issue.key)?.label ?? "配置"}：${issue.message}`).join("；") ||
+              tested.error ||
+              "连接测试未通过"
+          );
+          return;
+        }
+      }
+      setTestFailed(false);
       const result = await store.save(values);
       if (result.ok) { setDrafts({}); setSaved(true); setClearing(null); onSaved?.(); }
       else setError(result.issues.map(issue => `${entries.find(entry => entry.key === issue.key)?.label ?? "配置"}：${issue.message}`).join("；") || result.error);
@@ -125,10 +184,10 @@ export function ConnectionSettingsForm({ entries, store, onSaved, primaryKeys }:
     return <div className="provider-connection__field" data-setting-key={entry.key} key={entry.key}>
       <label>
         <span>{entry.label}</span>
-        {entry.kind === "boolean" ? <Switch checked={value === true} disabled={locked || busy} onCheckedChange={next => update(entry, next)} /> : <input
+        {entry.kind === "boolean" ? <Switch checked={value === true} disabled={locked || Boolean(busy)} onCheckedChange={next => update(entry, next)} /> : <input
           className="settings-page__input"
           type={entry.secret ? "password" : entry.kind === "integer" ? "number" : entry.kind === "url" ? "url" : "text"}
-          autoComplete="off" spellCheck={false} disabled={locked || busy} value={value === null ? "" : String(value)}
+          autoComplete="off" spellCheck={false} disabled={locked || Boolean(busy)} value={value === null ? "" : String(value)}
           placeholder={edited && value === null ? "保存后清除" : entry.secret ? entry.configured ? "已配置；留空保留，填写则替换" : entry.label : ""}
           onChange={event => update(entry, entry.kind === "integer" ? Number(event.target.value) : event.target.value)}
         />}
@@ -136,14 +195,20 @@ export function ConnectionSettingsForm({ entries, store, onSaved, primaryKeys }:
       {hint ? <p className="settings-page__hint">{hint}</p> : null}
       {locked ? <p className="settings-page__hint">由环境变量 {entry.lockedBy} 锁定，移除后可修改。</p> : null}
       {entry.pendingRestart || entry.reload !== "hot" && edited ? <p className="settings-page__hint">{entry.pendingRestart ? "等待重启" : "重启后生效"}</p> : null}
-      {!locked && (entry.source === "file" || entry.source === "secrets") ? <Button size="sm" tone="ghost" disabled={busy} onClick={() => setClearing(entry.key)}>清除{entry.label}</Button> : null}
-      {clearing === entry.key ? <div className="provider-connection__confirmation"><span>清除{entry.label}？</span><Button size="sm" disabled={busy} onClick={() => setClearing(null)}>取消</Button><Button size="sm" tone="danger" disabled={busy} onClick={() => { setDrafts(previous => ({ ...previous, [entry.key]: null })); setSaved(false); setClearing(null); }}>确认清除</Button></div> : null}
+      {!locked && (entry.source === "file" || entry.source === "secrets") ? <Button size="sm" tone="ghost" disabled={Boolean(busy)} onClick={() => setClearing(entry.key)}>清除{entry.label}</Button> : null}
+      {clearing === entry.key ? <div className="provider-connection__confirmation"><span>清除{entry.label}？</span><Button size="sm" disabled={Boolean(busy)} onClick={() => setClearing(null)}>取消</Button><Button size="sm" tone="danger" disabled={Boolean(busy)} onClick={() => { setDrafts(previous => ({ ...previous, [entry.key]: null })); setSaved(false); setTestFailed(false); setClearing(null); }}>确认清除</Button></div> : null}
     </div>;
   };
   return <form className="provider-connection" onSubmit={event => { event.preventDefault(); void save(); }}>
     {primary.map(field)}
     {advanced.length ? <details className="provider-connection__advanced"><summary>高级设置</summary>{advanced.map(field)}</details> : null}
     {error ? <p className="settings-page__error">{error}</p> : null}
-    <div className="provider-connection__actions">{saved ? <span>已保存</span> : null}<Button size="sm" tone="primary" type="submit" loading={busy} disabled={busy || Object.keys(drafts).length === 0}>保存</Button></div>
+    {testNotice ? <p className="settings-page__hint">{testNotice}</p> : null}
+    <div className="provider-connection__actions">
+      {saved ? <span>已保存</span> : null}
+      <Button size="sm" tone="ghost" type="button" loading={busy === "test"} disabled={Boolean(busy) || (Object.keys(drafts).length === 0 && !hasConfiguredSecret)} onClick={() => void runTest()}>测试</Button>
+      {testFailed ? <Button size="sm" tone="ghost" type="button" loading={busy === "save-anyway"} disabled={Boolean(busy) || Object.keys(drafts).length === 0} onClick={() => void save(true)}>仍然保存</Button> : null}
+      <Button size="sm" tone="primary" type="submit" loading={busy === "save"} disabled={Boolean(busy) || Object.keys(drafts).length === 0}>保存</Button>
+    </div>
   </form>;
 }

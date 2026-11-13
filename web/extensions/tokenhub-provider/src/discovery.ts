@@ -5,7 +5,7 @@
  * 其余在线模型默认是语言模型（Chat Completions）。语音、向量、3D 和没有协议的
  * 视觉模型不注册。
  */
-import type { GenerationModelDefinition } from "@woohaa3/contracts";
+import { reasoningEffortsForModel, type GenerationModelDefinition } from "@woohaa3/contracts";
 import { TOKENHUB_PROVIDER_ID, tokenHubOrigin } from "./shared.js";
 import { routeModel, type TokenHubKind } from "./routes.js";
 
@@ -59,7 +59,10 @@ export function tokenHubModelDefinitions(models: readonly DiscoveredModel[]): Ge
     providerModelId: model.id,
     modelType: model.modelType,
     title: model.title,
-    promptRequirement: "required" as const
+    promptRequirement: "required" as const,
+    ...(model.modelType === "language" && reasoningEffortsForModel(model.id)
+      ? { capabilityFacts: { reasoning: { supported: true, efforts: reasoningEffortsForModel(model.id) } } }
+      : {})
   }));
 }
 

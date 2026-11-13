@@ -73,12 +73,14 @@ describe("node-catalog", () => {
     expect(connectLabelFor("audio", "video")).toBe("");
   });
 
-  it("自包含 3D 节点直接创建携带完整本地模型定义（change: 2026-10-05）", () => {
-    const model = defaultNodeDataForType("model3d");
+  it("自包含 3D 节点直接创建携带完整本地模型定义与世界实例（change: 2026-11-10）", () => {
+    const model = defaultNodeDataForType("model3d", { instanceId: "instance-test", point: { x: 120, y: 80 } });
     expect(model?.modelScript).toBe("");
     expect(model?.modelScriptVersion).toBe("woohaa-model-js-v2");
     expect(model?.modelContentVersion).toBeTruthy();
-
+    expect(model?.sharedWorldInstance).toMatchObject({ instanceId: "instance-test" });
+    // 模型没有卡片：缺少世界实例时不能悄悄造出旧卡片节点。
+    expect(() => defaultNodeDataForType("model3d")).toThrow(/sharedWorldInstance/);
   });
 });
 

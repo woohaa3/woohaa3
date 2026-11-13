@@ -1,28 +1,9 @@
 import { z } from "zod";
-import {
-  MODEL_CAMERA_ASPECTS,
-  MAX_MODEL_CAMERAS,
-} from "@woohaa3/contracts";
 import { createToolRegistrar } from "./guide.js";
 import { jsonResult, toolError } from "./tool-results.js";
 import type { ModelMcpHttpOptions, ToolRegistration } from "./http-types.js";
 
 const id = z.string().trim().min(1).max(200);
-const camera = z.strictObject({
-  id,
-  name: z.string().min(1).max(80),
-  order: z.number().int().nonnegative(),
-  azimuth: z.number(),
-  elevation: z
-    .number()
-    .min(-Math.PI / 2)
-    .max(Math.PI / 2),
-  distance: z.number().positive(),
-  aspect: z.enum(MODEL_CAMERA_ASPECTS),
-  focusOffset: z
-    .strictObject({ x: z.number(), y: z.number(), z: z.number() })
-    .optional(),
-});
 const requestSchema = z.strictObject({
   canvasId: id,
   requestId: id,
@@ -34,8 +15,6 @@ const requestSchema = z.strictObject({
         nodeId: id,
         source: z.string().min(1),
         expectedModelContentHash: id.optional(),
-        cameras: z.array(camera).max(MAX_MODEL_CAMERAS).optional(),
-        expectedCamerasHash: id.optional(),
       }),
     )
     .min(1)
@@ -54,7 +33,7 @@ export function registerModelBatchTools(
     "get_model_nodes",
     {
       title: "批量读取模型节点",
-      description: `从同一权威快照读取同一 revision 的模型版本、提示词、参考输入和镜头及 camerasHash。默认省略源码；需要编辑既有脚本时 includeSource=true。camerasHash 用于批量替换镜头的并发保护。大响应可按同一快照继续读取，不按模型数量或响应总量要求缩小请求。`,
+      description: `从同一权威快照读取同一 revision 的模型版本、提示词和参考输入。默认省略源码；需要编辑既有脚本时 includeSource=true。大响应可按同一快照继续读取，不按模型数量或响应总量要求缩小请求。`,
       inputSchema: z.strictObject({
         canvasId: id,
         nodeIds: z.array(id).min(1),
@@ -77,7 +56,7 @@ export function registerModelBatchTools(
     "validate_model_scripts",
     {
       title: "预检模型批次",
-      description: `批量执行并校验模型脚本、镜头和内容哈希条件，不写画布、不占 requestId、不签发 token。commonSource 加换行后前置到每项 source，在独立 scene 中运行。返回逐节点模型版本、局部几何 AABB、操作数及镜头摘要；失败返回 index/nodeId/errors。批次按实际资源调度并整批一次原子保存，不按模型数量、源码字节、执行时长或并发批次数量拒绝合法工作。`,
+      description: `批量执行并校验模型脚本和内容哈希条件，不写画布、不占 requestId、不签发 token。commonSource 加换行后前置到每项 source，在独立 scene 中运行。返回逐节点模型版本、局部几何 AABB 与操作数；失败返回 index/nodeId/errors。批次按实际资源调度并整批一次原子保存，不按模型数量、源码字节、执行时长或并发批次数量拒绝合法工作。`,
       inputSchema: requestSchema,
       annotations: {
         readOnlyHint: true,
@@ -97,7 +76,7 @@ export function registerModelBatchTools(
     {
       title: "原子提交多个模型与镜头",
       description:
-        "整套素材优先使用：所有脚本校验通过，并在权威队列复核每个节点类型及哈希后，以一个事务保存全部模型与镜头。commonSource 只传一次，落库为每节点独立完整脚本。cameras 省略则保留，提供则整体替换并必须带 expectedCamerasHash。相同 requestId/内容返回冻结首次回执，变更内容必须换 requestId；任何一项失败均零写入。预检后原样提交，无需 token。",
+        "整套素材优先使用：所有脚本校验通过，并在权威队列复核每个节点类型及哈希后，以一个事务保存全部模型与镜头。commonSource 只传一次，落库为每节点独立完整脚本。相同 requestId/内容返回冻结首次回执，变更内容必须换 requestId；任何一项失败均零写入。预检后原样提交，无需 token。",
       inputSchema: requestSchema,
       annotations: {
         readOnlyHint: false,

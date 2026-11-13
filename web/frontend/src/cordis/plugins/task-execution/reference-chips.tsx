@@ -32,6 +32,8 @@ export type ReferenceTileStripProps = {
   onRemove?: (item: ReferenceItem) => void;
   /** 打开 picker；回调携带 add tile 元素作为锚点。 */
   onAdd?: (anchor: HTMLElement) => void;
+  /** 往一个模型声明的空槽位填素材。 */
+  onFillSlot?: (item: ReferenceItem) => void;
   disabled?: boolean;
   /**
    * 当前 panel presentation；变化时销毁悬浮预览（design D2 / task 2.4）。
@@ -80,9 +82,10 @@ export function ReferenceTileStrip(props: ReferenceTileStripProps) {
       ) : null}
       {props.items.map((item) => (
         <ReferenceTile
-          key={item.slotId || item.sourceNodeId}
+          key={item.slotId || `slot-${item.role}`}
           item={item}
           {...(props.onRemove ? { onRemove: props.onRemove } : {})}
+          {...(props.onFillSlot ? { onFillSlot: props.onFillSlot } : {})}
           {...(props.disabled !== undefined ? { disabled: props.disabled } : {})}
           {...(props.presentation !== undefined ? { presentation: props.presentation } : {})}
         />
@@ -94,11 +97,14 @@ export function ReferenceTileStrip(props: ReferenceTileStripProps) {
 function ReferenceTile({
   item,
   onRemove,
+  onFillSlot,
   disabled,
   presentation
 }: {
   item: ReferenceItem;
   onRemove?: (item: ReferenceItem) => void;
+  /** 空槽位的填充入口；槽位已填充时不存在。 */
+  onFillSlot?: (item: ReferenceItem) => void;
   disabled?: boolean;
   presentation?: string;
 }) {
@@ -116,19 +122,26 @@ function ReferenceTile({
   // 用受控 `<video preload=metadata>` 呈现首帧，绝不自动播放完整媒体（design D2）。
   const showImageThumb = item.status === "ready" && item.mediaKind === "image" && Boolean(item.previewUrl);
   const accessibleName = `${item.label}，角色 ${item.role}，${statusText(item)}${item.blockingReason ? `：${item.blockingReason}` : ""}`;
+  // 空槽位是「模型要求但这个槽位还没东西」：点击进入该槽位的素材选择，而不是加一个
+  // 泛泛的参考。已填充的槽位没有这个入口。
+  const fillable = item.status === "empty" && onFillSlot !== undefined && !disabled;
 
   return (
     <div
       ref={anchorRef}
-      className={`ref-tile ref-tile--${item.status}`}
+      className={`ref-tile ref-tile--${item.status}${fillable ? " ref-tile--fillable" : ""}`}
       role="listitem"
       tabIndex={0}
       data-slot-id={item.slotId}
       data-role={item.role}
       data-media-kind={item.mediaKind ?? "none"}
       data-status={item.status}
+      data-required={item.required === true ? "true" : undefined}
       aria-label={accessibleName}
       title={item.blockingReason ?? item.label}
+      onClick={() => {
+        if (fillable) onFillSlot?.(item);
+      }}
       onMouseEnter={() => setSurface("hover")}
       onMouseLeave={() => setSurface((current) => (current === "hover" ? "idle" : current))}
       onFocus={(event) => {
@@ -325,6 +338,7 @@ export function ReferencePickerContent(props: {
 function statusText(item: ReferenceItem): string {
   if (item.status === "ready") return "就绪";
   if (item.status === "waiting") return "等待中";
+  if (item.status === "empty") return item.required ? "待填充（必填）" : "待填充";
   return "不可用";
 }
 

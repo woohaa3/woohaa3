@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEmptyWoohaa3ServerCanvas, scriptModelPreparation, orbitModelPreview, type NodeCapabilities } from '@woohaa3/contracts';
+import { createEmptyWoohaa3ServerCanvas, scriptModelPreparation, type NodeCapabilities } from '@woohaa3/contracts';
 import { NodeImplementationRegistry } from './node-implementations.js';
 const canvas = createEmptyWoohaa3ServerCanvas('registry');
 const context = { canvas, node: { id: 'custom', type: 'custom', position: { x: 0, y: 0 } }, data: undefined };
@@ -20,17 +20,27 @@ describe('page node implementation registry', () => {
     const oldGeneration = a.resolve(context).generation;
     stop(); stop();
     expect(notify).toHaveBeenCalledTimes(2);
-    const stopNew = a.register({ type: 'custom', capabilities: { modelPreview: orbitModelPreview } });
+    const stopNew = a.register({ type: 'custom', capabilities: { modelPreparation: scriptModelPreparation } });
     stop(); expect(a.resolve(context).generation).toBeGreaterThan(oldGeneration);
-    expect(a.resolve(context).modelPreview).toBeDefined();
+    expect(a.resolve(context).modelPreparation).toBeDefined();
     a.clear(); a.clear(); stopNew();
     expect(notify).toHaveBeenCalledTimes(4);
-    expect(a.resolve(context).modelPreview).toBeUndefined();
-    expect(b.resolve({ ...context, node: { ...context.node, type: 'model3d' } }).modelPreparation).toBeDefined();
+    expect(a.resolve(context).modelPreparation).toBeUndefined();
+    const modelNode = { ...context.node, type: 'model3d' };
+    expect(b.resolve({ ...context, node: modelNode, data: undefined }).modelPreparation).toBeUndefined();
+    expect(b.resolve({ ...context, node: modelNode, data: undefined }).focus).toBeUndefined();
+    const worldModel = b.resolve({
+      ...context,
+      node: modelNode,
+      data: { sharedWorldInstance: { kind: 'world-instance', version: 'shared-world-v1', instanceId: 'i1',
+        transform: { version: 'shared-world-v1', position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } } }
+    });
+    expect(worldModel.modelPreparation).toBeDefined();
+    expect(worldModel.focus?.kind({ ...context, node: modelNode, data: undefined })).toBe('model');
   });
   it.each([
     { isModel: true }, { modelPreparation: {} }, { modelPreview: true },
-    { resources: { channel: 'unknown', previewSlot: true, contentKey: () => null } },
+    { resources: { channel: 'unknown', contentKey: () => null } },
     { appearance: { palette: 'model', defaultSize: { width: NaN, height: 20 } } },
     { resize: { mode: 'unknown', minimum: () => ({ width: 1, height: 1 }) } }
   ])('rejects invalid declarations atomically: %j', capabilities => {

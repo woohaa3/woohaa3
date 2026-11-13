@@ -14,7 +14,6 @@ fn model_node() -> GraphNode {
         chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,
-        model_preview: None,
         id: "m".into(),
         kind: "model".into(),
         x: 0.0,
@@ -230,6 +229,7 @@ fn hovering_model_b_stops_model_a() {
         ..Scene::default()
     };
     for entry in &mut scene.nodes {
+        super::with_world_instance(entry);
         entry.model = Some(reference.clone());
     }
     scene.hover = Some(hover_node("a"));
@@ -346,17 +346,14 @@ fn placement_update_preserves_active_playback() {
     run_sync(&mut world, &scene, &resources);
     assert!(playback_of(&world, "m")[0].active);
 
-    let mut moved = base.clone();
-    moved.placement = ModelPlacement {
-        offset: crate::protocol::ModelOffset {
-            x: 3.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        scale: 2.0,
-        yaw: 0.3,
-    };
-    scene.nodes[0].model = Some(moved);
+    // 世界变换预览只刷新根 transform，不打断播放。
+    scene.nodes[0]
+        .shared_world_instance
+        .as_mut()
+        .unwrap()
+        .transform
+        .position
+        .u = 3.0;
     run_sync(&mut world, &scene, &resources);
     assert!(
         playback_of(&world, "m")[0].active,

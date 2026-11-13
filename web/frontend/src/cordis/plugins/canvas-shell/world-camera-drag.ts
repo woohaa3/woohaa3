@@ -1,3 +1,4 @@
+import { rotateGroundQuarterTurns } from "@woohaa3/contracts";
 /**
  * 共享世界镜头的视锥直接拖动（镜头呈现的普通画布入口）。
  *
@@ -167,6 +168,11 @@ export function poseFor(
     ? (Math.abs(delta.u) < 0.35 ? 0 : (delta.u > 0 ? -1 : 1) * Math.PI / 2)
     : -delta.u * YAW_PER_METER;
   const pitch = isometric ? 0 : clamp(delta.v * PITCH_PER_METER, MIN_PITCH, MAX_PITCH);
+  // 没有偏航/俯仰时原样返回：等距镜头默认四元数是有限位小数，重新归一化会产生
+  // 1e-9 级漂移，足以把「没动」误判成一次位姿更新（点击一下就推进 revision）。
+  if (yaw === 0 && pitch === 0) {
+    return { position: { ...camera.position }, rotation: [...camera.rotation] as unknown as WorldRotation };
+  }
   // World basis is (u, v, h); the vertical axis is h, not Bevy's Y.
   const rotation = multiply(
     multiply(axisAngle([0, 0, 1], yaw), camera.rotation as unknown as WorldRotation),
@@ -323,7 +329,8 @@ export function animatedCameraAt(
     const sample = sampleWorldAnimationInArea(
       executed.ir,
       times?.get(node.id) ?? 0,
-      sceneAreaAnimationOrigin(decoded.value)
+      sceneAreaAnimationOrigin(decoded.value),
+      decoded.value.animationQuarterTurns
     ).cameras.get(cameraId);
     if (sample?.position) position = sample.position;
     if (sample?.rotation) rotation = sample.rotation;
@@ -384,6 +391,7 @@ export function planWorldCameraMoveWithAnimationParts(
   const inverseAreas: CanvasCommand[] = [];
   for (const area of sample.areas) {
     const unbind = unbindAreaIds?.has(area.nodeId) === true;
+    const localDelta = delta ? rotateGroundQuarterTurns(delta, { u: 0, v: 0 }, -(area.area.animationQuarterTurns ?? 0)) : null;
     let changed = false;
     const cameraTracks = (unbind
       ? area.ir.cameraTracks.filter(track => {
@@ -398,10 +406,10 @@ export function planWorldCameraMoveWithAnimationParts(
               changed = true;
               const from = [...track.from];
               const to = [...track.to];
-              from[0] = from[0]! + delta!.u;
-              from[1] = from[1]! + delta!.v;
-              to[0] = to[0]! + delta!.u;
-              to[1] = to[1]! + delta!.v;
+              from[0] = from[0]! + localDelta!.u;
+              from[1] = from[1]! + localDelta!.v;
+              to[0] = to[0]! + localDelta!.u;
+              to[1] = to[1]! + localDelta!.v;
               return { ...track, from, to };
             }
             // 手动旋转是显式覆盖：去掉朝向轨道，避免松手瞬间被脚本拉回。
@@ -418,7 +426,8 @@ export function planWorldCameraMoveWithAnimationParts(
       const sampled = sampleWorldAnimationInArea(
         area.ir,
         times?.get(area.nodeId) ?? 0,
-        sceneAreaAnimationOrigin(area.area)
+        sceneAreaAnimationOrigin(area.area),
+        area.area.animationQuarterTurns
       ).cameras.get(start.canonical.cameraId);
       const from = sampled?.position ?? start.camera.position;
       const next = { u: from.u + delta!.u, v: from.v + delta!.v };

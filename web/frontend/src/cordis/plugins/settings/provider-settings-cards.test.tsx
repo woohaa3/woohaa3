@@ -19,7 +19,8 @@ async function fixture(extra: SettingsEntryView[] = []) {
   ], plugins: [], files: { config: "c", secrets: "s" } };
   const fetchSnapshot = vi.fn(async () => ({ ok: true as const, snapshot }));
   const write = vi.fn(async (_values: Record<string, unknown>) => ({ ok: true as const, snapshot }));
-  const store = createBackendSettingsStore({ fetchSnapshot, write });
+  const test = vi.fn(async (_values: Record<string, unknown>) => ({ ok: true as const, message: "测试通过" }));
+  const store = createBackendSettingsStore({ fetchSnapshot, write, test });
   const el = document.createElement("div"); document.body.append(el); root = createRoot(el);
   await act(async () => root.render(<ProviderSettingsCards store={store} compact />));
   const click = async (text: string) => act(async () => [...el.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === text)!.click());
@@ -28,7 +29,7 @@ async function fixture(extra: SettingsEntryView[] = []) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value);
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  return { el, input, click, write, store };
+  return { el, input, click, write, test, store };
 }
 it("Provider 一次保存多个字段；收起高级设置和刷新快照不丢草稿", async () => {
   const f = await fixture();
@@ -78,4 +79,22 @@ it("清除须确认后随保存提交；锁定和等待重启的异常保留", a
   expect(f.write).not.toHaveBeenCalled();
   await f.click("保存");
   expect(f.write).toHaveBeenCalledWith({ "providers.test.apiKey": null });
+});
+it("提供测试按钮；保存前固定先测试，测试不通过时显示仍然保存小按钮", async () => {
+  const f = await fixture();
+  await f.input("apiKey", "bad-key");
+  f.test.mockResolvedValueOnce({ ok: false, error: "API Key 无效" } as never);
+  await f.click("测试");
+  expect(f.test).toHaveBeenCalledWith({ "providers.test.apiKey": "bad-key" });
+  expect(f.write).not.toHaveBeenCalled();
+  expect(f.el.textContent).toContain("API Key 无效");
+  expect([...f.el.querySelectorAll("button")].some(b => b.textContent === "仍然保存")).toBe(true);
+
+  f.test.mockResolvedValueOnce({ ok: false, error: "连接超时" } as never);
+  await f.click("保存");
+  expect(f.write).not.toHaveBeenCalled();
+  expect(f.el.textContent).toContain("连接超时");
+
+  await f.click("仍然保存");
+  expect(f.write).toHaveBeenCalledWith({ "providers.test.apiKey": "bad-key" });
 });

@@ -8,7 +8,6 @@
  *
  * 另含：稳定媒体引用的受限解析、MCP 工具委托（grant）与个人生成能力。
  */
-import type { ModelCamera, ModelCameraMutation } from "../../canvas/model-cameras.js";
 import type { ModelContentVersion } from "../../canvas/model-definition.js";
 import type { ApplicationUserDelegation } from "../host/principal.js";
 import type { AssistantWorldGrantBinding } from "../../canvas/assistant-world-authority.js";
@@ -25,7 +24,6 @@ export type ApplicationAuthoringNodeRead =
       references: ReadonlyArray<{ kind: string; role?: string; text?: string; url?: string; mediaKind?: string; mediaType?: string }>;
       modelContentVersion?: ModelContentVersion;
       snapshotHash?: string;
-      cameras: ModelCamera[];
     }
   | { ok: false; code: string; message: string };
 
@@ -49,11 +47,6 @@ export type ApplicationCanvasAuthoringFacade = {
     nodeId: string;
     source: string;
     expectedModelContentHash?: string;
-  }): Promise<ApplicationAuthoringWriteOutcome>;
-  mutateCamerasBatch(input: ApplicationAuthoringWriteContext & {
-    canvasId: string;
-    nodeId: string;
-    mutations: readonly ModelCameraMutation[];
   }): Promise<ApplicationAuthoringWriteOutcome>;
   /** 按工作/operationId 查询已提交回执（恢复/重连用）。 */
   receipt(input: { delegation: ApplicationUserDelegation; canvasId: string; nodeId: string; operationId: string }): Promise<

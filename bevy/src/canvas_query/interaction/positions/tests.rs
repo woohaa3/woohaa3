@@ -65,7 +65,6 @@ fn local_snapshot_matches_full_projection_and_retains_unrelated_edge_buffers() {
         assert_eq!(a.input_port, b.input_port);
         assert_eq!(a.output_port, b.output_port);
         assert_eq!(a.history_strip, b.history_strip);
-        assert_eq!(a.preview, b.preview);
         assert_eq!(a.resize, b.resize);
     }
     for (a, b) in snapshot.edges.iter().zip(&expected.edges) {

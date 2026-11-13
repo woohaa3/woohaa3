@@ -9,20 +9,38 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage, isExternalDesktopDependency } from './lib/desktop-host-package.mjs';
+import { nodeArtifact, DESKTOP_NODE_VERSION, copyRuntimeFiles, copyRuntimePackage, attachRuntimePackage, assertPortableTree, linkRuntimePackage, isExternalDesktopDependency, copyNpmCli } from './lib/desktop-host-package.mjs';
 import { systemTar, systemTarArgs } from './lib/desktop-platform-commands.mjs';
 import { writeRuntimeLinks } from './lib/desktop-runtime-links.mjs';
 import { resolvedRuntimeLock } from './package-runtime-components.mjs';
+import { assertRuntimeNpmLockCurrent, auditRuntimeNpmScripts } from './lib/runtime-npm-manifest.mjs';
 import { scanExtensions } from './lib/extension-scan.mjs';
 import { loadBuildProfile } from './lib/build-profile.mjs';
 import { applySiteDefaultEnabled } from './lib/site-extension-defaults.mjs';
+import { nodeDownloadArgs } from './lib/node-download-args.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true,...options});
+/** 随包执行器 CLI：桌面宿主用它启动/复用 workspace 级 daemon。 */
+function ensureExecutorBundle(){
+ const cli=path.join(root,'packages/execution-runtime/dist/cli.js');
+ if(!fs.existsSync(cli))execFileSync('pnpm',['-C','web','--filter','woohaa3-executor','run','build'],{cwd:root,stdio:'inherit',shell:process.platform==='win32',windowsHide:true});
+ if(!fs.existsSync(cli))throw new Error('woohaa3-executor 构建后仍缺少 dist/cli.js');
+ return cli;
+}
+function stageExecutorRuntime(output){
+ const cli=ensureExecutorBundle();const dir=path.join(output,'executor-runtime');
+ fs.mkdirSync(path.join(dir,'dist'),{recursive:true});
+ fs.copyFileSync(cli,path.join(dir,'dist','cli.js'));
+ fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify({name:'woohaa3-executor-runtime',private:true,type:'module'},null,2)+'\n');
+}
 export async function prepareDesktopNode(){
  const artifact=nodeArtifact();const cache=path.join(root,'.local/desktop-node');fs.mkdirSync(cache,{recursive:true});
  const archive=path.join(cache,artifact.archive);const sums=path.join(cache,'SHASUMS256.txt');
- if(!fs.existsSync(sums))run(process.platform==='win32'?'curl.exe':'curl',['--fail','--location','--retry','2',`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/SHASUMS256.txt`,'-o',sums]);
- if(!fs.existsSync(archive))run(process.platform==='win32'?'curl.exe':'curl',['--fail','--location','--retry','2',`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/${artifact.archive}`,'-o',archive]);
+ // 静默进度 + 断点续传 + 支持时重试传输中断；参数按本机 curl 能力裁剪（Windows 自带 curl 不认 --retry-all-errors）。
+ const curlBin=process.platform==='win32'?'curl.exe':'curl';
+ const fetchTo=(url,dest)=>run(curlBin,nodeDownloadArgs(url,dest,{curl:curlBin}));
+ if(!fs.existsSync(sums))fetchTo(`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/SHASUMS256.txt`,sums);
+ if(!fs.existsSync(archive))fetchTo(`https://nodejs.org/dist/v${DESKTOP_NODE_VERSION}/${artifact.archive}`,archive);
  const expected=fs.readFileSync(sums,'utf8').split('\n').find(line=>line.trim().endsWith(` ${artifact.archive}`))?.split(/\s+/)[0];
  const actual=createHash('sha256').update(fs.readFileSync(archive)).digest('hex');if(!expected||expected!==actual)throw new Error('Node SHA256 校验失败');
  const extracted=path.join(cache,artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,''));
@@ -63,6 +81,7 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  const {node,nodeSha256:actual}=await prepareDesktopNode();
  // Rebuild the staging tree. Never copy user configuration from source packages.
  fs.rmSync(output,{recursive:true,force:true});fs.mkdirSync(output,{recursive:true});
+ stageExecutorRuntime(output);
  const yaml=createRequire(path.join(root,'web/backend/package.json'))('yaml');
  const state=new Map();state.platform=process.platform;state.arch=process.arch;state.runtimeOnly=true;state.excludeDependency=isExternalDesktopDependency;state.packageExtensions=yaml.parse(fs.readFileSync(path.join(root,'web/pnpm-workspace.yaml'),'utf8')).packageExtensions??{};
  attachRuntimePackage(path.join(root,'web/backend'),path.join(output,'backend-runtime'),output,state);
@@ -109,15 +128,25 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  fs.writeFileSync(path.join(output,'runtime-components.lock.json'),JSON.stringify(resolvedRuntimeLock(),null,2)+'\n');
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
  fs.copyFileSync(path.join(root,'.local/desktop-node',artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,''),'LICENSE'),path.join(output,'tools/NODE_LICENSE'));
+ // app-local npm CLI：运行期从 npm registry 安装 Agent runtime 的唯一入口。
+ const npmCli=copyNpmCli(path.join(root,'.local/desktop-node',artifact.archive.replace(/(?:\.tar\.gz|\.zip)$/,'')),path.join(output,'tools'));
+ const npmLock=assertRuntimeNpmLockCurrent({clientRoot:root});
+ fs.writeFileSync(path.join(output,'runtime-npm-lock.json'),JSON.stringify(npmLock,null,2)+'\n');
+ // 构建期审核：本平台已安装依赖里出现未审核的 lifecycle script 直接失败。
+ const scriptAudit=auditRuntimeNpmScripts({clientRoot:root,lock:npmLock});
+ fs.writeFileSync(path.join(output,'runtime-npm-scripts.audit.json'),JSON.stringify(scriptAudit,null,2)+'\n');
+ fs.writeFileSync(path.join(output,'runtime-npm-toolchain.json'),JSON.stringify({schema:1,node:DESKTOP_NODE_VERSION,npmCli:path.relative(output,npmCli.npmCli).split(path.sep).join('/'),bytes:npmCli.bytes},null,2)+'\n');
  if(process.platform==='win32')writeRuntimeLinks(output,state.links??[]);
- fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
+ fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,npmCli:path.relative(output,npmCli.npmCli).split(path.sep).join('/'),npmLock:'runtime-npm-lock.json',inventory:[...state.keys()].map(dir=>{const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));return {name:pkg.name,version:pkg.version};})},null,2));
  assertPortableTree(output);
  console.log(`[desktop-host] ${state.size} packages, ${extensions.length} extensions → ${output}`);
- return {resourceRoot:output,node,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size};
+ return {resourceRoot:output,node,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,npmCli:npmCli.npmCli};
 }
 export async function prepareDevelopmentHost(){
  const prepared=await prepareDesktopNode();const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
  const output=path.join(root,'.local/desktop-dev-host');fs.mkdirSync(output,{recursive:true});
+ ensureExecutorBundle();
+ const executorLink=path.join(output,'executor-runtime');if(!fs.existsSync(executorLink))fs.symlinkSync(path.join(root,'packages/execution-runtime'),executorLink,process.platform==='win32'?'junction':'dir');
  for(const [name,source] of [['backend-runtime',path.join(root,'web/backend')],['frontend',path.join(root,'web/frontend/dist')],['scripts',path.join(root,'scripts')],['models.json',path.join(root,'web/services/task-service/pptask.models.json')]]) {
   const dest=path.join(output,name);if(!fs.existsSync(dest)){if(process.platform==='win32'&&!fs.statSync(source).isDirectory())fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir');}
  }

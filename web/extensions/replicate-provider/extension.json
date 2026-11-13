@@ -3,5 +3,6 @@
   "extensionId": "replicate-provider",
   "metadata": { "module": "./shared", "export": "REPLICATE_PLUGIN_METADATA", "order": 27 },
   "hostPlugin": { "module": "./backend", "factory": "createReplicateProviderPlugin", "features": ["provider"], "order": 17 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "1.0.0"
 }

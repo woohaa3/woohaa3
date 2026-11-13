@@ -13,12 +13,6 @@ export { effectiveCanvasNodeSize, minimumNodeSizeFor } from "../node-dimensions.
 /** 参考实现的 palette kind（决定 Bevy 中的配色与图标）。 */
 export type BevyNodeKind = "text" | "image" | "model" | "audio" | "video" | "shot" | "node";
 
-/** 静态 model3d 卡片自带本地轨道预览。
- * 已下线的 generate/edit/shot 不在此列，保持未知节点行为（change: 2026-10-08-integrate-render-performance-and-model-preview）。 */
-export function isModelPreviewNodeType(type: string): boolean {
-  return type === "model3d";
-}
-
 /**
  * woohaa3 六类应用节点 → 参考 palette kind。
  * `model3d`/`composite-asset` 承载 3D 内容，映射为 `model`；start 已下线；未知回落 `node`。
@@ -84,24 +78,31 @@ export function clampNodeSize(value: number, minimum: number): number {
   return Math.max(minimum, value);
 }
 
-/**
- * 右下角 resize 抓手命中区域（世界坐标），change: add-node-resize。
- *
- * 与 Bevy 绘制共用 `RESIZE_HANDLE_SIZE`：抓手贴住节点右下角内缘，
- * 命中判定用同一矩形，保证「画在哪、点在哪」一致（design D1/Risk）。
- */
+export type ResizeHandle = "nw" | "ne" | "sw" | "se";
+
+/** 四角 resize 抓手命中区域（世界坐标）。 */
+export function bevyResizeHandleRects(node: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Record<ResizeHandle, { x: number; y: number; width: number; height: number }> {
+  return {
+    nw: { x: node.x, y: node.y, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE },
+    ne: { x: node.x + node.width - RESIZE_HANDLE_SIZE, y: node.y, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE },
+    sw: { x: node.x, y: node.y + node.height - RESIZE_HANDLE_SIZE, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE },
+    se: { x: node.x + node.width - RESIZE_HANDLE_SIZE, y: node.y + node.height - RESIZE_HANDLE_SIZE, width: RESIZE_HANDLE_SIZE, height: RESIZE_HANDLE_SIZE }
+  };
+}
+
+/** 兼容旧测试/调用方：返回右下角抓手。 */
 export function bevyResizeHandleRect(node: {
   x: number;
   y: number;
   width: number;
   height: number;
 }): { x: number; y: number; width: number; height: number } {
-  return {
-    x: node.x + node.width - RESIZE_HANDLE_SIZE,
-    y: node.y + node.height - RESIZE_HANDLE_SIZE,
-    width: RESIZE_HANDLE_SIZE,
-    height: RESIZE_HANDLE_SIZE
-  };
+  return bevyResizeHandleRects(node).se;
 }
 
 /** 节点右上角历史动作的边框尺寸（世界坐标）。 */

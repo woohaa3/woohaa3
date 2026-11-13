@@ -2,7 +2,6 @@
  * ChatGPT 生成编排：候选解码与归一化
  * （自 `generation.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R09）。
  */
-import type { ModelCameraMutation } from "@woohaa3/contracts";
 
 /** 解析候选 JSON；SDK 结构化输出失败时给出可读原因。 */
 export function parseCandidateText(text: string): { ok: true; value: unknown } | { ok: false; message: string } {
@@ -33,53 +32,4 @@ export function overwriteGuard(userPrompt: string, previousSource: string | unde
 /** 提示词是否明确要求整体重建（中英文关键词）。 */
 function rebuildRequested(prompt: string): boolean {
   return /重建|重写|重做|从头|重新做|全部替换|整体替换|replace the (whole|entire)|rebuild|from scratch|rewrite the (whole|entire)/i.test(prompt);
-}
-
-/**
- * 归一结构化输出的镜头变更：把严格 schema 产生的 `null` 可选字段丢弃，仅保留有值字段。
- */
-export function normalizeCameraMutations(input: unknown): ModelCameraMutation[] {
-  if (!Array.isArray(input)) return [];
-  const out: ModelCameraMutation[] = [];
-  for (const raw of input) {
-    if (typeof raw !== "object" || raw === null) continue;
-    const entry = raw as Record<string, unknown>;
-    const kind = entry.kind;
-    const id = typeof entry.id === "string" ? entry.id : undefined;
-    const name = typeof entry.name === "string" ? entry.name : undefined;
-    const azimuth = typeof entry.azimuth === "number" ? entry.azimuth : undefined;
-    const elevation = typeof entry.elevation === "number" ? entry.elevation : undefined;
-    const distance = typeof entry.distance === "number" ? entry.distance : undefined;
-    const aspect = typeof entry.aspect === "string" ? entry.aspect : undefined;
-    const focusOffset =
-      entry.focusOffset && typeof entry.focusOffset === "object"
-        ? (entry.focusOffset as { x?: unknown; y?: unknown; z?: unknown })
-        : null;
-    const focus = focusOffset && typeof focusOffset.x === "number" && typeof focusOffset.y === "number" && typeof focusOffset.z === "number"
-      ? { x: focusOffset.x, y: focusOffset.y, z: focusOffset.z }
-      : undefined;
-    switch (kind) {
-      case "create":
-        if (typeof azimuth !== "number" || typeof distance !== "number") break;
-        out.push({ kind: "create", azimuth, distance, ...(name ? { name } : {}), ...(elevation !== undefined ? { elevation } : {}), ...(aspect ? { aspect: aspect as never } : {}), ...(focus ? { focusOffset: focus } : {}) });
-        break;
-      case "update":
-        if (!id) break;
-        out.push({ kind: "update", id, ...(azimuth !== undefined ? { azimuth } : {}), ...(elevation !== undefined ? { elevation } : {}), ...(distance !== undefined ? { distance } : {}), ...(aspect ? { aspect: aspect as never } : {}), ...(focus ? { focusOffset: focus } : {}) });
-        break;
-      case "remove":
-        if (id) out.push({ kind: "remove", id });
-        break;
-      case "rename":
-        if (id && name) out.push({ kind: "rename", id, name });
-        break;
-      case "reset":
-        if (!id || typeof azimuth !== "number" || typeof distance !== "number") break;
-        out.push({ kind: "reset", id, azimuth, distance, ...(elevation !== undefined ? { elevation } : {}) });
-        break;
-      default:
-        break;
-    }
-  }
-  return out;
 }

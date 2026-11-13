@@ -50,7 +50,7 @@ export function commitViewportUpdate(
   }
 }
 
-export const OBSERVER_ONLY_REASONS: ReadonlySet<string> = new Set(["model-focus", "model-preview"]);
+export const OBSERVER_ONLY_REASONS: ReadonlySet<string> = new Set(["model-focus"]);
 
 export function shouldRouteObserverOnly(
   reasons: ReadonlySet<string>,

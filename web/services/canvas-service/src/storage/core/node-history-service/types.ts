@@ -8,7 +8,6 @@
 import type {
   ContentContributionResolver,
   MediaStorageScope,
-  ModelCamera,
   ModelScriptBatchMeta,
   NodeGenerationKind,
   NodeHistoryModelPlacement,
@@ -163,7 +162,6 @@ export type RegisterModelEditInput = {
   version: string;
   placement: NodeHistoryModelPlacement;
   createdAt: string;
-  modelCameras?: ModelCamera[];
 };
 
 export type NodeHistoryServiceContext = {

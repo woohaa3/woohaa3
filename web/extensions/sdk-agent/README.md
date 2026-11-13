@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | OpenAI Responses API | `openai-responses`、`codex-agent-sdk` | `@openai/codex-sdk` 0.161.0 + 配套 Codex 0.161.0 | 部署允许的 Responses 协议地址 |
 | Anthropic Messages API | `anthropic-messages`、`claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` 0.3.301 + 同版本平台运行时 | 部署允许的 Messages 协议地址 |
-| Chat Completions 兼容 | `compat-chat` | `@deepseek-ai/dsh-sdk-client` + `@deepseek-ai/dsh` 0.2.1-rc.2 | 部署允许的自定义地址 |
+| Chat Completions 兼容 | `compat-chat` | `@deepseek-ai/dsh-sdk-client` + `@deepseek-ai/dsh` 0.2.2-rc.1 | 部署允许的自定义地址 |
 | Gemini 原生 API | `gemini-agent-adk` | `@google/adk` 2.3.0 | 部署允许的 Gemini API 地址，无 Vertex/ADC |
 
 历史 adapter ID 只是持久身份；新增表单只有四种 API。没有宿主自写 HTTP 推理/工具循环、没有运行依赖缺失时的降级。`@anthropic-ai/sdk` 是 Claude Agent SDK 的 peer 依赖，不是独立执行器。

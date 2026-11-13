@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { ApplicationToolDelegationFacade } from "@woohaa3/contracts";
-import { buildAgentSdkRestrictions, CLAUDE_BUILTIN_TOOLS, CODEX_BUILTIN_TOOLS, createAgentSdkAdapter, type AgentSdkTransport } from "./agent-sdk-adapter.js";
+import { buildAgentSdkRestrictions, CLAUDE_BUILTIN_TOOLS, CODEX_BUILTIN_TOOLS, createAgentSdkAdapter, MCP_RESOURCE_TOOL_NAMES, type AgentSdkTransport } from "./agent-sdk-adapter.js";
 
 const tools: ApplicationToolDelegationFacade = {
   issue: async () => ({ token: "t", canvasIds: [], nodeIds: [], tools: [], workId: "w" }),
@@ -152,5 +152,50 @@ describe("Agent SDK 执行前限制（任务 7.3）", () => {
     });
     expect(result).toMatchObject({ ok: false, code: "capability-unsupported" });
     expect(seen[0]?.isError).toBe(true);
+  });
+
+  it("运行时自带的 MCP 资源读取工具不算越权，也不中止回合", async () => {
+    const seen: string[] = [];
+    const { transport: t } = transport({
+      run: async (input) => {
+        input.onEvent({ type: "tool-call", call: { id: "c1", name: "read_mcp_resource", argumentsJson: "{}" } });
+        return { ok: true, assistantText: "", toolCalls: [{ id: "c1", name: "read_mcp_resource", argumentsJson: "{}" }], finishReason: "tool_calls" };
+      }
+    });
+    const adapter = createAgentSdkAdapter({ kind: "dsh-agent-sdk", apiKey: "sk-x", configDir: "/tmp/c", workspaceDir: "/tmp/ws", transport: t, probeRuntime: okRuntime });
+    const result = await adapter.run({
+      model: "m",
+      prompt: "p",
+      tools: [{ name: "create_world_model", description: "c", parameters: {} }],
+      toolToken: "grant-1",
+      toolFacade: tools,
+      signal: new AbortController().signal,
+      onToolCall: (call) => seen.push(call.name)
+    });
+    expect(MCP_RESOURCE_TOOL_NAMES).toContain("read_mcp_resource");
+    expect(result).toMatchObject({ ok: true });
+    expect(seen).toEqual(["read_mcp_resource"]);
+  });
+
+  it("MCP 客户端返回带 server 前缀的工具名时仍按本轮原名授权", async () => {
+    const seen: string[] = [];
+    const { transport: t } = transport({
+      run: async (input) => {
+        input.onEvent({ type: "tool-call", call: { id: "c1", name: "mcp__woohaa__create_world_model", argumentsJson: "{}" } });
+        return { ok: true, assistantText: "", toolCalls: [{ id: "c1", name: "mcp__woohaa__create_world_model", argumentsJson: "{}" }], finishReason: "tool_calls" };
+      }
+    });
+    const adapter = createAgentSdkAdapter({ kind: "dsh-agent-sdk", apiKey: "sk-x", configDir: "/tmp/c", workspaceDir: "/tmp/ws", transport: t, probeRuntime: okRuntime });
+    const result = await adapter.run({
+      model: "m",
+      prompt: "p",
+      tools: [{ name: "create_world_model", description: "c", parameters: {} }],
+      toolToken: "grant-1",
+      toolFacade: tools,
+      signal: new AbortController().signal,
+      onToolCall: (call) => seen.push(call.name)
+    });
+    expect(result).toMatchObject({ ok: true, outcome: { toolCalls: [{ name: "create_world_model" }] } });
+    expect(seen).toEqual(["create_world_model"]);
   });
 });

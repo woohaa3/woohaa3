@@ -2,5 +2,6 @@
   "schemaVersion": 1,
   "extensionId": "sqlite-storage",
   "icon": { "glyph": "storage" },
-  "bootstrap": { "module": "./bootstrap", "export": "createSqliteStorageBootstrap" }
+  "bootstrap": { "module": "./bootstrap", "export": "createSqliteStorageBootstrap" },
+  "version": "0.1.0"
 }

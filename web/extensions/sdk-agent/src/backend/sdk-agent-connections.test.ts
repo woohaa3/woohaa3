@@ -2,15 +2,38 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import type { ConnectionMetadataRecord, ConnectionService } from "@woohaa3/agent-connections";
 import { findSdkAgentAdapter } from "../shared.js";
-import { createSdkAgentConversationAdapter, sdkReasoningEfforts } from "./sdk-agent-connections.js";
+import { capabilitiesFor, createSdkAgentConversationAdapter, sdkModelViews, unwrittenError } from "./sdk-agent-connections.js";
 import type { AgentSdkTransport } from "./adapters/agent-sdk-adapter.js";
+import { buildTestPreparedTurn, toolsForTestIntent } from "@woohaa3/test-fixtures-agent-role-turns";
 
 function fixture(runtimeVersion: string | undefined = "codex-agent-sdk@0.161.0:1") {
-  const record: ConnectionMetadataRecord = { owner: "owner", connectionId: "connection", adapterId: "openai-responses", name: "API", runCategory: "agent-sdk", authMode: "api-key", configRevision: 1, credentialEpoch: 1, createdAt: "now", updatedAt: "now", runtimeVersion, models: ["fixture"] };
+  const record: ConnectionMetadataRecord = { owner: "owner", connectionId: "connection", adapterId: "openai-responses", name: "API", runCategory: "agent-sdk", authMode: "api-key", configRevision: 1, credentialEpoch: 1, createdAt: "now", updatedAt: "now", runtimeVersion, models: ["fixture", "gpt-6.1-sol"], modelCatalog: { revision: "test", capturedAt: "now", models: [{ id: "fixture", reasoning: { state: "unknown", source: "provider", revision: "test" } }, { id: "gpt-6.1-sol", reasoning: { state: "supported", source: "provider", revision: "test", efforts: [{ id: "low" }, { id: "medium" }, { id: "high" }] } }] } };
   const service = { get: vi.fn(async (owner: string) => owner === "owner" ? record : null), readCredential: vi.fn(async () => ({ secret: "real-key-never-given-to-sdk" })), setRuntimeProbe: vi.fn(), setStatus: vi.fn(), resolveNativeBinding: vi.fn(async () => null), setNativeBinding: vi.fn() } as unknown as ConnectionService;
   const run = vi.fn<AgentSdkTransport["run"]>(async () => ({ ok: true, assistantText: "reply", toolCalls: [], finishReason: "stop" }));
   const create = (available = true, inFlight?: Set<Promise<unknown>>, allowedHosts = ["api.openai.com"]) => createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, { service, inFlight, allowedHosts, allowHttp: false, ...(available ? { transports: { "codex-agent-sdk": { run } } } : {}) });
-  const input = (overrides: Partial<AgentAdapterRunInput> = {}): AgentAdapterRunInput => ({ owner: "owner", conversationId: "conversation", canvasId: "canvas", requestId: "request", turnId: "turn", connection: { connectionId: "connection", adapterId: "openai-responses", configRevision: 1, credentialEpoch: 1 }, history: [], intent: { action: "discuss", canvasId: "canvas", prompt: "reply", model: "fixture" }, signal: new AbortController().signal, emit: vi.fn(), ...overrides });
+  const input = (overrides: Partial<AgentAdapterRunInput> = {}): AgentAdapterRunInput => {
+    const intent = overrides.intent ?? { action: "discuss" as const, canvasId: "canvas", prompt: "reply", model: "fixture" };
+    return {
+      owner: "owner",
+      conversationId: "conversation",
+      canvasId: "canvas",
+      requestId: "request",
+      turnId: "turn",
+      connection: { connectionId: "connection", adapterId: "openai-responses", configRevision: 1, credentialEpoch: 1 },
+      history: [],
+      intent,
+      prepared: buildTestPreparedTurn({
+        requestId: overrides.requestId ?? "request",
+        target: { canvasId: intent.canvasId, ...(intent.nodeId ? { nodeId: intent.nodeId } : {}), ...(intent.mode ? { mode: intent.mode } : {}) },
+        prompt: intent.prompt,
+        tools: toolsForTestIntent(intent),
+        output: overrides.candidate ? { kind: "candidate", schema: overrides.candidate.outputSchema } : { kind: "tool-receipts" }
+      }),
+      signal: new AbortController().signal,
+      emit: vi.fn(),
+      ...overrides
+    };
+  };
   return { record, service, run, create, input };
 }
 
@@ -61,6 +84,22 @@ describe("固定 SDK 连接执行前门禁", () => {
     expect(inFlight.size).toBe(0);
     await expect(fetch(baseUrl + "/models")).rejects.toThrow();
   });
+  it("首次执行先准备固定引擎，准备失败的连接不进入模型传输", async () => {
+    const f = fixture();
+    const prepare = vi.fn(async () => ({ engine: "codex-agent-sdk", component: "codex", state: "unavailable" as const, code: "REGISTRY_UNAVAILABLE", reason: "npm registry 暂不可达：HTTP 503。请检查网络后重试准备。" }));
+    const resolve = vi.fn(async () => { throw new Error("resolve must not run after a failed preparation"); });
+    const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, {
+      service: f.service, allowedHosts: ["api.openai.com"], allowHttp: false,
+      runtime: { prepare, resolve } as never
+    });
+    const outcome = await adapter.run(f.input());
+    expect(outcome).toMatchObject({ status: "failed", error: { code: "runtime-missing" } });
+    expect(outcome).toMatchObject({ error: { message: expect.stringContaining("npm registry 暂不可达") } });
+    expect(prepare).toHaveBeenCalledWith("codex-agent-sdk");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.service.setRuntimeProbe).toHaveBeenCalledWith("owner", "connection", "codex-agent-sdk@0.161.0:1", expect.objectContaining({ state: "unavailable", reason: expect.stringContaining("npm registry 暂不可达") }));
+  });
   it("缺运行依赖不调用模型，不回退 HTTP", async () => {
     const f = fixture();
     expect(await f.create(false).run(f.input())).toMatchObject({ status: "failed", error: { code: "runtime-missing" } });
@@ -70,14 +109,6 @@ describe("固定 SDK 连接执行前门禁", () => {
     const f = fixture("old-http");
     expect(await f.create().run(f.input())).toMatchObject({ status: "failed", error: { code: "migration-required" } });
     expect(f.run).not.toHaveBeenCalled();
-  });
-  it("目录明确不支持工具的模型只可讨论，目标请求不发送", async () => {
-    const f = fixture();
-    f.record.modelCapabilities = { fixture: { tools: false } };
-    const input = f.input(); input.intent.action = "modify"; input.intent.nodeId = "node";
-    expect(await f.create().run(input)).toMatchObject({ error: { code: "capability-unsupported" } });
-    expect(f.run).not.toHaveBeenCalled();
-    expect(await f.create().run(f.input())).toMatchObject({ status: "succeeded" });
   });
   it("不符合部署策略的自定义地址在启动 SDK 前拒绝，原值保持", async () => {
     const f = fixture(); f.record.baseUrl = "https://legacy.example/v1";
@@ -117,8 +148,13 @@ it("选择的思考强度传入 SDK，未开放的模型在启动前拒绝", asy
   f.run.mockClear();
   expect(await f.create().run({ ...input, requestId: "other", intent: { ...input.intent, model: "fixture" } })).toMatchObject({ status: "failed", error: { code: "capability-unsupported" } });
   expect(f.run).not.toHaveBeenCalled();
-  expect(sdkReasoningEfforts("compat-chat", "unknown")).toEqual([]);
-  expect(sdkReasoningEfforts("gemini-agent-adk", "gemini-3-pro-preview")).toEqual(["low", "high"]);
+  const record = fixture().record;
+  const catalog = { revision: "r", capturedAt: "now", models: [
+    { id: "unknown", reasoning: { state: "unknown" as const, source: "provider" as const, revision: "r" } },
+    { id: "gemini-3-pro-preview", reasoning: { state: "supported" as const, source: "provider" as const, revision: "r", efforts: [{ id: "low" as const }, { id: "high" as const }] } }
+  ] };
+  expect(sdkModelViews("compat-chat", { ...record, modelCatalog: catalog })[0]?.reasoningEfforts).toBeUndefined();
+  expect(sdkModelViews("gemini-agent-adk", { ...record, modelCatalog: catalog })[1]?.reasoningEfforts).toEqual(["low", "high"]);
 });
 
 
@@ -153,10 +189,32 @@ it.each(["outside-scope", "spatial-rejected", "write-forbidden", "version-confli
   const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, {
     service: f.service, allowHttp: false, allowedHosts: ["api.openai.com"],
     transports: { "codex-agent-sdk": { run: f.run } }, mcpServerUrl: "http://127.0.0.1:1/mcp",
-    tools: { authorize: vi.fn(), issue: async () => { throw Object.assign(new Error("对象 model-a 超出范围，请调整导演区 real-key-never-given-to-sdk https://private.invalid/path token=secret"), { code }); }, revoke: vi.fn() }
+    tools: { issue: async () => { throw Object.assign(new Error("对象 model-a 超出范围，请调整导演区 real-key-never-given-to-sdk https://private.invalid/path token=secret"), { code }); }, revoke: vi.fn() }
   });
   const outcome = await adapter.run(f.input({ intent: { action: "modify", mode: "world", canvasId: "canvas", nodeId: "area", worldScope: { kind: "scene-area", areaId: "area" }, prompt: "修改", model: "fixture" } }));
   expect(outcome).toMatchObject({ status: "failed", error: { code, message: expect.stringContaining("对象 model-a 超出范围") } });
   expect(JSON.stringify(outcome)).not.toMatch(/real-key-never-given-to-sdk|private.invalid|token=secret/);
   expect(f.run).not.toHaveBeenCalled();
+});
+
+describe("没有写入时按真实结束原因归因", () => {
+  it("输出额度写满报 output-truncated，而不是未确认写入", () => {
+    expect(unwrittenError("length")).toEqual({ code: "output-truncated", message: expect.stringContaining("长度上限") });
+    expect(unwrittenError("content_filter")).toMatchObject({ code: "content-filtered" });
+    for (const reason of ["length", "content_filter"] as const) {
+      expect(unwrittenError(reason, true)?.message).toContain("已成功提交的修改已保留");
+      expect(unwrittenError(reason, true)?.message).not.toContain("没有完成写入");
+    }
+  });
+
+  it("正常结束或未知原因仍交给未确认写入兜底", () => {
+    expect(unwrittenError("stop")).toBeUndefined();
+    expect(unwrittenError("tool_calls")).toBeUndefined();
+    expect(unwrittenError("unknown")).toBeUndefined();
+  });
+});
+
+it("compat-chat 不宣称可恢复 native session", () => {
+  expect(capabilitiesFor(findSdkAgentAdapter("compat-chat")!)).toMatchObject({ resume: false });
+  expect(capabilitiesFor(findSdkAgentAdapter("openai-responses")!)).toMatchObject({ resume: true });
 });

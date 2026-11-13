@@ -77,8 +77,6 @@ pub(crate) struct GraphNode {
     /// 可选画布外壳；缺省 `card` 保持旧帧兼容。
     #[serde(default)]
     pub(crate) chrome: NodeChrome,
-    #[serde(default, rename = "modelPreview")]
-    pub(crate) model_preview: Option<ModelPreview>,
     pub(crate) id: String,
     #[serde(rename = "type")]
     pub(crate) kind: String,
@@ -111,7 +109,7 @@ pub(crate) struct GraphNode {
     pub(crate) media_loading: bool,
     #[serde(default)]
     pub(crate) texture: bool,
-    /// 是否绘制右下角 resize 抓手（仅单选节点，change: add-node-resize）。
+    /// 是否绘制四角 resize 抓手（仅单选节点，change: add-node-resize）。
     #[serde(default)]
     pub(crate) resizable: bool,
     /// 上传中的幽灵节点：只渲染、不可交互（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
@@ -186,17 +184,6 @@ impl HistoryStripPresentation {
         }
         Ok(())
     }
-}
-
-/// Browser-local orbit view; never a persisted model camera.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ModelPreview {
-    pub(crate) azimuth: f32,
-    pub(crate) elevation: f32,
-    pub(crate) distance_scale: f32,
-    #[serde(default)]
-    pub(crate) target_offset: [f32; 3],
 }
 
 fn default_node_width() -> f32 {
@@ -439,17 +426,6 @@ impl Scene {
                 && (self.selection.nodes.len() != 1 || self.selection.nodes[0] != node.id)
             {
                 return Err("Invalid resize projection");
-            }
-            if let Some(view) = &node.model_preview {
-                if ![view.azimuth, view.elevation, view.distance_scale]
-                    .iter()
-                    .chain(view.target_offset.iter())
-                    .all(|v| v.is_finite())
-                    || view.elevation.abs() >= std::f32::consts::FRAC_PI_2
-                    || view.distance_scale <= 0.
-                {
-                    return Err("Invalid model preview");
-                }
             }
             if let Some(strip) = &node.history_strip {
                 strip.validate()?;

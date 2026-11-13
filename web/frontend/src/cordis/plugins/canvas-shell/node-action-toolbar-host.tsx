@@ -39,11 +39,16 @@ export function NodeActionToolbar({ runtime, nodeId, presentation }: {
   runtime: CanvasRuntimeService; nodeId: string; presentation: BevyNodeActionsPresentation;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+  const relayout = useRef(() => {});
   useLayoutEffect(() => {
     const element = ref.current;
     const canvas = document.getElementById("bevy-canvas");
     if (!element || !canvas) return;
     const layout = () => {
+      // Freeze the screen anchor while the pointer is over the toolbar, so a
+      // changing model silhouette cannot move the next rotation click away.
+      if (hovered.current && element.style.visibility === "visible") return;
       const node = runtime.nodeScreenRect(nodeId, "action-toolbar");
       const next = node ? nodeActionToolbarScreenLayout(node, canvas.getBoundingClientRect(), presentation) : null;
       element.style.visibility = next ? "visible" : "hidden";
@@ -51,18 +56,21 @@ export function NodeActionToolbar({ runtime, nodeId, presentation }: {
       element.style.left = `${next.bar.x}px`;
       element.style.top = `${next.bar.y}px`;
     };
-    const resize = new ResizeObserver(layout);
+    relayout.current = layout;
+    const resized = () => { hovered.current = false; layout(); };
+    const resize = new ResizeObserver(resized);
     resize.observe(canvas);
-    const off = [runtime.subscribeViewport(layout), runtime.subscribeScene?.(layout), runtime.subscribeFrame?.(layout)];
-    window.addEventListener("resize", layout);
+    const off = [runtime.subscribeViewport(() => { hovered.current = false; layout(); }), runtime.subscribeScene?.(layout), runtime.subscribeFrame?.(layout)];
+    window.addEventListener("resize", resized);
     layout();
-    return () => { resize.disconnect(); off.forEach(dispose => dispose?.()); window.removeEventListener("resize", layout); };
+    return () => { resize.disconnect(); off.forEach(dispose => dispose?.()); window.removeEventListener("resize", resized); };
   }, [runtime, nodeId, presentation]);
   // Same fixed screen metrics as the previous toolbar, now with native DOM buttons and hover states.
   const layout = nodeActionToolbarLayout({ node: { x: 0, y: 0, width: 0, height: 0 }, ...presentation });
   if (!layout) return null;
   return <div ref={ref} className="node-action-toolbar" data-node-id={nodeId}
     style={{ visibility: "hidden", width: layout.bar.width, height: layout.bar.height }}
+    onPointerEnter={() => { hovered.current = true; }} onPointerLeave={() => { hovered.current = false; relayout.current(); }}
     onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
     onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}
@@ -90,6 +98,7 @@ function ActionIcon({ icon }: { icon: NonNullable<BevyNodeActionsPresentation["a
   if (icon === "edit") return <PenIcon size={16} />;
   if (icon === "box") return <BoxIcon size={16} />;
   const paths: Record<string, string> = {
+    "rotate-clockwise": "M20 4v5h-5M20 9a8 8 0 1 0 1 7",
     "arrange-horizontal": "M5 3v18M12 3v18M19 3v18",
     "arrange-vertical": "M3 5h18M3 12h18M3 19h18",
     "arrange-grid": "M3 3h18v18H3zM3 12h18M12 3v18",

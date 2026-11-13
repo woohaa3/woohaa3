@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { worldCameraRotationLookingAt, worldCameraView } from "./world-camera-ui.js";
+import { createDefaultWorldCameraData, initialCameraCardPosition, worldCameraRotationLookingAt, worldCameraView } from "./world-camera-ui.js";
+import { worldToCanvasPoint } from "./model-focus/canvas-projection.js";
+import { worldToRendererPosition } from "./shared-world.js";
 
 describe("worldCameraView", () => {
   it("reports the +v forward and no ground hit for a level camera", () => {
@@ -33,5 +35,23 @@ describe("worldCameraView", () => {
     const view = worldCameraView({ position, rotation: rotation! });
     expect(view.forward.h).toBeGreaterThan(0);
     expect(view.groundIntersection).toBeNull();
+  });
+});
+
+describe("initialCameraCardPosition", () => {
+  it("hangs the card above the camera body's projected canvas point", () => {
+    const camera = createDefaultWorldCameraData("camera-a", "v1", { u: 12, v: 7 });
+    const card = initialCameraCardPosition(camera);
+    const renderer = worldToRendererPosition(camera.position);
+    const body = worldToCanvasPoint([renderer[0], renderer[1], renderer[2]]);
+    expect(card.x).toBeCloseTo(body.x + 56, 9);
+    expect(card.y).toBeCloseTo(body.y - 156 - 56, 9);
+  });
+
+  it("moves with the camera instead of returning a fixed canvas slot", () => {
+    const near = initialCameraCardPosition({ position: { u: 0, v: 0, h: 1 } });
+    const far = initialCameraCardPosition({ position: { u: 40, v: 25, h: 1 } });
+    expect(far.x).not.toBeCloseTo(near.x, 3);
+    expect(far.y).not.toBeCloseTo(near.y, 3);
   });
 });

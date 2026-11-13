@@ -83,6 +83,28 @@ describe("连接元数据隔离（任务 1.3）", () => {
     expect(await service.resolveNativeBinding({ owner: "user-a", connectionId: id })).toBeNull();
   });
 
+  it("目录快照写回模型级能力但不推进 configRevision，重复快照不重写", async () => {
+    const { service } = setup();
+    const created = await service.create("user-a", { ...baseInput, models: ["gpt-5"] });
+    if (!created.ok) throw new Error("create failed");
+    const id = created.value.connectionId;
+    const input = {
+      owner: "user-a",
+      connectionId: id,
+      models: [{ id: "gpt-5", label: "GPT-5", reasoning: { state: "supported" as const, source: "provider" as const, revision: "r1", efforts: [{ id: "high" as const }] } }]
+    };
+    const saved = await service.setModelCatalog!(input);
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect(saved.value.configRevision).toBe(1);
+    expect(saved.value.models).toEqual(["gpt-5"]);
+    expect(saved.value.modelCatalog?.models[0]?.reasoning).toMatchObject({ state: "supported", efforts: [{ id: "high" }] });
+
+    // 同一份目录事实不产生新的元数据写入：读取到的记录保持原 updatedAt。
+    const again = await service.setModelCatalog!(input);
+    expect(again.ok && again.value.updatedAt).toBe(saved.value.updatedAt);
+  });
+
   it("并发增量修改：读后写入被他人抢先时冲突，不静默覆盖", async () => {
     const documents = createInMemoryDocumentStore([EXT_ID]);
     const store = documents.forExtension(EXT_ID)!;

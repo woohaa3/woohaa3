@@ -9,7 +9,7 @@
  * 真实实现由 `transports/*` 用专用进程与回环 HTTP 完成；测试注入 fake，独立验证
  * 初始化/账号证据、工具面限制、取消与终态映射，不启动真实进程。
  */
-import type { AgentConversationAdapterEvent, AgentAdapterRunOutcome, AgentModelView, AgentConnectionStatus } from "@woohaa3/contracts";
+import type { AgentNativeCapability, AgentConversationAdapterEvent, AgentAdapterRunOutcome, AgentModelView, AgentConnectionStatus } from "@woohaa3/contracts";
 import type { StdioConnection } from "../process-manager.js";
 
 export type LocalAgentTransportId = "codex-appserver" | "opencode-server" | "codebuddy-server";
@@ -31,6 +31,10 @@ export type LocalAgentTransportInput = {
   prompt: string;
   /** 本轮允许的工具（宿主允许面）；讨论回合为空。 */
   allowedTools: readonly string[];
+  /** 已准备角色允许的内建能力，缺省关闭。 */
+  nativeCapabilities?: readonly AgentNativeCapability[];
+  /** 执行器同步写入 journal；路径不进入模型可见消息。 */
+  onGeneratedImage?: (image: { savedPath: string; codexHome: string }) => void;
   /** 本轮工具 grant（讨论回合为 null）。 */
   toolToken: string | null;
   /** 受控 MCP 工具 endpoint（讨论回合为 null）。 */

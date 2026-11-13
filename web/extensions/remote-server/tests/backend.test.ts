@@ -118,6 +118,8 @@ async function activate(options: {
   canvas?: unknown;
   diagnostics?: ApplicationBackendDiagnostics;
   loginAssertionHeaders?: readonly string[];
+  /** 是否让扩展在激活时自动用 deviceToken 换会话；缺省关，避免打乱各用例的请求计数。 */
+  autoLoginWithDeviceToken?: boolean;
 }) {
   const services = {
     ...(options.documents ? { documents: options.documents } : {}),
@@ -128,6 +130,7 @@ async function activate(options: {
     deployment: () => options.deployment,
     fetchImpl: options.fetchImpl,
     loginAssertionHeaders: options.loginAssertionHeaders,
+    autoLoginWithDeviceToken: options.autoLoginWithDeviceToken === true,
     ...(options.now ? { now: options.now } : {}),
     ...(options.store ? { store: options.store } : {})
   });
@@ -2213,5 +2216,28 @@ describe("deleteCanvas()：删除属于远端的画布", () => {
     await provider.listCanvases!();
     reachable = false;
     expect(await provider.deleteCanvas!("canvas-remote-1")).toBe("unavailable");
+  });
+
+  it("配了 deviceToken 时激活即换会话，不必等一次存储操作", async () => {
+    // 实测踩过：配好 serverUrl + deviceToken 后界面一直是「本地模式」。原因是 `ensure()`
+    // 只有存储客户端在真正读写对象时才调用，于是没人打开过云端画布就永远不登录——
+    // 而部署凭证的含义就是「这台机器不用人登录」。
+    const fake = createFakeServer({ identities: { "device-token": "device-alice" } });
+    const host = await activate({
+      deployment: { serverUrl: fake.serverUrl, deviceToken: "device-token", keyPrefix: "" },
+      fetchImpl: fake.fetch,
+      autoLoginWithDeviceToken: true
+    });
+
+    // 换会话是激活里的后台任务：轮询到 connected，而不是假定 apply 返回时就好了。
+    const deadline = Date.now() + 2000;
+    let phase = "";
+    while (Date.now() < deadline) {
+      const result = await host.call(REMOTE_SERVER_SESSION_ROUTE);
+      phase = String((result.body as { phase?: string }).phase ?? "");
+      if (phase === "connected") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(phase).toBe("connected");
   });
 });

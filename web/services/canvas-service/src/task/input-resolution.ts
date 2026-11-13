@@ -7,6 +7,7 @@
  * 只输出稳定引用（assetId/role/storageKey/mediaType），绝不输出 bytes、浏览器 URL 或签名 URL。
  */
 import {
+  alignRoleToDeclaredSlot,
   ensureWoohaa3CanvasInputMappingSlotId,
   inferWoohaa3CanvasInputRole,
   sortWoohaa3CanvasInputMappings,
@@ -69,6 +70,15 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
   }
 
   const mappings = collectInputMappings(canvas, nodeId, nodeData);
+  /**
+   * 已被占用的角色（与面板/预检同一规则）：只收模型接受的显式角色。连线的推断角色若
+   * 模型根本不接受，它并不真正占用槽位。
+   */
+  const claimedRoles = new Set(
+    mappings
+      .map((mapping) => mapping.role)
+      .filter((role) => bindings.some((entry) => entry.roles.includes(role)))
+  );
 
   for (const mapping of mappings) {
     // 文字角色是 prompt 来源，不是媒体参考资产。它的内容由 prompt-resolution 解析。
@@ -76,13 +86,22 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
     const cameraInput = options.cameraInputs?.get(mapping.sourceNodeId);
     if (cameraInput) {
       // 冻结结果自带权威角色（动态镜头为 reference_video，静态为 reference_image）。
-      const referenceRole = cameraInput.mediaKind === "video" ? cameraInput.role : mapping.role;
+      // 静态镜头沿用映射角色，仍要与模型声明的槽位对齐（工作流模型可能只有 control_image）。
+      const cameraKind = cameraInput.mediaKind as CanvasReferenceMediaKind;
+      const referenceRole = cameraKind === "video"
+        ? cameraInput.role
+        : alignRoleToDeclaredSlot({
+            inferredRole: mapping.role,
+            mediaKind: cameraKind,
+            bindings,
+            claimedRoles
+          });
       const binding = bindings.find(entry => entry.roles.includes(referenceRole)
-        && entry.mediaKinds.includes(cameraInput.mediaKind as CanvasReferenceMediaKind)
+        && entry.mediaKinds.includes(cameraKind)
         && entry.mediaTypes.includes(cameraInput.mediaType));
       if (!binding) {
         blockingReasons.push(
-          cameraInput.mediaKind === "video"
+          cameraKind === "video"
             ? "所选模型不接受镜头视频参考"
             : "所选模型不接受镜头图像参考"
         );
@@ -91,6 +110,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       const used = (counts.get(binding.field) ?? 0) + 1;
       if (used > binding.maxItems) { blockingReasons.push(`镜头参考数量超过模型对 ${binding.field} 的上限 ${binding.maxItems}`); continue; }
       counts.set(binding.field, used);
+      claimedRoles.add(referenceRole);
       references.push({ slotId: mapping.slotId ?? "", role: referenceRole, sortKey: mapping.sortKey,
         sourceNodeId: mapping.sourceNodeId, input: { ...cameraInput, role: referenceRole } });
       continue;
@@ -110,7 +130,17 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
 
     for (const assetId of assetIds) {
       const asset = canvas.assets.find((entry) => entry.id === assetId);
-      const problem = validateReferenceAsset(asset, assetId, bindings, mapping.role);
+      /**
+       * 连线推断的角色可能不是模型声明的槽位（图片源默认 `reference_image`，而工作流只声明
+       * `control_image`）。先对齐再校验：否则会出现「功能明明支持，却被判成不支持参考角色」
+       * 的自相矛盾门禁，而用户没有任何入口能改映射角色。
+       */
+      const assetKind = asset?.mediaKind;
+      const effectiveRole =
+        assetKind === "image" || assetKind === "video" || assetKind === "audio"
+          ? alignRoleToDeclaredSlot({ inferredRole: mapping.role, mediaKind: assetKind, bindings, claimedRoles })
+          : mapping.role;
+      const problem = validateReferenceAsset(asset, assetId, bindings, effectiveRole);
       if (problem) {
         blockingReasons.push(problem);
         continue;
@@ -121,7 +151,7 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
       const mediaKind = typedAsset.mediaKind as CanvasReferenceMediaKind;
       const binding = bindings.find(
         (entry) =>
-          entry.roles.includes(mapping.role) &&
+          entry.roles.includes(effectiveRole) &&
           entry.mediaKinds.includes(mediaKind) &&
           entry.mediaTypes.includes(mediaType)
       );
@@ -133,14 +163,15 @@ export function resolveNodeReferenceInputs(options: ResolveNodeInputsOptions): I
         }
         counts.set(binding.field, used);
       }
+      claimedRoles.add(effectiveRole);
       references.push({
         slotId: mapping.slotId ?? "",
-        role: mapping.role,
+        role: effectiveRole,
         sortKey: mapping.sortKey,
         sourceNodeId: mapping.sourceNodeId,
         input: {
           assetId,
-          role: mapping.role,
+          role: effectiveRole,
           storageKey,
           mediaType,
           mediaKind

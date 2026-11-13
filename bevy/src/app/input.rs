@@ -214,6 +214,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_observer_keeps_director_edges_aligned_with_ground_queries() {
+        use crate::isometric_grid::{self, IsometricGridView};
+        use bevy::camera::{CameraProjection, visibility::RenderLayers};
+
+        let mut world = World::new();
+        world.insert_resource(CurrentScene::default());
+        world.insert_resource(super::super::FocusRig::default());
+        world.insert_resource(FrameFlags::default());
+        world.insert_resource(SurfaceState::default());
+        world.insert_resource(Messages::<WindowResized>::default());
+        let window = world.spawn((Window::default(), PrimaryWindow)).id();
+        let observer = world.spawn((
+            Camera::default(),
+            crate::model3d::grid::ModelCanvasCamera,
+            RenderLayers::default(),
+        )).id();
+        let mut schedule = Schedule::default();
+        // Run both writers in their real frame order: the later observer routing
+        // must preserve the viewport chosen by surface synchronization.
+        schedule.add_systems((sync_surface, super::super::scene3d::drive_observer_from_shot).chain());
+        let view = IsometricGridView { x: 210., y: 160., zoom: 0.75 };
+        let ground = Vec2::new(120., -80.);
+        let point = Vec3::new(ground.x, 0., ground.y);
+        let expected = isometric_grid::screen_point_from_world(point, &view);
+        // Includes moving from a Retina display to an external screen, resizing,
+        // a left inset, and browser mode without any native chrome inset.
+        for (left, top, width, height, dpr) in [
+            (0., 26., 1600., 974., 2.),
+            (0., 26., 1600., 974., 1.),
+            (180., 24., 1024., 744., 1.25),
+            (0., 0., 1280., 720., 1.),
+        ] {
+            world.resource_mut::<CurrentScene>().0.surface = Some(serde_json::from_value(
+                serde_json::json!({"width":width,"height":height,"pixelRatio":dpr,"originX":left,"originY":top})
+            ).unwrap());
+            schedule.run(&mut world);
+            let window = world.get::<Window>(window).unwrap();
+            let viewport = world.get::<Camera>(observer).unwrap().viewport.as_ref();
+            let position = viewport.map(|v| v.physical_position.as_vec2()).unwrap_or(Vec2::ZERO) / dpr;
+            let size = viewport.map(|v| v.physical_size.as_vec2()).unwrap_or(Vec2::new(
+                window.physical_width() as f32, window.physical_height() as f32,
+            )) / dpr;
+            let mut lens = isometric_grid::canvas_camera_projection_for_view(&view);
+            lens.update(size.x, size.y);
+            let pose = isometric_grid::canvas_camera_transform_for_view(Vec2::new(width, height), &view);
+            let clip = lens.get_clip_from_view() * pose.to_matrix().inverse() * point.extend(1.);
+            let ndc = clip.truncate() / clip.w;
+            let client = position + Vec2::new(ndc.x + 1., 1. - ndc.y) * size * 0.5;
+            let local = client - Vec2::new(left, top);
+            assert!((local - expected).length() < 0.01,
+                "rendered director edge must match CSS picking at DPR {dpr}: {local:?} != {expected:?}");
+            let picked = isometric_grid::screen_to_ground(&view, local);
+            assert!((picked - ground).length() < 0.05,
+                "pointer on the rendered edge must recover its actual ground position");
+        }
+    }
+
+    #[test]
     fn unchanged_surface_and_camera_do_not_publish_change_ticks_but_dpr_does() {
         let mut world = World::new();
         let mut scene = CurrentScene::default();

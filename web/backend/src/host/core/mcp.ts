@@ -1,3 +1,4 @@
+import { readRuntimeGeneratedImages } from "@woohaa3/application-service";
 /**
  * 核心层 · mcp：内置 MCP 服务与共享工具授权表。
  *
@@ -5,6 +6,8 @@
  * mcp 与 application；插件扩展的 MCP 工具清单在调用时从 application 懒取。
  */
 import { createMcpService } from "@woohaa3/mcp-service";
+import path from "node:path";
+import { createMemoryToolGrantStore, createSqliteToolGrantStore } from "../../ports/tool-grant-store.js";
 import type { SkillStepClient } from "@woohaa3/mcp-service";
 import type { HostPlugin } from "../context.js";
 import { READINESS_ORDER, ROUTE_ORDER } from "../order.js";
@@ -14,15 +17,21 @@ import { agentCanvasServiceToClient, modelMcpServiceToClient } from "../../ports
 import { groupScopedClient } from "../../ports/group-scoped-client.js";
 import { withMcpPrincipal } from "../../ports/mcp-principal.js";
 import { devPrincipalIdFromEnv } from "../base/access.js";
-import { decodeWorkflowGroupData, generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
-import { importCodexGeneratedImage, resolveCodexHome } from "../../ports/import-generated-image.js";
+import { decodeWorkflowGroupData } from "@woohaa3/contracts";
+import { importCodexGeneratedImage } from "../../ports/import-generated-image.js";
 import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
   inject: ["log", "gateway", "canvas"],
   apply(ctx, { env }) {
-    const toolGrants = createToolGrantRegistry();
+    // 持久 grant registry（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）：
+    // 与应用库同目录的独立文件，避免与业务表争锁；没有可用库路径时退回内存。
+    const storePath = env.WOOHAA3_APPLICATION_STORE_PATH?.trim() || env.WOOHAA3_TASK_STORE_PATH?.trim() || "";
+    const grantStore = storePath
+      ? createSqliteToolGrantStore({ path: path.join(path.dirname(path.resolve(storePath)), "tool-grants.sqlite") })
+      : createMemoryToolGrantStore();
+    const toolGrants = createToolGrantRegistry({ store: grantStore });
     const application = () => {
       const module = ctx.get("application");
       if (!module) throw new Error("插件宿主尚未就绪");
@@ -130,7 +139,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       agentClient: groupScopedClient({
         ...agentCanvasServiceToClient(services.agent, { principalId: devPrincipalIdFromEnv(env) }),
         // Codex 生图导入：目标只来自当前受信的 2D 组作用域，不接受工具参数自报。
-        importGeneratedImage: async (input) => {
+        importGeneratedImage: async (input: { canvasId?: string; requestId: string; index?: number }) => {
           const scope = currentCanvasGroupScope();
           const media = ctx.get("media");
           if (!scope || !media) {
@@ -156,13 +165,23 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
           if (!groupNode || !groupNodeData || !workflowGroup?.ok) {
             return { ok: false as const, code: "group-target-missing", message: "2D 组已删除或成员表无效" };
           }
+          let images: { codexHome: string; paths: string[] };
+          try {
+            images = await readRuntimeGeneratedImages({
+              socketPath: env.WOOHAA3_AGENT_RUNTIME_SOCKET ?? "",
+              token: env.WOOHAA3_AGENT_RUNTIME_TOKEN ?? "",
+              workspaceKey: env.WOOHAA3_AGENT_WORKSPACE_KEY ?? ""
+            }, scope.owner, input.requestId);
+          } catch (error) {
+            return { ok: false as const, code: "generated-image-unavailable", message: error instanceof Error ? error.message : String(error) };
+          }
           const result = await importCodexGeneratedImage({
             canvasId: scope.canvasId,
             requestId: input.requestId,
             index: input.index ?? 0,
             group: { nodeId: scope.rootGroupId, nodeData: groupNodeData, workflowGroup: workflowGroup.value },
-            codexHome: generatedImageCodexHome(input.requestId) ?? resolveCodexHome(env),
-            paths: generatedImagePaths(input.requestId),
+            codexHome: images.codexHome,
+            paths: images.paths,
             importBytes: (bytes) => media.port().importBytes(bytes),
             apply: async (commands, commandId) => {
               const agent = ctx.canvas.mcpServices().agent;
@@ -194,7 +213,7 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       },
       logger: ctx.log.scope("mcp")
     });
-    ctx.effect(() => () => mcp.close());
+    ctx.effect(() => () => { toolGrants.close?.(); mcp.close(); });
     ctx.provide("toolGrants", toolGrants);
     ctx.provide("mcp", mcp);
     // 2D 组作用域：grant 命中组绑定时，把本轮 MCP 调用放进受信作用域；成员/写膜由

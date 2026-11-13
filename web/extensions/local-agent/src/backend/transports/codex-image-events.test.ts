@@ -4,8 +4,7 @@
  * 只验证传输层从 `item/completed` 的 `imageGeneration` 项提取 `savedPath`：
  * 按到达顺序累积、不转发 base64、缺路径时不产出条目。
  */
-import { clearGeneratedImages, generatedImageCodexHome, generatedImagePaths } from "@woohaa3/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { connectionCodexHome } from "../codex-home.js";
 import type { StdioConnection } from "../process-manager.js";
 import { createCodexAppServerTransport } from "./codex-appserver-transport.js";
@@ -47,11 +46,11 @@ function fakeStdio() {
 const transport = () => createCodexAppServerTransport({ protocolVersion: "2025-06-18", clientVersion: "test" });
 
 describe("Codex 生图产物路径记录", () => {
-  afterEach(() => clearGeneratedImages("req-registry"));
 
   it("到达时按回合 requestId 登记路径，供导入工具在回合结束前读取", async () => {
     const fake = fakeStdio();
-    const run = transport().run({ ...fake.input(), turnRequestId: "req-registry" });
+    const images: Array<{ savedPath: string; codexHome: string }> = [];
+    const run = transport().run({ ...fake.input(), onGeneratedImage: image => images.push(image) });
     await fake.started();
     fake.emit({
       method: "item/completed",
@@ -60,8 +59,7 @@ describe("Codex 生图产物路径记录", () => {
         item: { type: "imageGeneration", id: "g1", status: "completed", savedPath: "/codex/generated_images/s1/a.png", result: "AAA" }
       }
     });
-    expect(generatedImagePaths("req-registry")).toEqual(["/codex/generated_images/s1/a.png"]);
-    expect(generatedImageCodexHome("req-registry")).toBe(connectionCodexHome("/tmp/config"));
+    expect(images).toEqual([{ savedPath: "/codex/generated_images/s1/a.png", codexHome: connectionCodexHome("/tmp/config") }]);
     fake.emit({ method: "turn/completed", params: { threadId: "thread-1", turnId: "turn-1", turn: { id: "turn-1", status: "completed" } } });
     await run;
   });

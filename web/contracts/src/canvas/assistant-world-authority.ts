@@ -37,10 +37,9 @@ import { decodeGroundAabb } from "./creation-scope-codec.js";
 
 export const ASSISTANT_WORLD_AUTHORITY_VERSION = "assistant-world-authority-v1" as const;
 
-/** Selectable authoring scopes. A 2D group is organizational only. */
+/** Selectable authoring scopes. */
 export type AssistantWorldScopeSelection =
   | { kind: "scene-area"; areaId: WorldId }
-  | { kind: "workflow-group-2d"; groupId: WorldId }
   | { kind: "world-camera"; cameraId: WorldId };
 
 export type AssistantWorldScopeKind = AssistantWorldScopeSelection["kind"];
@@ -56,6 +55,12 @@ export const ASSISTANT_WORLD_TOOL = {
   sampleAnimation: "sample_scene_animation",
   createModel: "create_world_model",
   replaceModel: "replace_world_model_content",
+  /** Read one director-area model's current script and content version. */
+  readModelScript: "get_world_model_script",
+  /** Append one chunk to an existing model script (skeleton → chunks). */
+  appendModelScript: "append_world_model_script",
+  /** Exact-text patch of one existing model script (`oldString` → `newString`). */
+  patchModelScript: "patch_world_model_script",
   moveModel: "move_world_model",
   setAnimation: "set_scene_animation_script",
   resizeArea: "resize_scene_area",
@@ -73,6 +78,8 @@ export const ASSISTANT_WORLD_READ_TOOLS = [ASSISTANT_WORLD_TOOL.readContext] as 
 export const ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.createModel,
   ASSISTANT_WORLD_TOOL.replaceModel,
+  ASSISTANT_WORLD_TOOL.appendModelScript,
+  ASSISTANT_WORLD_TOOL.patchModelScript,
   ASSISTANT_WORLD_TOOL.moveModel,
   ASSISTANT_WORLD_TOOL.setAnimation,
   ASSISTANT_WORLD_TOOL.resizeArea,
@@ -83,6 +90,7 @@ export const ASSISTANT_WORLD_WRITE_TOOLS = [
 
 export const ASSISTANT_WORLD_TOOLS = [
   ...ASSISTANT_WORLD_READ_TOOLS,
+  ASSISTANT_WORLD_TOOL.readModelScript,
   ...(HUMANOID_RIG_AUTHORING_ENABLED ? [ASSISTANT_WORLD_TOOL.readModelRig] : []),
   ASSISTANT_WORLD_TOOL.sampleAnimation,
   ...ASSISTANT_WORLD_WRITE_TOOLS
@@ -94,13 +102,9 @@ export const ASSISTANT_WORLD_CAMERA_TOOLS = [
   ASSISTANT_WORLD_TOOL.completeCamera
 ] as const;
 
-/**
- * Actual tool catalog for a selected scope. A 2D group cannot widen world write
- * eligibility by listing its member cards.
- */
+/** Actual tool catalog for a selected scope. */
 export function assistantWorldToolsForScope(scope: AssistantWorldScopeSelection): readonly AssistantWorldToolName[] {
-  if (scope.kind === "world-camera") return ASSISTANT_WORLD_CAMERA_TOOLS;
-  return scope.kind === "workflow-group-2d" ? ASSISTANT_WORLD_READ_TOOLS : ASSISTANT_WORLD_TOOLS;
+  return scope.kind === "world-camera" ? ASSISTANT_WORLD_CAMERA_TOOLS : ASSISTANT_WORLD_TOOLS;
 }
 
 /** Per-source capability declaration consumed by the assistant directory. */
@@ -117,7 +121,7 @@ export const ASSISTANT_WORLD_CAPABILITY_ID = "assistant.world-authoring" as cons
 export function assistantWorldSourceCapability(
   input: { targets?: readonly AssistantWorldScopeKind[]; tools?: readonly AssistantWorldToolName[] } = {}
 ): AssistantWorldSourceCapability {
-  const targets = input.targets ?? ["scene-area", "workflow-group-2d", "world-camera"];
+  const targets = input.targets ?? ["scene-area", "world-camera"];
   const tools = input.tools ?? (targets.includes("scene-area") ? ASSISTANT_WORLD_TOOLS : targets.includes("world-camera") ? ASSISTANT_WORLD_CAMERA_TOOLS : ASSISTANT_WORLD_READ_TOOLS);
   return {
     version: ASSISTANT_WORLD_AUTHORITY_VERSION,
@@ -166,7 +170,37 @@ export type AssistantWorldFailureCode =
   | "capability-unsupported"
   | "not-issued"
   | "unverified-run"
-  | "unverified-stop";
+  | "unverified-stop"
+  /** `oldString` never occurs in the current script. */
+  | "patch-not-found"
+  /** `oldString` occurs more than once; the caller must supply more context. */
+  | "patch-ambiguous"
+  /** `oldString === newString`; nothing changed and no version advanced. */
+  | "patch-noop";
+
+/** One place a patch `oldString` occurs; `line` is 1-based. */
+export interface AssistantWorldPatchMatch {
+  line: number;
+  /** 1-based column inside that line. */
+  column: number;
+  /** Bounded original-text excerpt around the match. */
+  excerpt: string;
+}
+
+/**
+ * Actionable patch diagnostics. They name where the requested text is (or is
+ * nearly) located so the caller can widen its context instead of guessing.
+ */
+export interface AssistantWorldPatchDiagnostic {
+  /** How many times `oldString` occurred (0 for not-found, >1 for ambiguous). */
+  occurrences: number;
+  /** Occurrence positions, bounded. */
+  matches?: AssistantWorldPatchMatch[];
+  /** Nearest similar excerpt, present for `patch-not-found`. */
+  closest?: AssistantWorldPatchMatch;
+  /** Current authoritative script length in characters. */
+  scriptLength: number;
+}
 
 export interface AssistantWorldFailure {
   ok: false;
@@ -176,15 +210,24 @@ export interface AssistantWorldFailure {
   spatialReason?: string;
   /** Actionable out-of-scope geometry, only when the authority could read it. */
   spatialDiagnostic?: WorldAuthoringFailure["spatialDiagnostic"];
+  /** Patch-only diagnostics (`patch-not-found` / `patch-ambiguous`). */
+  patchDiagnostic?: AssistantWorldPatchDiagnostic;
+  /** Current authoritative version, present on `version-conflict` when it could be read. */
+  currentVersion?: WorldVersion;
 }
 
 export type AssistantWorldIssueOutcome = ({ ok: true } & AssistantWorldIssued) | AssistantWorldFailure;
 
-/** Model content accepted by assistant tools. Content identity is derived by the authority. */
+/**
+ * Model content accepted by assistant tools. Content identity is derived by the authority.
+ *
+ * 模型没有卡片，位置只由创建操作的 `transform` 表达
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
+ */
 export interface AssistantWorldModelContent {
   modelScript: string;
   modelScriptVersion?: string;
-  /** Optional card position only; world pose is authoritative and independent. */
+  /** 新建模型时画布上的卡片落点；缺省由画布按非重叠规则决定。 */
   cardPosition?: { x: number; y: number };
 }
 
@@ -196,6 +239,7 @@ export type AssistantWorldWriteOperation =
       nodeId: WorldId;
       /** Optional stable instance identity; defaults to a deterministic identity derived from nodeId. */
       instanceId?: WorldId;
+      /** Empty content is a skeleton: the model gets an identity and a version but renders nothing until chunks arrive. */
       content: AssistantWorldModelContent;
       transform: WorldTransform;
     }
@@ -207,6 +251,23 @@ export type AssistantWorldWriteOperation =
       content: AssistantWorldModelContent;
       /** Optional pose change applied atomically with the content replacement. */
       transform?: WorldTransform;
+    }
+  | {
+      /** Append one chunk to the authoritative script; the host composes `current + chunk`. */
+      kind: "append-model-script";
+      operationId: WorldId;
+      instanceId: WorldId;
+      expectedVersion: WorldVersion;
+      chunk: string;
+    }
+  | {
+      /** Exact-text patch: `oldString` must occur exactly once in the current script. */
+      kind: "patch-model-script";
+      operationId: WorldId;
+      instanceId: WorldId;
+      expectedVersion: WorldVersion;
+      oldString: string;
+      newString: string;
     }
   | {
       kind: "set-model-transform";
@@ -271,6 +332,10 @@ export type AssistantWorldWriteOutcome =
       settingsVersion?: WorldVersion;
       /** Post-commit canonical object version (model or camera) for the next tool call. */
       version?: WorldVersion;
+      /** Post-commit authoritative script length in characters (chunk writes). */
+      scriptLength?: number;
+      /** How many places an exact-text patch replaced (always 1 on success). */
+      replaced?: number;
       /**
        * Post-commit camera view (unit forward + ground intersection) for camera
        * operations, so a caller can verify where the lens points instead of
@@ -376,9 +441,6 @@ export function decodeAssistantWorldScope(value: unknown): { ok: true; value: As
   if (value.kind === "scene-area" && isBoundedId(value.areaId) && Object.keys(value).length === 2) {
     return { ok: true, value: { kind: "scene-area", areaId: value.areaId } };
   }
-  if (value.kind === "workflow-group-2d" && isBoundedId(value.groupId) && Object.keys(value).length === 2) {
-    return { ok: true, value: { kind: "workflow-group-2d", groupId: value.groupId } };
-  }
   if (value.kind === "world-camera" && isBoundedId(value.cameraId) && Object.keys(value).length === 2) {
     return { ok: true, value: { kind: "world-camera", cameraId: value.cameraId } };
   }
@@ -386,24 +448,21 @@ export function decodeAssistantWorldScope(value: unknown): { ok: true; value: As
 }
 
 export function decodeAssistantWorldModelContent(value: unknown): { ok: true; value: AssistantWorldModelContent } | { ok: false; code: "invalid-data"; message: string } {
-  if (!isJsonObject(value) || Object.keys(value).some(key => !["modelScript", "modelScriptVersion", "cardPosition"].includes(key))) {
+  if (!isJsonObject(value) || Object.keys(value).some(key => !["modelScript", "modelScriptVersion"].includes(key))) {
     return { ok: false, code: "invalid-data", message: "模型内容包含未知字段" };
   }
-  if (typeof value.modelScript !== "string" || value.modelScript.trim() === "") {
-    return { ok: false, code: "invalid-data", message: "模型脚本不能为空" };
+  // 空脚本是合法骨架：身份与版本照常由宿主派生，内容在追加前不参与渲染。
+  if (typeof value.modelScript !== "string") {
+    return { ok: false, code: "invalid-data", message: "模型脚本必须是字符串" };
   }
   if (value.modelScriptVersion !== undefined && !isBoundedId(value.modelScriptVersion)) {
     return { ok: false, code: "invalid-data", message: "模型脚本版本无效" };
-  }
-  if (value.cardPosition !== undefined && (!isJsonObject(value.cardPosition) || !finite(value.cardPosition.x) || !finite(value.cardPosition.y))) {
-    return { ok: false, code: "invalid-data", message: "卡片位置无效" };
   }
   return {
     ok: true,
     value: {
       modelScript: value.modelScript,
-      ...(value.modelScriptVersion === undefined ? {} : { modelScriptVersion: value.modelScriptVersion as string }),
-      ...(value.cardPosition === undefined ? {} : { cardPosition: { x: (value.cardPosition as { x: number }).x, y: (value.cardPosition as { y: number }).y } })
+      ...(value.modelScriptVersion === undefined ? {} : { modelScriptVersion: value.modelScriptVersion as string })
     }
   };
 }
@@ -415,6 +474,8 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
   const allowedKeys: Record<string, readonly string[]> = {
     "create-model": ["kind", "operationId", "nodeId", "instanceId", "content", "transform"],
     "replace-model-content": ["kind", "operationId", "instanceId", "expectedVersion", "content", "transform"],
+    "append-model-script": ["kind", "operationId", "instanceId", "expectedVersion", "chunk"],
+    "patch-model-script": ["kind", "operationId", "instanceId", "expectedVersion", "oldString", "newString"],
     "set-model-transform": ["kind", "operationId", "instanceId", "expectedVersion", "transform"],
     "set-scene-animation-script": ["kind", "operationId", "script", "duration", "loop"],
     "set-world-camera": ["kind", "operationId", "cameraId", "expectedSettingsVersion", "settings"],
@@ -456,6 +517,43 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
         expectedVersion: value.expectedVersion,
         content: content.value,
         ...(value.transform === undefined ? {} : { transform: value.transform })
+      }
+    };
+  }
+  if (value.kind === "append-model-script") {
+    if (!isBoundedId(value.instanceId) || !isBoundedId(value.expectedVersion) || value.chunk === undefined) {
+      return { ok: false, code: "invalid-data", message: "追加脚本目标或版本无效" };
+    }
+    if (typeof value.chunk !== "string" || value.chunk === "") {
+      return { ok: false, code: "invalid-data", message: "追加片段必须是非空字符串" };
+    }
+    return {
+      ok: true,
+      value: {
+        kind: "append-model-script",
+        operationId: value.operationId,
+        instanceId: value.instanceId,
+        expectedVersion: value.expectedVersion,
+        chunk: value.chunk
+      }
+    };
+  }
+  if (value.kind === "patch-model-script") {
+    if (!isBoundedId(value.instanceId) || !isBoundedId(value.expectedVersion)) {
+      return { ok: false, code: "invalid-data", message: "修补脚本目标或版本无效" };
+    }
+    if (typeof value.oldString !== "string" || value.oldString === "" || typeof value.newString !== "string") {
+      return { ok: false, code: "invalid-data", message: "修补脚本需要非空 oldString 与字符串 newString" };
+    }
+    return {
+      ok: true,
+      value: {
+        kind: "patch-model-script",
+        operationId: value.operationId,
+        instanceId: value.instanceId,
+        expectedVersion: value.expectedVersion,
+        oldString: value.oldString,
+        newString: value.newString
       }
     };
   }
@@ -652,6 +750,159 @@ export function decodeAssistantWorldCameraInput(value: unknown): {
   };
 }
 
+/**
+ * Compose the authoritative script after one append.
+ *
+ * An append is a plain tail concatenation: chunks are never separated or
+ * reformatted by the host, so `readback === original + chunk1 + chunk2 + …`
+ * exactly. Callers are responsible for emitting a chunk that can end a program
+ * (host-side validation of the composed script is the judge).
+ */
+export function appendWorldModelChunk(current: string, chunk: string): string {
+  return `${current}${chunk}`;
+}
+
+function lineColumnOf(script: string, index: number): { line: number; column: number } {
+  let line = 1;
+  let lineStart = 0;
+  for (let cursor = 0; cursor < index; cursor += 1) {
+    if (script.charCodeAt(cursor) === 10) {
+      line += 1;
+      lineStart = cursor + 1;
+    }
+  }
+  return { line, column: index - lineStart + 1 };
+}
+
+function excerptAround(script: string, start: number, end: number, radius = 40): string {
+  const from = Math.max(0, start - radius);
+  const to = Math.min(script.length, end + radius);
+  const head = from > 0 ? "…" : "";
+  const tail = to < script.length ? "…" : "";
+  return `${head}${script.slice(from, to)}${tail}`;
+}
+
+function allIndicesOf(script: string, needle: string, limit = 16): number[] {
+  const indices: number[] = [];
+  let from = 0;
+  while (indices.length < limit) {
+    const found = script.indexOf(needle, from);
+    if (found < 0) break;
+    indices.push(found);
+    from = found + Math.max(1, needle.length);
+  }
+  return indices;
+}
+
+/** Bounded Levenshtein distance (early exit above `limit`). */
+function boundedDistance(left: string, right: string, limit: number): number {
+  if (Math.abs(left.length - right.length) > limit) return limit + 1;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    let rowMin = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      const value = Math.min(previous[column]! + 1, current[column - 1]! + 1, previous[column - 1]! + cost);
+      current.push(value);
+      if (value < rowMin) rowMin = value;
+    }
+    if (rowMin > limit) return limit + 1;
+    previous = current;
+  }
+  return previous[right.length]!;
+}
+
+/**
+ * Locate the nearest place the requested text almost matched.
+ *
+ * Two signals, both derived from the caller's own needle: anchored positions of
+ * its distinctive lines (so indentation or whitespace differences still point at
+ * a real line) and a bounded sliding edit-distance scan (so a needle that only
+ * partially overlaps still resolves). Candidates are scored by edit distance
+ * normalised by needle length; no location is ever invented.
+ */
+function closestExcerpt(script: string, needle: string, occurrences: readonly number[]): AssistantWorldPatchMatch | undefined {
+  if (script.length === 0 || needle.length === 0) return undefined;
+  if (occurrences.length > 0) {
+    const index = occurrences[0]!;
+    return { ...lineColumnOf(script, index), excerpt: excerptAround(script, index, index + needle.length) };
+  }
+  // Edit-distance scan is bounded: large scripts are sampled on a stride so the
+  // closest-match search never becomes the dominant cost of a failed patch.
+  const width = Math.min(needle.length, 96);
+  const probe = needle.slice(0, width);
+  const limit = Math.max(2, Math.floor(width / 4));
+  const stride = Math.max(1, Math.floor(script.length / 4096));
+  let best: { index: number; distance: number } | null = null;
+  for (let offset = 0; offset + width <= script.length; offset += stride) {
+    const window = script.slice(offset, offset + width);
+    // Cheap gate: require at least one shared 12-character run before the full scan.
+    if (!probe.slice(0, 12).includes(window.slice(0, 1)) && !window.slice(0, 12).includes(probe.slice(0, 1))) continue;
+    const distance = boundedDistance(probe, window, limit);
+    if (!best || distance < best.distance) best = { index: offset, distance };
+  }
+  // Anchors: positions of the needle's first non-space token (any indentation).
+  const anchors = new Set<number>();
+  const trimmed = probe.trimStart();
+  if (trimmed.length >= 2) {
+    for (const index of allIndicesOf(script, trimmed.slice(0, Math.min(trimmed.length, 24)), 8)) anchors.add(index);
+  }
+  for (const index of anchors) {
+    const distance = boundedDistance(probe, script.slice(index, index + width), limit);
+    if (!best || distance < best.distance) best = { index, distance };
+  }
+  if (!best) return undefined;
+  const similarity = width === 0 ? 0 : 1 - best.distance / width;
+  // A single shared character is not actionable evidence; require real overlap.
+  if (similarity < 0.5) return undefined;
+  return { ...lineColumnOf(script, best.index), excerpt: excerptAround(script, best.index, best.index + needle.length) };
+}
+
+export type WorldModelScriptPatchPlan =
+  | { ok: true; script: string; replaced: 1 }
+  | { ok: false; code: "patch-not-found" | "patch-ambiguous" | "patch-noop"; diagnostic: AssistantWorldPatchDiagnostic };
+
+/**
+ * Plan one exact-text patch against the current authoritative script.
+ *
+ * Semantics match an editor's `edit`: `oldString` must occur exactly once. Three
+ * refusals are explicit and never guess — `patch-not-found`, `patch-ambiguous`
+ * and `patch-noop` — and each refusal leaves the script untouched.
+ */
+export function planWorldModelScriptPatch(current: string, oldString: string, newString: string): WorldModelScriptPatchPlan {
+  if (oldString === newString) {
+    const count = current.includes(oldString) ? allIndicesOf(current, oldString, Number.MAX_SAFE_INTEGER).length : 0;
+    return {
+      ok: false,
+      code: "patch-noop",
+      diagnostic: { occurrences: count, scriptLength: current.length }
+    };
+  }
+  const indices = allIndicesOf(current, oldString);
+  if (indices.length === 0) {
+    const closest = closestExcerpt(current, oldString, indices);
+    return {
+      ok: false,
+      code: "patch-not-found",
+      diagnostic: { occurrences: 0, scriptLength: current.length, ...(closest ? { closest } : {}) }
+    };
+  }
+  if (indices.length > 1) {
+    return {
+      ok: false,
+      code: "patch-ambiguous",
+      diagnostic: {
+        occurrences: indices.length,
+        scriptLength: current.length,
+        matches: indices.map((index) => ({ ...lineColumnOf(current, index), excerpt: excerptAround(current, index, index + oldString.length) }))
+      }
+    };
+  }
+  const index = indices[0]!;
+  return { ok: true, script: `${current.slice(0, index)}${newString}${current.slice(index + oldString.length)}`, replaced: 1 };
+}
+
 export type AssistantWorldObjectSummary = {
   identity: WorldObjectIdentity;
   nodeId: string | null;
@@ -702,12 +953,20 @@ export type AssistantWorldContextView = {
     scopeVersion: WorldVersion;
     /** Stable origin for position tracks; u/v are offsets from it, h is absolute. */
     animationOrigin: import("./shared-world.js").GroundPoint;
+    animationQuarterTurns?: number;
     /** An explicit null means the current director area has no animation script. */
     animationScript: WorldAnimationScript | null;
   };
   /** Selected camera and published scene geometry, for camera-only composition edits. */
   camera?: { nodeId: WorldId; settings: WorldCameraData };
   sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null; animationRig?: WorldModelAnimationRig }>;
+  /**
+   * Authoritative scripts of the instance identities in this scope (writable plus
+   * read-only references), keyed by instance id. `get_world_model_script` reads
+   * `includeSource` from here, so a chunk write can verify its real tail.
+   * Omitted by hosts that predate chunked authoring.
+   */
+  modelScripts?: Record<WorldId, string>;
   /** A 2D group has no writable world set and no completion. */
   worldWritable: boolean;
 };

@@ -37,9 +37,8 @@ describe("ChatGPT authoring 端口 owner 透传", () => {
     const read = await ports.readNode({ ownerId: "local:abc", canvasId: "cv", nodeId: "n" });
     expect(read.ok).toBe(true);
     await ports.submitModel({ ownerId: "local:abc", canvasId: "cv", nodeId: "n", requestId: "r1", source: "scene.box({id:'b',size:[1,1,1]});" });
-    await ports.mutateCamerasBatch({ ownerId: "local:abc", canvasId: "cv", nodeId: "n", requestId: "r3", mutations: [] });
 
-    expect(recorded.map((entry) => entry.op)).toEqual(["read", "submit", "cameras"]);
+    expect(recorded.map((entry) => entry.op)).toEqual(["read", "submit"]);
     for (const entry of recorded) {
       expect(entry.delegation?.subject).toBe("local:abc");
       expect(entry.delegation?.authLevel).toBe("authenticated");

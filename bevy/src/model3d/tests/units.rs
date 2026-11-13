@@ -1,7 +1,7 @@
 //! 纯函数/单实体单元测试：颜色、transform、mesh key、锚点
 //! （change: refactor-bevy-rust-file-size，任务 4.1 / design D4）。
 
-use super::super::layout::{MODEL_CARD_GAP, model_anchor, model_transform_signature, model_unit};
+use super::super::layout::{model_bounds_for_node, model_root_transform, world_instance_transform};
 use super::super::mesh::mesh_key;
 use super::super::scene::ModelGeometry;
 use super::super::{grid, scene};
@@ -9,9 +9,16 @@ use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelSnapshot};
 use bevy::prelude::*;
 
 #[test]
-fn transform_signature_tracks_position_and_placement() {
+fn world_root_reads_only_the_shared_world_instance() {
+    // 旧卡片节点（无 sharedWorldInstance）没有世界根，也不产生可聚焦 AABB。
+    let legacy: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "m", "type": "model3d", "x": 10., "y": 20., "width": 224., "height": 116.
+    }))
+    .unwrap();
+    assert!(world_instance_transform(&legacy).is_none());
+    assert!(model_root_transform(&legacy).is_none());
     let model = ModelSnapshot {
-        scene_version: Some("woohaa-model-scene-ir-v1".to_owned()),
+        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
         ops: vec![],
         signature: "sig".into(),
         extent: 1.0,
@@ -20,50 +27,24 @@ fn transform_signature_tracks_position_and_placement() {
         prepared_bounds: None,
         placement: ModelPlacement::default(),
     };
-    let node = GraphNode {
-        chrome: crate::protocol::NodeChrome::Card,
-        shared_world_instance: None,
-        world_camera: None,
-        model_preview: None,
-        id: "n".into(),
-        kind: "model".into(),
-        x: 10.0,
-        y: 20.0,
-        width: 224.0,
-        height: 116.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        model: None,
-        history_strip: None,
-    };
-    let a = model_transform_signature(&model, &ModelPlacement::default(), &node);
-    let placed = ModelPlacement {
-        offset: crate::protocol::ModelOffset {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        scale: 1.0,
-        yaw: 0.0,
-    };
-    let b = model_transform_signature(&model, &placed, &node);
-    // 根 transform identity 不包含 model.signature（内容）；内容替换与根刷新分离。
-    let c = ModelSnapshot {
-        signature: "other".into(),
-        ..model.clone()
-    };
-    let d = model_transform_signature(&c, &ModelPlacement::default(), &node);
-    assert_ne!(a, b);
-    assert_eq!(a, d);
+    assert!(model_bounds_for_node(&model, &legacy).is_none());
+
+    // 世界模型：根姿态完全来自实例 transform，与卡片坐标无关。
+    let world: GraphNode = serde_json::from_value(serde_json::json!({
+        "id": "w", "type": "model3d", "x": 0.0, "y": 0.0, "width": 260.0, "height": 195.0,
+        "sharedWorldInstance": {"kind": "world-instance", "version": "shared-world-v1",
+            "instanceId": "i1",
+            "transform": {"version": "shared-world-v1", "position": {"u": 3.0, "v": 4.0, "h": 0.0},
+                "rotation": [0.0, 0.0, 0.0, 1.0], "scale": 2.0}}
+    }))
+    .unwrap();
+    let root = world_instance_transform(&world).unwrap();
+    // u = 3m → 渲染 x = 3 × 64；v = 4m → 渲染 z = -4 × 64（Y-up）。
+    assert!((root.translation.x - 192.0).abs() < 1e-3);
+    assert!((root.translation.z + 256.0).abs() < 1e-3);
+    assert!((root.scale.x - 128.0).abs() < 1e-3);
+    // 内容签名变化不改变世界根；实例变换才是唯一位置来源。
+    assert_eq!(world_instance_transform(&world).unwrap(), root);
 }
 
 #[test]
@@ -93,33 +74,18 @@ fn material_key_prefers_material_reference() {
     assert_eq!(scene::material_key(&op), "material:armor");
 }
 
-/// 内容 identity 与根 transform identity 分离（任务 1.1 / design D4）。
+/// 内容 identity 与世界根 identity 分离（任务 1.1 / design D4）。
 #[test]
-fn content_and_transform_identity_are_independent() {
-    let node = |id: &str| GraphNode {
-        chrome: crate::protocol::NodeChrome::Card,
-        shared_world_instance: None,
-        world_camera: None,
-        model_preview: None,
-        id: id.into(),
-        kind: "model".into(),
-        x: 0.0,
-        y: 0.0,
-        width: 224.0,
-        height: 116.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        model: None,
-        history_strip: None,
+fn content_and_world_root_identity_are_independent() {
+    let node = |instance: &str| -> GraphNode {
+        serde_json::from_value(serde_json::json!({
+            "id": "v2", "type": "model3d", "x": 0.0, "y": 0.0, "width": 260.0, "height": 195.0,
+            "sharedWorldInstance": {"kind": "world-instance", "version": "shared-world-v1",
+                "instanceId": instance,
+                "transform": {"version": "shared-world-v1", "position": {"u": 0.0, "v": 0.0, "h": 0.0},
+                    "rotation": [0.0, 0.0, 0.0, 1.0], "scale": 1.0}}
+        }))
+        .unwrap()
     };
     let v2_before = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -135,22 +101,16 @@ fn content_and_transform_identity_are_independent() {
         signature: "v2-sig-b".into(),
         ..v2_before.clone()
     };
-    // 内容签名变化（Scene IR）在根 transform identity 上不可见。
-    assert_eq!(
-        model_transform_signature(&v2_before, &ModelPlacement::default(), &node("v2")),
-        model_transform_signature(&v2_after, &ModelPlacement::default(), &node("v2"))
-    );
-    // placement 变化属于根 transform identity。
-    let placed = ModelPlacement {
-        offset: Default::default(),
-        scale: 2.0,
-        yaw: 0.5,
-    };
-    assert_ne!(
-        model_transform_signature(&v2_before, &ModelPlacement::default(), &node("v2")),
-        model_transform_signature(&v2_before, &placed, &node("v2"))
-    );
+    // 内容签名变化（Scene IR）不改变世界根。
+    assert_eq!(v2_before.signature == v2_after.signature, false);
+    assert_eq!(model_root_transform(&node("i1")), model_root_transform(&node("i1")));
+    // 实例身份不同但变换相同 ⇒ 世界根相同；变换改变才改变世界根。
+    assert_eq!(model_root_transform(&node("i1")), model_root_transform(&node("i2")));
+    let mut moved = node("i1");
+    moved.shared_world_instance.as_mut().unwrap().transform.position.u = 5.0;
+    assert_ne!(model_root_transform(&node("i1")), model_root_transform(&moved));
 }
+
 /// 重复 shape 复用同一 mesh key（任务 4.2）：同尺寸关节不线性创建重复资源。
 #[test]
 fn repeated_shapes_share_mesh_key() {
@@ -163,156 +123,19 @@ fn repeated_shapes_share_mesh_key() {
     assert_eq!(keys.len(), 1, "重复 shape 应共享同一 mesh key");
 }
 
-/// 卡片不与模型重叠（change: 卡片与模型不重叠）：模型顶部投影到卡片底部下方固定间距。
-#[test]
-fn model_anchor_keeps_card_above_model_top() {
-    let node = GraphNode {
-        chrome: crate::protocol::NodeChrome::Card,
-        shared_world_instance: None,
-        world_camera: None,
-        model_preview: None,
-        id: "m".into(),
-        kind: "model".into(),
-        x: 100.0,
-        y: 200.0,
-        width: 260.0,
-        height: 195.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        model: None,
-        history_strip: None,
-    };
-    // 高模型：0..4 单位的 box（unit 缩放到世界）。
-    let model = ModelSnapshot {
-        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
-        ops: vec![ModelOp::Box {
-            id: "body".into(),
-            parent: None,
-            position: [0.0, 2.0, 0.0],
-            rotation: [0.0; 3],
-            scale: [1.0; 3],
-            color: Some("#ffffff".into()),
-            material: None,
-            size: [1.0, 4.0, 1.0],
-        }],
-        signature: "sig".into(),
-        extent: 4.0,
-        aabb: None,
-        geometry_keys: None,
-        prepared_bounds: None,
-        placement: ModelPlacement::default(),
-    };
-    let placement = ModelPlacement::default();
-    let unit = model_unit(&node, &model, &placement);
-    let view_rotation = grid::view_rotation();
-    let anchor = model_anchor(&node, &model, &placement, unit);
-    // 画布屏幕 y 向下坐标（y 轴翻转后）。
-    let anchor_screen_y = -(view_rotation * anchor).y;
-
-    // 卡片底部（屏幕 y 向下）：node.y + node.height。
-    let card_bottom = node.y + node.height;
-    let top = scene::model_world_aabb(&model, view_rotation, unit)
-        .unwrap()
-        .max[1];
-    let model_top_screen_y = anchor_screen_y - top;
-    let gap = model_top_screen_y - card_bottom;
-    assert!(
-        (gap - MODEL_CARD_GAP).abs() < 0.5,
-        "gap {gap} 应约等于 {MODEL_CARD_GAP}"
-    );
-    // 模型整体位于卡片下方：模型顶部不高于卡片底部。
-    assert!(
-        model_top_screen_y >= card_bottom,
-        "模型顶部不应高于卡片底部"
-    );
-}
-
-/// 空模型（无几何）回退到既有固定偏移，不发生 NaN。
-#[test]
-fn model_anchor_falls_back_for_empty_model() {
-    let node = GraphNode {
-        chrome: crate::protocol::NodeChrome::Card,
-        shared_world_instance: None,
-        world_camera: None,
-        model_preview: None,
-        id: "m".into(),
-        kind: "model".into(),
-        x: 0.0,
-        y: 0.0,
-        width: 260.0,
-        height: 195.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        model: None,
-        history_strip: None,
-    };
-    let model = ModelSnapshot {
-        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
-        ops: vec![],
-        signature: "empty".into(),
-        extent: 1.0,
-        aabb: None,
-        geometry_keys: None,
-        prepared_bounds: None,
-        placement: ModelPlacement::default(),
-    };
-    let placement = ModelPlacement::default();
-    let unit = model_unit(&node, &model, &placement);
-    let anchor = model_anchor(&node, &model, &placement, unit);
-    assert!(anchor.x.is_finite() && anchor.y.is_finite());
-}
-
-/// 组形象锚定在组结构底边中点向下 40 的固定徽标锚点上，模型尺寸不移动锚点。
-
-/// 片场（composite-asset）：没有卡片，模型锚定在节点矩形**中心**（无朝下偏移），且模型投影
-/// 高度不超过节点矩形（范围框罩住模型）。change: 2026-10-08-make-film-set-model-only 修订。
-
-/// 固定世界不变式：同一内容/placement 派生稳定 unit/anchor/AABB；真实 scale 改变才改变 bounds
-/// （change: make-shot-framing-zoom-invariant，任务 5.1）。
+/// 固定世界不变式：同一世界变换派生稳定 AABB；实例 scale 改变才改变 bounds
+/// （change: 2026-11-10-remove-legacy-model-card-nodes）。
 #[test]
 fn model_world_is_stable_and_scale_sensitive() {
-    let node = GraphNode {
-        chrome: crate::protocol::NodeChrome::Card,
-        shared_world_instance: None,
-        world_camera: None,
-        model_preview: None,
-        id: "m".into(),
-        kind: "model".into(),
-        x: 100.0,
-        y: 200.0,
-        width: 260.0,
-        height: 195.0,
-        body: String::new(),
-        title: String::new(),
-        type_label: String::new(),
-        progress: 0.0,
-        progress_started_at: None,
-        busy: false,
-        texture: false,
-        media_loading: false,
-        resizable: false,
-        ghost: false,
-        card_label: None,
-        model: None,
-        history_strip: None,
+    let node = |scale: f64| -> GraphNode {
+        serde_json::from_value(serde_json::json!({
+            "id": "w", "type": "model3d", "x": 0.0, "y": 0.0, "width": 260.0, "height": 195.0,
+            "sharedWorldInstance": {"kind": "world-instance", "version": "shared-world-v1",
+                "instanceId": "i1",
+                "transform": {"version": "shared-world-v1", "position": {"u": 0.0, "v": 0.0, "h": 0.0},
+                    "rotation": [0.0, 0.0, 0.0, 1.0], "scale": scale}}
+        }))
+        .unwrap()
     };
     let model = ModelSnapshot {
         scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
@@ -333,95 +156,40 @@ fn model_world_is_stable_and_scale_sensitive() {
         prepared_bounds: None,
         placement: ModelPlacement::default(),
     };
-    let placement = ModelPlacement {
-        offset: crate::protocol::ModelOffset {
-            x: 0.5,
-            y: 0.25,
-            z: -0.1,
-        },
-        scale: 1.3,
-        yaw: 35.0,
-    };
-    // 派生函数只接受内容与 placement：同输入多次派生逐位稳定。
-    let unit = model_unit(&node, &model, &placement);
-    let anchor = model_anchor(&node, &model, &placement, unit);
-    let aabb = super::super::layout::model_world_aabb_for_node(&model, &placement, &node).unwrap();
-    assert!(unit.is_finite() && unit > 0.0);
-    assert_eq!(
-        anchor,
-        model_anchor(
-            &node,
-            &model,
-            &placement,
-            model_unit(&node, &model, &placement)
-        )
-    );
-    assert_eq!(
-        aabb.min,
-        super::super::layout::model_world_aabb_for_node(&model, &placement, &node)
-            .unwrap()
-            .min
-    );
-    // 真实 placement.scale 改变确实改变世界 bounds 与半径。
-    let scaled = ModelPlacement {
-        scale: placement.scale * 2.0,
-        ..placement
-    };
-    let scaled_aabb =
-        super::super::layout::model_world_aabb_for_node(&model, &scaled, &node).unwrap();
-    let radius = |a: crate::model3d::scene::ModelAabb| {
-        (bevy::prelude::Vec3::from_array(a.max) - bevy::prelude::Vec3::from_array(a.min)).length()
+    let base = model_bounds_for_node(&model, &node(1.0)).unwrap();
+    // 派生函数只接受内容与实例变换：同输入多次派生逐位稳定。
+    assert_eq!(base, model_bounds_for_node(&model, &node(1.0)).unwrap());
+    // 实例 scale 改变确实改变世界 bounds。
+    let scaled = model_bounds_for_node(&model, &node(2.0)).unwrap();
+    let radius = |aabb: crate::model3d::scene::ModelAabb| {
+        (bevy::prelude::Vec3::from_array(aabb.max) - bevy::prelude::Vec3::from_array(aabb.min)).length()
             * 0.5
     };
     assert!(
-        (radius(scaled_aabb) - radius(aabb) * 2.0).abs() < 1e-2,
-        "scale 改变应翻倍世界半径"
+        (radius(scaled.0) - radius(base.0) * 2.0).abs() < 1e-2,
+        "实例 scale 改变应翻倍世界半径"
     );
 }
 
-/// `offset.z` 保留在协议与内容身份里，但不再参与画布观察深度
-/// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D5）。
+/// `modelPlacement` 仍是内容/历史快照字段，但不进入世界根：旧卡片偏移不再移动模型。
 #[test]
-fn placement_offset_z_never_moves_canvas_anchor() {
+fn model_placement_never_moves_the_world_root() {
     let node: GraphNode = serde_json::from_value(serde_json::json!({
-        "id": "m", "type": "model3d", "x": 10., "y": 20., "width": 260., "height": 195.
+        "id": "w", "type": "model3d", "x": 0.0, "y": 0.0, "width": 260.0, "height": 195.0,
+        "sharedWorldInstance": {"kind": "world-instance", "version": "shared-world-v1",
+            "instanceId": "i1",
+            "transform": {"version": "shared-world-v1", "position": {"u": 0.0, "v": 0.0, "h": 0.0},
+                "rotation": [0.0, 0.0, 0.0, 1.0], "scale": 1.0}}
     }))
     .unwrap();
-    let model = ModelSnapshot {
-        scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
-        ops: vec![ModelOp::Box {
-            id: "body".into(),
-            parent: None,
-            position: [0.0, 1.0, 0.0],
-            rotation: [0.0; 3],
-            scale: [1.0; 3],
-            color: None,
-            material: None,
-            size: [2.0, 2.0, 2.0],
-        }],
-        signature: "sig".into(),
-        extent: 2.0,
-        aabb: None,
-        geometry_keys: None,
-        prepared_bounds: None,
-        placement: ModelPlacement::default(),
-    };
-    let base = ModelPlacement::default();
-    let with_z = ModelPlacement {
-        offset: crate::protocol::ModelOffset {
-            x: 0.0,
-            y: 0.0,
-            z: -7.0,
-        },
-        ..ModelPlacement::default()
-    };
-    let anchor = |placement: &ModelPlacement| {
-        model_anchor(
-            &node,
-            &model,
-            placement,
-            model_unit(&node, &model, placement),
-        )
-    };
-    assert_eq!(anchor(&base), anchor(&with_z));
+    let root = model_root_transform(&node).unwrap();
+    // 根变换只看实例；`ModelReference` 已不含 placement 字段，因此无法再叠加卡片偏移。
+    assert_eq!(root.translation, Vec3::ZERO);
+    // 旧客户端携带 `placement`：按未知字段忽略，世界根仍是实例姿态。
+    let _legacy_reference: crate::protocol::ModelReference = serde_json::from_value(serde_json::json!({
+        "resourceKey": "woohaa-model-scene-ir-v2:sig",
+        "placement": {"offset": {"x": 9.0, "y": 9.0, "z": 9.0}, "scale": 3.0, "yaw": 45.0}
+    }))
+    .unwrap();
+    assert_eq!(model_root_transform(&node).unwrap(), root);
 }

@@ -40,6 +40,7 @@ describe("connection-bound model transport", () => {
     const upstream = await fixture(); let valid = true;
     const relay = await transport(upstream.upstream, { valid: () => valid });
     expect((await fetch(`${relay.baseUrl}/responses`, { method: "POST" })).status).toBe(401);
+    // `/chat/completions` 是 chat-completions 协议的端点，openai 协议不认它：必须拒绝且不打到上游。
     for (const path of ["/chat/completions", "/responses?url=https://evil.example", "/responses?alt=other"]) {
       expect((await fetch(relay.baseUrl + path, { method: "POST", headers: { authorization: `Bearer ${relay.token}` } })).ok).toBe(false);
     }

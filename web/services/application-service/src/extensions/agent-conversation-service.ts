@@ -15,9 +15,11 @@ import { createHash } from "node:crypto";
 import type {
   AgentAdapterRunOutcome,
   AgentConnectionBinding,
-  AgentConnectionView,
   AgentConversationAdapterEvent,
-  AgentEntryIntent,
+    AgentEntryIntent,
+  AgentRoleChannelCapabilities,
+  AgentRoleDescriptor,
+  AgentRoleRef,
   AgentTargetSnapshot,
   ConversationEventType,
   ConversationSnapshot,
@@ -26,22 +28,30 @@ import type {
   ConversationTurnStatus,
   AgentCatalogSnapshot,
   AgentAdapterAuthState,
-  AgentAdapterCapabilities
+  AgentAdapterCapabilities,
+  PreparedAgentRoleTurn
 } from "@woohaa3/contracts";
 import {
+  agentRoleRefEquals,
+  decodePreparedAgentRoleTurn,
+  decodeAgentRoleDefinition,
+  reasoningCapabilityOf,
   UNCONFIRMED_RESULT_ERROR_CODE,
   UNCONFIRMED_RESULT_MESSAGE,
   UNCONFIRMED_WRITE_ERROR_CODE,
   UNCONFIRMED_WRITE_MESSAGE
 } from "@woohaa3/contracts";
+import { randomUUID } from "node:crypto";
 import type {
   AgentConversationStore,
   ConversationAdapterBinding,
-  ConversationTurnRecord
+  ConversationTurnRecord,
+  TurnAuthorityRecord
 } from "../repository/agent-conversation-repository.js";
 import { isTerminalTurnStatus } from "../repository/agent-conversation-repository.js";
 import type { AgentAdapterRegistry } from "../extensions/agent-adapter-registry.js";
 import type { AgentConnectionRegistry } from "../extensions/agent-connection-registry.js";
+import type { AgentRoleRegistry } from "../agent-roles/registry.js";
 import {
   buildSnapshot as projectionBuildSnapshot,
   clamp,
@@ -65,15 +75,26 @@ export type AgentConversationServiceOptions = {
   /**
    * 连接发现注册表（change: 2026-10-16-...，任务 2.1/2.3）。
    *
-   * 可选：未注入时按 adapter 解析兼容默认连接（既有 ChatGPT 行为不变）。
+   * 新调用必须显式选择已登记的连接。
    */
   connections?: AgentConnectionRegistry;
   /**
-   * 兼容默认连接解析（旧数据/未显式选连接时）。
+   * 角色注册表（change: 2026-11-07-add-pluggable-agent-roles）。
    *
-   * 返回该 owner + adapter 的兼容默认连接（既有 ChatGPT）；未配置时返回 null（不伪造）。
+   * 注入后，新回合必须显式选择已注册角色；缺失时不回退执行通道里的旧业务模板。
    */
-  defaultConnectionFor?: (input: { owner: string; adapterId: string }) => Promise<AgentConnectionView | null> | AgentConnectionView | null;
+  agentRoles?: AgentRoleRegistry;
+  /**
+   * 权威角色上下文（只由受信宿主按 owner/画布/目标准备；浏览器不可达）。
+   */
+  roleContextFor?: (input: {
+    owner: string;
+    canvasId: string;
+    nodeId?: string;
+    action: string;
+    mode?: string;
+    roleId: string;
+  }) => Promise<unknown> | unknown;
   /** 每会话事件保留窗口（用于 resync 判定）；缺省 2000。 */
   maxEvents?: number;
   /** 单页消息数（分页读取的传输参数，不是总量截断）；缺省 200。 */
@@ -123,6 +144,13 @@ export const DEFINITE_FAILURE_ERROR_CODES: readonly string[] = [
   "variant-unavailable",
   "budget-exceeded",
   "cancelled",
+  "role-not-found",
+  "role-unavailable",
+  "role-version-conflict",
+  "role-input-invalid",
+  "role-context-invalid",
+  "role-requirement-unsatisfied",
+  "role-prepare-failed"
 ];
 
 export function isDefiniteFailureCode(code: string | undefined): boolean {
@@ -141,7 +169,14 @@ export type AgentConversationServiceError = {
     | "capability-unsupported"
     | "budget-exceeded"
     | "storage-failed"
-    | "active-turn";
+    | "active-turn"
+    | "role-not-found"
+    | "role-unavailable"
+    | "role-version-conflict"
+    | "role-input-invalid"
+    | "role-context-invalid"
+    | "role-requirement-unsatisfied"
+    | "role-prepare-failed";
   message: string;
 };
 
@@ -203,15 +238,31 @@ export type AgentConversationService = {
   readConversation(input: { owner: string; conversationId: string; cursor?: number; beforeMessageSequence?: number; turnOffset?: number }):
     | { ok: true; snapshot: ConversationSnapshot }
     | { ok: false; error: AgentConversationServiceError };
-  acceptTurn(input: { owner: string; conversationId: string; requestId: string; entry: AgentEntryIntent; connection?: AgentConnectionBinding | null }): AcceptTurnResult;
+  acceptTurn(input: {
+    owner: string;
+    conversationId: string;
+    requestId: string;
+    entry: AgentEntryIntent;
+    connection?: AgentConnectionBinding | null;
+    /**
+     * 受信领域入口直接提供的角色输入/上下文（扩展 facade 使用）。
+     *
+     * 只在进程内出现；浏览器请求没有该通道，HTTP 解码器也不接受。提供时在**受理时**同步
+     * prepare 并冻结，dispatch 直接复用。
+     */
+    trustedRole?: { input: unknown; context: unknown };
+  }): AcceptTurnResult;
   /**
    * 解析本回合要冻结的连接身份（change: 2026-10-16-...，任务 2.2/2.3）。
    *
-   * 显式选择必须经连接注册表校验属于该 owner；缺失时映射兼容默认连接。API 在接受回合前调用，
+   * 显式选择必须经连接注册表校验属于该 owner；缺失时拒绝。API 在接受回合前调用，
    * 把结果作为 `connection` 传入 `acceptTurn`（保持后者同步，便于复用/测试）。
+   *
+   * `upgradedFrom` 只在本次解析触发执行器版本迁移时出现，记录迁移前身份；调用方据此
+   * 接受「在自动升级前冻结」的选择，同时仍用迁移后身份冻结本回合。
    */
-  resolveConnectionBinding(input: { owner: string; adapterId: string; connectionId?: string }):
-    Promise<{ ok: true; binding: AgentConnectionBinding | null } | { ok: false; error: AgentConversationServiceError }>;
+  resolveConnectionBinding(input: { owner: string; adapterId: string; connectionId?: string; model?: string; reasoningEffort?: string }):
+    Promise<{ ok: true; binding: AgentConnectionBinding | null; upgradedFrom?: AgentConnectionBinding } | { ok: false; error: AgentConversationServiceError }>;
   /** 异步 dispatch（accept 后调用）；幂等，同一 turn 只运行一次。 */
   dispatchTurn(turnId: string): Promise<void>;
   /** 等待指定回合 dispatch 完成（测试/受控收尾用）。 */
@@ -230,9 +281,41 @@ export type AgentConversationService = {
     | { ok: false; error: AgentConversationServiceError };
   /** 由宿主领域链在 run/task 接受后显式关联（不从节点 active run 反推）。 */
   linkRun(input: { owner: string; requestId: string; runId?: string; taskId?: string }): { ok: true; turn: ConversationTurn } | { ok: false; error: AgentConversationServiceError };
-  catalog(input: { owner: string; adapterId?: string }): Promise<{ ok: true; models: AgentCatalogSnapshot["models"]; error?: string; authState: AgentAdapterAuthState; capabilities: AgentAdapterCapabilities } | { ok: false; error: AgentConversationServiceError }>;
-  /** 重启恢复：读取未结算回合并核对 adapter 回执；无法证明时结算 failed，不自动重推理。 */
+  catalog(input: { owner: string; adapterId?: string }): Promise<{ ok: true; models: AgentCatalogSnapshot["models"]; capabilityRevision?: string; error?: string; authState: AgentAdapterAuthState; capabilities: AgentAdapterCapabilities } | { ok: false; error: AgentConversationServiceError }>;
+  /**
+   * 只读角色目录与能力匹配投影（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 只解析 adapter 能力并读注册表；不准备、不推理、不签发授权。
+   */
+  listRoles(input: { owner: string; adapterId?: string }):
+    | { ok: true; roles: readonly AgentRoleDescriptor[] }
+    | { ok: false; error: AgentConversationServiceError };
+  /**
+   * 角色插件停用/升级时精确收回活动回合（不删除历史，不影响其他角色/连接）。
+   */
+  onRoleRevoked(namespacedId: string): void;
+  /**
+   * 记录领域入口准备的规范回合（delivery 路径）：冻结角色身份必须与受理时一致。
+   * 只写 prepared 摘要，不重新准备或推理。
+   */
+  recordPrepared(input: { owner: string; requestId: string; prepared: PreparedAgentRoleTurn }):
+    | { ok: true }
+    | { ok: false; error: AgentConversationServiceError };
+  /** 重启恢复：接管仍在执行器 journal 中的回合；无法证明时按原身份核对回执或结算 failed。 */
   reconcileUnknown(): Promise<ConversationTurnRecord[]>;
+  /**
+   * 按回合身份接管单个未结算回合（宿主启动核对与桥按需重建共用）。
+   *
+   * 返回 `true` 表示该回合已被本宿主接管或已终态；`false` 表示当前通道没有接管能力，
+   * 调用方应退回只读查询语义。
+   */
+  adoptTurn(turnId: string): Promise<boolean>;
+  /** 持久回合授权（桥按 turnId 校验 lease；不暴露给浏览器）。 */
+  turnAuthority(turnId: string): TurnAuthorityRecord | undefined;
+  /** 执行器派生 turnId 与账本 turnId 不同时，按 (owner, requestId) 回到同一份授权。 */
+  turnAuthorityByRequest(owner: string, requestId: string): TurnAuthorityRecord | undefined;
+  /** 记录通道实际声明的 host-call 方法；只增不减，不扩大工具/凭据范围。 */
+  recordHostMethods(turnId: string, methods: readonly string[]): void;
   deleteAll(input: { owner: string; canvasId: string }): void;
 };
 
@@ -246,57 +329,63 @@ export function createAgentConversationService(options: AgentConversationService
   const maxMessageChars = options.maxMessageChars ?? Infinity;
   const dispatches = new Map<string, Promise<void>>();
   const controllers = new Map<string, AbortController>();
+  /** 活动回合的冻结角色（停用/升级时按角色精确取消）。 */
+  const activeRoles = new Map<string, AgentRoleRef>();
   let acceptingTrustedDelivery = false;
   let acceptingStructuredHash: string | undefined;
   const connections = options.connections;
 
   const fail = (code: AgentConversationServiceError["code"], message: string): { ok: false; error: AgentConversationServiceError } => ({ ok: false, error: { code, message } });
 
+  /** 本宿主实例（接管 CAS 的 owner）；进程重启即变化，租约随之失效。 */
+  const hostId = randomUUID();
+  const adoptionLeaseMs = 30_000;
+
   const resolveAdapter = (adapterId: string | undefined) => registry.resolve(adapterId);
 
   /**
-   * 解析该 owner + adapter 的兼容默认连接（旧数据/未显式选择）。
+   * 新调用必须显式选择归属于当前 owner 的连接。
    *
-   * 未注入兜底解析时返回 null：调用方不伪造连接身份（旧历史仍可读）。
-   */
-  const resolveDefaultConnection = async (owner: string, adapterId: string): Promise<AgentConnectionView | null> => {
-    if (!options.defaultConnectionFor) {
-      const visible = connections ? await connections.listConnections({ owner }) : [];
-      const defaults = visible.filter((view) => view.adapterId === adapterId && view.authMode === "oauth");
-      return defaults.length === 1 ? defaults[0]! : null;
-    }
-    try {
-      return await options.defaultConnectionFor({ owner, adapterId });
-    } catch {
-      return null;
-    }
-  };
-
-  /**
-   * 解析本回合要冻结的连接身份：优先显式选择，其次兼容默认连接；都没有时返回 null。
-   *
-   * 显式选择必须经连接注册表校验属于该 owner（跨 owner/未知连接拒绝，不静默降级）。
+   * 执行器版本升级会在解析时迁移连接并推进 `configRevision`。先读取迁移前身份，
+   * 让调用方可以接受「恰好在本次自动升级前冻结」的选择：否则请求自己触发升级，
+   * 又以升级后的版本不一致为由拒绝，用户只能反复重选。
    */
   const resolveTurnConnection = async (
     owner: string,
     adapterId: string,
-    requestedId: string | undefined
-  ): Promise<{ ok: true; binding: AgentConnectionBinding | null } | { ok: false; error: { code: AgentConversationServiceError["code"]; message: string } }> => {
+    requestedId: string | undefined,
+    reasoning?: { model?: string; effort?: string }
+  ): Promise<{ ok: true; binding: AgentConnectionBinding | null; upgradedFrom?: AgentConnectionBinding } | { ok: false; error: { code: AgentConversationServiceError["code"]; message: string } }> => {
     if (requestedId) {
       if (!connections) return { ok: false, error: { code: "connection-unavailable", message: "连接服务未配置" } };
+      const before = await connections.getConnection({ owner, connectionId: requestedId });
       try {
         await connections.migrateConnection?.({ owner, connectionId: requestedId, beforeMigration: () => store.prepareConnectionMigration?.(owner, requestedId) ?? false });
       } catch { return { ok: false, error: { code: "connection-unavailable", message: "连接执行版本升级未完成；请先核对活动或未知回合再重试" } }; }
       const view = await connections.getConnection({ owner, connectionId: requestedId });
       if (!view) return { ok: false, error: { code: "connection-unavailable", message: "连接不存在或无权访问" } };
       if (view.adapterId !== adapterId) return { ok: false, error: { code: "connection-unavailable", message: "连接与来源不一致" } };
-      return {
-        ok: true,
-        binding: { connectionId: view.connectionId, adapterId: view.adapterId, configRevision: view.configRevision, credentialEpoch: view.credentialEpoch }
+      if (reasoning?.effort) {
+        const model = reasoning.model ? view.models.find((candidate) => candidate.id === reasoning.model) : undefined;
+        const capability = model ? reasoningCapabilityOf(model) : undefined;
+        if (!capability || capability.state !== "supported" || !(capability.efforts ?? []).some((option) => option.id === reasoning.effort)) {
+          return { ok: false, error: { code: "capability-unsupported", message: "当前模型未开放此思考强度，请清除强度或重新选择模型" } };
+        }
+      }
+      const binding = {
+        connectionId: view.connectionId,
+        adapterId: view.adapterId,
+        configRevision: view.configRevision,
+        credentialEpoch: view.credentialEpoch,
+        ...(view.capabilityRevision ? { capabilityRevision: view.capabilityRevision } : {})
       };
+      const upgradedFrom = before && before.connectionId === view.connectionId && before.adapterId === view.adapterId
+        && (before.configRevision !== view.configRevision || before.credentialEpoch !== view.credentialEpoch)
+        ? { connectionId: before.connectionId, adapterId: before.adapterId, configRevision: before.configRevision, credentialEpoch: before.credentialEpoch, ...(before.capabilityRevision ? { capabilityRevision: before.capabilityRevision } : {}) }
+        : undefined;
+      return { ok: true, binding, ...(upgradedFrom ? { upgradedFrom } : {}) };
     }
-    const fallback = await resolveDefaultConnection(owner, adapterId);
-    return { ok: true, binding: fallback ? { connectionId: fallback.connectionId, adapterId: fallback.adapterId, configRevision: fallback.configRevision, credentialEpoch: fallback.credentialEpoch } : null };
+    return { ok: false, error: { code: "connection-unavailable", message: "请求必须明确选择助手连接" } };
   };
 
   // 投影绑定 store：把存储记录转成公开 DTO（纯函数在 projection 模块）。
@@ -340,7 +429,8 @@ export function createAgentConversationService(options: AgentConversationService
   };
 
   const runTurn = async (turn: ConversationTurnRecord, entry: AgentEntryIntent,
-    delivery?: Parameters<AgentConversationService["dispatchDeliveryTurn"]>[1], candidate?: StructuredCandidate): Promise<void> => {
+    delivery?: Parameters<AgentConversationService["dispatchDeliveryTurn"]>[1], candidate?: StructuredCandidate,
+    adoption?: { cursor: number | "head" }): Promise<void> => {
     const resolved = resolveAdapter(undefined);
     // adapter 可能与创建时不同（扩展升级）；用会话绑定的 adapterId 再解析一次。
     const binding = store.getConversation(turn.conversationId);
@@ -349,10 +439,60 @@ export function createAgentConversationService(options: AgentConversationService
       finishTurn(turn, { status: "failed", error: { code: "adapter-unavailable", message: bound.message } });
       return;
     }
+    // 角色准备先于推理：required 缺失或 input/context 非法时直接失败，不调用模型。
+    let prepared: PreparedAgentRoleTurn | undefined;
+    const frozenForDispatch = frozenRole(turn);
+    if (delivery) {
+      const registration = frozenForDispatch ? options.agentRoles?.resolve(frozenForDispatch.namespacedId) : null;
+      if (frozenForDispatch && (!registration || !agentRoleRefEquals(registration.ref, frozenForDispatch))) {
+        finishTurn(turn, {
+          status: "failed",
+          error: { code: "role-version-conflict", message: "角色实现已停用或升级，本回合不再接受新的执行；历史仍可查询" }
+        });
+        return;
+      }
+    } else if (adoption) {
+      // 接管不重新准备角色：只复用受理时冻结的结果；没有冻结结果的旧回合由通道返回 null，
+      // 走「不可证明」路径，不按新模板重算。
+      prepared = frozenPrepared(turn);
+    } else {
+      const rolePrepared = await prepareFrozenRole(turn, entry, bound.handle.capabilities);
+      if (!rolePrepared.ok) {
+        finishTurn(turn, { status: "failed", error: { code: rolePrepared.code, message: rolePrepared.message } });
+        return;
+      }
+      prepared = rolePrepared.prepared;
+    }
+
+    // 回合授权（任务 2.1/2.3）：在调用通道前持久冻结 owner/连接版本/目标/方法/工具范围，
+    // 新宿主只按这份记录授权，不扩大原回合权限。
+    store.recordTurnAuthority({
+      turnId: turn.turnId,
+      requestId: turn.requestId,
+      conversationId: turn.conversationId,
+      owner: turn.owner,
+      canvasId: turn.canvasId,
+      action: turn.action,
+      adapterId: bound.handle.adapter.id,
+      executor: bound.handle.adapter.runtimeExecutor ?? null,
+      connectionId: turn.connectionId,
+      configRevision: turn.connectionConfigRevision,
+      credentialEpoch: turn.connectionCredentialEpoch,
+      targetJson: turn.targetJson,
+      preparedHash: prepared?.preparedHash ?? null,
+      hostMethods: [],
+      toolScope: [...(prepared?.tools ?? [])],
+      createdAt: now(),
+      expiresAt: null,
+      revokedAt: null
+    });
+
     const controller = new AbortController();
     controllers.set(turn.turnId, controller);
+    const frozenForRun = frozenRole(turn);
+    if (frozenForRun) activeRoles.set(turn.turnId, frozenForRun);
     store.updateTurn(turn.turnId, { status: "running", stage: "running" }, now());
-    appendEvent(turn.conversationId, turn.turnId, turn.requestId, "stage", { stage: "running" });
+    if (!adoption) appendEvent(turn.conversationId, turn.turnId, turn.requestId, "stage", { stage: "running" });
 
     // 完整历史（任务 4.1）：按游标从冻结基准向前逐页读取，不按固定条数截断；真正的上下文窗口
     // 由所选引擎的原生能力处理（此处只保证不静默丢弃合法历史）。
@@ -395,8 +535,15 @@ export function createAgentConversationService(options: AgentConversationService
       recordAssistantText: (messageId, text) => assistantDigest.record(messageId, text)
     });
     let acceptingEvents = true;
+    const emittedFingerprints = new Set<string>();
     const emit = (event: AgentConversationAdapterEvent): void => {
       if (!acceptingEvents) return;
+      // 接管重放可能没有稳定 cursor：按内容指纹去重，绝不重复写消息/阶段。
+      if (adoption) {
+        const fingerprint = JSON.stringify(event);
+        if (emittedFingerprints.has(fingerprint)) return;
+        emittedFingerprints.add(fingerprint);
+      }
       switch (event.type) {
         case "stage": {
           // 阶段切换可能夹着下一条助手消息：先结算当前打开的那条。
@@ -423,30 +570,87 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
     };
-    let outcome: AgentAdapterRunOutcome;
+    const emitExecutor = (cursor: number, event: AgentConversationAdapterEvent): void => {
+      // `(turnId, cursor)` 幂等：重复接管/重放不重复落库；cursor 只前进。
+      if (!store.consumeExecutorEvent(turn.turnId, cursor)) return;
+      store.updateTurn(turn.turnId, { executorCursor: cursor }, now());
+      emit(event);
+    };
+    const adapterInput = {
+      owner: turn.owner,
+      canvasId: turn.canvasId,
+      conversationId: turn.conversationId,
+      turnId: turn.turnId,
+      requestId: turn.requestId,
+      intent: entry,
+      ...(prepared ? { prepared } : {}),
+      ...(candidate ? { candidate } : {}),
+      ...(turnConnection(turn) ? { connection: turnConnection(turn)! } : {}),
+      history,
+      signal: controller.signal,
+      emit,
+      emitExecutor,
+      ...(adoption ? { resumeCursor: adoption.cursor } : {})
+    };
+    let outcome: AgentAdapterRunOutcome | null;
     try {
-      outcome = delivery ? await delivery({ signal: controller.signal, emit, history }) : await bound.handle.adapter.run({
-        owner: turn.owner,
-        canvasId: turn.canvasId,
-        conversationId: turn.conversationId,
-        turnId: turn.turnId,
-        requestId: turn.requestId,
-        intent: entry,
-        ...(candidate ? { candidate } : {}),
-        ...(turnConnection(turn) ? { connection: turnConnection(turn)! } : {}),
-        history,
-        signal: controller.signal,
-        emit
-      });
+      outcome = delivery
+        ? await delivery({ signal: controller.signal, emit, history })
+        : adoption && bound.handle.adapter.resume
+          ? await bound.handle.adapter.resume(adapterInput)
+          : await bound.handle.adapter.run(adapterInput);
     } catch (error) {
       outcome = { status: controller.signal.aborted ? "cancelled" : "failed", error: { code: controller.signal.aborted ? "cancelled" : "adapter-error", message: error instanceof Error ? error.message : String(error) } };
     } finally {
       acceptingEvents = false;
       controllers.delete(turn.turnId);
+      activeRoles.delete(turn.turnId);
     }
     // 回合结束：结算仍在增长的助手消息（否则它的完成事件/摘要不会落库）。
     stream.flush();
+    if (outcome === null) {
+      settleFailed(turn, "journal-missing");
+      return;
+    }
     finishTurn(turn, outcome, assistantDigest);
+  };
+
+  /**
+   * 接管单个回合（启动核对与桥按需重建共用）。
+   *
+   * 返回 `false` 表示通道没有接管能力（调用方退回只读查询）；`true` 表示已接管、已有终态，
+   * 或另一宿主持有未过期租约（只读，不产生重复事件/结算）。
+   */
+  const adopt = async (turn: ConversationTurnRecord): Promise<boolean> => {
+    const binding = store.getConversation(turn.conversationId);
+    const bound = registry.resolve(binding?.adapterId);
+    if (!bound.ok || !bound.handle.adapter.resume) return false;
+    const leaseUntil = Date.now() + adoptionLeaseMs;
+    if (!store.claimAdoption(turn.turnId, hostId, leaseUntil, now())) {
+      log({ event: "agent-conversation-adoption-skipped", turnId: turn.turnId, reason: "lease-held" });
+      return true;
+    }
+    const heartbeat = setInterval(() => {
+      if (!store.renewAdoption(turn.turnId, hostId, Date.now() + adoptionLeaseMs)) clearInterval(heartbeat);
+    }, Math.floor(adoptionLeaseMs / 3));
+    heartbeat.unref?.();
+    try {
+      const cursor = turn.executorCursor ?? "head";
+      if (turn.executorCursor === null) {
+        // 升级前没有 cursor 的旧回合：从当前 journal 头开始，避免全量重放历史消息。
+        appendEvent(turn.conversationId, turn.turnId, turn.requestId, "recovered", { reason: "host-restart", from: "head" });
+      }
+      await runTurn(turn, entryFromTurn(turn), undefined, undefined, { cursor });
+      log({ event: "agent-conversation-adopted", turnId: turn.turnId, cursor });
+      return true;
+    } catch (error) {
+      log({ event: "agent-conversation-adoption-failed", turnId: turn.turnId, message: error instanceof Error ? error.message : String(error) });
+      settleFailed(turn, "adoption-failed");
+      return true;
+    } finally {
+      clearInterval(heartbeat);
+      store.releaseAdoption(turn.turnId, hostId);
+    }
   };
 
   const appendMessage = (turn: ConversationTurnRecord, role: "assistant" | "system" | "user", content: string): void => {
@@ -467,10 +671,16 @@ export function createAgentConversationService(options: AgentConversationService
     appendEvent(turn.conversationId, turn.turnId, turn.requestId, "message-completed", { messageId, role, content: bounded, truncated });
   };
 
-  const finishTurn = (turn: ConversationTurnRecord, outcome: AgentAdapterRunOutcome, assistantDigest?: ReturnType<typeof createAssistantMessageDigest>): void => {
-    if (outcome.assistantText && outcome.assistantText.trim() !== "") {
-      if (!assistantDigest?.matches(outcome.assistantText)) appendMessage(turn, "assistant", outcome.assistantText);
-    }
+  /** 助手正文只写一次：终态细化/重试复用同一回合时按内容去重。 */
+  const hasAssistantMessage = (turn: ConversationTurnRecord, content: string): boolean =>
+    store.listMessages(turn.conversationId, 5_000).some((message) => message.turnId === turn.turnId && message.role === "assistant" && message.content === content);
+
+  const finishTurn = (
+    turn: ConversationTurnRecord,
+    outcome: AgentAdapterRunOutcome,
+    assistantDigest?: ReturnType<typeof createAssistantMessageDigest>,
+    settleOptions: { allowTerminal?: boolean } = {}
+  ): void => {
     if (turn.action !== "discuss" && outcome.status === "succeeded" && outcome.receipt === undefined && !outcome.runId && !outcome.taskId) {
       outcome = { ...outcome, status: "failed", error: { code: UNCONFIRMED_WRITE_ERROR_CODE, message: UNCONFIRMED_WRITE_MESSAGE } };
     }
@@ -479,7 +689,18 @@ export function createAgentConversationService(options: AgentConversationService
       outcome = { ...outcome, status: "failed", error: { code: "tool-call-not-executed", message: "助手返回了未执行的工具调用文本，本轮没有修改作品。请在当前作品侧栏重新发送修改要求。" } };
     }
     const status = outcome.status;
-    store.updateTurn(
+    // 终态只结算一次：条件更新失败说明另一宿主/另一路径已结算，不再追加消息或事件。
+    // delivery 的权威回执细化（失败码补充、文本候选保存成功）显式允许改写已结算回合。
+    const settled = settleOptions.allowTerminal ? (store.updateTurn(turn.turnId, {
+      status,
+      stage: status,
+      ...(outcome.assistantText !== undefined ? { assistantText: outcome.assistantText } : {}),
+      ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
+      ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
+      ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
+      ...(outcome.reasoning !== undefined ? { reasoningJson: safeJson(outcome.reasoning) } : {}),
+      ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
+    }, now()), true) : store.updateTurnIfActive(
       turn.turnId,
       {
         status,
@@ -488,10 +709,23 @@ export function createAgentConversationService(options: AgentConversationService
         ...(outcome.runId !== undefined ? { runId: outcome.runId } : {}),
         ...(outcome.taskId !== undefined ? { taskId: outcome.taskId } : {}),
         ...(outcome.receipt !== undefined ? { receiptJson: safeJson(outcome.receipt) } : {}),
+        ...(outcome.reasoning !== undefined ? { reasoningJson: safeJson(outcome.reasoning) } : {}),
         ...(outcome.error !== undefined ? { errorCode: outcome.error.code, errorMessage: outcome.error.message } : {})
       },
       now()
     );
+    if (!settled) {
+      log({ event: "agent-conversation-settle-skipped", turnId: turn.turnId, requestId: turn.requestId, status });
+      return;
+    }
+    store.clearExecutorEvents?.(turn.turnId);
+    // 失败/取消后不再接受该回合的 host-call（用户停止、运行时停止、扩展停用共用）。
+    if (status === "cancelled" || status === "failed") store.revokeTurnAuthority(turn.turnId, now());
+    if (outcome.assistantText && outcome.assistantText.trim() !== "") {
+      if (!assistantDigest?.matches(outcome.assistantText) && !hasAssistantMessage(turn, outcome.assistantText)) {
+        appendMessage(turn, "assistant", outcome.assistantText);
+      }
+    }
     if (status === "succeeded" || status === "partial") {
       appendEvent(turn.conversationId, turn.turnId, turn.requestId, "receipt", { status, ...(outcome.receipt !== undefined ? { receipt: outcome.receipt } : {}) });
     } else {
@@ -524,7 +758,7 @@ export function createAgentConversationService(options: AgentConversationService
    * 待核对状态）；预算结束后由下一次核对调用走同一失败结算。
    */
   const settleFailed = (turn: ConversationTurnRecord, reason: string): void => {
-    if (options.preserveUnreconciledOnRestart) {
+    if (options.preserveUnreconciledOnRestart && reason !== "journal-missing") {
       store.updateTurn(turn.turnId, {
         errorCode: "runtime-reconnecting",
         errorMessage: "Agent 运行时正在重新连接，结果尚未确认"
@@ -537,6 +771,135 @@ export function createAgentConversationService(options: AgentConversationService
       status: "failed",
       error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE }
     });
+  };
+
+  /** 执行通道真实能力 → 角色匹配输入（不从角色或不存在的旧授权推导）。 */
+  const channelCapabilities = (capabilities: AgentAdapterCapabilities): AgentRoleChannelCapabilities => ({
+    toolCalling: capabilities.tools,
+    imageInput: capabilities.candidateGeneration?.imageInput ?? capabilities.textDelivery?.imageInput ?? false,
+    structuredOutput: capabilities.candidateGeneration
+      ? "validated-json"
+      : capabilities.textDelivery
+        ? "validated-json"
+        : "none",
+    nativeCapabilities: [...(capabilities.nativeCapabilities ?? [])]
+  });
+
+  /** 角色输入只含用户输入与动作；业务变体在 inputSchema 里表达。 */
+  const roleInput = (entry: AgentEntryIntent): unknown => ({
+    prompt: entry.prompt,
+    action: entry.action,
+    ...(entry.mode !== undefined ? { mode: entry.mode } : {})
+  });
+
+  const roleTarget = (turn: ConversationTurnRecord): import("@woohaa3/contracts").AgentRoleTargetRef => {
+    const target = JSON.parse(turn.targetJson) as AgentTargetSnapshot;
+    return {
+      canvasId: turn.canvasId,
+      ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
+      ...(target.mode !== undefined ? { mode: target.mode } : {}),
+      ...(target.cameraId !== undefined ? { cameraId: target.cameraId } : {}),
+      ...(target.worldScope ? {
+        worldScope: target.worldScope.kind === "scene-area"
+          ? { kind: "scene-area" as const, areaId: target.worldScope.areaId }
+          : { kind: "world-camera" as const, cameraId: target.worldScope.cameraId }
+      } : {})
+    };
+  };
+
+  const frozenRole = (turn: ConversationTurnRecord): AgentRoleRef | null => {
+    if (!turn.roleRefJson) return null;
+    try { return JSON.parse(turn.roleRefJson) as AgentRoleRef; } catch { return null; }
+  };
+
+  /** 已冻结的准备结果（接管复用；不按当前模板重新准备）。 */
+  const frozenPrepared = (turn: ConversationTurnRecord): PreparedAgentRoleTurn | undefined => {
+    if (!turn.preparedJson) return undefined;
+    try {
+      const decoded = decodePreparedAgentRoleTurn(JSON.parse(turn.preparedJson) as unknown);
+      return decoded.ok ? decoded.value : undefined;
+    } catch { return undefined; }
+  };
+
+  /**
+   * 受理时解析角色：只做注册/可用性判定（同步），上下文校验与 prepare 在 dispatch 前完成。
+   */
+  const resolveRoleForAccept = (
+    entry: AgentEntryIntent,
+    capabilities: AgentAdapterCapabilities
+  ): { ok: true; ref?: AgentRoleRef } | { ok: false; error: AgentConversationServiceError } => {
+    // 所有新调用必须通过角色注册表；独立组合也不提供旧入口。
+    if (!options.agentRoles) return { ok: false, error: { code: "role-unavailable", message: "宿主未启用 Agent 角色注册表" } };
+    if (!entry.roleId) return { ok: false, error: { code: "role-not-found", message: "请求没有选择明确角色；核心不按模式或连接猜角色" } };
+    const role = options.agentRoles.resolve(entry.roleId);
+    if (!role) return { ok: false, error: { code: "role-not-found", message: `角色不存在或未启用：${entry.roleId}` } };
+    const availability = options.agentRoles.availability(entry.roleId, channelCapabilities(capabilities));
+    if (!availability.available) {
+      const code = availability.missing && availability.missing.length > 0
+        ? "role-requirement-unsatisfied"
+        : "role-unavailable";
+      return { ok: false, error: { code, message: availability.reason ?? "角色不可用" } };
+    }
+    return { ok: true, ref: role.ref };
+  };
+
+  /**
+   * dispatch 前准备冻结角色。required 缺失或 input/context 非法时**不调用模型**。
+   * 已准备并冻结的回合直接复用（重传/重启不重新准备）。
+   */
+  const prepareFrozenRole = async (
+    turn: ConversationTurnRecord,
+    entry: AgentEntryIntent,
+    capabilities: AgentAdapterCapabilities
+  ): Promise<{ ok: true; prepared: PreparedAgentRoleTurn } | { ok: false; code: string; message: string }> => {
+    const frozen = frozenRole(turn);
+    if (!frozen) return { ok: false, code: "role-not-found", message: "该回合没有冻结角色身份" };
+    if (turn.preparedJson) {
+      const decoded = decodePreparedAgentRoleTurn(JSON.parse(turn.preparedJson) as unknown);
+      if (decoded.ok && agentRoleRefEquals(decoded.value.roleRef, frozen)) return { ok: true, prepared: decoded.value };
+      return { ok: false, code: "role-version-conflict", message: "冻结的角色准备内容不可用，请以新请求重新生成" };
+    }
+    const registry = options.agentRoles;
+    if (!registry) return { ok: false, code: "role-unavailable", message: "宿主未启用 Agent 角色注册表" };
+    const registration = registry.resolve(frozen.namespacedId);
+    if (!registration) return { ok: false, code: "role-unavailable", message: `角色实现已停用：${frozen.namespacedId}` };
+    // 角色升级后不得用新模板重算旧请求：冻结修订必须仍与当前实现一致。
+    if (!agentRoleRefEquals(registration.ref, frozen)) {
+      return { ok: false, code: "role-version-conflict", message: "角色已被升级，请用新请求重新生成；本回合保留原记录" };
+    }
+    const definition = decodeAgentRoleDefinition(registration.definition);
+    if (!definition.ok) return { ok: false, code: "role-unavailable", message: "角色定义不可用" };
+    let context: unknown = {};
+    try {
+      context = (await options.roleContextFor?.({
+        owner: turn.owner,
+        canvasId: turn.canvasId,
+        ...(entry.nodeId !== undefined ? { nodeId: entry.nodeId } : {}),
+        action: entry.action,
+        ...(entry.mode !== undefined ? { mode: entry.mode } : {}),
+        roleId: frozen.namespacedId
+      })) ?? {};
+    } catch (error) {
+      return { ok: false, code: "role-context-invalid", message: `角色上下文准备失败：${error instanceof Error ? error.message : String(error)}` };
+    }
+    const prepared = registry.prepare({
+      roleId: frozen.namespacedId,
+      input: roleInput(entry),
+      context,
+      target: roleTarget(turn),
+      requestId: turn.requestId,
+      ...(JSON.parse(turn.targetJson) as AgentTargetSnapshot).expectedContentHash !== undefined
+        ? { expectedContentHash: (JSON.parse(turn.targetJson) as AgentTargetSnapshot).expectedContentHash! }
+        : {},
+      channel: channelCapabilities(capabilities),
+      attachments: (entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
+    });
+    if (!prepared.ok) return { ok: false, code: prepared.code, message: prepared.message };
+    if (!agentRoleRefEquals(prepared.turn.roleRef, frozen)) {
+      return { ok: false, code: "role-version-conflict", message: "角色准备结果与冻结身份不一致" };
+    }
+    store.updateTurn(turn.turnId, { preparedJson: safeJson(prepared.turn) }, now());
+    return { ok: true, prepared: prepared.turn };
   };
 
   const service: AgentConversationService = {
@@ -610,7 +973,10 @@ export function createAgentConversationService(options: AgentConversationService
     },
 
     resolveConnectionBinding(input) {
-      return resolveTurnConnection(input.owner, input.adapterId, input.connectionId);
+      return resolveTurnConnection(input.owner, input.adapterId, input.connectionId, {
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.reasoningEffort ? { effort: input.reasoningEffort } : {})
+      });
     },
 
     acceptStructuredTurn(input) {
@@ -663,8 +1029,9 @@ export function createAgentConversationService(options: AgentConversationService
       const refinesFailure = record.status === "failed" &&
         input.outcome.status === "failed" &&
         isDefiniteFailureCode(input.outcome.error?.code);
-      if (!["queued", "running", "committing"].includes(record.status) && !refinesFailure && !((input.delivery.purpose === "text-generation" || input.delivery.purpose === "image-director-scene") && input.outcome.status === "succeeded" && input.outcome.receipt)) return;
-      finishTurn(record, input.outcome);
+      const settlesTerminalText = (input.delivery.purpose === "text-generation" || input.delivery.purpose === "image-director-scene") && input.outcome.status === "succeeded" && input.outcome.receipt !== undefined;
+      if (!["queued", "running", "committing"].includes(record.status) && !refinesFailure && !settlesTerminalText) return;
+      finishTurn(record, input.outcome, undefined, { allowTerminal: refinesFailure || settlesTerminalText });
     },
 
     async dispatchDeliveryTurn(turnId, execute) {
@@ -687,7 +1054,9 @@ export function createAgentConversationService(options: AgentConversationService
       if (input.entry.action !== "discuss" && binding.nodeId && input.entry.nodeId !== binding.nodeId) return fail("unauthorized", "目标节点与会话不一致");
 
       if (input.entry.mode === "text" && input.entry.action !== "discuss" && !acceptingTrustedDelivery) return fail("capability-unsupported", "文本生成必须经过可信文本交付入口");
-      const inputHash = hashIntent(input.entry, input.connection ?? null) + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "");
+      const inputHash = hashIntent(input.entry, input.connection ?? null)
+        + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "")
+        + (input.trustedRole ? `:${createHash("sha256").update(JSON.stringify(input.trustedRole.input ?? null)).digest("hex")}` : "");
       const existing = store.findTurnByRequest(input.owner, input.requestId);
       if (existing) {
         if (existing.conversationId !== binding.conversationId || existing.canvasId !== binding.canvasId) return fail("request-id-reused", "requestId 已绑定其它会话或画布");
@@ -702,6 +1071,10 @@ export function createAgentConversationService(options: AgentConversationService
       const resolved = registry.resolve(binding.adapterId);
       if (!resolved.ok) return fail("adapter-unavailable", resolved.message);
       const capabilities = resolved.handle.capabilities;
+      // 显式角色解析（change: 2026-11-07-add-pluggable-agent-roles）：核心不按 mode、
+      // 显示名或连接猜业务职责；未选择角色即拒绝。
+      const roleResolved = resolveRoleForAccept(input.entry, capabilities);
+      if (!roleResolved.ok) return roleResolved;
       if (!capabilities.discussion && input.entry.action === "discuss") {
         return fail("capability-unsupported", "该 adapter 不支持讨论");
       }
@@ -716,11 +1089,52 @@ export function createAgentConversationService(options: AgentConversationService
         return fail("malformed-request", "对象动作缺少 clipId，拒绝退化成整体片场修改");
       }
 
-      // 冻结本回合来源连接身份（design D7）：由 API 在接受前解析后传入；缺失时为兼容默认连接或 null。
+      // 冻结本回合来源连接身份（design D7）：由 API 在接受前解析后传入；缺失时不可发起新的执行。
       const connection = input.connection ?? null;
       // 会话冻结的连接与本次请求不一致时拒绝（不静默换来源）。
       if (binding.connectionId && connection && binding.connectionId !== connection.connectionId) {
         return fail("connection-unavailable", "该会话已冻结其它来源连接，请先切换来源");
+      }
+
+      // 受信领域入口提供角色输入/上下文时在受理时同步准备并冻结。
+      let trustedPrepared: PreparedAgentRoleTurn | undefined;
+      let trustedRoleInputDigest: string | undefined;
+      if (input.trustedRole && roleResolved.ref) {
+        if (!options.agentRoles) return fail("role-unavailable", "宿主未启用 Agent 角色注册表");
+        const targetRef: import("@woohaa3/contracts").AgentRoleTargetRef = {
+          canvasId: input.entry.canvasId,
+          ...(input.entry.nodeId !== undefined ? { nodeId: input.entry.nodeId } : {}),
+          ...(input.entry.mode !== undefined ? { mode: input.entry.mode } : {})
+        };
+        const prepared = options.agentRoles.prepare({
+          roleId: roleResolved.ref.namespacedId,
+          input: input.trustedRole.input,
+          context: input.trustedRole.context,
+          target: targetRef,
+          requestId: input.requestId,
+          ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {}),
+          channel: channelCapabilities(capabilities),
+          attachments: (input.entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
+        });
+        if (!prepared.ok) {
+          const code: AgentConversationServiceError["code"] = [
+            "role-not-found",
+            "role-unavailable",
+            "role-version-conflict",
+            "role-input-invalid",
+            "role-context-invalid",
+            "role-requirement-unsatisfied",
+            "role-prepare-failed"
+          ].includes(prepared.code)
+            ? prepared.code as AgentConversationServiceError["code"]
+            : "role-unavailable";
+          return { ok: false, error: { code, message: prepared.message } };
+        }
+        if (!agentRoleRefEquals(prepared.turn.roleRef, roleResolved.ref)) {
+          return fail("role-version-conflict", "角色准备结果与解析到的角色身份不一致");
+        }
+        trustedPrepared = prepared.turn;
+        trustedRoleInputDigest = prepared.turn.inputDigest;
       }
 
       const turnId = createId("turn");
@@ -736,8 +1150,10 @@ export function createAgentConversationService(options: AgentConversationService
         ...(input.entry.itemId !== undefined ? { itemId: input.entry.itemId } : {}),
         ...(input.entry.model !== undefined ? { model: input.entry.model } : {}),
         ...(input.entry.reasoningEffort !== undefined ? { reasoningEffort: input.entry.reasoningEffort } : {}),
+        ...(connection?.capabilityRevision !== undefined ? { capabilityRevision: connection.capabilityRevision } : {}),
         ...(connection ? { connectionId: connection.connectionId } : {}),
-        ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {})
+        ...(input.entry.expectedContentHash !== undefined ? { expectedContentHash: input.entry.expectedContentHash } : {}),
+        ...(roleResolved.ref ? { role: roleResolved.ref } : {})
       };
       store.createTurn({
         turnId,
@@ -755,6 +1171,10 @@ export function createAgentConversationService(options: AgentConversationService
         connectionAdapterId: connection?.adapterId ?? null,
         connectionConfigRevision: connection?.configRevision ?? null,
         connectionCredentialEpoch: connection?.credentialEpoch ?? null,
+        connectionCapabilityRevision: connection?.capabilityRevision ?? null,
+        ...(roleResolved.ref ? { roleRefJson: safeJson(roleResolved.ref) } : {}),
+        ...(trustedPrepared ? { preparedJson: safeJson(trustedPrepared) } : {}),
+        roleInputDigest: trustedRoleInputDigest ?? createHash("sha256").update(JSON.stringify(roleInput(input.entry))).digest("hex"),
         // 受理时冻结历史基准（任务 3.1）：只把此刻已完成的合法前缀纳入本回合，不读并发回合的半条输出。
         historySequence: store.maxMessageSequence(binding.conversationId),
         createdAt: timestamp,
@@ -824,6 +1244,7 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
       controller?.abort();
+      store.revokeTurnAuthority(record.turnId, now());
       // 宿主重启后没有在途控制器：活动回合按用户停止结算；旧 unknown 已由启动核对结算失败。
       if (!controller && ["queued", "running", "committing"].includes(record.status)) {
         store.updateTurn(record.turnId, { status: "cancelled", stage: "cancelled" }, now());
@@ -864,27 +1285,76 @@ export function createAgentConversationService(options: AgentConversationService
           error = cause instanceof Error ? cause.message : "目录读取失败";
         }
       }
-      return { ok: true, models: snapshot.models, authState, capabilities, ...(error ? { error } : {}) };
+      return { ok: true, models: snapshot.models, ...(snapshot.capabilityRevision ? { capabilityRevision: snapshot.capabilityRevision } : {}), authState, capabilities, ...(error ? { error } : {}) };
     },
 
+    listRoles(input) {
+      if (!input.owner) return fail("unauthorized", "缺少可信用户主体");
+      if (!options.agentRoles) return fail("role-unavailable", "宿主未启用 Agent 角色注册表");
+      const resolved = resolveAdapter(input.adapterId);
+      if (!resolved.ok) return fail("adapter-unavailable", resolved.message);
+      const channel = channelCapabilities(resolved.handle.capabilities);
+      const roles = options.agentRoles.list().map((descriptor) => {
+        const availability = options.agentRoles!.availability(descriptor.ref.namespacedId, channel);
+        // 公开目录只投影身份/专长/能力需求/可用原因；工具与内建能力清单留在宿主内部。
+        const { tools: _tools, nativeCapabilities: _native, ...publicDescriptor } = descriptor;
+        return {
+          ...publicDescriptor,
+          available: availability.available,
+          ...(availability.reason ? { reason: availability.reason } : {})
+        };
+      });
+      return { ok: true, roles };
+    },
+
+    recordPrepared(input) {
+      const record = store.findTurnByRequest(input.owner, input.requestId);
+      if (!record) return fail("not-found", "未找到该请求");
+      const frozen = frozenRole(record);
+      if (!frozen || !agentRoleRefEquals(frozen, input.prepared.roleRef)) {
+        return fail("role-version-conflict", "准备结果与回合冻结的角色身份不一致");
+      }
+      store.updateTurn(record.turnId, { preparedJson: safeJson(input.prepared), roleInputDigest: input.prepared.inputDigest }, now());
+      return { ok: true };
+    },
+
+    onRoleRevoked(namespacedId) {
+      // 只取消冻结该角色的活动回合；无关角色与连接继续运行，历史不删除。
+      for (const [turnId, ref] of [...activeRoles]) {
+        if (ref.namespacedId !== namespacedId) continue;
+        activeRoles.delete(turnId);
+        controllers.get(turnId)?.abort();
+        store.revokeTurnAuthority(turnId, now());
+      }
+    },
+
+    /**
+     * 能接管就接管（任务 3.2/3.3）。
+     *
+     * - 运行中且通道声明 `resume`：按确定性回合身份接回执行器 journal，从 cursor 继续；
+     * - 终态：按事实结算一次（CAS 保证不重复）；
+     * - 通道没有接管能力或 structured/delivery：沿用「查询一次 + 按回执结算」；
+     * - journal 缺失/运行时不可达：按原身份核对领域回执，仍不能证明则结算 failed（不重跑）。
+     */
     async reconcileUnknown() {
       const unsettled = store.listUnsettledTurns();
-      const owners = new Set<string>();
+      const reconciled = new Set<string>();
       for (const turn of unsettled) {
-        // Candidate delivery 的权威回执在领域侧：文本/片场等 reconciliator 会按原请求结算父回合。
-        if (JSON.parse(turn.targetJson).delivery) continue;
-        // 组创作只读一次子 run 证据；仍活动/不可读时撤销匹配子 run 后按失败结算。
-
+        const target = JSON.parse(turn.targetJson) as { delivery?: unknown; structuredInputHash?: unknown };
+        // Candidate delivery 的权威回执在领域侧：只核对，不接管执行。
+        if (target.delivery) continue;
+        // structured 输出的权威回执也在领域侧：不进入接管，走只读核对。
+        if (!target.structuredInputHash && await adopt(turn)) { reconciled.add(turn.turnId); continue; }
         const resolved = registry.resolve(undefined);
         const binding = store.getConversation(turn.conversationId);
         const bound = binding ? registry.resolve(binding.adapterId) : resolved;
         const query = bound.ok ? bound.handle.adapter.query : undefined;
         if (!query) { settleFailed(turn, "query-unavailable"); continue; }
-        owners.add(turn.turnId);
+        reconciled.add(turn.turnId);
         try {
           const outcome = await query({ owner: turn.owner, requestId: turn.requestId });
           if (!outcome) { settleFailed(turn, "receipt-missing"); continue; }
-          if (JSON.parse(turn.targetJson).structuredInputHash) {
+          if (target.structuredInputHash) {
             // A completion without its structured text cannot be adopted as a design result.
             if (outcome.status !== "succeeded" || outcome.assistantText?.trim()) finishTurn(turn, outcome);
             else settleFailed(turn, "structured-text-missing");
@@ -896,8 +1366,26 @@ export function createAgentConversationService(options: AgentConversationService
           settleFailed(turn, "query-failed");
         }
       }
-      if (unsettled.length > 0) log({ event: "agent-conversation-restart-reconciled", count: unsettled.length, reconciled: owners.size });
+      if (unsettled.length > 0) log({ event: "agent-conversation-restart-reconciled", count: unsettled.length, reconciled: reconciled.size });
       return unsettled;
+    },
+
+    async adoptTurn(turnId) {
+      const turn = store.getTurn(turnId);
+      if (!turn || isTerminalTurnStatus(turn.status)) return true;
+      return adopt(turn);
+    },
+
+    turnAuthority(turnId) {
+      return store.getTurnAuthority(turnId);
+    },
+
+    turnAuthorityByRequest(owner, requestId) {
+      return store.getTurnAuthorityByRequest(owner, requestId);
+    },
+
+    recordHostMethods(turnId, methods) {
+      if (methods.length > 0) store.recordTurnAuthorityHostMethods(turnId, methods);
     },
 
     deleteAll(input) {

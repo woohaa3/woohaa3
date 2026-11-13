@@ -50,7 +50,6 @@ mod tests {
             chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             world_camera: None,
-            model_preview: None,
             id: id.into(),
             kind: "image".into(),
             x: 0.0,

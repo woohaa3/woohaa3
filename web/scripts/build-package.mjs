@@ -60,13 +60,28 @@ const entryName = readArg("entry-name") ?? "index";
 
 const manifest = JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8"));
 
-/** 声明过的依赖一律 external；同时 external 其子路径（例如 `zustand/vanilla`）。 */
+const bundleWorkspace = process.argv.includes("--bundle-workspace") || entryName === "executor";
+
+/**
+ * 声明过的依赖默认 external；同时 external 其子路径（例如 `zustand/vanilla`）。
+ * `executor` 入口由常驻 `woohaa3-executor` daemon 按文件摘要（`?revision=`）动态加载：
+ * 若将 `workspace:*` 依赖留作裸说明符 external，daemon 进程内的 Node ESM 缓存会一直复用
+ * 首次启动时的旧版工作区包（如 `@woohaa3/contracts`），导致新增导出时报 SyntaxError。
+ * 因此 executor 产物内联 `workspace:*` 依赖，使每次构建随摘要一并生效。
+ */
 const declared = [
   ...Object.keys(manifest.dependencies ?? {}),
   ...Object.keys(manifest.peerDependencies ?? {}),
   ...Object.keys(manifest.optionalDependencies ?? {}),
 ];
-const external = [...new Set(declared.flatMap((name) => [name, `${name}/*`]))].sort();
+const externalDeclared = [
+  ...Object.entries(manifest.dependencies ?? {})
+    .filter(([, range]) => !(bundleWorkspace && typeof range === "string" && range.startsWith("workspace:")))
+    .map(([name]) => name),
+  ...Object.keys(manifest.peerDependencies ?? {}),
+  ...Object.keys(manifest.optionalDependencies ?? {}),
+];
+const external = [...new Set(externalDeclared.flatMap((name) => [name, `${name}/*`]))].sort();
 
 /**
  * 包边界守卫：源码里出现的每个裸说明符，都必须声明在 dependencies /

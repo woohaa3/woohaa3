@@ -60,11 +60,13 @@ function typeInto(input: HTMLInputElement, value: string) {
 async function mountRow(
   entry: SettingsEntryView,
   write: BackendSettingsRemote["write"],
-  editSession = createSettingsEditSession()
+  editSession = createSettingsEditSession(),
+  test?: BackendSettingsRemote["test"]
 ) {
   const store = createBackendSettingsStore({
     fetchSnapshot: async () => ({ ok: true, snapshot: snapshot(entry) }),
-    write
+    write,
+    ...(test ? { test } : {})
   });
   await store.load();
   const container = document.createElement("div");
@@ -141,5 +143,42 @@ describe("设置行的退出保护上报", () => {
     expect(editSession.getSnapshot()).toEqual({ dirty: false, pending: false, hasChanges: false });
     // 敏感值不写入任何浏览器存储。
     expect(globalThis.localStorage?.length ?? 0).toBe(0);
+  });
+
+  it("提供商密钥行提供测试按钮；保存前固定测试，测试不通过时可点击仍然保存", async () => {
+    const providerSecret = urlEntry({
+      key: "providers.deepseek.apiKey",
+      kind: "string",
+      secret: true,
+      configured: false,
+      source: null
+    });
+    const write = vi.fn(async () => ({
+      ok: true as const,
+      snapshot: snapshot({ ...providerSecret, configured: true, source: "secrets" as const })
+    }));
+    const test = vi.fn(async () => ({ ok: false as const, error: "DeepSeek Key 无效" }));
+    const { container } = await mountRow(providerSecret, write, createSettingsEditSession(), test);
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="setting-input-providers.deepseek.apiKey"]')!;
+    typeInto(input, "sk-bad");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="setting-test-providers.deepseek.apiKey"]')!.click();
+    });
+    expect(test).toHaveBeenCalledWith({ "providers.deepseek.apiKey": "sk-bad" });
+    expect(write).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("DeepSeek Key 无效");
+    expect(container.querySelector('[data-testid="setting-save-anyway-providers.deepseek.apiKey"]')).not.toBeNull();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="setting-save-providers.deepseek.apiKey"]')!.click();
+    });
+    expect(write).not.toHaveBeenCalled();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="setting-save-anyway-providers.deepseek.apiKey"]')!.click();
+    });
+    expect(write).toHaveBeenCalledWith({ "providers.deepseek.apiKey": "sk-bad" });
   });
 });

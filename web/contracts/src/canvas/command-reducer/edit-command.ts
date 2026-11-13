@@ -238,7 +238,8 @@ export function applyEditOperation(work: WorkingState, operation: EditOperation)
     case "extension.edit":
       return reject("edit-operation-invalid", "content-edit-unexpanded");
     case "node-add":
-      return addNode(work, { type: "node.add", node: operation.node, nodeData: operation.nodeData });
+      // 撤销/重做恢复既有节点：旧卡片模型原值必须能回到画布，不按新建写入收紧。
+      return addNode(work, { type: "node.add", node: operation.node, nodeData: operation.nodeData }, { restore: true });
     case "node-update":
       return updateNode(work, {
         type: "node.update",

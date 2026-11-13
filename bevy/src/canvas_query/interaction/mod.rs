@@ -432,7 +432,6 @@ pub(crate) fn point_hit_golden(
         ),
         results::PointHit::AggregateHandle { direction } => format!("aggregate-handle:{direction}"),
         results::PointHit::Node { node_id } => format!("node:{node_id}"),
-        results::PointHit::ModelPreview { node_id } => format!("model-preview:{node_id}"),
         results::PointHit::History { node_id } => format!("history:{node_id}"),
         results::PointHit::Port { node_id, side } => format!("port:{node_id}:{side}"),
         results::PointHit::Resize { node_id, handle } => match handle {

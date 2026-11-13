@@ -15,7 +15,7 @@ import {
   bevyNodeHistoryStripRect,
   bevyNodeSize,
   bevyPort,
-  bevyResizeHandleRect,
+  bevyResizeHandleRects,
   bevySelectionBounds,
   type BevyNodeKind,
   type CanvasRenderScene
@@ -110,9 +110,12 @@ export function hitTestOracle(
     // resize 抓手优先于底部历史条；历史入口已从右上角迁移到节点底部历史条
     // （change: 2026-10-12-unify-generation-history-strip）。
     if (selected.has(node.id)) {
-      const handle = bevyResizeHandleRect({ x: node.x, y: node.y, width, height });
-      if (world.x >= handle.x && world.x <= handle.x + handle.width && world.y >= handle.y && world.y <= handle.y + handle.height) {
-        return { kind: "resize", nodeId: node.id };
+      const handles = bevyResizeHandleRects({ x: node.x, y: node.y, width, height });
+      for (const handle of ["nw", "ne", "sw", "se"] as const) {
+        const rect = handles[handle];
+        if (world.x >= rect.x && world.x <= rect.x + rect.width && world.y >= rect.y && world.y <= rect.y + rect.height) {
+          return { kind: "resize", nodeId: node.id, handle };
+        }
       }
     }
     {

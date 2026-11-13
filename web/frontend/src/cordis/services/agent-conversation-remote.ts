@@ -25,6 +25,12 @@ export type AgentConversationRemote = {
   manageServiceConnection?: (input: import("@woohaa3/contracts").ServiceConnectionManagement) => Promise<AgentConversationResult<{ connection: import("@woohaa3/contracts").ServiceConnectionView }>>;
   catalog: (adapterId?: string) => Promise<AgentConversationResult<AgentCatalogResponse>>;
   /**
+   * 只读角色目录与能力匹配（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 通用界面据此在提交前展示必要能力缺失；查询本身不准备、不推理。
+   */
+  roles?: (adapterId?: string) => Promise<AgentConversationResult<{ roles: readonly import("@woohaa3/contracts").AgentRoleDescriptor[] }>>;
+  /**
    * 该 owner 可见的来源连接（不含秘密；change: 2026-10-16-...，任务 2.4）。
    *
    * 只读；`adapterId` 提供时只返回该来源的连接。不缓存 capability 结果。
@@ -102,6 +108,10 @@ export function createAgentConversationRemote(options: AgentConversationRemoteOp
   const path = (suffix: string) => `${basePath}/${suffix}`;
 
   return {
+    async roles(adapterId) {
+      const query = adapterId ? `?adapterId=${encodeURIComponent(adapterId)}` : "";
+      return unwrap<{ roles: readonly import("@woohaa3/contracts").AgentRoleDescriptor[] }>(await transport.request({ path: path(`roles${query}`), method: "GET" }));
+    },
     async catalog(adapterId) {
       const query = adapterId ? `?adapterId=${encodeURIComponent(adapterId)}` : "";
       return unwrap<AgentCatalogResponse>(await transport.request({ path: path(`catalog${query}`), method: "GET" }));

@@ -54,6 +54,12 @@ export type PluginSettingsGroup = {
   providerId: string | null;
   /** 插件声明的模型目录刷新入口；缺省表示该插件没有「可用模型」一节。 */
   modelRefresh?: { path: string; hint: string };
+  /**
+   * 非站点插件（Provider / 存储后端）最近一次启动失败的原因。
+   *
+   * 这类插件没有站点行、也没有 `actualState`，失败时设置页原本只能显示「还没有模型」。
+   */
+  activationFailure?: string;
   entries: SettingsEntryView[];
 };
 
@@ -340,7 +346,16 @@ export function diagnosticsOf(index: PluginViewIndex, group: PluginSettingsGroup
   const site = index.siteRows.get(group.id)?.diagnostics ?? [];
   // 浏览器本地插件的加载/激活失败原因：契约里现在有 failureReason，和站点诊断合并展示。
   const reason = index.browserRows.get(group.id)?.failureReason;
-  return reason ? [...site, reason] : site;
+  const merged = reason ? [...site, reason] : [...site];
+  // 非站点插件（Provider / 存储后端）没有站点行：启动失败的原因只在这里出现，
+  // 不合并就会被说成「还没有模型」。
+  if (group.activationFailure) merged.push(group.activationFailure);
+  return merged;
+}
+
+/** 非站点插件是否启动失败过（用于把状态标成异常而不是「运行中」）。 */
+export function activationFailed(group: PluginSettingsGroup): boolean {
+  return typeof group.activationFailure === "string" && group.activationFailure.trim() !== "";
 }
 
 /** 站点插件是否已在运行（降级运行也算：插件已装载，配置改动照常生效）。 */
@@ -371,6 +386,7 @@ function groupOf(plugin: SettingPluginView, entries: SettingsEntryView[]): Plugi
     provider: plugin.provider,
     providerId: providerIdFromConfigPrefix(plugin.configPrefix),
     ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
+    ...(plugin.activationFailure ? { activationFailure: plugin.activationFailure } : {}),
     entries
   };
 }

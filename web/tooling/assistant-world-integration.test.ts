@@ -716,6 +716,99 @@ describe("assistant world authoring through the real canvas queue", () => {
     }
   });
 
+  it("creates an empty skeleton through the real authority, then fills it with appended chunks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-world-skeleton-"));
+    const file = join(dir, "canvas.sqlite");
+    const canvas = createEmptyWoohaa3ServerCanvas("canvas-1", now);
+    canvas.document.nodes.push({ id: "area-node", type: "scene-area", position: { x: 0, y: 0 } });
+    canvas.nodeData["area-node"] = {
+      sceneArea: {
+        kind: "scene-area",
+        version: "shared-world-v1",
+        areaId: "area-1",
+        scopeVersion: "area-scope-1",
+        bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+      }
+    };
+    const authority = createWorldAuthoringAuthority({
+      // 空格骨架没有几何；带 body 的片段按固定 2×2×2 盒子编译。
+      executeScene: async (source: string) => source.includes("scene.box")
+        ? { ok: true as const, version: "woohaa-model-js-v2" as const, sceneVersion: "scene-ir-v2", json: "", sourceHash: "fixture", ops: [box] as never }
+        : { ok: false as const, stage: "validate" as const, code: "empty-scene", message: "没有几何" }
+    });
+    const repository = new SqliteYjsRepository({ path: file, spatialAuthority: authority });
+    const room = new CanvasRoom({ canvasId: canvas.id, repository, now: () => now });
+    await room.initialize({ canvas, roomEpoch: "initial", createdAt: now });
+    const worldAuthoring = createWorldAuthoringService({
+      authority,
+      resolveRoom: async () => room,
+      acquire: async (intent) => repository.acquireSpatialRun(intent),
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      findLatest: async (canvasId, operationId) => repository.findLatestWorldAuthoringCommand(canvasId, operationId)
+    });
+    const assistant = createAssistantWorldService({
+      authority,
+      worldAuthoring,
+      cameraSettings: {
+        async save() { return { ok: false as const, code: "write-forbidden" as const, message: "camera not used" }; },
+        async complete() { return { ok: false as const, code: "write-forbidden" as const, message: "camera not used" }; }
+      },
+      resolveRoom: async () => room,
+      cancel: async (canvasId, requestId) => repository.cancelSpatialRun(canvasId, requestId),
+      confirmStopped: async (input) => repository.confirmSpatialStopped(input.canvasId, input.requestId, input.runId, input.epoch, input.executionId, input.evidence),
+      pending: async () => repository.pendingSpatialRuns()
+    });
+    try {
+      const issued = await assistant.issue({
+        canvasId: canvas.id,
+        requestId: "run-skeleton",
+        runId: "run-skeleton",
+        epoch: 0,
+        executionId: "exec-skeleton",
+        scope: { kind: "scene-area", areaId: "area-1" }
+      });
+      if (!issued.ok) throw new Error(issued.message);
+      const created = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "create-model",
+          operationId: "create-skeleton",
+          nodeId: "skeleton-node",
+          content: { modelScript: "" },
+          transform: { version: "shared-world-v1", position: { u: 5, v: 5, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 }
+        }
+      });
+      expect(created).toMatchObject({ ok: true, nodeId: "skeleton-node" });
+      if (!created.ok) return;
+      // 骨架提交成功且没有任何几何：内容为空、版本已存在。
+      let projection = (await repository.loadYjsState(canvas.id))?.projection ?? null;
+      expect((projection?.nodeData["skeleton-node"] as { modelScript?: string }).modelScript).toBe("");
+
+      // 骨架本身不可写几何，但追加可以把完整脚本合成出来并推进版本。
+      const appended = await assistant.write({
+        contextId: issued.context.contextId,
+        operation: {
+          kind: "append-model-script",
+          operationId: "append-1",
+          instanceId: created.instanceId!,
+          expectedVersion: created.version!,
+          chunk: "scene.box({ id: 'body', size: [2, 2, 2] });"
+        }
+      });
+      expect(appended).toMatchObject({ ok: true, instanceId: created.instanceId });
+      if (!appended.ok) return;
+      expect(appended.version).not.toBe(created.version);
+      projection = (await repository.loadYjsState(canvas.id))?.projection ?? null;
+      const filled = projection?.nodeData["skeleton-node"] as { modelScript?: string; modelContentVersion?: { revision: number } };
+      expect(filled.modelScript).toBe("scene.box({ id: 'body', size: [2, 2, 2] });");
+      expect(filled.modelContentVersion?.revision).toBe(2);
+    } finally {
+      assistant.close();
+      repository.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("recovers an authoritative camera write when the backend restarts before the first settle", async () => {
     const dir = mkdtempSync(join(tmpdir(), "assistant-world-before-settle-"));
     const file = join(dir, "canvas.sqlite");
@@ -1097,7 +1190,8 @@ describe("assistant world authoring through the real canvas queue", () => {
           nodeId: "camera-node",
           cameraId: "camera-new",
           settings: {
-            position: { u: -4, v: 5, h: 1.6 },
+            // 机位必须落在本轮 bounds 内（u/v ∈ [0, 10]），越界会被 outside-scope 拒绝。
+            position: { u: 1, v: 5, h: 1.6 },
             rotation: [0, 0, 0, 1],
             projection: { kind: "perspective", verticalFovRadians: 0.8, nearMeters: 0.1, farMeters: 100 },
             captureMode: { kind: "static" },

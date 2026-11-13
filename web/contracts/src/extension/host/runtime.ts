@@ -53,11 +53,17 @@ export type ApplicationBackendCapabilityRegistration = {
 };
 
 /** 后台资源：拥有 start/stop 生命周期，disposer 必须幂等（design D2）。 */
+/**
+ * 释放原因（change: 2026-11-10-split-agent-runtime-lifecycle，任务 4.1）：
+ * 宿主优雅关闭/热重载只 detach；停用/升级/卸载才 cancel 并排空。
+ */
+export type ApplicationDisposeReason = "shutdown" | "reload" | "disable" | "upgrade" | "uninstall";
+
 export type ApplicationBackendResource = {
   id: string;
   start?: () => Promise<void> | void;
-  /** 幂等停止；activation 回滚与停用都调用它。 */
-  stop: () => Promise<void> | void;
+  /** 幂等停止；activation 回滚与停用都调用它，并携带释放原因。 */
+  stop: (reason?: ApplicationDisposeReason) => Promise<void> | void;
 };
 
 /** 宿主提供的配置读写 facade（只读已提交配置；不暴露秘密）。 */
@@ -170,6 +176,13 @@ export type ApplicationBackendHost = {
    */
   /** Register a custom media validator; activation cleanup always releases its registration. */
   registerMediaFormat?: (format: MediaFormatValidator) => void;
+  /**
+   * 注册一个 Agent 角色实现（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 归属由宿主按本次 activation 的 extensionId 记账，插件不能自报其他扩展身份；停用/回滚时
+   * 宿主自动注销，重复完整角色 id 会让本次激活失败并回滚。
+   */
+  registerAgentRole?: (implementation: import("../assistant/agent-role.js").AgentRoleImplementation) => () => void;
   registerStorage?: (backend: StorageBackend) => void;
   /**
    * 注销一个存储后端（按 `backendId`）。
@@ -269,6 +282,9 @@ export type ApplicationExtensionMcpTool = {
 /** 后端插件定义（构建时静态登记；宿主 activation 前解析依赖）。 */
 export type ApplicationBackendExtensionDefinition = {
   extensionId: string;
+  /** Trusted module paths resolved from extension.json by the extension loader. */
+  executors?: readonly import("../services/host/executor.js").ExtensionExecutorModule[];
+  publicRoutes?: readonly import("./http.js").ApplicationExtensionPublicRouteMapping[];
   mcpTools?: readonly ApplicationExtensionMcpTool[];
   /** 必需依赖的 capability/service id；缺失时不得产生部分可用贡献。 */
   requiredDependencies?: readonly string[];

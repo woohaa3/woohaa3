@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { createProcessManager } from "./process-manager.js";
 import { createSupervisorProcessManager } from "./supervisor-client.js";
 
 const cleanups: Array<() => void> = [];
@@ -19,6 +20,14 @@ afterEach(() => {
 });
 
 describe("Agent Supervisor 客户端", () => {
+  it("missing daemon configuration fails before creating any process or working directory", async () => {
+    const root = path.join(os.tmpdir(), `missing-runtime-${Date.now()}`);
+    const manager = createProcessManager({ workDirRoot: root, portRange: { min: 42000, max: 42010 }, executableFor: () => process.execPath });
+    await expect(manager.ensure({ adapterId: "codex-appserver", owner: "owner", connectionId: "connection", args: [], kind: "stdio" })).rejects.toThrow("宿主未配置独立执行器");
+    expect(existsSync(root)).toBe(false);
+    expect(manager.activeCount()).toBe(0);
+  });
+
   it("ensure 先建好 workDir/config，再向 supervisor 发请求", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "woohaa3-supervisor-"));
     cleanups.push(() => rmSync(root, { recursive: true, force: true }));
@@ -56,7 +65,7 @@ describe("Agent Supervisor 客户端", () => {
     // 请求发出去时 cwd 必须已经存在，否则 supervisor 侧只会得到一句误导性的 ENOENT。
     expect(existsSync(handle.workDir)).toBe(true);
     expect(existsSync(handle.configDir)).toBe(true);
-    expect(requests.find(request => request.method === "ensure")?.params).toMatchObject({ cwd: handle.workDir });
+    expect(requests.find(request => request.method === "proc.ensure")?.params).toMatchObject({ cwd: handle.workDir });
   });
 
   it("Supervisor 不在时给出可执行的错误，而不是裸 connect ENOENT", async () => {

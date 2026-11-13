@@ -255,3 +255,25 @@ describe("动态镜头 mention 槽类型", () => {
     expect(resolution.kind).toBe("ok");
   });
 });
+
+describe("控制图槽位的 mention 标签", () => {
+  const CONTROL_ONLY: CanvasTaskInputBinding[] = [{
+    field: "control_image", semantic: "reference-image", roles: ["control_image"],
+    mediaKinds: ["image"], mediaTypes: ["image/png"], maxItems: 1,
+    valueFormat: "reference", label: "控制图", required: true, declaredSlot: true
+  }];
+
+  it("连线推断的 reference_image 对齐成控制图，token 标签也跟着换", () => {
+    // 面板显示「控制图」而 prompt token 写「图片 1」时，用户 @ 出来的位置和实际落点对不上。
+    const candidates = collectDirectMentionCandidates(canvasWithImageSource(), "target", undefined, CONTROL_ONLY);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ role: "control_image", label: "控制图" });
+    // 提交形态的角色也必须是对齐后的槽位，否则服务端按原角色找不到落点。
+    expect(candidates[0]!.input?.role).toBe("control_image");
+  });
+
+  it("没传 bindings 时保持推断角色与编号标签", () => {
+    const candidates = collectDirectMentionCandidates(canvasWithImageSource(), "target");
+    expect(candidates[0]).toMatchObject({ role: "reference_image", label: "图片 1" });
+  });
+});

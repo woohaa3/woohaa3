@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { AgentConnectionBinding, AgentEntryIntent, FrozenImageDirectorSource, ImageDirectorSceneCandidate, ImageDirectorSceneReceipt, ImageDirectorSceneRequest, ImageDirectorSceneReservation, ImageDirectorSceneStage } from "@woohaa3/contracts";
+import type { AgentConnectionBinding, AgentEntryIntent, FrozenImageDirectorSource, ImageDirectorSceneReceipt, ImageDirectorSceneRequest, ImageDirectorSceneReservation, ImageDirectorSceneStage } from "@woohaa3/contracts";
 import { loadNodeSqlite } from "./sqlite-loader.js";
 
 export interface ImageDirectorSceneRecord {
@@ -10,17 +10,14 @@ export interface ImageDirectorSceneRecord {
   source: FrozenImageDirectorSource;
   reservation?: ImageDirectorSceneReservation;
   imageBase64: string;
+  beforeNodeIds: string[];
   connectionVersion: string;
   connection?: AgentConnectionBinding;
   conversationId?: string;
   entry?: AgentEntryIntent;
   stage: ImageDirectorSceneStage;
   parentTurnId?: string;
-  attempts: Array<{ id: string; diagnostic?: string; raw?: unknown; candidate?: ImageDirectorSceneCandidate }>;
   activeAttemptId?: string;
-  candidate?: ImageDirectorSceneCandidate;
-  placement?: { attemptId: string; commandId: string; plan: unknown; state?: "pending" | "rejected" | "unknown" | "not-committed" };
-  placementHistory?: Array<{ attemptId: string; commandId: string; plan: unknown; state?: "pending" | "rejected" | "unknown" | "not-committed" }>;
   receipt?: ImageDirectorSceneReceipt;
   revision?: number;
   error?: string;

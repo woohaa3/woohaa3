@@ -142,6 +142,25 @@ describe("resize 手势（change: add-node-resize）", () => {
     controller.dispose();
   });
 
+  it("四个角都能拉伸，并固定被拖动角的对侧边", () => {
+    const { dom, controller, width, height } = setupResizable("image", 300, 200);
+    dom.fire("pointerdown", { clientX: 150, clientY: 100 });
+    dom.fire("pointerup", { clientX: 150, clientY: 100 });
+    controller.flush();
+    submitted.length = 0;
+
+    // 左上角向左上拖：右下角保持在原处，节点位置和尺寸同时变化。
+    dom.fire("pointerdown", { clientX: 10, clientY: 10 });
+    dom.fire("pointermove", { clientX: 0, clientY: 0 });
+    dom.fire("pointerup", { clientX: 0, clientY: 0 });
+
+    const command = submitted.find((entry) => entry.type === "node.update" && (entry as { width?: number }).width !== undefined) as { width: number; height: number; position?: { x: number; y: number } };
+    expect(command.width).toBe(width + 10);
+    expect(command.height).toBe(height + 10);
+    expect(command.position).toEqual({ x: -10, y: -10 });
+    controller.dispose();
+  });
+
   it("非图片节点宽高可独立变化", () => {
     const { dom, controller, handle } = setupResizable("text", 300, 200);
     dom.fire("pointerdown", { clientX: 150, clientY: 100 });

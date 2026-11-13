@@ -1,6 +1,5 @@
 import { expect, test } from "./review-browser.js";
-import { defaultSelfContained3DNodeData } from "@woohaa3/contracts";
-import { resetCanvasStorage, waitForCanvasSession, sendCommands } from "./helpers.js";
+import { modelNodeData, resetCanvasStorage, waitForCanvasSession, sendCommands } from "./helpers.js";
 
 test("real pointer drag uses incremental frames and release/cancel restores canonical state", async ({ page }, info) => {
   test.setTimeout(120000);
@@ -10,9 +9,10 @@ test("real pointer drag uses incremental frames and release/cancel restores cano
     type:"node.add",node:{id:`drag-${i}`,type:"text",position:{x:i===0?80:1200+i*270,y:100}}
   })))).ok).toBe(true);
   await expect.poll(()=>page.evaluate(()=>(window as any).__bevyRuntime.lastScene()?.nodes.length)).toBe(33);
+  // 共享世界模型：画布点投影成世界实例（模型没有卡片，change: 2026-11-10）。
   expect((await sendCommands(page,["model-a","model-b"].map((id,i)=>({
-    type:"node.add",node:{id,type:"model3d",position:{x:12000+i*500,y:100}},
-    nodeData:defaultSelfContained3DNodeData("model3d")
+    type:"node.add",node:{id,type:"model3d"},
+    nodeData:modelNodeData({x:12000+i*500,y:100})
   })))).ok).toBe(true);
   for (const id of ["model-a","model-b"]) {
     const response=await page.request.post("/api/model-mcp/scripts",{data:{

@@ -240,7 +240,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     const configurableIds = resolveConfigurableOptionalIds(runtimeCatalogIds);
     const catalogMetadata = canvasExtensionCatalogMetadata(extensionCatalogMetadata(metadata));
 
-    // 2. 目标状态来自宿主配置文件（`extensions.frontend.<id>.enabled`）：与 provider 参数同层同格式，
+    // 2. 目标状态来自宿主配置文件（`extensions.<id>.enabled`）：与 provider 参数同层同格式，
     //    前端只投影、不自持 localStorage。启动前先读一次权威配置；读取失败按全部启用继续启动
     //    （缺配置不该拦住画布，面板会显示持久化不可用）。
     // 配置来源：宿主设置 API（独立 remote 实例，不依赖 scope 内服务装配顺序）。

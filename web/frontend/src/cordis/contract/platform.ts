@@ -248,7 +248,7 @@ export type NodeActionActivation = NodeActionContext & {
 export type NodeActionDescriptor = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "edit" | "box" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "box" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups" | "rotate-clockwise";
   iconOnly?: boolean;
   /** 按钮文案（中文）。 */
   label: string;

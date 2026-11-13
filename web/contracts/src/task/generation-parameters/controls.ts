@@ -355,3 +355,20 @@ export const PARAMETER_CONTROLS: readonly ParameterControlSpec[] = [
 export const CONTROL_BY_KEY: ReadonlyMap<string, ParameterControlSpec> = new Map(
   PARAMETER_CONTROLS.map((control) => [control.key, control])
 );
+
+/** Presentation declarations belong beside the controls that own these exact semantics. */
+export const CONTROL_PRESENTATION: Readonly<Record<string, Record<string, unknown>>> = {
+  aspectRatio: { section: "common", order: 10, summaryOrder: 10, semanticId: "pptask.aspect-ratio" },
+  resolution: { section: "common", order: 20, summaryOrder: 20, semanticId: "pptask.resolution" },
+  quality: { section: "common", order: 30, summaryOrder: 30, semanticId: "pptask.quality" },
+  generationMode: { section: "common", order: 0, semanticId: "video.generation-mode" },
+  durationSeconds: { section: "common", order: 30, summaryOrder: 30, semanticId: "video.duration-seconds", control: "slider" },
+  generateAudio: { section: "common", order: 40, summaryOrder: 40, semanticId: "video.generate-audio", control: "switch" },
+  voice: { section: "common", order: 10, summaryOrder: 10, semanticId: "speech.voice", control: "search-select" },
+  speed: { section: "common", order: 20, summaryOrder: 20, semanticId: "speech.speed", control: "slider" },
+  lyrics: { section: "common", order: 10, semanticId: "music.lyrics", control: "textarea" },
+  background: { section: "common", order: 40, semanticId: "image.background" },
+  outputFormat: { section: "advanced", semanticId: "media.output-format" },
+  n: { section: "advanced", semanticId: "image.count", control: "number" },
+  seed: { section: "advanced", control: "number" },
+};

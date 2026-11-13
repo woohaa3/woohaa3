@@ -12,7 +12,7 @@ export async function renderPreview(
 ): Promise<RenderPreviewOutcome> {
   const canvasId = input.canvasId?.trim() ?? "", nodeId = input.nodeId?.trim() ?? "";
   if (!canvasId || !nodeId) return { ok: false, code: "malformed-request", message: "canvasId 和 nodeId 不能为空" };
-  const normalized = normalizeCaptureOptions({ ...(input.width !== undefined ? { width: input.width } : {}), ...(input.height !== undefined ? { height: input.height } : {}), ...(input.background !== undefined ? { background: input.background } : {}), ...(input.cameraPreset !== undefined ? { cameraPreset: input.cameraPreset } : {}) });
+  const normalized = normalizeCaptureOptions({ ...(input.width !== undefined ? { width: input.width } : {}), ...(input.height !== undefined ? { height: input.height } : {}), ...(input.background !== undefined ? { background: input.background } : {}) });
   if (!normalized.ok) return normalized;
   const room = await deps.resolveRoom(canvasId);
   if (!room) return { ok: false, code: "canvas-not-found", message: `画布 ${canvasId} 不存在` };
@@ -27,7 +27,7 @@ export async function renderPreview(
   const capture = normalized.options;
   const source = typeof data?.modelScript === "string" ? data.modelScript : "";
   if (!source.trim()) return { ok: false, code: "no-source", message: "节点没有可预览的 modelScript" };
-  if (timeSeconds !== 0 || capture.cameraPreset === "initial") return { ok: false, code: "malformed-request", message: "静态节点不支持动画采样或 initial camera preset" };
+  if (timeSeconds !== 0) return { ok: false, code: "malformed-request", message: "静态节点不支持动画采样" };
   const execution = await executeSceneIr(source, data?.modelScriptVersion, deps.scriptExecutor ?? {});
   if (!execution.ok) return { ok: false, code: `model-script-${execution.stage}`, message: execution.message };
   const sourceHash = hashModelScript(source);
@@ -36,7 +36,7 @@ export async function renderPreview(
   const cacheSourceHash = hashModelScript(JSON.stringify({ sourceHash, placement }));
   const scene: Omit<RendererSceneRequest, "requestId" | "capture"> = { sceneVersion: execution.sceneVersion, signature: hashModelScript(JSON.stringify({ version: execution.sceneVersion, ops })), extent: v2SceneExtent(ops), ops: ops as unknown[], ...(placement ? { placement: { offset: [placement.offset.x, placement.offset.y, placement.offset.z] as [number, number, number], scale: placement.scale, yaw: placement.yaw } } : {}) };
   const cacheKey = renderCacheKey({ sourceHash: cacheSourceHash, sceneVersion: scene.sceneVersion, renderVersion: RENDER_VERSION, capture });
-  const metadata = (renderVersion: string, width: number, height: number, sceneSignature: string): RenderPreviewMetadata => ({ canvasId, nodeId, sourceHash, sceneSignature, sceneVersion: scene.sceneVersion, renderVersion, width, height, background: capture.background, cameraPreset: capture.cameraPreset });
+  const metadata = (renderVersion: string, width: number, height: number, sceneSignature: string): RenderPreviewMetadata => ({ canvasId, nodeId, sourceHash, sceneSignature, sceneVersion: scene.sceneVersion, renderVersion, width, height, background: capture.background });
   const cached = renderCache.get(cacheKey);
   if (cached) return { ok: true, cached: true, pngBase64: cached.png.toString("base64"), metadata: metadata(cached.renderVersion, cached.width, cached.height, cached.sceneSignature) };
   if (!deps.rendererClient) return { ok: false, code: "renderer-unavailable", message: "未配置可用的原生 model renderer" };

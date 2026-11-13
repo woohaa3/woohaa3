@@ -1,0 +1,14 @@
+.world-rotation-error {
+  position: absolute;
+  left: 50%;
+  bottom: 90px;
+  transform: translateX(-50%);
+  max-width: 460px;
+  padding: 8px 14px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-panel);
+  color: var(--app-status-danger);
+  font: 13px/1.4 var(--app-font);
+  pointer-events: none;
+}

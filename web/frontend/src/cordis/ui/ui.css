@@ -614,37 +614,8 @@
  * 模型聚焦编辑期间常驻画布右侧的非模态工具栏：工具模式、镜头列表、pose 文本与
  * 截图动作。选中镜头的取景就是主画面。
  * ------------------------------------------------------------------ */
-.model-camera-preview {
-	position: fixed;
-	z-index: 43;
-	pointer-events: none;
-	outline: 1px solid var(--app-web-border);
-	box-shadow: 0 8px 28px var(--app-web-shadow);
-}
 
-.model-camera-preview__header {
-	position: absolute;
-	bottom: 100%;
-	left: -1px;
-	right: -1px;
-	height: 30px;
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 8px;
-	padding: 0 10px;
-	border: 1px solid var(--app-web-border);
-	border-radius: 8px 8px 0 0;
-	background: var(--app-web-panel);
-	color: var(--app-web-text-primary);
-	font-size: 11px;
-}
 
-.model-camera-preview__header span:first-child {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
 
 /* 模型聚焦右侧 dock：历史 drawer 打开时整体左移一个 drawer 宽度，避免互相遮挡
    （change: 2026-10-08-add-image-focus-editing-and-unified-node-history，design D3）。 */
@@ -1086,6 +1057,19 @@
 
 .ref-tile--waiting { border-style: dashed; color: var(--app-web-text-muted); }
 .ref-tile--invalid { border-color: var(--app-status-danger-soft); color: var(--app-status-danger); }
+/* 模型声明但还没填的槽位：虚线 + 可点，与「加一个参考」的 add tile 区分开——
+   前者有明确语义（控制图、遮罩），后者是"随便挑一个"。 */
+.ref-tile--empty {
+	border-style: dashed;
+	border-color: var(--app-interaction-accent);
+	color: var(--app-web-text-muted);
+}
+.ref-tile--empty.ref-tile--fillable { cursor: pointer; }
+.ref-tile--empty.ref-tile--fillable:hover {
+	background: color-mix(in srgb, var(--app-interaction-accent) 8%, transparent);
+}
+/* 必填空槽位用危险色描边：它挡住执行，必须比"可选槽位"更显眼。 */
+.ref-tile--empty[data-required="true"] { border-color: var(--app-status-danger); }
 .ref-tile--add {
 	border-style: dashed;
 	cursor: pointer;

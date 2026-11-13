@@ -191,6 +191,19 @@ function typeInto(input: HTMLInputElement, value: string) {
 }
 
 describe("插件配置弹窗", () => {
+  it("浏览器插件失败时概览可展开原因，开关旁不误报运行中", async () => {
+    const { container } = await renderDialog({
+      pluginId: "sdk-agent",
+      plugins: [sdkAgentPlugin()],
+      view: { rows: [{ id: "sdk-agent", name: "SDK Agent 来源", description: "SDK", required: false, configurable: true, status: "failed", failureReason: "模块加载失败：HTTP 404" }] }
+    });
+    const details = query<HTMLDetailsElement>(container, "plugin-failure-sdk-agent")!;
+    await act(async () => details.querySelector("summary")!.click());
+    expect(details.open).toBe(true);
+    expect(details.textContent).toContain("模块加载失败：HTTP 404");
+    expect(container.querySelector(".plugin-state__label")?.textContent).toBe("激活失败");
+  });
+
   it("详情头展示扩展声明的版本，没有版本时不渲染空标记", async () => {
     const plugin: SettingPluginView = {
       id: "fal-provider", label: "fal.ai", description: "", layer: "extension",
@@ -229,6 +242,27 @@ describe("插件配置弹窗", () => {
     });
     expect(query(container, "litellm-refresh-models")?.textContent).toContain("刷新可用模型");
     expect(container.textContent).toContain("不用在这里手写名单");
+  });
+
+  it("非站点插件启动失败时，模型页直接给出原因而不是「还没有模型」", async () => {
+    const plugin: SettingPluginView = {
+      id: "litellm-provider",
+      label: "LiteLLM",
+      description: "网关",
+      layer: "extension",
+      configPrefix: "providers.litellm",
+      settingCount: 1,
+      // Provider 不进站点控制面：没有 actualState，失败原因只能靠 activationFailure 上屏。
+      siteManaged: false,
+      provider: true,
+      modelRefresh: { path: "/api/providers/litellm/refresh", hint: "从网关发现" },
+      activationFailure: "ctx.generation.registerConversion is not a function"
+    };
+    const { container } = await renderDialog({ pluginId: "litellm-provider", page: "models", plugins: [plugin] });
+    expect(container.textContent).toContain("ctx.generation.registerConversion is not a function");
+    // 概览页的状态标记同样要跟着变：否则卡片写着「运行中」，模型页却说插件没启动。
+    const overview = await renderDialog({ pluginId: "litellm-provider", page: "overview", plugins: [plugin] });
+    expect(overview.container.querySelector(".plugin-overview__status")?.textContent).toBe("启动失败");
   });
 
   it("全部启用和全部关闭一次写这张卡片上的模型，关闭前先确认", async () => {

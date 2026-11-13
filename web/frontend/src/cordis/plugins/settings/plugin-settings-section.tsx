@@ -35,7 +35,7 @@ import {
   sectionizePluginGroups,
   type PluginBrowserFilter
 } from "./plugin-browser.js";
-import { PluginStateControl } from "./plugin-state-control.js";
+import { PluginFailureDetails, PluginStateControl } from "./plugin-state-control.js";
 import { ExtensionFaultNotice } from "./extension-fault-notice.js";
 import { ReleaseChangedNotice } from "./managed-extensions-ui.js";
 import { extensionObservationBadge, extensionSource, extensionTrustBadge, signedKeyId } from "./extension-source.js";
@@ -409,6 +409,7 @@ function PluginRow({
         </div>
         {openable ? <span className="plugin-row__chevron"><ChevronRightIcon size={15} /></span> : null}
       </div>
+      <PluginFailureDetails index={index} group={group} />
       {group.directory ? (
         <p className="plugin-directory plugin-row__directory" title={group.directory}>
           <span>所在目录</span><code>{group.directory}</code>

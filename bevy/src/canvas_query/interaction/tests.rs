@@ -34,7 +34,6 @@ fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         chrome: NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,
-        model_preview: None,
         id: id.into(),
         kind: "image".into(),
         x,
@@ -135,9 +134,22 @@ fn resize_only_hits_selected_node() {
         point_query(g, corner.0, corner.1, 1.0, None).hit,
         Some(PointHit::Resize {
             node_id: "n".into(),
-            handle: None
+            handle: Some("se".into())
         })
     );
+    for (point, handle) in [
+        ((0.0, 0.0), "nw"),
+        ((100.0, 0.0), "ne"),
+        ((0.0, 50.0), "sw"),
+    ] {
+        assert_eq!(
+            point_query(g, point.0, point.1, 1.0, None).hit,
+            Some(PointHit::Resize {
+                node_id: "n".into(),
+                handle: Some(handle.into())
+            })
+        );
+    }
 }
 
 

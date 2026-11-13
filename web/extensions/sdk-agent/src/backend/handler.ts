@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { createSdkAgentConversationAdapter, type SdkAgentRuntimeOptions } from "./sdk-agent-connections.js";
+import { createSdkAgentConversationAdapter } from "./execution-client.js";
+import type { SdkAgentRuntimeOptions } from "./sdk-agent-connections.js";
+import type { EnginePreparation } from "./runtime-preparation.js";
 import { createFixedEngineRuntime } from "./fixed-engine-runtime.js";
 import { sdkEngineForAdapter } from "../shared.js";
 /**
@@ -22,6 +24,7 @@ import type {
   ApplicationExtensionRawResponse,
   ApplicationExtensionRequestContext,
   ApplicationToolDelegationFacade,
+  ApplicationExtensionAgentRoleFacade,
 } from "@woohaa3/contracts";
 import {
   createEndpointPolicy,
@@ -34,6 +37,7 @@ import {
 } from "../shared.js";
 import {
   configureModelService,
+  testModelServiceConnection,
   type ModelServiceInput,
 } from "./configure-service.js";
 
@@ -50,13 +54,39 @@ export type SdkAgentHandlerOptions = {
   deployment: SdkAgentHandlerDeployment;
   tools?: ApplicationToolDelegationFacade;
   runtimeOptions?: SdkAgentRuntimeOptions;
+  /** 宿主角色准备面：连接测试也必须使用已注册角色，不绕过角色执行。 */
+  prepareRole?: ApplicationExtensionAgentRoleFacade;
 };
+
+/** 连接测试使用无工具文本角色；绑定配置显式指定，不由通道按 mode 推导。 */
+export const SDK_AGENT_PROBE_ROLE_ID = "standard-agent-roles/text-author";
 
 const BASE_PATH = "/api/sdk-agent";
 
 export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
   const { service, deployment } = options;
   const configureQueues = new Map<string, Promise<void>>();
+  let runtimeInstance: import("./fixed-engine-runtime.js").FixedEngineRuntime | undefined;
+  const runtimeOf = () => {
+    runtimeInstance ??= options.runtimeOptions?.runtime ?? (deployment.agentSdkDirs ? createFixedEngineRuntime(deployment.agentSdkDirs) : undefined);
+    return runtimeInstance;
+  };
+  const probeKey = (engine: string, version: string) => `${engine}@${version}:1`;
+  /** 连接保存/重试时的预检：只准备 runtime，不发送模型请求。 */
+  const prepareConnection = async (owner: string, connectionId: string): Promise<EnginePreparation | undefined> => {
+    const record = await service.get(owner, connectionId);
+    const binding = record && sdkEngineForAdapter(record.adapterId);
+    if (!record || !binding) return undefined;
+    const key = probeKey(binding.engine, binding.version);
+    await service.setRuntimeProbe?.(owner, connectionId, key, { state: "pending", checkedAt: new Date().toISOString(), reason: `正在准备 ${binding.engine} 运行时…` });
+    const runtime = runtimeOf();
+    if (!runtime?.prepare) return undefined;
+    const prepared = await runtime.prepare(binding.engine);
+    await service.setRuntimeProbe?.(owner, connectionId, key, prepared.state === "ready"
+      ? { state: "ready", checkedAt: new Date().toISOString() }
+      : { state: "unavailable", checkedAt: new Date().toISOString(), reason: prepared.reason ?? "运行时准备失败，请重试" });
+    return prepared;
+  };
 
   const sendJson = (
     res: ApplicationExtensionRawResponse,
@@ -105,6 +135,39 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
     const method = (req.method ?? "GET").toUpperCase();
     const segments = suffix.split("/").filter((part) => part !== "");
 
+    // 测试连接配置（不落盘、不创建连接）
+    if (suffix === "test-connection" && method === "POST") {
+      const body = (await readBody(req)) as Record<string, unknown> | null;
+      if (
+        !body ||
+        typeof body.adapterId !== "string" ||
+        ["secret", "baseUrl", "connectionId"].some(
+          (key) => body[key] !== undefined && typeof body[key] !== "string",
+        )
+      )
+        return sendJson(res, 400, {
+          ok: false,
+          code: "malformed-request",
+          message: "服务配置格式无效",
+        });
+      const result = await testModelServiceConnection(service, deployment, owner, {
+        adapterId: body.adapterId,
+        ...(typeof body.connectionId === "string"
+          ? { connectionId: body.connectionId }
+          : {}),
+        ...(typeof body.baseUrl === "string" ? { baseUrl: body.baseUrl } : {}),
+        ...(typeof body.secret === "string" ? { secret: body.secret } : {}),
+        ...(Array.isArray(body.models)
+          ? {
+              models: body.models.filter(
+                (id): id is string => typeof id === "string",
+              ),
+            }
+          : {}),
+      });
+      return sendJson(res, result.status, result.body);
+    }
+
     // 一次保存地址、Key 与模型目录；同一用户的并发保存串行处理，避免重复创建。
     if (suffix === "configure" && method === "POST") {
       const body = (await readBody(req)) as Record<string, unknown> | null;
@@ -151,6 +214,10 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
               }
             : {}),
         } satisfies ModelServiceInput);
+        // 保存设置不发起推理，但会触发一次可取消的 runtime 预检；失败只影响该连接。
+        if (result.status === 200 && result.body && "connectionId" in result.body) {
+          void prepareConnection(owner, result.body.connectionId).catch(() => undefined);
+        }
         return sendJson(res, result.status, result.body);
       } finally {
         release();
@@ -189,6 +256,7 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
             baseUrl: record.baseUrl,
             models: record.models ?? [],
             lastStatus: record.lastStatus,
+            runtimeProbe: record.runtimeProbe,
           };
         }),
       );
@@ -267,6 +335,20 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
           code: "not-found",
           message: "连接不存在或无权访问",
         });
+
+      if (segments.length === 3 && segments[2] === "runtime" && method === "POST") {
+        const prepared = await prepareConnection(owner, connectionId);
+        const binding = sdkEngineForAdapter(record.adapterId);
+        if (!prepared || !binding) return sendJson(res, 400, { code: "connection-unsupported", message: "该连接不需要外部运行时" });
+        return sendJson(res, 200, {
+          runtime: prepared.state,
+          engine: binding.engine,
+          engineVersion: binding.version,
+          ...(prepared.source ? { source: prepared.source } : {}),
+          ...(prepared.version ? { runtimeVersion: prepared.version } : {}),
+          ...(prepared.reason ? { reason: prepared.reason } : {})
+        });
+      }
 
       if (
         segments.length === 3 &&
@@ -359,14 +441,12 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
         purpose: "model-api-key",
       });
       const fixed = sdkEngineForAdapter(adapter.adapterId)!;
-      let runtimeReady = false;
-      try {
-        const runtime = options.runtimeOptions?.runtime ?? (deployment.agentSdkDirs ? createFixedEngineRuntime(deployment.agentSdkDirs) : undefined);
-        if (runtime) { await runtime.resolve(fixed.engine); runtimeReady = true; }
-      } catch { /* Runtime failure does not lose the saved key or contact a model. */ }
-      await service.setRuntimeProbe?.(owner, connectionId, `${fixed.engine}@${fixed.version}:1`, { state: runtimeReady ? "ready" : "unavailable", checkedAt: new Date().toISOString(), ...(!runtimeReady ? { reason: "缺少配套运行时，请重新安装对应平台扩展" } : {}) });
+      // 显式探测会准备 runtime（可能需要联网安装），但绝不发送模型请求。
+      const prepared = await prepareConnection(owner, connectionId);
+      const runtimeReady = prepared?.state === "ready" || !prepared;
       return sendJson(res, 200, {
         runtime: runtimeReady ? "ready" : "runtime-missing",
+        ...(!runtimeReady ? { runtimeReason: prepared?.reason ?? "缺少配套运行时，请重试准备" } : {}),
         engine: fixed.engine,
         engineVersion: fixed.version,
         transport: "unknown",
@@ -401,11 +481,22 @@ export function createSdkAgentHandler(options: SdkAgentHandlerOptions) {
       const model = typeof body?.model === "string" && body.model.trim() ? body.model.trim() : record.models?.[0];
       if (!model) return sendJson(res, 400, { code: "malformed-request", message: "请选择模型" });
       const requestId = `maintenance-${randomUUID()}`;
+      const prepared = options.prepareRole?.prepare({
+        roleId: SDK_AGENT_PROBE_ROLE_ID,
+        input: { prompt: "请只回复 ok。", action: "discuss" },
+        context: { prompt: "请只回复 ok。" },
+        target: { canvasId: "maintenance" },
+        requestId,
+        channel: { toolCalling: false, imageInput: false, structuredOutput: "validated-json", nativeCapabilities: [] }
+      });
+      if (!prepared || !prepared.ok) {
+        return sendJson(res, 409, { ok: false, code: prepared?.code ?? "role-unavailable", message: prepared?.message ?? "宿主未提供角色准备面", model });
+      }
       const runner = createSdkAgentConversationAdapter(adapter, options.runtimeOptions ?? {
         service, ...deployment, ...(options.tools ? { tools: options.tools } : {})
       });
       const outcome = await runner.run({ owner, canvasId: "maintenance", conversationId: requestId,
-        turnId: requestId, requestId, connection: { connectionId, adapterId: record.adapterId, configRevision: record.configRevision, credentialEpoch: record.credentialEpoch },
+        turnId: requestId, requestId, prepared: prepared.turn, connection: { connectionId, adapterId: record.adapterId, configRevision: record.configRevision, credentialEpoch: record.credentialEpoch },
         intent: { action: "discuss", canvasId: "maintenance", prompt: "请只回复 ok。", model }, history: [], signal: AbortSignal.timeout(60_000), emit: () => undefined });
       const result = outcome.status === "succeeded"
         ? { ok: true as const, outcome: { assistantText: outcome.assistantText ?? "" } }

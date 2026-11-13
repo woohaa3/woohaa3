@@ -10,6 +10,7 @@
  */
 import http from 'node:http';
 import { createStaticHandler, send } from './static-server.mjs';
+import { applyHostHttpTiming } from './host-http-timing.mjs';
 import { injectReleaseLinkHtml } from './extension-release-catalog.mjs';
 import { applyHttpMount, applyUpgradeMount, interceptHttpMount, rejectUpgradeSocket } from './mount-adapter.mjs';
 import { resolveAppPageTitle } from './app-html.mjs';
@@ -47,7 +48,7 @@ export async function startWebHostServer({
       : {})
   });
 
-  const server = http.createServer((req, res) => {
+  const server = applyHostHttpTiming(http.createServer((req, res) => {
     if (stopping) {
       send(res, 503, 'host is shutting down');
       return;
@@ -100,7 +101,7 @@ export async function startWebHostServer({
         if (!res.headersSent) send(res, 502, 'backend failure');
         else res.end();
       });
-  });
+  }));
 
   server.on('connection', (socket) => {
     sockets.add(socket);

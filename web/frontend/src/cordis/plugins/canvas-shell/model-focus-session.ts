@@ -8,7 +8,6 @@
  */
 import {
   aabbCenterRadius,
-  effectiveCanvasNodeSize,
   autoFrameDistance,
   clampPitch,
   normalizeYaw,
@@ -24,10 +23,7 @@ import {
   invalidateTarget,
   isFocused,
   keyboardFly,
-  modelAnchor,
   modelLocalAabb,
-  modelLayoutAabbRelative,
-  modelWorldAabbRelative,
   moveGesture,
   reframeFocus,
   restoreFocusCamera,
@@ -80,55 +76,19 @@ function sceneInput(input: FocusTargetInput) {
   };
 }
 
-/** 模型世界 AABB（含根锚点）；不可解析时返回 null。 */
-export function modelBounds(input: FocusTargetInput): ModelBounds | null {
-  const scene = sceneInput(input);
-  const local = modelLocalAabb(scene);
-  const hasWorldInstance = input.canvas.nodeData?.[input.nodeId]?.sharedWorldInstance !== undefined;
-  const world = worldInstancePresentation(input.canvas, input.nodeId, local);
-  if (hasWorldInstance) {
-    // 非法世界数据或空模型/资源未就绪都没有可聚焦几何；不能悄悄回落到旧卡片布局。
-    if (!world?.aabb) return null;
-    return { aabb: world.aabb, ...aabbCenterRadius(world.aabb), anchor: world.anchor };
-  }
-  const upright = modelWorldAabbRelative(scene);
-  const layout = modelLayoutAabbRelative(scene);
-  const node = input.canvas.document.nodes.find((entry) => entry.id === input.nodeId);
-  if (!node) return null;
-  const size = renderedModelNodeSize(node, input.canvas.nodeData?.[input.nodeId], input.capabilities);
-  const offset = input.placement?.offset ?? { x: 0, y: 0, z: 0 };
-  const anchor = modelAnchor({
-    nodeX: node.position?.x ?? 0,
-    nodeY: node.position?.y ?? 0,
-    nodeWidth: size.width,
-    nodeHeight: size.height,
-    relativeAabb: layout ?? { min: [0, 0, 0], max: [0, 0, 0] },
-    offset
-  });
-  if (!upright || !layout) return null;
-  const aabb: Aabb = {
-    min: [upright.min[0] + anchor[0], upright.min[1] + anchor[1], upright.min[2] + anchor[2]],
-    max: [upright.max[0] + anchor[0], upright.max[1] + anchor[1], upright.max[2] + anchor[2]]
-  };
-  const finite = [...aabb.min, ...aabb.max].every((value) => Number.isFinite(value));
-  if (!finite) return null;
-  const { center, radius } = aabbCenterRadius(aabb);
-  return { aabb, center, radius, anchor };
-}
-
 /**
- * 节点在 Bevy 画面中的**实际卡片尺寸**：与 `buildCanvasRenderScene` 一致。
+ * 模型世界 AABB（含世界实例根锚点）；不可解析时返回 null。
  *
- * 普通模型的旧紧凑尺寸扩展为内嵌预览卡片；复合资产使用规范基准矩形。
- * `modelAnchor` 必须用同一尺寸，否则命中/取景与画面漂移
- * （change: 2026-10-08-make-film-set-model-only 修订）。
+ * 受支持模型只有共享世界实例一种形态：聚焦取景只读 `sharedWorldInstance.transform` 与已准备
+ * 的局部 AABB，不读取卡片矩形、卡片相机或 `modelPlacement`
+ * （change: 2026-11-10-remove-legacy-model-card-nodes）。
  */
-export function renderedModelNodeSize(node: {
-  type: string;
-  width?: number;
-  height?: number;
-}, _data?: unknown, capabilities?: import("@woohaa3/contracts").NodeCapabilities): { width: number; height: number } {
-  return effectiveCanvasNodeSize(node, undefined, capabilities);
+export function modelBounds(input: FocusTargetInput): ModelBounds | null {
+  const local = modelLocalAabb(sceneInput(input));
+  // 非法世界数据或空模型/资源未就绪都没有可聚焦几何；不回落到卡片布局。
+  const world = worldInstancePresentation(input.canvas, input.nodeId, local);
+  if (!world?.aabb) return null;
+  return { aabb: world.aabb, ...aabbCenterRadius(world.aabb), anchor: world.anchor };
 }
 
 export type FocusHitResult =

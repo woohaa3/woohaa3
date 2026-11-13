@@ -185,7 +185,6 @@ fn apply_presentation(commands: &mut Commands, entity: Entity, node: &GraphNode)
         media_loading: node.media_loading,
         ghost: node.ghost,
         model: node.model.is_some(),
-        model_preview: node.model_preview.is_some(),
         history: crate::canvas_query::layout::has_history_strip(node),
     });
     if node.kind.is_empty() {

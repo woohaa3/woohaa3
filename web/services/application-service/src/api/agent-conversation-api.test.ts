@@ -104,7 +104,7 @@ it("image director API rejects private fields and derives the owner and connecti
   service.resolveConnectionBinding = async () => ({ ok: true, binding: { connectionId: "connection", adapterId: "adapter", configRevision: 1, credentialEpoch: 1 } });
   const accept = vi.fn(async () => ({ ok: true, conversation: {}, turn: {}, reused: false }));
   const { base } = await boot({ service, imageDirectorScene: { accept } as never });
-  const entry = { action: "discuss", canvasId: "canvas", nodeId: "image", model: "model", connectionId: "connection", prompt: "build" };
+  const entry = { action: "generate", canvasId: "canvas", nodeId: "image", model: "model", connectionId: "connection", roleId: "test/scene-director", prompt: "build" };
   const path = `${base}/api/agent-conversations/conversations/conversation/image-director-scenes`;
   const post = (body: unknown) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   expect((await post({ requestId: "request", entry: { ...entry, owner: "forged" } })).status).toBe(400);
@@ -457,13 +457,43 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
       acceptTurn: (input: { conversationId: string }) => { accepted.push(input.conversationId); return { ok: true, conversation: { conversationId: input.conversationId }, turn: { turnId: "t1" }, reused: true }; }
     } as unknown as AgentConversationService;
     const { base } = await boot({ service });
-    const submit = () => fetch(`${base}/api/agent-conversations/conversations/old/turns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId: "req", entry: { action: "modify", canvasId: "cv", nodeId: "node", prompt: "修改", connectionId: "c1" } }) });
+    const submit = () => fetch(`${base}/api/agent-conversations/conversations/old/turns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId: "req", entry: { action: "modify", canvasId: "cv", nodeId: "node", roleId: "test/discussion", prompt: "修改", connectionId: "c1" } }) });
     expect((await submit()).status).toBe(200);
     expect(created).toEqual([{ owner: "user-a", canvasId: "cv", adapterId: "fake", nodeId: "node", connectionId: "c1" }]);
     expect(accepted).toEqual(["fresh"]);
     await submit();
     expect(created).toHaveLength(1);
     expect(accepted).toEqual(["fresh", "old"]);
+  });
+
+  it("接受回合允许执行器迁移前的冻结身份，仍按迁移后身份冻结", async () => {
+    const calls: Array<{ connection?: unknown }> = [];
+    const service = {
+      ...serviceStub(),
+      readConversation: () => ({ ok: true as const, snapshot: { conversation: { conversationId: "conv-1", canvasId: "cv", adapterId: "fake" } } }),
+      resolveConnectionBinding: async () => ({
+        ok: true as const,
+        binding: { connectionId: "c1", adapterId: "fake", configRevision: 2, credentialEpoch: 0 },
+        upgradedFrom: { connectionId: "c1", adapterId: "fake", configRevision: 1, credentialEpoch: 0 }
+      }),
+      acceptTurn: (input: { connection?: unknown }) => {
+        calls.push({ connection: input.connection });
+        return { ok: true as const, conversation: { conversationId: "conv-1", canvasId: "cv" }, turn: { turnId: "t1" }, reused: true };
+      }
+    } as unknown as AgentConversationService;
+    const { base } = await boot({ service });
+    const submit = (connection: { configRevision: number }) => fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: "req", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi", connectionId: "c1",
+        connection: { connectionId: "c1", adapterId: "fake", configRevision: connection.configRevision, credentialEpoch: 0 } } })
+    });
+    // 迁移前版本（1）仍接受，本回合按迁移后版本（2）冻结。
+    expect((await submit({ configRevision: 1 })).status).toBe(200);
+    expect(calls[0]?.connection).toEqual({ connectionId: "c1", adapterId: "fake", configRevision: 2, credentialEpoch: 0 });
+    // 既不是迁移前也不是迁移后的版本仍拒绝。
+    expect((await submit({ configRevision: 0 })).status).toBe(409);
+    expect(calls).toHaveLength(1);
   });
 
   it("接受回合时解析连接并把绑定传给服务；连接不可用返回 409", async () => {
@@ -482,13 +512,13 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     const okResponse = await fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "req-1", entry: { action: "discuss", canvasId: "cv", prompt: "hi" } })
+      body: JSON.stringify({ requestId: "req-1", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi" } })
     });
     expect(okResponse.status).toBe(200);
     expect(calls[0]?.connection).toEqual({ connectionId: "c1", adapterId: "fake", configRevision: 1, credentialEpoch: 0 });
     const stale = await fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "frozen", entry: { action: "discuss", canvasId: "cv", prompt: "hi", connectionId: "c1",
+      body: JSON.stringify({ requestId: "frozen", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi", connectionId: "c1",
         connection: { connectionId: "c1", adapterId: "fake", configRevision: 0, credentialEpoch: 0 } } })
     });
     expect(stale.status).toBe(409);
@@ -498,7 +528,7 @@ describe("Agent 会话 API · 来源连接发现与切换（change 2026-10-16，
     const failResponse = await fetch(`${base}/api/agent-conversations/conversations/conv-1/turns`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "req-2", entry: { action: "discuss", canvasId: "cv", prompt: "hi", connectionId: "c9" } })
+      body: JSON.stringify({ requestId: "req-2", entry: { action: "discuss", canvasId: "cv", roleId: "test/discussion", prompt: "hi", connectionId: "c9" } })
     });
     expect(failResponse.status).toBe(409);
   });
@@ -513,7 +543,7 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
   const port = registry.forExtension("demo");
   port.registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
-  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
   const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"] } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
   try {
     const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
@@ -541,16 +571,16 @@ it("service management uses trusted owner, enforces Origin/admin and atomically 
 });
 
 
-it("auto-projects a declared provider assistant as a discussion binding without wrapping ordinary text generation", async () => {
+it("auto-projects a declared provider assistant as a text binding without wrapping ordinary text generation", async () => {
   const { createServiceConnectionRegistry } = await import("../service-connections/registry.js");
   const { createSqliteExtensionDocumentStore } = await import("../repository/extension-document-store.js");
   const store = createSqliteExtensionDocumentStore({ path: ":memory:", owners: ["sources"] });
   const registry = createServiceConnectionRegistry({ documents: store.forExtension("sources")!, checkEndpoint: () => true, validateBinding: () => false });
   const actor = { owner: "user-a", administrator: false, canUseSite: true };
   registry.forExtension("demo").registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
-  registry.forExtension("sdk-agent").registerConsumer({ protocols: ["chat-completions"], purposes: ["discussion", "target-execution"] });
+  registry.forExtension("sdk-agent").registerConsumer({ protocols: ["chat-completions"], purposes: ["text"] });
   const source = (await registry.save(actor, { operationId: "create", name: "Relay", endpoints: [{ protocol: "chat-completions", baseUrl: "https://relay.example/v1" }], expectedRevision: 0, expectedCredentialEpoch: 0 })).connection;
-  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "discussion", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
+  const evidenced = await registry.publishCapabilities(actor, source.serviceConnectionId, source, [{ purpose: "text", protocol: "chat-completions", modelId: "model", imageInput: false, evidence: "adapter" }]);
   const providers = () => [{ providerId: "demo", extensionId: "demo", models: [{ providerModelId: "model", modelType: "language" }], serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" } }] as unknown as import("@woohaa3/contracts").GenerationProvider[];
   try {
     const { base } = await boot({ serviceConnections: registry, serviceConnectionProviders: providers });
@@ -560,7 +590,7 @@ it("auto-projects a declared provider assistant as a discussion binding without 
     const connection = ((await first.json()) as { connection: import("@woohaa3/contracts").ServiceConnectionView }).connection;
     expect(connection.bindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ bindingId: "provider:demo", consumer: "provider", purposes: ["text"] }),
-      expect.objectContaining({ bindingId: "provider-assistant:demo", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion", "target-execution"], modelKeys: ["model"] }),
+      expect.objectContaining({ bindingId: "provider-assistant:demo", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"], modelKeys: ["model"] }),
     ]));
     // Repeating the same operation does not add a binding or advance the published revision.
     const second = await post({ ...connection, providerId: "demo", modelId: "model" });
@@ -588,4 +618,32 @@ it("text query, retry and exact stop authorize the trusted owner before touching
   const allowed = await boot({ service, assistantText: text as never });
   const link = await fetch(`${allowed.base}/api/agent-conversations/turns/round/link`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: "spoofed" }) });
   expect(link.status).toBe(400);
+});
+
+describe("conversation read recovery (task 5.1)", () => {
+  it("returns the adopted running turn on re-read without resubmitting work", async () => {
+    const acceptTurn = vi.fn(() => { throw new Error("must not accept"); });
+    const dispatchTurn = vi.fn(() => { throw new Error("must not dispatch"); });
+    const snapshot = {
+      conversation: { conversationId: "conv-1", canvasId: "canvas-1", adapterId: "local-agent", title: "t", status: "active", createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:01:00.000Z", turnCount: 1 },
+      messages: [{ messageId: "m1", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "user", content: "hello", truncated: false, sequence: 1, createdAt: "2026-11-10T00:00:00.000Z" }],
+      turns: [{ turnId: "turn-1", conversationId: "conv-1", requestId: "req-1", action: "modify", status: "running", stage: "writing", target: { canvasId: "canvas-1", nodeId: "n1" }, tools: [], executorCursor: 3, createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:01:00.000Z" }],
+      events: [],
+      cursor: 0
+    };
+    const service = {
+      ...serviceStub(),
+      readConversation: () => ({ ok: true, snapshot }),
+      acceptTurn,
+      dispatchTurn
+    } as unknown as AgentConversationService;
+    const { base } = await boot({ service });
+    const first = await fetch(`${base}/api/agent-conversations/conversations/conv-1`).then((response) => response.json()) as typeof snapshot;
+    const second = await fetch(`${base}/api/agent-conversations/conversations/conv-1`).then((response) => response.json()) as typeof snapshot;
+    expect(first.turns[0]).toMatchObject({ status: "running", stage: "writing", executorCursor: 3 });
+    expect(second.messages).toEqual(first.messages);
+    expect(second.turns[0]!.status).toBe("running");
+    expect(acceptTurn).not.toHaveBeenCalled();
+    expect(dispatchTurn).not.toHaveBeenCalled();
+  });
 });

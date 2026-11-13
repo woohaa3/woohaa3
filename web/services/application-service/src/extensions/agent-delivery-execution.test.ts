@@ -7,6 +7,8 @@ import { createSqliteAgentConversationStore } from "../repository/agent-conversa
 import { createAgentAdapterRegistry } from "./agent-adapter-registry.js";
 import { createAgentConversationService } from "./agent-conversation-service.js";
 
+import { testRoleRegistry } from "./test-role-registry.js";
+
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).reverse().forEach(dispose => dispose()));
 function fixture() {
@@ -21,11 +23,11 @@ function fixture() {
   const registry = createAgentAdapterRegistry({ hasCapability: () => true,
     resolveCapabilityOwner: () => ({ extensionId: "fake", configVersion: 1, mode: "public" }),
     resolveCapability: () => adapter, snapshot: () => [{ extensionId: "fake", capabilities: ["agent-conversation-adapter:fake"] }] });
-  const service = createAgentConversationService({ store, registry, maxMessageChars: 64 });
+  const service = createAgentConversationService({ store, registry, agentRoles: testRoleRegistry(), maxMessageChars: 64 });
   const created = service.createConversation({ owner: "owner", canvasId: "canvas", nodeId: "target", adapterId: "fake" });
   if (!created.ok) throw new Error(created.error.message);
   const input = { owner: "owner", conversationId: created.conversation.conversationId, requestId: "conversion:request:1",
-    entry: { action: "generate" as const, canvasId: "canvas", nodeId: "target", mode: "model3d" as const, prompt: "Build from the source image" },
+    entry: { roleId: "test/discussion", action: "generate" as const, canvasId: "canvas", nodeId: "target", mode: "model3d" as const, prompt: "Build from the source image" },
     delivery: { purpose: "text-generation" as const, domainRequestId: "request", attemptId: "attempt-1" } };
   const accepted = service.acceptDeliveryTurn(input);
   if (!accepted.ok) throw new Error(accepted.error.message);
@@ -66,7 +68,7 @@ describe("trusted candidate delivery on the conversation ledger", () => {
 
   it("does not let an adapter candidate result settle a restarted parent", async () => {
     const f = fixture();
-    const restarted = createAgentConversationService({ store: f.reopen(), registry: f.registry });
+    const restarted = createAgentConversationService({ store: f.reopen(), registry: f.registry, agentRoles: testRoleRegistry() });
     await restarted.reconcileUnknown();
     await restarted.dispatchTurn(f.accepted.turn.turnId);
     expect(f.query).not.toHaveBeenCalled();

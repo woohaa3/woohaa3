@@ -117,17 +117,12 @@ export function decodeMcpRenderPreviewRequest(body: unknown): McpDecodeResult<Mc
   if (background !== undefined && typeof background !== "string") {
     return fail("malformed-request", "background 必须是字符串");
   }
-  const cameraPreset = body.cameraPreset;
-  if (cameraPreset !== undefined && typeof cameraPreset !== "string") {
-    return fail("malformed-request", "cameraPreset 必须是字符串");
-  }
   return ok({
     canvasId,
     nodeId: body.nodeId,
     ...numeric,
     ...(typeof body.clipId === "string" ? { clipId: body.clipId } : {}),
     ...(background === undefined ? {} : { background }),
-    ...(cameraPreset === undefined ? {} : { cameraPreset })
   } as McpRenderPreviewRequest);
 }
 

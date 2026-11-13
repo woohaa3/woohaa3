@@ -5,21 +5,27 @@ import { createBackendSettingsStore } from "../settings/backend-settings-store.j
 import { api, cleanupHarness, declaredSite, local, render } from "./plugin-harness.js";
 afterEach(cleanupHarness);
 
-it("零提供者显示添加入口，Agent 直接显示本地连接和模型提供商按钮", async () => {
+it("零提供者的 Agent 使用统一添加卡片，详情保留本地与提供商入口", async () => {
   const f = await render([], true);
   expect([...f.el.querySelectorAll('[data-empty="true"]')].map(card => card.getAttribute("data-capability"))).toEqual(["agent", "image", "video", "audio"]);
-  expect([...f.el.querySelectorAll('[data-capability="agent"] button')].map(button => button.textContent)).toEqual(["连接本地 Agent", "添加模型提供商"]);
+  const card = f.el.querySelector('[data-capability="agent"]')!;
+  expect(card.tagName).toBe("BUTTON");
+  expect(card.querySelector(".agent-assistant__capability-add")?.textContent).toBe("添加 Agent");
+  expect(card.querySelectorAll("button")).toHaveLength(0);
   expect(f.el.querySelector('[data-capability="agent"] [aria-haspopup]')).toBeNull();
   expect(f.el.querySelector('[data-capability="agent"]')?.textContent).not.toContain("已配置 0");
   for (const kind of ["model3d", "hosting"]) {
     expect(f.el.querySelector(`[data-capability="${kind}"]`)?.getAttribute("data-empty")).toBe("false");
     expect(f.el.querySelector(`[data-capability="${kind}"]`)?.textContent).toContain(kind === "model3d" ? "暂未接入" : "给模型提供临时图片访问地址不可用");
   }
-  await f.click("连接本地 Agent");
+  await act(async () => card.querySelector<HTMLElement>(".agent-assistant__capability-add")!.click());
+  expect(f.el.querySelector('[data-capability-detail="agent"]')).not.toBeNull();
+  await f.click("配置本地 Agent");
   expect(f.el.querySelector('[data-ai-page="agents"]')?.closest("[hidden]")).toBeNull();
   expect(f.el.querySelector('[data-ai-page="agents"]')?.textContent).toContain("本机工具配置");
   await f.click("能力总览");
-  await f.click("添加模型提供商");
+  await f.click("Agent");
+  await f.click("添加提供商");
   expect(f.el.querySelector('.agent-assistant__drawer-layer:not([hidden])')?.textContent).toContain("添加 Agent提供商");
 });
 

@@ -5,7 +5,6 @@
  * 纯类型/常量叶子；历史是**画布权限域内的独立产品读模型**。完整历史、缩略图与面板状态
  * MUST NOT 进入 Canvas Y.Doc / `ServerCanvas`。
  */
-import type { ModelCamera } from "../model-cameras.js";
 import type { ImageEditDocument, ImageEditProjectObjectRef } from "../image-edit.js";
 
 /** 历史条目契约版本；结构变化必须升版本。 */
@@ -108,7 +107,6 @@ export type NodeHistoryModelPayload = {
   version: string;
   sourceHash: string;
   placement?: NodeHistoryModelPlacement;
-  modelCameras?: ModelCamera[];
 };
 
 export type NodeHistoryContentPayload = NodeHistoryTextPayload | NodeHistoryMediaPayload | NodeHistoryModelPayload;
@@ -267,8 +265,7 @@ export type NodeGenerationHistoryDetail =
       version: string;
       sourceHash: string;
       placement?: NodeHistoryModelPlacement;
-      modelCameras?: ModelCamera[];
-        }
+            }
   | {
       entryId: string;
       kind: "failure";

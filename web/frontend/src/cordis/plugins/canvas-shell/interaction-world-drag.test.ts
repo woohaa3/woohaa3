@@ -259,6 +259,49 @@ it("switches sibling world models directly when both are hit only by the rendere
   controller.dispose();
 });
 
+it("does not select a world model when the click misses every exposed surface", () => {
+  const base = worldCanvas();
+  const area = { id: "area", type: "scene-area", position: { x: 0, y: 0 } };
+  const canvas = {
+    ...base,
+    document: { ...base.document, nodes: [...base.document.nodes, area] },
+    nodeData: {
+      ...base.nodeData,
+      area: {
+        sceneArea: {
+          kind: "scene-area", version: "shared-world-v1", areaId: "a1", scopeVersion: "s1",
+          bounds: { min: { u: 0, v: 0 }, max: { u: 10, v: 10 } }
+        }
+      }
+    }
+  } as unknown as ServerCanvas;
+  woohaa3CanvasStore.getState().applyRemoteCanvas(canvas);
+  const dom = harness();
+  // 指针落在旧实现拿来兜底的 4x4 AABB 内，但没命中任何露出表面；
+  // 点击位置在导演区之外（地面 20,20），不能因此选中区内的模型。
+  const { runtime } = runtimeCapturing({
+    pointHit: () => null,
+    modelPick: () => null,
+    modelMarquee: () => ["m1"]
+  });
+  runtime.queryWorldGround = () => ({ ok: true, generation: runtime.interactionGeneration?.() ?? 0, value: { u: 20, v: 20 } });
+  // 生产 2D snapshot 不给世界对象保留卡片矩形；测试 oracle 按卡片矩形兜底，这里显式对齐。
+  runtime.queryMarquee = () => ({ ok: true, generation: runtime.interactionGeneration?.() ?? 0, value: [] });
+  const controller = installInteractionController({
+    canvas: dom.canvas, getRuntime: () => runtime, getSession: () => getSession() as never,
+    target: dom.target as never
+  });
+  controller.flush();
+  submitted.length = 0;
+  dom.fire("pointerdown", { clientX: 150, clientY: 140 });
+  // 按下阶段就必须为空：旧实现的 4x4 AABB 兜底会在这里选中 m1。
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual([]);
+  dom.fire("pointerup", { clientX: 150, clientY: 140 });
+  controller.flush();
+  expect(nodeSelectionStore.getSnapshot().nodeIds).toEqual([]);
+  controller.dispose();
+});
+
 it("applies the same area-first rule when the world model is hit only by the renderer pick", () => {
   const base = worldCanvas();
   const area = { id: "area", type: "scene-area", position: { x: 0, y: 0 } };

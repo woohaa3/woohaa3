@@ -248,7 +248,7 @@ describe("ModelExecutionHost 视频参数门禁", () => {
     });
     expect(outcome).toMatchObject({ ok: false });
     expect(outcome !== undefined && !outcome.ok ? outcome.error : "").toContain(
-      "缺少必填参数「比例」（aspectRatio）"
+      "请填写比例"
     );
     expect(panel.blockingReasons?.join("；")).toContain("缺少必填参数「比例」");
     expect(submit).not.toHaveBeenCalled();
@@ -340,7 +340,7 @@ describe("model choice persistence", () => {
       registry={registryWithPanel()} draftStore={createModelDraftStore()} />);
     expect(host.textContent).toContain("removed-model");
     expect(host.textContent).toContain("下线");
-    expect(host.querySelector('button[aria-label="选择生成模型"]')).not.toBeNull();
+    expect(host.querySelector('button[aria-label="来源与模型"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="video-panel"]')).toBeNull();
     expect(run).not.toHaveBeenCalled();
   });
@@ -409,4 +409,23 @@ it("keeps a rejected configuration for the existing edit history without retryin
   expect(record).toHaveBeenCalledTimes(1);
   expect(record.mock.calls[0]![0]).toMatchObject([{expectedNodeData:{[NODE_ID]:canvasWithVideoNode().nodeData[NODE_ID]}}]);
   expect(panel!.draft.prompt).toBe("unsent"); expect(submit).not.toHaveBeenCalled();
+});
+
+it("media accepts independent A/B snapshots while the first request is unresolved; editing and browsing do not run", async () => {
+  woohaa3CanvasStore.getState().hydrate(canvasFixture({nodes:[{id:'media',type:'image',data:{prompt:'target prompt',preferredModelKey:'image'}}]}));
+  const catalog=catalogFixture([{modelKey:'image',interaction:{id:'snapshot-panel',version:1},inputSchema:{type:'object',properties:{seed:{type:'integer',default:1}}}}]);
+  let panel: ModelPanelProps | undefined;
+  const registry=new ModelInteractionService();registry.register({id:'snapshot-panel',version:1,owner:'test',Panel:props=>{panel=props;return <output>{props.draft.prompt}</output>}});
+  const frozen: Array<{prompt:string;parameters:Record<string,unknown>}> = [];
+  const settle: Array<(v:{ok:true;runId:string;jobId:string})=>void>=[];
+  const submit=vi.fn((input:{prompt:string;parameters:Record<string,unknown>})=>{frozen.push(structuredClone(input));return new Promise<{ok:true;runId:string;jobId:string}>(resolve=>settle.push(resolve));});
+  await mount(<ModelExecutionHost canvasId="canvas" selectedNodeId="media" session={{} as never} runClient={{} as never} writable dialogs={new DialogService()} catalog={new StubCatalogService(catalog)} registry={registry} draftStore={createModelDraftStore()} submitCoordinator={{submit,cancel:vi.fn()}}/>);
+  await act(async()=>panel!.patchDraft({prompt:'A',parameters:{model:'image',seed:1}}));expect(submit).not.toHaveBeenCalled();
+  let taskA!: ReturnType<ModelPanelProps['submit']>;let taskB!: ReturnType<ModelPanelProps['submit']>;
+  await act(async()=>{taskA=panel!.submit({prompt:'A',parameters:{model:'image',seed:1}});});
+  await act(async()=>panel!.patchDraft({prompt:'B',parameters:{model:'image',seed:2}}));
+  await act(async()=>{taskB=panel!.submit({prompt:'B',parameters:{model:'image',seed:2}});});
+  expect(submit).toHaveBeenCalledTimes(2);expect(frozen.map(input=>[input.prompt,input.parameters.seed])).toEqual([['A',1],['B',2]]);
+  await act(async()=>{settle[1]!({ok:true,runId:'B',jobId:'B'});settle[0]!({ok:true,runId:'A',jobId:'A'});await Promise.all([taskA,taskB]);});
+  expect(panel!.draft.prompt).toBe('B');
 });

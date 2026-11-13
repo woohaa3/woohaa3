@@ -31,7 +31,7 @@ function diagnosticTimes(ir: WorldAnimationIr, maximum: number): number[] {
   return Array.from({length:maximum},(_,i)=>sorted[Math.round(i*(sorted.length-1)/(maximum-1))]!);
 }
 
-export function analyzeWorldAnimationData(ir:WorldAnimationIr, models:readonly Model[], origin:GroundPoint, area?:GroundAabb) {
+export function analyzeWorldAnimationData(ir:WorldAnimationIr, models:readonly Model[], origin:GroundPoint, area?:GroundAabb, quarterTurns = 0) {
   const targets=new Set([...ir.instanceTracks,...(ir.partTracks ?? []),...(ir.walkTracks ?? [])].map(track=>track.targetId));
   const byId=new Map(models.map(model=>[model.instanceId,model]));
   const unavailableTargets=new Set<string>();
@@ -59,9 +59,9 @@ export function analyzeWorldAnimationData(ir:WorldAnimationIr, models:readonly M
   }
   const previousFeet=new Map<string,{time:number;u:number;v:number;h:number}>();
   for(const time of times){
-    const current=sampleWorldAnimationInArea(ir,time,origin);
+    const current=sampleWorldAnimationInArea(ir,time,origin,quarterTurns);
     const neighborTime=time<ir.duration ? Math.min(ir.duration,time+0.01) : Math.max(0,time-0.01);
-    const next=sampleWorldAnimationInArea(ir,neighborTime,origin);
+    const next=sampleWorldAnimationInArea(ir,neighborTime,origin,quarterTurns);
     for(const instanceId of targets){
       const model=byId.get(instanceId);
       if(!model)continue;
@@ -142,10 +142,10 @@ export function analyzeWorldAnimationData(ir:WorldAnimationIr, models:readonly M
   if(ir.loop)boundaryTimes.add(0);
   const epsilon=Math.min(0.01,ir.duration/1000);
   for(const time of times)if(boundaryTimes.has(time) && time<ir.duration && (ir.loop || time>0)) {
-    const before=sampleWorldAnimationInArea(ir,time===0 ? ir.duration-epsilon : time-epsilon,origin);
-    const center=sampleWorldAnimationInArea(ir,time,origin);
-    const after=sampleWorldAnimationInArea(ir,time===ir.duration ? epsilon : time+epsilon,origin);
-    const seamEnd=time===0 ? sampleWorldAnimationInArea(ir,ir.duration,origin) : center;
+    const before=sampleWorldAnimationInArea(ir,time===0 ? ir.duration-epsilon : time-epsilon,origin,quarterTurns);
+    const center=sampleWorldAnimationInArea(ir,time,origin,quarterTurns);
+    const after=sampleWorldAnimationInArea(ir,time===ir.duration ? epsilon : time+epsilon,origin,quarterTurns);
+    const seamEnd=time===0 ? sampleWorldAnimationInArea(ir,ir.duration,origin,quarterTurns) : center;
     for(const instanceId of targets){
       const a=before.instances.get(instanceId)?.position,b=seamEnd.instances.get(instanceId)?.position;
       const c=center.instances.get(instanceId)?.position,d=after.instances.get(instanceId)?.position;

@@ -76,7 +76,7 @@ async function waitForModelRendered(page: Page, nodeId: string): Promise<void> {
   await page.waitForTimeout(800);
 }
 
-/** 聚焦后模型 AABB 中心的 client 坐标。 */
+/** 聚焦后复合资产（片场）范围的 client 中心坐标（共享世界模型没有卡片）。 */
 async function focusPoint(page: Page, nodeId: string): Promise<{ x: number; y: number }> {
   return page.evaluate((id) => {
     const canonical = (window as unknown as {

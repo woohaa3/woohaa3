@@ -44,6 +44,14 @@ it("当前版本圆点只做只读查看，不重复应用",()=>{
   expect(changed.mock.calls[0]?.[0]).toMatchObject({nodeId:"n", entryId:"2"});
   expect(submitted).toHaveLength(0);
 });
+
+it("旧卡片模型不再扩展为预览卡片：圆点按存储尺寸计算",()=>{
+  // 模型没有卡片扩展/Minimum preview height；旧卡片节点保留原值（change: 2026-11-10）。
+  const {scene}=setup({type:"model3d",width:196,height:64});
+  const card=scene().nodes.find(candidate=>candidate.id==="n")!;
+  expect(card.width).toBe(196);
+  expect(card.height).toBe(64);
+});
 it("locks identity across window changes and cancels when the pressed target disappears",()=>{
   const {dom,point,changed,versionsByNode,controller}=setup();const at=point(212);
   dom.fire("pointerdown",{clientX:at.x,clientY:at.y});
@@ -148,10 +156,9 @@ it("圆点内外的连续滚动均不查询历史命中",()=>{
 });
 
 it.each([
-  {type:"model3d",width:196,height:64},
-  {type:"model3d",width:300,height:116},
+  {type:"text",width:32,height:40},
   {type:"image",width:32,height:40},
-])("dot centers use rendered geometry for expanded/clamped cards: %o", node => {
+])("dot centers use rendered geometry for clamped cards: %o", node => {
   const {dom,controller,changed,scene}=setup(node);
   dom.canvas.getBoundingClientRect=()=>({left:83,top:47,width:1000,height:800}) as DOMRect;
   // Nonzero viewport and DOM origins must not introduce a CSS/world coordinate offset.

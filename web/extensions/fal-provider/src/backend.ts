@@ -14,7 +14,7 @@ import { discoverFalModels } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { createFalProvider, type FalCatalog } from "./provider.js";
 import { falModelDefinitions, type FalModel } from "./schema.js";
-import { DEFAULT_FAL_BASE_URL, FAL_PLUGIN_ID, FAL_PROVIDER_ID, parseModelIds } from "./shared.js";
+import { DEFAULT_FAL_BASE_URL, FAL_PLUGIN_ID, FAL_PROVIDER_ID, falOrigin, parseModelIds } from "./shared.js";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
@@ -132,6 +132,36 @@ export function createFalProviderPlugin(deps: FalPluginDependencies = {}): Exten
             ? parsed.message
             : "未填写模型。填 endpoint id，例如 fal-ai/flux/schnell";
       return { state: "degraded" as const, diagnostics: [{ code: "provider-credentials-missing", message }] };
+    },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      const baseUrl = (config.baseUrl ?? DEFAULT_FAL_BASE_URL).trim();
+      if (!apiKey || !baseUrl) return { ok: false, message: "请先填写 fal.ai API Key 和地址" };
+      const parsed = parseModelIds(config.models);
+      if (!parsed.ok) return { ok: false, message: parsed.message };
+      const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+      if (parsed.ids.length > 0) {
+        const result = await discoverFalModels({
+          modelIds: parsed.ids,
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+          timeoutMs: 10_000
+        });
+        if (!result.ok) return { ok: false, message: result.message };
+      }
+      const probeEndpoint = parsed.ids[0] ?? "fal-ai/flux/schnell";
+      try {
+        const response = await fetchImpl(`${falOrigin(baseUrl)}/${probeEndpoint}/requests/00000000-0000-0000-0000-000000000000/status`, {
+          method: "GET",
+          headers: { authorization: `Key ${apiKey}`, accept: "application/json" },
+          signal: AbortSignal.timeout(10_000)
+        });
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, message: `fal.ai API Key 验证失败（HTTP ${response.status}）` };
+        }
+        return { ok: true, message: "fal.ai 连接测试通过" };
+      } catch (error) {
+        return { ok: false, message: `fal.ai 连接失败：${error instanceof Error ? error.message : String(error)}` };
+      }
     },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";

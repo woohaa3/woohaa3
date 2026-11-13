@@ -9,6 +9,7 @@
  * 视频编辑能力由 optional `video-capture` Plugin 以 `VIDEO_EDIT_SERVICE` 提供。
  */
 import { Button } from "@woohaa3/ui/primitives";
+import { roleIdForTarget } from "../../services/agent-role-bindings.js";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
 import { useSyncExternalStore, type ReactNode } from "react";
@@ -239,7 +240,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           useSyncExternalStore(ctx.canvasState.subscribe, ctx.canvasState.getWorkingCanvas, ctx.canvasState.getWorkingCanvas);
           if (!resolveSelectionContext(ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas(), route.nodeId)) return null;
           return (
-            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
+            // 共享世界模型是没有卡片的大锚点：下方放不下时不要让画布平移找空间，
+            // 面板贴可用区域底边停靠即可（与导演区同一规则）。
+            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime} revealAnchor={false}>
               <ModelParameterPanel
                 canvasId={canvasId}
                 nodeId={route.nodeId}
@@ -291,7 +294,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           const area = node ? decodeSceneAreaData(canvas?.nodeData[route.nodeId]?.sceneArea) : undefined;
           if (!node || !area || !area.ok) return null;
           return (
-            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
+            <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime} revealAnchor={false}>
               <AuthoringGenerateHost
                 canvasId={canvasId}
                 nodeId={route.nodeId}
@@ -386,7 +389,21 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                 const canvas = ctx.canvasState.getWorkingCanvas() ?? ctx.canvasState.getCanvas();
                 if (!nodeId || !target || !ctx.canvasSession.isWritable() || !canvas?.document.nodes.some((node) => node.id === nodeId)) return null;
                 const hash = (canvas.nodeData[nodeId]?.modelContentVersion as { contentHash?: string } | undefined)?.contentHash;
-                return { ...target, action: "modify", prompt: "", ...(hash ? { expectedContentHash: hash } : {}) };
+                // 明确重建 entry（不把回合快照里的 role/delivery 等内部字段送回浏览器请求）。
+                return {
+                  action: "modify",
+                  canvasId: target.canvasId,
+                  nodeId,
+                  ...(target.mode ? { mode: target.mode } : {}),
+                  ...(target.worldScope ? { worldScope: target.worldScope } : {}),
+                  ...(target.cameraId ? { cameraId: target.cameraId } : {}),
+                  ...(target.model ? { model: target.model } : {}),
+                  ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}),
+                  ...(target.connectionId ? { connectionId: target.connectionId } : {}),
+                  roleId: target.role?.namespacedId ?? roleIdForTarget({ ...(target.mode ? { mode: target.mode } : {}), ...(target.worldScope ? { worldScope: target.worldScope } : {}) }),
+                  prompt: "",
+                  ...(hash ? { expectedContentHash: hash } : {})
+                };
               }}
               // 概览态让 runtime 视口避让侧栏宽度；卸载时释放（0）。聚焦态宽度由
               // FocusWorkspace 统一计算（不重复占位）。

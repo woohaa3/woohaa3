@@ -5,7 +5,7 @@
  * 予任何共享世界写资格——模型/镜头必须继续走导演区的世界助手权威（`assistant.world-authoring`）。
  *
  * 旧版本（普通组容器）的工具白名单随 `f510576d` 删除；这里按当前真实注册的工具名重建，
- * 由 `localAgentToolsForMode("world" + workflow-group-2d)` 与宿主 grant 共同约束。
+ * 由角色工具声明与宿主 grant 共同约束。
  */
 export const CANVAS_GROUP_TOOLS = [
   // 读取与能力发现

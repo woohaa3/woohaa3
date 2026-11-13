@@ -49,7 +49,7 @@ export type CanvasPageScopeStarterInput = {
   /** 旧版浏览器偏好的读取介质：**只用于一次性迁移**到宿主配置文件；null 表示跳过迁移。 */
   preferenceStorage?: PreferenceStorage | null | undefined;
   /**
-   * 当前生效的 browser-local 启停目标状态（来自宿主配置文件 `extensions.frontend.*`）。
+   * 当前生效的 browser-local 启停目标状态（来自宿主配置文件 `extensions.<id>.enabled`）。
    * 缺省表示宿主未提供：按各插件 metadata 的 `defaultEnabled`（再缺省启用），兼容旧宿主。
    */
   frontendExtensions?: FrontendExtensionPreferences | undefined;
@@ -77,7 +77,7 @@ export function createCanvasPageScopeStarter(
     const configurableIds = resolveConfigurableOptionalIds(runtimeCatalogIds);
     const catalogMetadata = canvasExtensionCatalogMetadata(extensionCatalogMetadata(metadata));
 
-    // 2. 目标状态来自宿主配置文件（`extensions.frontend.<id>.enabled`），不再自持 localStorage。
+    // 2. 目标状态来自宿主配置文件（`extensions.<id>.enabled`），不再自持 localStorage。
     //    旧版本遗留在浏览器里的显式选择只做一次性迁移：写回宿主配置后不再读取。
     const preferenceStore = new ExtensionPreferenceStore({
       ids: configurableIds,

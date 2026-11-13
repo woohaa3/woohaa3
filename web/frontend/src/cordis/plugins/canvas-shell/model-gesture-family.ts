@@ -15,7 +15,6 @@ import { focusedTarget, ModelFocusSession } from "./model-focus-session.js";
 import { hitFocusGizmoAxis, hitShotGizmoHandle, type GizmoQuery } from "./model-gizmo-hit.js";
 import { createFocusNavigation } from "./model-focus-navigation.js";
 import { createFocusLifecycle } from "./model-focus-lifecycle.js";
-import { syncPreviewObserver } from "./model-preview-focus.js";
 import { isDomConsumingInputTarget } from "./input/shortcuts.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { InteractionControllerOptions } from "./interaction-types.js";
@@ -72,9 +71,8 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
   };
   /** 上报聚焦投影变化；宿主据此把投影合并进下一份渲染快照并 flush。 */
   const emitModelFocus = () => {
-    if (options.getModelFocusMode?.() !== "history") syncPreviewObserver(focus, options.getModelFocusTargets?.() ?? []);
     options.onModelFocusChange?.(focus.projection());
-    schedule("model-preview");
+    schedule("model-focus");
   };
 
   /** 聚焦相机导航（键盘飞行 + 滚轮/捏合）委托到独立模块。 */

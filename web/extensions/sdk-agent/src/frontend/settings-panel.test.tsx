@@ -38,6 +38,9 @@ function fixture() {
   };
   const connections = [connection];
   const api: SdkAgentRemote = {
+    testConnection: vi.fn(async () =>
+      ok({ ok: true, models: ["model-a", "model-b"], message: "测试通过" }),
+    ),
     list: vi.fn(async () =>
       ok({
         connections: [...connections],
@@ -379,4 +382,44 @@ it("通用请求失败提供恢复建议且保留填写内容", async () => {
   expect(el.textContent).toContain("请检查服务地址与后端连接后重试");
   expect(el.querySelector<HTMLInputElement>('input[aria-label="API Key"]')!.value).toBe("ui-test-key-not-real");
   expect(api.testGeneration).not.toHaveBeenCalled();
+});
+
+it("支持单独点击测试按钮；保存前固定先测试，测试不通过时提供仍然保存小按钮", async () => {
+  const { api } = fixture();
+  vi.mocked(api.testConnection!).mockResolvedValueOnce(
+    ok({ ok: false, message: "连接测试未通过（HTTP 404）" }),
+  );
+  await mount(api);
+  await input("Base URL", "https://tokenhub.tencentmaas.com");
+  await input("API Key", "sk-tokenhub");
+
+  await click("测试");
+  expect(api.testConnection).toHaveBeenCalledWith(
+    expect.objectContaining({
+      adapterId: "compat-chat",
+      baseUrl: "https://tokenhub.tencentmaas.com",
+      secret: "sk-tokenhub",
+    }),
+  );
+  expect(api.configure).not.toHaveBeenCalled();
+  expect(el.textContent).toContain("连接测试未通过（HTTP 404）");
+  expect(
+    [...el.querySelectorAll("button")].some((b) => b.textContent === "仍然保存"),
+  ).toBe(true);
+
+  vi.mocked(api.testConnection!).mockResolvedValueOnce(
+    ok({ ok: false, message: "连接测试未通过（HTTP 401）" }),
+  );
+  await click("保存并读取模型");
+  expect(api.configure).not.toHaveBeenCalled();
+  expect(el.textContent).toContain("连接测试未通过（HTTP 401）");
+
+  await click("仍然保存");
+  expect(api.configure).toHaveBeenCalledWith(
+    expect.objectContaining({
+      adapterId: "compat-chat",
+      baseUrl: "https://tokenhub.tencentmaas.com",
+      secret: "sk-tokenhub",
+    }),
+  );
 });

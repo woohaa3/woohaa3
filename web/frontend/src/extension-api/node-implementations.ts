@@ -1,14 +1,14 @@
 /** Trusted implementation bindings owned by a single page scope. */
 import {
-  builtinNodeImplementations, scriptModelPreparation,
+  builtinNodeImplementations, hasSharedWorldInstance, modelNodeCapabilities, scriptModelPreparation,
   type NodeCapabilities, type NodeCapabilityContext, type NodeCapabilityResolver,
   type ResolvedNodeCapabilities,
 } from '@woohaa3/contracts';
 import type { FileModelPreparation } from '../cordis/services/file-model-preparation.js';
 
 export type NodeImplementation = { type: string; capabilities: NodeCapabilities };
-const keys = new Set(['appearance', 'modelPreparation', 'modelPreview', 'connections', 'resources', 'focus', 'resize', 'actions']);
-const handlers = { connections: ['endpoints'], modelPreparation: ['executionKey', 'prepare'], modelPreview: ['project'], resources: ['contentKey'], focus: ['kind'], resize: ['minimum'], actions: ['accepts'] } as const;
+const keys = new Set(['appearance', 'modelPreparation', 'connections', 'resources', 'focus', 'resize', 'actions']);
+const handlers = { connections: ['endpoints'], modelPreparation: ['executionKey', 'prepare'], resources: ['contentKey'], focus: ['kind'], resize: ['minimum'], actions: ['accepts'] } as const;
 function snapshot<T>(value: T): T {
   if (!value || typeof value !== 'object') return value;
   if (Array.isArray(value)) return Object.freeze(value.map(snapshot)) as T;
@@ -25,7 +25,7 @@ function validate(capabilities: NodeCapabilities): void {
   const appearance = capabilities.appearance;
   if (appearance && (!['text', 'image', 'model', 'audio', 'video', 'shot', 'node'].includes(appearance.palette) || ![appearance.defaultSize?.width, appearance.defaultSize?.height].every(value => Number.isFinite(value) && value > 0))) throw new Error('Invalid node appearance');
   if (capabilities.resize && capabilities.resize.mode !== 'rect') throw new Error('Invalid resize mode');
-  if (capabilities.resources && (!['image', 'video', 'model'].includes(capabilities.resources.channel) || typeof capabilities.resources.previewSlot !== 'boolean')) throw new Error('Invalid resource demand');
+  if (capabilities.resources && !['image', 'video', 'model'].includes(capabilities.resources.channel)) throw new Error('Invalid resource demand');
 }
 export class NodeImplementationRegistry implements NodeCapabilityResolver {
   private readonly bindings = new Map<string, ResolvedNodeCapabilities>();
@@ -41,7 +41,16 @@ export class NodeImplementationRegistry implements NodeCapabilityResolver {
     }
   }
   getRevision = (): number => this.revision;
-  resolve = (context: NodeCapabilityContext): ResolvedNodeCapabilities => this.bindings.get(context.node.type) ?? EMPTY;
+  resolve = (context: NodeCapabilityContext): ResolvedNodeCapabilities => {
+    const binding = this.bindings.get(context.node.type);
+    if (!binding) return EMPTY;
+    // 受支持模型只认 sharedWorldInstance；旧卡片模型保留诊断身份，但没有模型能力
+    // （change: 2026-11-10-remove-legacy-model-card-nodes）。
+    if (context.node.type === 'model3d') {
+      return hasSharedWorldInstance(context) ? binding : { ...modelNodeCapabilities(context), generation: binding.generation };
+    }
+    return binding;
+  };
   register({ type, capabilities }: NodeImplementation): () => void {
     if (!type.trim() || this.reserved.has(type) || this.bindings.has(type)) throw new Error(`Node implementation conflict: ${type}`);
     validate(capabilities);

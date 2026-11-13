@@ -163,8 +163,10 @@ function watchBackendReady(url) {
 }
 
 /**
- * Supervisor 是独立进程，可能在开发期间被外部清理；后端持有的 socket/token 不变，
- * 因此由启动器定时探活并原地重启（见 lib/agent-runtime-supervisor-host.mjs）。
+ * 执行器运行时是 workspace 级独立实例（change: 2026-11-10-split-agent-runtime-lifecycle）。
+ *
+ * 启动器先读 `executor.json` 并探活：匹配就复用，缺失才按需拉起；探活只维持连接，
+ * 不拥有运行时生命周期。dev 退出时不调用 `shutdown`，在途回合继续执行。
  */
 async function ensureAgentSupervisor() {
   const host = agentSupervisorHost();
@@ -173,7 +175,8 @@ async function ensureAgentSupervisor() {
   return config;
 }
 
-async function shutdownAgentSupervisor() {
+/** 只停止探活；运行时与在途回合保持存活，下一次启动直接重连。 */
+async function detachAgentSupervisor() {
   if (!agentSupervisor) return;
   const host = agentSupervisor;
   agentSupervisor = null;
@@ -201,7 +204,7 @@ function stop(code) {
       await Promise.all(exited);
     } finally {
       clearTimeout(timeout);
-      await shutdownAgentSupervisor();
+      await detachAgentSupervisor();
     }
   })();
   return stopPromise;

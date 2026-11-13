@@ -80,16 +80,13 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
         .map(|_| layout::history_strip_rect(p.x, p.y, w, h));
     // 横条不对平移封闭（边缘避让、上下回退）；commit 后按当前视口重算。
     next.node_actions = None;
-    next.preview = node
-        .preview
-        .map(|_| layout::content_rect_for_bounds(p.x, p.y, w, h));
     next.resize = node.resize.map(|_| {
-        ResizeGrip::for_bounds(next.bounds.0, next.bounds.1, next.bounds.2, next.bounds.3)
+        ResizeGrip::all_for_bounds(next.bounds.0, next.bounds.1, next.bounds.2, next.bounds.3)
     });
     if !rect_finite(next.layout_bounds)
         || !rect_finite(next.bounds)
         || !next.center.is_finite()
-        || [next.history_strip, next.preview]
+        || [next.history_strip]
             .into_iter()
             .flatten()
             .any(|r| !rect_finite(r))
@@ -109,8 +106,12 @@ fn relocate(node: &SnapshotNode, p: &NodePosition) -> Result<SnapshotNode, &'sta
 }
 
 /// 抓手几何有限性。
-fn grip_finite(grip: Option<&ResizeGrip>) -> bool {
-    grip.is_none_or(|rect| rect_finite((rect.x, rect.y, rect.width, rect.height)))
+fn grip_finite(grip: Option<&[ResizeGrip; 4]>) -> bool {
+    grip.is_none_or(|rects| {
+        rects
+            .iter()
+            .all(|rect| rect_finite((rect.x, rect.y, rect.width, rect.height)))
+    })
 }
 
 pub(super) fn plan(

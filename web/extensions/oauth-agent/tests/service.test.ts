@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CodexFactoryOptions, CodexLike } from "../src/backend/index.js";
+import { createExecutor } from "../src/backend/executor.js";
+import type { ApplicationExtensionExecutorFacade } from "@woohaa3/contracts";
 import { createChatGptService } from "../src/backend/service.js";
+import { testPreparedTurn } from "./role-fixture.js";
 import { CHATGPT_PLAN_SCOPE } from "../src/backend/oauth.js";
 import type { ChatGptCanvasPorts } from "../src/backend/ports.js";
 
@@ -50,9 +53,8 @@ function fakeCodex(threads: Parameters<CodexLike["startThread"]>[0][] = []): (op
 
 function ports(): ChatGptCanvasPorts {
   return {
-    readNode: async () => ({ ok: true, nodeType: "model3d", title: "m", prompt: "", references: [], modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" }, cameras: [] }),
+    readNode: async () => ({ ok: true, nodeType: "model3d", title: "m", prompt: "", references: [], modelContentVersion: { revision: 1, sourceHash: "s", contentHash: "c" } }),
     submitModel: async () => ({ ok: true, canvasId: "cv", nodeId: "n", commandId: "cmd", duplicate: false, noop: false }),
-    mutateCamerasBatch: async () => ({ ok: true, canvasId: "cv", nodeId: "n", commandId: "cmd", duplicate: false, noop: false })
   };
 }
 
@@ -71,7 +73,20 @@ async function boot(
     },
     canvasPorts: ports(),
     authConfigured: false,
-    createCodex: fakeCodex(threads),
+    // 直连生成入口经宿主角色准备（真实链路由 application-service 注入）。
+    prepareGenerationRole: async ({ request }) => ({
+      ok: true,
+      prepared: testPreparedTurn({ requestId: request.requestId, canvasId: request.canvasId, nodeId: request.nodeId, mode: request.mode, prompt: request.prompt, ...(request.selectedCameraId ? { selectedCameraId: request.selectedCameraId } : {}) })
+    }),
+    executor: {
+      run: async input => createExecutor({ createCodex: fakeCodex(threads) }).run({ kind: "agent", turnId: input.requestId, requestId: input.requestId, prepared: input.prepared, payload: input.payload }, {
+        signal: input.signal ?? new AbortController().signal, turnId: input.requestId, requestId: input.requestId,
+        stateDir: tempDir(), workspaceKey: "test", emit: (type, payload) => input.onEvent?.({ type, payload }),
+        host: { call: (method, params) => input.hostCall!(method, params) as never },
+        processes: { ensure: async () => { throw new Error("unused"); }, stop: async () => undefined }
+      }),
+      query: async () => null, cancel: async () => undefined
+    } satisfies ApplicationExtensionExecutorFacade,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
   });
   const server = http.createServer((req, res) => {
@@ -178,7 +193,7 @@ describe("ChatGPT HTTP 面", () => {
     const response = await c.fetch("/api/oauth-agent/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "r1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "x" })
+      body: JSON.stringify({ roleId: "test/role", requestId: "r1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "x" })
     });
     expect(response.status).toBe(409);
   });
@@ -209,7 +224,7 @@ describe("ChatGPT HTTP 面", () => {
     const response = await c.fetch("/api/oauth-agent/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "gen-1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "make a box", reasoningEffort: "xhigh" })
+      body: JSON.stringify({ roleId: "test/role", requestId: "gen-1", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "make a box", reasoningEffort: "xhigh" })
     });
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -225,7 +240,7 @@ describe("ChatGPT HTTP 面", () => {
 
     const defaultResponse = await c.fetch("/api/oauth-agent/generate", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "gen-default", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "make a box" })
+      body: JSON.stringify({ roleId: "test/role", requestId: "gen-default", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "make a box" })
     });
     expect(await defaultResponse.text()).toContain("succeeded");
     expect(threads).toHaveLength(2);
@@ -233,7 +248,7 @@ describe("ChatGPT HTTP 面", () => {
 
     const invalidResponse = await c.fetch("/api/oauth-agent/generate", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId: "gen-invalid", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "make a box", reasoningEffort: "invalid" })
+      body: JSON.stringify({ roleId: "test/role", requestId: "gen-invalid", canvasId: "cv", nodeId: "n", mode: "model3d", model: "gpt-6.1-sol", prompt: "make a box", reasoningEffort: "invalid" })
     });
     expect(invalidResponse.status).toBe(400);
     expect(threads).toHaveLength(2);

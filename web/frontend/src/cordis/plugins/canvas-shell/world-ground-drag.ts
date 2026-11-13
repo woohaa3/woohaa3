@@ -1,3 +1,4 @@
+import { rotateGroundQuarterTurns } from "@woohaa3/contracts";
 /**
  * 共享世界对象的直接地面拖动（普通画布入口，不含镜头）。
  *
@@ -248,6 +249,7 @@ export function planWorldGroundMoveWithAnimationParts(
     if (!executed.ok) continue;
     if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
     const unbind = unbindAreaIds?.has(node.id) === true;
+    const localDelta = rotateGroundQuarterTurns(delta, { u: 0, v: 0 }, -(area.value.animationQuarterTurns ?? 0));
     let changed = false;
     const instanceTracks = unbind
       ? executed.ir.instanceTracks.filter(track => {
@@ -260,23 +262,24 @@ export function planWorldGroundMoveWithAnimationParts(
           changed = true;
           const from = [...track.from];
           const to = [...track.to];
-          from[0] = from[0]! + delta.u;
-          from[1] = from[1]! + delta.v;
-          to[0] = to[0]! + delta.u;
-          to[1] = to[1]! + delta.v;
+          from[0] = from[0]! + localDelta.u;
+          from[1] = from[1]! + localDelta.v;
+          to[0] = to[0]! + localDelta.u;
+          to[1] = to[1]! + localDelta.v;
           return { ...track, from, to };
         });
     const walkTracks=(executed.ir.walkTracks ?? []).flatMap(track=>{
       if(!instanceIds.has(track.targetId))return [track];
       changed=true;
-      return unbind ? [] : [{...track,path:track.path.map(([u,v])=>[u+delta.u,v+delta.v] as [number,number])}];
+      return unbind ? [] : [{...track,path:track.path.map(([u,v])=>[u+localDelta.u,v+localDelta.v] as [number,number])}];
     });
     const partTracks = (executed.ir.partTracks ?? []).filter(track => !unbind || !instanceIds.has(track.targetId));
     if (partTracks.length !== (executed.ir.partTracks?.length ?? 0)) changed = true;
     const sampled = sampleWorldAnimationInArea(
       executed.ir,
       times?.get(node.id) ?? 0,
-      sceneAreaAnimationOrigin(area.value)
+      sceneAreaAnimationOrigin(area.value),
+      area.value.animationQuarterTurns
     ).instances;
     for (const instanceId of instanceIds) {
       const motion = sampled.get(instanceId);

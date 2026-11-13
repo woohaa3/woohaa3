@@ -7,7 +7,7 @@ import type { AuthoringGenerationProps } from "../../contract/authoring.js";
 import { AuthoringModelGenerateHost } from "./authoring-model-generate-host.js";
 import { AuthoringModelGeneratePanel } from "./authoring-model-generate-panel.js";
 
-const mocks = vi.hoisted(() => ({ state: {} as { canvas?: unknown }, submit: vi.fn(() => ({ ok: true })), writable: true }));
+const mocks = vi.hoisted(() => ({ state: {} as { canvas?: unknown }, submit: vi.fn(() => ({ ok: true, handle: { settled: Promise.resolve({ state: "accepted" }) } })), writable: true }));
 vi.mock("../../react.js", () => ({ useService: () => ({ isWritable: () => mocks.writable, submitCommands: mocks.submit }) }));
 vi.mock("./use-task-state.js", () => ({ useCanvasStoreState: () => mocks.state }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -80,6 +80,7 @@ export function RunningHubAppPanel(props: ModelPanelProps) {
       <ExecutionPanel
         taskKind={model.modelType === "video" ? "video-generation" : "image-generation"}
         modelConfig={modelConfig}
+        modelSelectorSlot={props.renderers?.modelSelector?.()}
         data={panelData}
         surface="dock"
         presentation={presentation}

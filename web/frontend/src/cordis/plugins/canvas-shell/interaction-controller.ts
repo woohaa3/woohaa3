@@ -1,3 +1,4 @@
+import { projectWorldRotationPreview } from "../../services/world-rotation-preview.js";
 import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnostics.js";
 /**
  * 浏览器画布交互控制器：共享输入路由、瞬时态、渲染调度和生命周期。
@@ -27,7 +28,6 @@ import { beginStartupSpan } from "../../services/telemetry-primitives.js";
 import { sharedCanvasNodeIndex, indexNodeSize } from "./canvas-node-index.js";
 import { errorDetail } from "../canvas-runtime/runtime-issues.js";
 import { advanceTransientState } from "./interaction-frame-prelude.js";
-import { collectModelPlacements } from "./interaction-placements.js";
 import { INITIAL_WHEEL_SOURCE } from "./input/wheel-gesture.js";
 import type { TextureUploader } from "../canvas-runtime/texture-sync.js";
 import { createLocalViewportStore } from "../canvas-runtime/local-viewport.js";
@@ -39,7 +39,6 @@ import { createWorldGroundPreviewState } from "./world-ground-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
-import { modelPreviewStore } from "../../services/model-preview-store.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
 import type { AlignmentSnapPolicy } from "./alignment-snap.js";
@@ -134,7 +133,6 @@ export function installInteractionController(options: InteractionControllerOptio
     activeViewport
   });
 
-  const modelPlacements = () => collectModelPlacements();
   /**
    * 镜头视锥拖动中的瞬时位姿：只影响呈现，不写规范 nodeData。
    * 规则与状态在 `world-camera-preview.ts`（保持 controller 文件体积）。
@@ -214,7 +212,7 @@ export function installInteractionController(options: InteractionControllerOptio
    */
   let firstSceneBuildMeasured = false;
   const buildSceneWithResources = () => {
-    const build = () => buildSceneWithResourcesModule(options, surfaceSize, () => modelPlacements(), frameState());
+    const build = () => buildSceneWithResourcesModule(options, surfaceSize, frameState());
     if (firstSceneBuildMeasured) return build();
     // 第一次完整构建包含模型资源装配与全表投影，是启动路径上唯一可分离的"建场"成本。
     const finish = beginStartupSpan("scene-build");
@@ -652,11 +650,10 @@ export function installInteractionController(options: InteractionControllerOptio
 
   // 供 E2E/排障观察（生产无副作用）；change: 2026-09-28-split-frontend-god-plugins 后续拆分。
   const unsubscribeCapabilities = options.nodeCapabilities?.subscribe(() => {
-    if (state.gesture.kind === "resize" || state.gesture.kind === "model-preview") cancelTransientGesture();
+    if (state.gesture.kind === "resize") cancelTransientGesture();
     schedule("node-capabilities");
   });
   const unsubscribeAppearance = canvasAppearanceStore.subscribe(() => schedule("canvas-appearance"));
-  const unsubscribePreview = modelPreviewStore.subscribe(() => schedule("model-preview"));
   const unsubscribeCameraEditor = worldCameraEditorStore.subscribe(() => schedule("world-camera-editor"));
   const disposeDiagnostics = installCanvasDiagnostics({ core, target, state, activeViewport, setSelection, model,
     renderError: () => renderError,
@@ -768,15 +765,18 @@ export function installInteractionController(options: InteractionControllerOptio
       setSelection([nodeId]); return true;
     },
     nodeScreenRect: (nodeId, part) => {
-      if (part === "action-toolbar") {
+      const canvas = projectWorldRotationPreview(workingCanvasOf(woohaa3CanvasStore.getState()));
+      const area = decodeSceneAreaData(canvas?.nodeData[nodeId]?.sceneArea);
+      if (part === "action-toolbar" && !area.ok) {
         // Match the old renderer toolbar eligibility and anchor using the accepted card projection.
         const node = frameSubmission.renderedNode(nodeId);
-        if (!node || node.chrome?.kind === "none") return null;
-        const point = worldToClient({ x: node.x, y: node.y });
-        const zoom = activeViewport().zoom;
-        return { left: point.x, top: point.y, width: node.width * zoom, height: node.height * zoom };
+        if (!node) return null;
+        if (node.chrome?.kind !== "none") {
+          const point = worldToClient({ x: node.x, y: node.y });
+          const zoom = activeViewport().zoom;
+          return { left: point.x, top: point.y, width: node.width * zoom, height: node.height * zoom };
+        }
       }
-      const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
       // 面板锚点必须跟随**当前渲染姿态**：导演区动画会覆盖镜头/实例位姿，权威 nodeData 是动画前
       // 的基准；直接用规范位姿会把面板留在动画前的位置。
       const rendered = frameSubmission.renderedNode(nodeId);
@@ -786,7 +786,6 @@ export function installInteractionController(options: InteractionControllerOptio
         return worldToClient({ x: point.x, y: point.y });
       };
       // 导演区没有卡片：用地面范围投影后的屏幕包围盒定位底部面板。
-      const area = decodeSceneAreaData(canvas?.nodeData[nodeId]?.sceneArea);
       if (area.ok) {
         const bounds = sceneAreaPreviews.get(nodeId) ?? area.value.bounds;
         return part === "scope-title" ? sceneAreaTitleRect(bounds, project, activeViewport().zoom) : sceneAreaPanelRect(bounds, project);
@@ -797,7 +796,7 @@ export function installInteractionController(options: InteractionControllerOptio
       if (instance.ok) {
         // 动画/拖动预览后的实例位姿优先；没有已提交场景时退回权威位姿。
         const transform = rendered?.sharedWorldInstance?.transform ?? instance.value.transform;
-        if (part === "panel") {
+        if (part === "panel" || part === "action-toolbar") {
           const localAabb = options.getModelResources?.().get(nodeId)?.aabb;
           const worldAabb = worldInstanceAabb(transform, localAabb);
           if (worldAabb) {
@@ -845,9 +844,7 @@ export function installInteractionController(options: InteractionControllerOptio
       frameLoop.dispose();
       unsubscribeCapabilities?.();
       unsubscribeAppearance();
-      unsubscribePreview();
       unsubscribeCameraEditor();
-      modelPreviewStore.clear();
       viewportTransition.cancel();
       // 取消未提交的拖动粘连 / 聚合拉线手势（change: add-drag-touch-connections /
       // add-multi-select-aggregate-connect，design D6）。

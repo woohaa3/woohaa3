@@ -2,7 +2,7 @@
 //! （change: refactor-bevy-rust-file-size，任务 4.1 / design D4；
 //!  change: optimize-model-scene-snapshot-hot-path 改为节点引用 + 独立资源表）。
 
-use super::{reference_for, resource_table, run_sync, scene_with, world_with_resources};
+use super::{reference_for, resource_table, run_sync, scene_with, with_world_instance, world_instance_for, world_with_resources};
 use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelReference, ModelSnapshot, Scene};
 use bevy::prelude::*;
 
@@ -11,7 +11,6 @@ fn model_node() -> GraphNode {
         chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,
-        model_preview: None,
         id: "m".into(),
         kind: "model".into(),
         x: 0.0,
@@ -78,10 +77,9 @@ fn shared_world_roots_survive_relayout_and_resource_recreation() {
     let (entity, original) = root(&world);
     assert_eq!(original.translation, Vec3::new(64., 192., -128.));
     assert_eq!(original.scale, Vec3::splat(128.));
+    // 旧卡片坐标与 `modelPlacement` 都不再影响世界根（change: 2026-11-10）。
     node.x = 900.; node.y = -400.;
-    let mut changed = reference.clone();
-    changed.placement.scale = 7.; changed.placement.yaw = 90.;
-    run_sync(&mut world, &scene_with(&node, Some(changed)), &resources);
+    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &resources);
     assert_eq!(root(&world), (entity, original));
     node.shared_world_instance.as_mut().unwrap().transform.position.u = 4.;
     node.shared_world_instance.as_mut().unwrap().transform.rotation = [0., 0., std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
@@ -142,7 +140,7 @@ fn shared_resource_instances_keep_independent_roots_and_child_hierarchy() {
 }
 
 fn table_for(signatures: &[&str]) -> (super::super::runtime::ModelAssets, Vec<ModelReference>) {
-    let node = model_node();
+    let mut node = model_node();
     let _ = node;
     let mut entries = Vec::new();
     let mut references = Vec::new();
@@ -210,7 +208,8 @@ fn model_lifecycle_returns_to_baseline() {
 #[test]
 fn placement_preview_keeps_entity_and_resource_identity() {
     let mut world = world_with_resources();
-    let node = model_node();
+    let mut node = model_node();
+    with_world_instance(&mut node);
 
     // 内容 signature 恒定；仅 placement 变化。同一资源注册一次，引用逐帧更新 placement。
     let snapshot = sphere_snapshot("content");
@@ -240,9 +239,11 @@ fn placement_preview_keeps_entity_and_resource_identity() {
             scale: 1.0 + index as f32 * 0.1,
             yaw: index as f32 * 0.2,
         };
-        let mut reference = base.clone();
-        reference.placement = placement;
-        run_sync(&mut world, &scene_with(&node, Some(reference)), &resources);
+        // 实例变换预览（世界坐标）只刷新根 transform，不重建实体与资源。
+        let instance = node.shared_world_instance.as_mut().unwrap();
+        instance.transform.position.u = placement.offset.x as f64;
+        instance.transform.scale = placement.scale as f64;
+        run_sync(&mut world, &scene_with(&node, Some(base.clone())), &resources);
     }
     assert_eq!(
         world.iter_entities().count(),
@@ -270,7 +271,6 @@ fn focus_hides_non_target_models_without_despawn() {
         chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,
-        model_preview: None,
         id: id.to_owned(),
         kind: "model".into(),
         x: 0.0,
@@ -360,6 +360,9 @@ fn explicit_resource_references_track_two_roots_and_frozen_capture_until_last_re
         nodes: vec![a, b],
         ..Scene::default()
     };
+    for entry in &mut scene.nodes {
+        super::with_world_instance(entry);
+    }
     run_sync(&mut world, &scene, &resources);
     let (mesh, material) = {
         let visuals = world.resource::<ModelVisuals>();
@@ -469,6 +472,9 @@ fn focus_visibility_writes_only_hierarchy_root_and_leaves_descendants_inherited(
         nodes: vec![a, b],
         ..Scene::default()
     };
+    for entry in &mut scene.nodes {
+        super::with_world_instance(entry);
+    }
     run_sync(&mut world, &scene, &resources);
 
     scene.model_focus = Some(crate::protocol::ModelFocus {
@@ -526,6 +532,7 @@ fn unchanged_ownership_skips_reference_rebuild_but_keeps_counts() {
     let mut world = world_with_resources();
     let (resources, references) = table_for(&["shared-content"]);
     let mut node = model_node();
+    with_world_instance(&mut node);
     node.model = Some(references[0].clone());
     let scene = Scene {
         nodes: vec![node],
@@ -552,4 +559,27 @@ fn unchanged_ownership_skips_reference_rebuild_but_keeps_counts() {
         1,
         "跳过重建后引用仍然有效"
     );
+}
+
+/// 旧卡片模型（无 `sharedWorldInstance`）只显示诊断卡片：不创建模型根、不上传几何。
+///
+/// change: 2026-11-10-remove-legacy-model-card-nodes。
+#[test]
+fn legacy_card_model_without_world_instance_creates_no_root() {
+    use super::super::runtime::ModelVisuals;
+    let mut world = world_with_resources();
+    let mut node = model_node();
+    node.shared_world_instance = None;
+    let (resources, references) = table_for(&["legacy-content"]);
+    node.model = Some(references[0].clone());
+    let mut scene = scene_with(&node, Some(references[0].clone()));
+    // `scene_with` 会为普通模型补世界实例；这里显式清空以模拟旧画布文档。
+    scene.nodes[0].shared_world_instance = None;
+    run_sync(&mut world, &scene, &resources);
+    assert!(
+        world.resource::<ModelVisuals>().roots.is_empty(),
+        "旧卡片节点不生成模型根"
+    );
+    assert!(world.resource::<Assets<Mesh>>().is_empty());
+    assert!(world.resource::<Assets<StandardMaterial>>().is_empty());
 }

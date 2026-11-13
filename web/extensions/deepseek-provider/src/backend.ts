@@ -154,6 +154,17 @@ export function createDeepSeekProviderPlugin(
         ]
       };
     },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      if (!apiKey) return { ok: false, message: "请先填写 DeepSeek API Key" };
+      const result = await discoverDeepSeekModels({
+        apiKey,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!result.ok) return { ok: false, message: result.message };
+      return { ok: true, message: `测试通过，已发现 ${result.models.length} 个模型` };
+    },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";
       const log = ctx.log.scope(DEEPSEEK_PLUGIN_ID);

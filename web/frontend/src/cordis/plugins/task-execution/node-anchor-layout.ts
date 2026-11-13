@@ -11,6 +11,11 @@ export type AnchoredPanel = {
 /** 贴着锚点的固定留白。 */
 const EDGE_MARGIN = 12;
 
+/** 执行面板在锚点下方默认保留的编辑/主操作空间。 */
+export const PANEL_COMPOSER_RESERVE_HEIGHT = 360;
+
+export type AnchoredPanelPolicy = "auto" | "below" | "dock";
+
 export function usableCanvasArea(area: Rect, occlusions: readonly Rect[]): Rect {
   let usable = area;
   for (const occlusion of occlusions) {
@@ -30,7 +35,7 @@ export function usableCanvasArea(area: Rect, occlusions: readonly Rect[]): Rect 
   return usable;
 }
 
-export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; height: number }, previous?: AnchoredPanel["placement"], policy: "auto" | "below" = "auto"): AnchoredPanel | null {
+export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; height: number }, previous?: AnchoredPanel["placement"], policy: AnchoredPanelPolicy = "auto"): AnchoredPanel | null {
   const right = node.left + node.width;
   const bottom = node.top + node.height;
   const areaRight = area.left + area.width;
@@ -43,6 +48,13 @@ export function layoutNodePanel(node: Rect, area: Rect, panel: { width: number; 
   const width = Math.max(0, Math.min(760, area.width - 32, panel.width));
   const left = Math.max(area.left + 16, Math.min(node.left + node.width / 2 - width / 2, areaRight - 16 - width));
   const below = areaBottom - bottom - EDGE_MARGIN;
+  if (policy === "dock") {
+    // 既不平移画布，也不把面板压成锚点下方的残高：贴住可用区域底边，
+    // 高度按面板自然高度收回可用范围，内部滚动。用于导演区等超大锚点。
+    const maxHeight = Math.max(0, area.height - EDGE_MARGIN * 2);
+    const height = Math.min(panel.height, maxHeight);
+    return { left, top: areaBottom - EDGE_MARGIN - height, width, maxHeight: height, placement: "edge" };
+  }
   if (policy === "below") {
     const room = Math.max(0, below);
     // 只落在锚点下方：面板高度收回可用空间并内部滚动，绝不为了「放得下」改贴左右两侧或

@@ -66,7 +66,7 @@ export type ExtensionFrontendMetadata = {
   /**
    * `browser-local` optional 的**开箱默认启停**；缺省视为启用（兼容旧 artifact）。
    *
-   * 只影响「宿主配置文件里还没有显式选择」时的目标状态；显式 `extensions.frontend.<id>.enabled`
+   * 只影响「宿主配置文件里还没有显式选择」时的目标状态；显式 `extensions.<id>.enabled`
    * 始终优先，升级不重置用户选择。
    */
   defaultEnabled?: boolean;

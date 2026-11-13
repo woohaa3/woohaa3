@@ -10,6 +10,24 @@ import { ExtensionHostError, createApplicationExtensionHost } from "./host.js";
 import type { ApplicationBackendExtensionDefinition } from "./contract.js";
 
 describe("Task 后端插件宿主（任务 2.1）", () => {
+  it("public routes follow successful activation, reject conflicting owners, and disappear on disposal", async () => {
+    const host = createApplicationExtensionHost();
+    const definition: ApplicationBackendExtensionDefinition = {
+      extensionId: "external-agent",
+      publicRoutes: [{ extensionId: "external-agent", publicPath: "/api/external-agent", route: "agent", methods: ["POST"] }],
+      activate() { expect(host.declaredPublicRoutes?.()).toEqual([]); }
+    };
+    const result = await host.activate(definition);
+    expect(result.ok).toBe(true);
+    expect(host.declaredPublicRoutes?.()).toEqual(definition.publicRoutes);
+    expect((await host.activate({ ...definition, extensionId: "conflict", publicRoutes: [{ ...definition.publicRoutes![0]!, extensionId: "conflict" }] })).ok).toBe(false);
+    expect((await host.activate({ extensionId: "broken", publicRoutes: [{ ...definition.publicRoutes![0]!, extensionId: "broken", publicPath: "/api/broken" }], activate() { throw new Error("failed"); } })).ok).toBe(false);
+    expect(host.declaredPublicRoutes?.()).toEqual(definition.publicRoutes);
+    if (result.ok) await result.handle.dispose();
+    expect(host.declaredPublicRoutes?.()).toEqual([]);
+    await host.dispose();
+  });
+
   it("依赖满足时激活并注册 capability / handler / resource", async () => {
     const host = createApplicationExtensionHost();
     const events: string[] = [];
@@ -328,4 +346,25 @@ it("pluginContextFor 暴露 mediaFormats，并在 release 时注销", () => {
   expect([...registrations]).toEqual(["host-plugin:application/vnd.host-plugin"]);
   surface.release();
   expect(registrations.size).toBe(0);
+});
+
+describe("dispose reasons (task 4.1)", () => {
+  it("passes detach/cancel reasons to resources and treats host shutdown as detach", async () => {
+    const host = createApplicationExtensionHost();
+    const reasons: string[] = [];
+    const definition: ApplicationBackendExtensionDefinition = {
+      extensionId: "executor-holder",
+      activate: (h) => {
+        h.registerResource({ id: "executors", start: () => undefined, stop: (reason) => { reasons.push(reason ?? "none"); } });
+      }
+    };
+    const activated = await host.activate(definition);
+    expect(activated.ok).toBe(true);
+    await host.disposeVersion("executor-holder", 0, "upgrade");
+    expect(reasons).toEqual(["upgrade"]);
+
+    await host.activate(definition);
+    await host.dispose();
+    expect(reasons).toEqual(["upgrade", "shutdown"]);
+  });
 });

@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import type {
   AgentConnectionBinding,
   AgentEntryIntent,
+  AgentRoleRef,
   AgentTargetSnapshot,
   ConversationEventType,
   ConversationMessage,
@@ -50,13 +51,19 @@ export function toSummary(binding: ConversationAdapterBinding): ConversationSumm
   };
 }
 
+function turnRoleBinding(record: ConversationTurnRecord): AgentRoleRef | undefined {
+  if (!record.roleRefJson) return undefined;
+  try { return JSON.parse(record.roleRefJson) as AgentRoleRef; } catch { return undefined; }
+}
+
 function turnConnectionBinding(record: ConversationTurnRecord): ConversationTurn["connection"] | undefined {
   if (!record.connectionId || !record.connectionAdapterId) return undefined;
   return {
     connectionId: record.connectionId,
     adapterId: record.connectionAdapterId,
     configRevision: record.connectionConfigRevision ?? 0,
-    credentialEpoch: record.connectionCredentialEpoch ?? 0
+    credentialEpoch: record.connectionCredentialEpoch ?? 0,
+    ...(record.connectionCapabilityRevision ? { capabilityRevision: record.connectionCapabilityRevision } : {})
   };
 }
 
@@ -85,7 +92,10 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
     ...(record.runId !== null ? { runId: record.runId } : {}),
     ...(record.taskId !== null ? { taskId: record.taskId } : {}),
     ...(record.receiptJson !== null ? { receipt: JSON.parse(record.receiptJson) } : {}),
+    ...(typeof record.reasoningJson === "string" ? { reasoning: JSON.parse(record.reasoningJson) as ConversationTurn["reasoning"] } : {}),
     ...(connection ? { connection } : {}),
+    ...(turnRoleBinding(record) ? { role: turnRoleBinding(record)! } : {}),
+    ...(record.executorCursor !== null ? { executorCursor: record.executorCursor } : {}),
     ...(record.errorCode !== null ? { error: { code: record.errorCode, message: record.errorMessage ?? "" } }
       : legacyUnconfirmed ? { error: { code: UNCONFIRMED_RESULT_ERROR_CODE, message: UNCONFIRMED_RESULT_MESSAGE } } : {}),
     createdAt: record.createdAt,
@@ -290,10 +300,13 @@ export function hashIntent(entry: AgentEntryIntent, connection?: AgentConnection
     clipId: entry.clipId ?? null,
     itemId: entry.itemId ?? null,
     model: entry.model ?? null,
+    reasoningEffort: entry.reasoningEffort ?? null,
     connectionId: typeof binding === "string" ? binding : binding?.connectionId ?? null,
     connectionAdapterId: typeof binding === "string" ? null : binding?.adapterId ?? null,
     connectionConfigRevision: typeof binding === "string" ? null : binding?.configRevision ?? null,
     connectionCredentialEpoch: typeof binding === "string" ? null : binding?.credentialEpoch ?? null,
+    connectionCapabilityRevision: typeof binding === "string" ? null : binding?.capabilityRevision ?? null,
+    roleId: entry.roleId ?? null,
     expectedContentHash: entry.expectedContentHash ?? null,
     prompt: entry.prompt,
     references: (entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
@@ -316,7 +329,11 @@ export function entryFromTurn(record: ConversationTurnRecord): AgentEntryIntent 
     ...(target.cameraId !== undefined ? { cameraId: target.cameraId } : {}),
     ...(target.clipId !== undefined ? { clipId: target.clipId } : {}),
     ...(target.itemId !== undefined ? { itemId: target.itemId } : {}),
+    ...(target.model !== undefined ? { model: target.model } : {}),
+    ...(target.reasoningEffort !== undefined ? { reasoningEffort: target.reasoningEffort } : {}),
+    ...(target.connectionId !== undefined ? { connectionId: target.connectionId } : {}),
     ...(target.expectedContentHash !== undefined ? { expectedContentHash: target.expectedContentHash } : {}),
+    ...(target.role ? { roleId: target.role.namespacedId } : {}),
     prompt: ""
   };
 }

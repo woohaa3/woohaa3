@@ -287,8 +287,6 @@ describe("前端协议边界审计", () => {
       // canvas-menu ↔ canvas-runtime：共享 canvas-context menu type 常量。
       "cordis/plugins/canvas-menu/plugin.ts -> canvas-runtime",
       // model-editor ↔ canvas-shell / model-scene / media-import：聚焦会话、场景 store 与上传共享。
-      "cordis/plugins/model-editor/model-camera-store.ts -> canvas-shell",
-      "cordis/plugins/model-editor/model-camera-store.ts -> model-scene",
       // MP4 export shares the pure uploaded-asset / atomic node planner with still capture.
       // media-import ↔ paste-import：导入共享 clipboard/datatransfer 分类。
       "cordis/plugins/media-import/service.ts -> paste-import",

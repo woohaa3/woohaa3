@@ -2,7 +2,7 @@
 //! （change: 2026-10-15-add-film-set-shooting-shot-previews，design D7）。
 //!
 //! 预览卡片直接采样离屏 `RenderTarget::Image`，因此「画面何时可以发布」必须由**渲染侧**
-//! 确认，而不是 CPU 侧发起渲染就当作完成。本模块沿用 `model_preview` 已验证的同一模式：
+//! 确认，而不是 CPU 侧发起渲染就当作完成。本模块沿用离屏预览就绪（`preview_readiness`）已验证的同一模式：
 //!
 //! - 宿主每帧把 [`ShotPreviewReadiness`] 写到**预览相机实体**上（相机 + 稳定 key + 请求代数 +
 //!   当前目标 mesh/material）；写在相机实体上是因为只有相机才会被提取出 `ExtractedView`；

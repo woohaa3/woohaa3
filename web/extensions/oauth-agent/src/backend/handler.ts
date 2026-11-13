@@ -15,9 +15,11 @@ import {
   addAppBasePath,
   decodeChatGptGenerateRequest,
   type ChatGptGenerateRequest,
+  type PreparedAgentRoleTurn,
   decodeChatGptRequestIdQuery,
   WOOHAA3_PROTOCOL_VERSION
-} from "@woohaa3/contracts";import type { ChatGptAuthorizationService } from "./authorization.js";
+} from "@woohaa3/contracts";
+import type { ChatGptAuthorizationService } from "./authorization.js";
 import type { ChatGptGenerationService } from "./generation.js";
 import { isAllowedChatGptModel } from "./models.js";
 import type { OwnerResolver, OwnerResolution } from "./identity.js";
@@ -29,6 +31,10 @@ export type ChatGptApiDependencies = {
   owners: OwnerResolver;
   authorization: ChatGptAuthorizationService;
   generation: ChatGptGenerationService;
+  prepareGenerationRole?: (input: {
+    ownerId: string;
+    request: ChatGptGenerateRequest;
+  }) => Promise<{ ok: true; prepared: PreparedAgentRoleTurn } | { ok: false; code: string; message: string }>;
   models: { list: (accessToken: string) => Promise<{ ok: true; models: { id: string; label: string }[] } | { ok: false; message: string }> };
   /** 断开时终止该 owner 的活动推理会话。 */
   onOwnerDisconnect?: (ownerId: string) => void;
@@ -230,10 +236,20 @@ async function streamGeneration(
   }, 15_000);
 
   try {
+    const role = deps.prepareGenerationRole
+      ? await deps.prepareGenerationRole({ ownerId, request: request as ChatGptGenerateRequest })
+      : { ok: false as const, code: "role-unavailable", message: "宿主未提供 Agent 角色准备面" };
+    if (!role.ok) {
+      emit("error", { code: role.code, message: role.message });
+      sendJson(res, role.code === "role-not-found" || role.code === "role-input-invalid" ? 400 : 409, { ok: false, code: role.code, message: role.message });
+      return;
+    }
     const result = await deps.generation.generate(
       {
         ownerId,
         requestId: request.requestId,
+        roleId: request.roleId,
+        prepared: role.prepared,
         canvasId: request.canvasId,
         nodeId: request.nodeId,
         mode: request.mode,

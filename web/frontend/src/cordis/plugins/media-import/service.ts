@@ -365,13 +365,13 @@ export class MediaImportService implements ImportService {
       file: uploadFile
     });
     this.submit(
+      // 模型没有卡片：落点只投影成世界实例，不参与卡片连线规则。
       planUploadedNode({
         nodeType: "model3d",
         position: anchor.world ?? { x: 0, y: 0 },
         file: uploadFile,
         asset,
-        nodeId: anchor.nodeId,
-        ...(anchor.connectFrom ? { connectFrom: anchor.connectFrom } : {})
+        nodeId: anchor.nodeId
       })
     );
   }

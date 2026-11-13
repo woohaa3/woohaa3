@@ -45,3 +45,13 @@ export type OAuthAgentProvider = {
 export const OAUTH_AGENT_PROVIDERS: readonly OAuthAgentProvider[] = [
   { providerId: "chatgpt", label: "ChatGPT（OAuth）", routePrefix: "" }
 ];
+
+/**
+ * 业务入口的显式角色绑定（change: 2026-11-07-add-pluggable-agent-roles）。
+ *
+ * 直连生成面板按目标显式选择角色；宿主核心与执行通道不按 mode 推导角色。
+ * 这是**绑定配置**，不是角色实现：角色本身由 standard-agent-roles 插件提供。
+ */
+export const OAUTH_AGENT_GENERATION_ROLE_IDS = {
+  model3d: "standard-agent-roles/model-author"
+} as const;

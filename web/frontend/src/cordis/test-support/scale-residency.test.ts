@@ -139,9 +139,9 @@ describe("固定可见需求下重资源数量不随文档规模增长", () => {
     project();
     const admitted = coordinator.admittedNodeIds().length;
     expect(admitted).toBeGreaterThan(0);
-    // 预览槽只服务离屏预览相机（模型/复合资产）；密集总览全是图片卡，必须由 GPU 估算预算
-    // 收敛，不能沿用预览槽数量（否则 16 张之后全部卡片只能 hover 才加载）。
-    expect(admitted).toBeGreaterThan(coordinator.getPolicy().previewSlots);
+    // 密集总览全是图片卡，由全页 GPU 估算预算收敛；不能沿用单一类别数量
+    // （否则超过该数量的卡片只能 hover 才加载）。
+    expect(admitted).toBeGreaterThan(16);
     const diagnostics = coordinator.diagnostics();
     expect(diagnostics.demands).toBe(admitted);
     expect(diagnostics.deferred).toBeGreaterThan(0);

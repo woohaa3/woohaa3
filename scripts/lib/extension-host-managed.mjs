@@ -41,7 +41,7 @@ export async function loadRuntimePlugin({ dir, extensionId, version, token }) {
     rootWritable: false
   };
   const descriptor = loadExtensionDescriptor(extension);
-  if (!descriptor?.hostPlugin) {
+  if (!descriptor?.hostPlugin && !descriptor?.backend) {
     throw new ExtensionLoadError("EXTENSION_MODULE_INVALID", `扩展 ${extensionId} 没有声明 hostPlugin，无法作为后端插件装配`, { extensionId, directory: dir });
   }
   const violation = untrustedRootViolation(extension, descriptor);
@@ -50,15 +50,27 @@ export async function loadRuntimePlugin({ dir, extensionId, version, token }) {
   if (problem) throw new ExtensionLoadError(problem.code, problem.message, { extensionId, directory: dir });
 
   const context = { extensionId, directory: dir, descriptorPath: extension.descriptorPath };
-  const modulePath = resolveModuleFile(dir, descriptor.hostPlugin.module ?? "./backend", context);
+  const declaration = descriptor.hostPlugin ?? descriptor.backend;
+  const modulePath = resolveModuleFile(dir, declaration.module ?? "./backend", context);
   const moduleUrl = pathToFileURL(modulePath);
   if (typeof token === "string" && token.length > 0) moduleUrl.searchParams.set("v", token);
   const module = await import(moduleUrl.href);
-  const factory = module[descriptor.hostPlugin.factory];
+  const factory = module[declaration.factory];
   if (typeof factory !== "function") {
-    throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", `扩展 ${extensionId} 的 hostPlugin 工厂导出不是函数：${descriptor.hostPlugin.factory}`, { extensionId, directory: dir, export: descriptor.hostPlugin.factory });
+    throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", `扩展 ${extensionId} 的 hostPlugin 工厂导出不是函数：${declaration.factory}`, { extensionId, directory: dir, export: declaration.factory });
   }
   const plugin = factory({});
+  if (!descriptor.hostPlugin) {
+    if (!plugin || plugin.extensionId !== extensionId || typeof plugin.activate !== "function") throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", "Invalid backend extension factory", context);
+    const publicRoutes = [];
+    for (const route of descriptor.publicRoutes ?? []) {
+      const routeModule = route.publicPathExport ? await import(pathToFileURL(resolveModuleFile(dir, route.module ?? "./shared", context)).href) : null;
+      const publicPath = route.publicPath ?? routeModule?.[route.publicPathExport];
+      if (typeof publicPath !== "string" || !publicPath.startsWith("/api/")) throw new Error("Invalid public route export");
+      publicRoutes.push({ extensionId, publicPath, route: route.route, methods: route.methods });
+    }
+    return { descriptor, definition: { ...plugin, publicRoutes, executors: (descriptor.executors ?? []).map(entry => ({ ...entry, module: resolveModuleFile(dir, entry.module, context) })) } };
+  }
   if (!plugin || typeof plugin.apply !== "function" || typeof plugin.configPrefix !== "string") {
     throw new ExtensionLoadError("EXTENSION_EXPORT_INVALID", `扩展 ${extensionId} 的 hostPlugin 工厂返回值不是扩展层插件（需要 name/configPrefix/apply）`, { extensionId, directory: dir });
   }
@@ -134,7 +146,7 @@ export function untrustedRootViolation(extension, descriptor) {
  */
 export function probeDeclaredModules(extension, descriptor) {
   const context = { extensionId: extension.extensionId, directory: extension.dir, descriptorPath: extension.descriptorPath ?? null };
-  const subpaths = [];
+  const subpaths = (descriptor.executors ?? []).map(entry => entry.module);
   if (descriptor.backend) subpaths.push(descriptor.backend.module ?? "./backend");
   if (descriptor.hostPlugin) subpaths.push(descriptor.hostPlugin.module ?? "./backend");
   if (descriptor.canvasContent) subpaths.push(descriptor.canvasContent.module ?? "./backend");

@@ -3,7 +3,7 @@
  * （自 `mcp-http.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R11）。
  */
 import type { ToolCallback, ToolAnnotations, RegisteredTool, StandardSchemaWithJSON } from "@modelcontextprotocol/server";
-import { HUMANOID_RIG_AUTHORING_ENABLED, HUMANOID_V1_JOINT_IDS, MODEL_CAMERA_ASPECTS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, modelScaleGuidanceTextZh, motionApiGuideText } from "@woohaa3/contracts";
+import { HUMANOID_RIG_AUTHORING_ENABLED, HUMANOID_V1_JOINT_IDS, modelApiGuide, modelPrimitiveConstraintsText, modelRenderBudgetText, modelScaleGuidanceTextZh, motionApiGuideText } from "@woohaa3/contracts";
 import { toolError } from "./tool-results.js";
 import type { ToolRegistration } from "./http-types.js";
 
@@ -12,18 +12,6 @@ const REFERENCE_GUIDE = `生成或修改脚本前，先调用 get_model_node 读
 - kind: "text" 的条目带 text 字段（上游文字节点的权威内容）；
 - kind: "image" / "video" / "audio" 的条目带 asset.storageKey 与同源 asset.url，可直接下载查看；
 - 只有 status: ready 的媒体才有 asset，未就绪条目会带 pendingReason。`;
-
-/**
- * 镜头 CRUD 指南（change: add-model-camera-mcp-crud）。
- */
-const CAMERA_GUIDE = `镜头（nodeData.modelCameras）是模型节点的 canonical 子资源，不是独立画布节点：
-- 先 get_model_cameras 读取现有镜头的稳定 id 与字段，再决定增删改；
-- 单条操作用 create/update/delete/rename/reset_model_camera，服务端基于权威集合读改写，
-  不要回传完整数组（那会覆盖同节点上的并发修改）；写工具需提供稳定 requestId 以幂等重试；
-- 只有需要一次性重建整组镜头时才用 set_model_camera 整体替换（含 aspect 与 focusOffset）；
-- 每条镜头字段：id/name/order/azimuth（弧度）/elevation（仰角弧度，必填）/distance（正）/aspect（${MODEL_CAMERA_ASPECTS.join("|")}，必填）/可选 focusOffset；
-- 不要写选中镜头、hover、活动 handle、preview URL 或 capture busy 等瞬态状态，也不要创建
-  camera/shot 节点或边。`;
 
 /** 由 contracts descriptor 生成的版本/方法/示例指南，避免文档漂移（design D8）。 */
 export function buildModelApiGuideText(): string {
@@ -34,7 +22,6 @@ export function buildModelApiGuideText(): string {
 
 ${REFERENCE_GUIDE}
 
-${CAMERA_GUIDE}
 
 SceneBuilder 方法：
 ${methods}
@@ -46,7 +33,7 @@ ${methods}
 - 画布使用 dimetric 等距视图：local +Z（正面）投影到屏幕“左下方、面向观察者”，
   local +X（左侧）投影到“右下方”；请把正面放在 +Z 一侧，背面放在 -Z。
 
-尺度约定（模型卡片与渲染共用同一现实基准）：
+尺度约定（模型按真实世界尺度渲染）：
 - ${modelScaleGuidanceTextZh()}
 
 ${HUMANOID_RIG_AUTHORING_ENABLED ? `人形骨架（机甲、人物；白模视频要靠这些关节动起来）：
@@ -58,8 +45,8 @@ ${HUMANOID_RIG_AUTHORING_ENABLED ? `人形骨架（机甲、人物；白模视�
 - 腹部必须连上髋和脊柱。脊柱在髋上方 0.5 米，中间没有腰关节。不要只在 Hips 和 Spine 原点各放一个小盒子。用这一段填上：scene.segment({ id: "abdomen", parent: rig.joint("Spine"), from: [0, -0.5, 0], to: [0, 0, 0], width: 0.32, depth: 0.24, shape: "box" })。胸甲中心要低于头关节，头在 Spine 上方 0.25 米。
 - 髋在模型原点，脚在负 Y。这是参考姿态。不要改关节位置来把脚挪到 y=0。
 - 动作的 targetId 必须是上面的关节 id。原地跑步要给左右 UpperLeg、LowerLeg、Foot 各写不同的旋转轨道。工具返回成功不等于用了关节。
-- 这条基准只描述模型自身的绝对尺寸；卡片按模型 extent 归一化显示，卡片里看起来一样大不代表
-  实际尺寸一致。不要用卡片取景、节点矩形或画布 zoom 反推单位。` : ""}
+- 这条基准只描述模型自身的绝对尺寸；模型在世界中按真实尺度渲染，位置使用世界坐标，
+  不要用节点矩形、画布 zoom 或聚焦取景反推单位。` : ""}
 
 选择建议：
 - 球状部件用 scene.sphere；圆润肢体用 scene.capsule；方块肢体用 box segment；

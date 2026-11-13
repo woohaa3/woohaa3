@@ -297,6 +297,29 @@ describe("createSettingsService", () => {
     ]);
   });
 
+  it("非站点插件的启动失败原因进插件清单，成功/注销后清除", async () => {
+    const { service } = await start(tempFiles());
+    service.registerPlugin({ id: "litellm-provider", label: "LiteLLM", layer: "extension", configPrefix: "providers.litellm" });
+    // 没有失败时字段不出现：消费方据此区分「没启动失败」与「失败原因为空」。
+    expect(service.plugins()[0]).not.toHaveProperty("activationFailure");
+
+    // 真实场景：旧版本插件调用了宿主已删除的 ctx 能力，apply 抛错。
+    service.setPluginActivationFailure("litellm-provider", "ctx.generation.registerConversion is not a function");
+    expect(service.plugins()[0]?.activationFailure).toBe("ctx.generation.registerConversion is not a function");
+
+    // 配置改对后重启成功：失败原因必须自己消失，否则设置页会一直谎报异常。
+    service.setPluginActivationFailure("litellm-provider", null);
+    expect(service.plugins()[0]).not.toHaveProperty("activationFailure");
+
+    // 插件被卸载：登记与失败原因一起撤出。
+    service.setPluginActivationFailure("litellm-provider", "boom");
+    service.plugins();
+    const unregister = service.registerPlugin({ id: "temp", label: "临时", layer: "extension" });
+    service.setPluginActivationFailure("temp", "boom");
+    unregister();
+    expect(service.plugins().some((plugin) => plugin.id === "temp")).toBe(false);
+  });
+
   it("登记时现有值不合法则拒绝登记", async () => {
     const files = tempFiles();
     fs.writeFileSync(files.configFile, "providers:\n  demo:\n    timeoutMs: 0\n");

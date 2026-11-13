@@ -500,7 +500,6 @@ export type InteractionController = {
 export type Gesture =
   | { kind: "none" }
   | { kind: "history-press"; pointerId: number; nodeId: string; presentationId: string; startScreen: Point }
-  | { kind: "model-preview"; pointerId: number; nodeId: string; last: Point }
   | { kind: "pan"; pointerId: number; last: Point }
   | { kind: "right-press"; pointerId: number; start: Point; startScreen: Point; nodeId: string | null; moved: boolean }
   | {

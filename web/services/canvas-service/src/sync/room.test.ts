@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, newWorldInstance } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
 import { serverCanvasToYDoc, yDocToServerCanvas } from "@woohaa3/contracts/canvas-yjs";
 import { InMemoryYjsDocumentRepository } from "./in-memory-yjs-repository.js";
@@ -33,7 +33,15 @@ const MODEL3D_NODE_DATA = {
 
 /** 构造一个合法的 model3d `node.add` 命令（含自包含定义）。 */
 function addModel3dCommand(id: string) {
-  return { type: "node.add" as const, node: { id, type: "model3d", position: { x: 0, y: 0 } }, nodeData: { ...MODEL3D_NODE_DATA } };
+  // 模型没有卡片：每次创建都使用独立共享世界实例（change: 2026-11-10-remove-legacy-model-card-nodes）。
+  return {
+    type: "node.add" as const,
+    node: { id, type: "model3d" },
+    nodeData: {
+      ...MODEL3D_NODE_DATA,
+      sharedWorldInstance: newWorldInstance(`instance-${id}`, { x: 0, y: 0 })
+    } as never
+  };
 }
 
 function batch(overrides: Partial<CanvasCommandBatch> = {}): CanvasCommandBatch {
@@ -86,7 +94,6 @@ describe("串行命令与并行 room（任务 4.1）", () => {
       await room.initialize({ canvas: createEmptyWoohaa3ServerCanvas(CANVAS, NOW), roomEpoch: "epoch-1", createdAt: NOW });
       const result = await room.submit(batch({ commands: [
         { ...addModel3dCommand("model"), nodeData: { ...MODEL3D_NODE_DATA, sharedWorldInstance: instance, parameters } },
-        addModel3dCommand("legacy-model"),
         { type: "node.add", node: { id: "image", type: "image", position: { x: 0, y: 0 } } },
         { type: "node.add", node: { id: "group", type: "workflow-group-2d", position: { x: 0, y: 0 } }, nodeData: { workflowGroup2d: group }, connect: { fromNodeId: "image", edgeId: "e-group" } },
         { type: "node.add", node: { id: "area", type: "scene-area", position: { x: 0, y: 0 } }, nodeData: { sceneArea: area }, connect: { fromNodeId: "image", edgeId: "e-area" } },
@@ -103,8 +110,6 @@ describe("串行命令与并行 room（任务 4.1）", () => {
         if (exported.ok) {
           expect(exported.canvas.nodeData.model.sharedWorldInstance).toEqual(instance);
           expect(exported.canvas.nodeData.model.parameters).toEqual(parameters);
-          expect(exported.canvas.nodeData["legacy-model"]).toEqual(MODEL3D_NODE_DATA);
-          expect(exported.canvas.nodeData["legacy-model"].sharedWorldInstance).toBeUndefined();
           expect(exported.canvas.nodeData.group.workflowGroup2d).toEqual(group);
           expect(exported.canvas.nodeData.area.sceneArea).toEqual(area);
           expect(exported.canvas.nodeData.camera.worldCamera).toEqual(camera);
@@ -479,71 +484,6 @@ describe("命令 durable 成功后的观察者（change: 模型编辑历史）",
   });
 });
 
-describe("模型镜头子资源 patch（change: add-model-editor-gizmo-shot-capture）", () => {
-  it("合法 modelCameras patch 经 Yjs durable 提交并可往返恢复", async () => {
-    const { room, repository } = await readyRoom();
-    // 先加一个 model3d 节点（含自包含定义）。
-    const addNode = await room.submit(
-      batch({ commandId: "c-cam-0", commands: [addModel3dCommand("m1")] })
-    );
-    expect(addNode.ok).toBe(true);
-
-    const patch = await room.submit(
-      batch({
-        commandId: "c-cam-1",
-        commands: [
-          {
-            type: "nodeData.patch",
-            nodeId: "m1",
-            value: {
-              modelCameras: [
-                { id: "cam-b", name: "B", order: 1, azimuth: 1, elevation: 0, distance: 4, aspect: "16:9" },
-                { id: "cam-a", name: "A", order: 0, azimuth: 0.2, elevation: 0, distance: 2, aspect: "1:1" }
-              ]
-            }
-          }
-        ] as never
-      })
-    );
-    expect(patch.ok).toBe(true);
-    const exported = room.exportCanvas();
-    expect(exported.ok).toBe(true);
-    if (!exported.ok) return;
-    const cameras = (exported.canvas.nodeData.m1 as { modelCameras: Array<{ id: string }> }).modelCameras;
-    // 规范化排序：cam-a 在前。
-    expect(cameras.map((camera) => camera.id)).toEqual(["cam-a", "cam-b"]);
-
-    // 从持久化状态重建 room 后镜头仍在（Yjs round-trip）。
-    const reloaded = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
-    const loaded = await reloaded.load();
-    expect(loaded.ok).toBe(true);
-    const reExported = reloaded.exportCanvas();
-    expect(reExported.ok).toBe(true);
-    if (!reExported.ok) return;
-    expect((reExported.canvas.nodeData.m1 as { modelCameras: unknown[] }).modelCameras).toHaveLength(2);
-  });
-
-  it("非法 modelCameras patch 被拒绝且不改变画布", async () => {
-    const { room } = await readyRoom();
-    await room.submit(
-      batch({ commandId: "c-bad-0", commands: [addModel3dCommand("m1")] })
-    );
-    const before = room.currentRevision;
-    const rejected = await room.submit(
-      batch({
-        commandId: "c-bad-1",
-        commands: [
-          { type: "nodeData.patch", nodeId: "m1", value: { modelCameras: [{ id: "cam-a", name: "A", order: 0, azimuth: 0, elevation: 0, distance: 0, aspect: "16:9" }] } }
-        ] as never
-      })
-    );
-    expect(rejected.ok).toBe(false);
-    if (rejected.ok) return;
-    expect(rejected.code).toBe("invalid-model-cameras");
-    expect(room.currentRevision).toBe(before);
-  });
-});
-
 describe("submitDerived 串行读改写（change: add-model-camera-mcp-crud）", () => {
   it("按最新 published 派生批次，两个并发派生不互相覆盖", async () => {
     const { room } = await readyRoom();
@@ -553,11 +493,13 @@ describe("submitDerived 串行读改写（change: add-model-camera-mcp-crud）",
       room.submitDerived({
         commandId,
         derive: (canvas) => {
-          const data = canvas.nodeData.m1 as { ids?: string[] } | undefined;
-          const ids = [...(data?.ids ?? []), id];
+          // 模型 nodeData 采用受控字段白名单：派生批次只改写模型层允许的字段（提示词），
+          // 两个并发派生都基于最新 published，后一个不会覆盖前一个。
+          const data = canvas.nodeData.m1 as { prompt?: string } | undefined;
+          const prompt = [data?.prompt, id].filter((value) => value !== undefined).join("+");
           return {
             ok: true,
-            batch: batch({ commandId, baseRevision: canvas.revision, commands: [{ type: "nodeData.patch", nodeId: "m1", value: { ids } as never }] })
+            batch: batch({ commandId, baseRevision: canvas.revision, commands: [{ type: "nodeData.patch", nodeId: "m1", value: { prompt } as never }] })
           };
         }
       });
@@ -566,7 +508,7 @@ describe("submitDerived 串行读改写（change: add-model-camera-mcp-crud）",
     const exported = room.exportCanvas();
     expect(exported.ok).toBe(true);
     if (!exported.ok) return;
-    expect((exported.canvas.nodeData.m1 as { ids: string[] }).ids).toEqual(["a", "b"]);
+    expect((exported.canvas.nodeData.m1 as { prompt: string }).prompt).toBe("a+b");
   });
 
   it("命中同 commandId 回执时短路为 duplicate，不重新派生", async () => {

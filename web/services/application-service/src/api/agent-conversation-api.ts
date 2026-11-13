@@ -5,6 +5,7 @@
  * 同源路径 `/api/agent-conversations/*`，由 Application Service 承载：
  * ```
  * GET  /api/agent-conversations/catalog?adapterId=            账户目录/授权/能力（owner 隔离）
+ * GET  /api/agent-conversations/roles?adapterId=              角色目录与能力匹配（只读，不准备）
  * GET  /api/agent-conversations/mcp                            内置 MCP 真实发现 + 外部连接指引
  * POST /api/agent-conversations/conversations                创建会话
  * GET  /api/agent-conversations/conversations?canvasId=&limit= 列出会话
@@ -33,6 +34,7 @@ import {
   decodeCursorQuery,
   decodeLinkRunRequest,
   decodeSwitchConnectionRequest,
+  type AgentConnectionBinding,
   type ApplicationExtensionCanvasAccessFacade
 } from "@woohaa3/contracts";
 import type { ApplicationRequestAuthenticator } from "../auth/adapter.js";
@@ -98,8 +100,33 @@ const STATUS_FOR: Record<AgentConversationServiceError["code"], number> = {
   "capability-unsupported": 400,
   "budget-exceeded": 429,
   "storage-failed": 500,
-  "active-turn": 409
+  "active-turn": 409,
+  "role-not-found": 400,
+  "role-unavailable": 409,
+  "role-version-conflict": 409,
+  "role-input-invalid": 400,
+  "role-context-invalid": 400,
+  "role-requirement-unsatisfied": 409,
+  "role-prepare-failed": 500
 };
+
+/** 冻结连接身份是否等于给定身份（四个字段共同构成回合的版本快照）。 */
+const sameConnectionBinding = (frozen: AgentConnectionBinding, current: AgentConnectionBinding) =>
+  frozen.connectionId === current.connectionId && frozen.adapterId === current.adapterId
+  && frozen.configRevision === current.configRevision && frozen.credentialEpoch === current.credentialEpoch
+  && (frozen.capabilityRevision === undefined || frozen.capabilityRevision === current.capabilityRevision);
+
+/**
+ * 接受回合前校验前端冻结的连接身份。
+ *
+ * 解析时会自动迁移执行器版本并推进 `configRevision`；此时前端持有的仍是迁移前身份，
+ * 允许它匹配 `upgradedFrom`，本回合仍按迁移后身份冻结。
+ */
+const frozenConnectionAccepted = (
+  frozen: AgentConnectionBinding,
+  resolved: { binding: AgentConnectionBinding | null; upgradedFrom?: AgentConnectionBinding }
+) => Boolean(resolved.binding && sameConnectionBinding(frozen, resolved.binding))
+  || Boolean(resolved.upgradedFrom && sameConnectionBinding(frozen, resolved.upgradedFrom));
 
 export function createAgentConversationApiHandler(deps: AgentConversationApiDependencies): AgentConversationApiHandler {
   const log = deps.logger ?? (() => undefined);
@@ -187,7 +214,7 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const provider = deps.serviceConnectionProviders?.().find(provider => provider.providerId === input.providerId && provider.serviceConnectionFactory);
         const model = provider?.models.find(model => model.providerModelId === input.modelId && model.modelType === "language");
         const endpoint = source.endpoints.find(endpoint => provider?.serviceConnectionFactory?.protocols.includes(endpoint.protocol));
-        if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "discussion")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
+        if (!provider || !model || !endpoint || !source.capabilities.some(capability => capability.modelId === model.providerModelId && capability.protocol === endpoint.protocol && capability.purpose === "text")) return badRequest(res, "此来源或 Provider 未提供所选模型的文本生成适配");
         const connection = await deps.serviceConnections!.bind(actor, source.serviceConnectionId, { bindingId: `provider:${provider.providerId}`,
           extensionId: provider.extensionId, consumer: "provider", consumerId: provider.providerId, purposes: ["text"], modelKeys: [...new Set([...(source.bindings.find(binding => binding.bindingId === `provider:${provider.providerId}`)?.modelKeys ?? []), `${provider.providerId}:${model.providerModelId}`])] }, source,
           normalizeCapabilities([...source.capabilities.filter(capability => !(capability.purpose === "text" && capability.protocol === endpoint.protocol && capability.modelId === model.providerModelId)),
@@ -209,8 +236,8 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const expected = { configRevision: input.configRevision as number, credentialEpoch: input.credentialEpoch as number };
         const bindingId = `shared-sdk:${source.serviceConnectionId}`;
         const connection = input.enabled ? await deps.serviceConnections!.bind(actor, source.serviceConnectionId, {
-          bindingId, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["discussion"],
-          modelKeys: source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === "chat-completions").map(capability => capability.modelId),
+          bindingId, extensionId: "sdk-agent", consumer: "agent", consumerId: "shared:chat-completions", purposes: ["text"],
+          modelKeys: source.capabilities.filter(capability => capability.purpose === "text" && capability.protocol === "chat-completions").map(capability => capability.modelId),
         }, expected) : await deps.serviceConnections!.unbind(actor, source.serviceConnectionId, bindingId, expected);
         sendJson(res, 200, { connection }); return true;
       }
@@ -218,6 +245,16 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
       if (suffix === "catalog" && method === "GET") {
         const adapterId = url.searchParams.get("adapterId") ?? undefined;
         const result = await deps.service.catalog({ owner, ...(adapterId ? { adapterId } : {}) });
+        if (!result.ok) return respondError(res, result.error);
+        sendJson(res, 200, result);
+        return true;
+      }
+
+      // GET /roles：只读角色目录与能力匹配投影（change: 2026-11-07-add-pluggable-agent-roles）。
+      // 只解析 adapter 能力并读注册表；不准备、不推理、不签发授权。
+      if (suffix === "roles" && method === "GET") {
+        const adapterId = url.searchParams.get("adapterId") ?? undefined;
+        const result = deps.service.listRoles({ owner, ...(adapterId ? { adapterId } : {}) });
         if (!result.ok) return respondError(res, result.error);
         sendJson(res, 200, result);
         return true;
@@ -429,15 +466,15 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const decoded = decodeAcceptTurnRequest(await readJson(req, maxBytes));
         if (!decoded.ok) return badRequest(res, decoded.message, decoded.code);
         const entry = decoded.value.entry;
-        if (!entry.nodeId || !entry.model || !entry.connectionId || entry.action !== "discuss" || entry.references?.length || entry.mode || entry.cameraId || entry.clipId || entry.itemId || entry.worldScope || entry.expectedContentHash) return badRequest(res, "图片场景请求无效");
+        if (!entry.nodeId || !entry.model || !entry.connectionId || !entry.roleId || entry.action !== "generate" || entry.references?.length || entry.mode || entry.cameraId || entry.clipId || entry.itemId || entry.worldScope || entry.expectedContentHash) return badRequest(res, "图片场景请求无效");
         const conversation = deps.service.readConversation({ owner, conversationId });
         if (!conversation.ok) return respondError(res, conversation.error);
         if (conversation.snapshot.conversation.canvasId !== entry.canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
         const allowed = await authorizeCanvas(deps, owner, entry.canvasId, "write");
         if (!allowed.ok) return respondError(res, allowed.error);
-        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId: conversation.snapshot.conversation.adapterId, connectionId: entry.connectionId });
+        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId: conversation.snapshot.conversation.adapterId, connectionId: entry.connectionId, ...(entry.model ? { model: entry.model } : {}), ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
-        if (!connection.binding || (entry.connection && (entry.connection.connectionId !== connection.binding.connectionId || entry.connection.adapterId !== connection.binding.adapterId || entry.connection.configRevision !== connection.binding.configRevision || entry.connection.credentialEpoch !== connection.binding.credentialEpoch))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        if (!connection.binding || (entry.connection && !frozenConnectionAccepted(entry.connection, connection))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
         const accepted = await deps.imageDirectorScene.accept({ owner, canvasId: entry.canvasId, conversationId, entry, connection: connection.binding, request: { requestId: decoded.value.requestId, sourceNodeId: entry.nodeId, connectionId: entry.connectionId, model: entry.model, variant: entry.reasoningEffort ?? null, instructions: entry.prompt } });
         if (!accepted.ok) return respondError(res, accepted.error);
         sendJson(res, 200, accepted);
@@ -450,17 +487,6 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         if (!allowed.ok) return respondError(res, allowed.error);
         const result = await deps.imageDirectorScene.reconcile(owner, canvasId, requestId);
         sendJson(res, 200, result);
-        return true;
-      }
-      if ((suffix === "image-director-scenes/retry-placement" || suffix === "image-director-scenes/retry-save") && method === "POST") {
-        const body = await readJson(req, maxBytes);
-        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "canvasId,requestId") return badRequest(res, "创建身份无效");
-        const { canvasId, requestId } = body as { canvasId?: unknown; requestId?: unknown };
-        if (typeof canvasId !== "string" || !canvasId || typeof requestId !== "string" || !requestId || !deps.imageDirectorScene) return badRequest(res, "创建身份无效");
-        const allowed = await authorizeCanvas(deps, owner, canvasId, "write");
-        if (!allowed.ok) return respondError(res, allowed.error);
-        try { sendJson(res, 200, await (suffix.endsWith("retry-save") ? deps.imageDirectorScene.retrySave(owner, canvasId, requestId) : deps.imageDirectorScene.retryPlacement(owner, canvasId, requestId))); }
-        catch (error) { return badRequest(res, error instanceof Error ? error.message : "重试失败"); }
         return true;
       }
       const turnsCreate = /^conversations\/([^/]+)\/turns$/.exec(suffix);
@@ -478,11 +504,11 @@ export function createAgentConversationApiHandler(deps: AgentConversationApiDepe
         const allowed = await authorizeCanvas(deps, owner, canvasId, permission);
         if (!allowed.ok) return respondError(res, allowed.error);
         if (decoded.value.entry.canvasId !== canvasId) return respondError(res, { code: "unauthorized", message: "目标画布与会话不一致" });
-        // 冻结本回合连接身份：显式选择校验归属，缺失时映射兼容默认连接（change: 2026-10-16-...，任务 2.2）。
-        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId, ...(decoded.value.entry.connectionId ? { connectionId: decoded.value.entry.connectionId } : {}) });
+        // 冻结本回合连接身份：显式选择校验归属，缺失时直接拒绝（change: 2026-10-16-...，任务 2.2）。
+        const connection = await deps.service.resolveConnectionBinding({ owner, adapterId, ...(decoded.value.entry.connectionId ? { connectionId: decoded.value.entry.connectionId } : {}), ...(decoded.value.entry.model ? { model: decoded.value.entry.model } : {}), ...(decoded.value.entry.reasoningEffort ? { reasoningEffort: decoded.value.entry.reasoningEffort } : {}) });
         if (!connection.ok) return respondError(res, connection.error);
         const frozen = decoded.value.entry.connection;
-        if (frozen && (!connection.binding || frozen.connectionId !== connection.binding.connectionId || frozen.adapterId !== connection.binding.adapterId || frozen.configRevision !== connection.binding.configRevision || frozen.credentialEpoch !== connection.binding.credentialEpoch)) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
+        if (frozen && (!connection.binding || !frozenConnectionAccepted(frozen, connection))) return respondError(res, { code: "connection-unavailable", message: "助手连接版本已变更，请重新选择" });
         // A version upgrade may archive the old target while resolving the binding.
         // Only that transition creates a fresh conversation; archived history stays immutable.
         let acceptedConversationId = conversationId;
@@ -607,21 +633,20 @@ async function ensureProviderAssistantBinding(
   const protocol = provider.serviceConnectionFactory?.assistantProtocol;
   if (!protocol || !deps.serviceConnections) return connection;
   const modelKeys = provider.models.filter(model => model.modelType === "language" && connection.capabilities.some(capability =>
-    capability.purpose === "discussion" && capability.protocol === protocol && capability.modelId === model.providerModelId)).map(model => model.providerModelId);
+    capability.purpose === "text" && capability.protocol === protocol && capability.modelId === model.providerModelId)).map(model => model.providerModelId);
   if (!modelKeys.length) return connection;
-  const assistantCapabilities = modelKeys.flatMap(modelId => [
-    { purpose: "discussion" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
-    { purpose: "target-execution" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
-  ]);
+  const assistantCapabilities = modelKeys.map(modelId => (
+    { purpose: "text" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const }
+  ));
   const capabilities = normalizeCapabilities([
     ...connection.capabilities.filter(capability => !(capability.protocol === protocol && modelKeys.includes(capability.modelId)
-      && (capability.purpose === "discussion" || capability.purpose === "target-execution"))),
+      && capability.purpose === "text")),
     ...assistantCapabilities,
   ]);
   try {
     return await deps.serviceConnections.bind(actor, connection.serviceConnectionId, {
       bindingId: `provider-assistant:${provider.providerId}`, extensionId: "sdk-agent", consumer: "agent",
-      consumerId: `shared:${protocol}`, purposes: ["discussion", "target-execution"], modelKeys,
+      consumerId: `shared:${protocol}`, purposes: ["text"], modelKeys,
     }, connection, capabilities);
   } catch { return connection; }
 }

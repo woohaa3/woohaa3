@@ -16,7 +16,7 @@ import {
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { cephalonModelDefinitions, discoverCephalonModels, type DiscoveredModel } from "./discovery.js";
 import { createCephalonProvider, describeCephalonModel } from "./provider.js";
-import { CEPHALON_ORIGIN, CEPHALON_PLUGIN_ID, CEPHALON_PROVIDER_ID } from "./shared.js";
+import { CEPHALON_CHAT_BASE, CEPHALON_ORIGIN, CEPHALON_PLUGIN_ID, CEPHALON_PROVIDER_ID } from "./shared.js";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
@@ -55,19 +55,22 @@ export function createCephalonRegistration(input: CephalonRegistrationInput): { 
   const apiKey = (input.apiKey ?? "").trim();
   const available = apiKey !== "";
   const models: DiscoveredModel[] = [...(input.models ?? [])];
+  const guardedFetch = (options: { validate?: () => Promise<void>; apiFetchImpl?: typeof globalThis.fetch } = {}) =>
+    createGuardedFetch({
+      baseUrl: CEPHALON_ORIGIN,
+      maxBytes: input.maxBytes ?? DEFAULT_MAX_BYTES,
+      timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      // 图片结果由 Provider 自己下载成字节；视频只回地址，交给宿主入库流程。
+      allowedContentTypes: ["image/", "video/"],
+      ...options,
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
+    });
   const provider = available
     ? createCephalonProvider({
         apiKey,
         models,
         ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
-        fetch: createGuardedFetch({
-          baseUrl: CEPHALON_ORIGIN,
-          maxBytes: input.maxBytes ?? DEFAULT_MAX_BYTES,
-          timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          // 图片结果由 Provider 自己下载成字节；视频只回地址，交给宿主入库流程。
-          allowedContentTypes: ["image/", "video/"],
-          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {})
-        })
+        fetch: guardedFetch()
       })
     : undefined;
   return {
@@ -77,6 +80,23 @@ export function createCephalonRegistration(input: CephalonRegistrationInput): { 
       available,
       provider,
       models: cephalonModelDefinitions(models),
+      // 文本模型按 OpenAI 兼容对话协议接入助手：平台地址固定，来源只能换 Key，不能改写主机。
+      serviceConnectionFactory: {
+        protocols: ["chat-completions"],
+        assistantProtocol: "chat-completions",
+        endpoints: { "chat-completions": CEPHALON_CHAT_BASE },
+        create: ({ secret, validate, fetch: sourceFetch }) =>
+          createCephalonProvider({
+            apiKey: secret,
+            models,
+            ...(input.jobRepository ? { jobRepository: input.jobRepository as never } : {}),
+            fetch: guardedFetch({ validate, ...(sourceFetch ? { apiFetchImpl: sourceFetch } : {}) })
+          })
+      },
+      languageCapabilities: (providerModelId) => {
+        const model = models.find((item) => item.id === providerModelId && item.modelType === "language");
+        return model ? { imageInput: model.supportsVision === true } : undefined;
+      },
       describeModel: (model) =>
         describeCephalonModel(
           model.providerModelId,
@@ -117,6 +137,17 @@ export function createCephalonProviderPlugin(
           }
         ]
       };
+    },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      if (!apiKey) return { ok: false, message: "请先填写端脑云 API Key" };
+      const result = await discoverCephalonModels({
+        apiKey,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        timeoutMs: 10_000
+      });
+      if (!result.ok) return { ok: false, message: result.message };
+      return { ok: true, message: `测试通过，已发现 ${result.models.length} 个模型` };
     },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";

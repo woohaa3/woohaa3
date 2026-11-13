@@ -11,7 +11,7 @@
  * - 非法脚本（空/超长/非模型节点/不可执行）在写入前失败且不改节点状态。
  */
 import { describe, expect, it } from "vitest";
-import { createEmptyWoohaa3ServerCanvas, modelSourceHash, type CanvasNodeData } from "@woohaa3/contracts";
+import { createEmptyWoohaa3ServerCanvas, modelSourceHash, newWorldInstance, type CanvasNodeData } from "@woohaa3/contracts";
 import { InMemoryYjsDocumentRepository } from "../sync/index.js";
 import { CanvasRoom } from "../sync/room.js";
 import { ModelMcpService } from "./service.js";
@@ -22,8 +22,10 @@ const NOW = "2026-09-24T00:00:00.000Z";
 const VALID_SCRIPT = "scene.box({ id: 'body', size: [1, 2, 1], color: '#ff0000' });";
 
 /** 自包含 model3d 节点的默认合法定义（新建模型节点必须携带完整本地模型）。 */
+// 模型没有卡片：权威节点携带共享世界实例（change: 2026-11-10-remove-legacy-model-card-nodes）。
 const BASE_MODEL_NODE_DATA: CanvasNodeData = {
   title: "模型",
+  sharedWorldInstance: newWorldInstance("instance-model-1", { x: 0, y: 0 }),
   modelScript: VALID_SCRIPT,
   modelScriptLanguage: "javascript",
   modelScriptVersion: "woohaa-model-js-v2",
@@ -45,7 +47,7 @@ async function readyRoom(canvasId: string, nodeData: Record<string, CanvasNodeDa
       document: {
         ...base.document,
         nodes: [
-          { id: "model-1", type: "model3d", position: { x: 0, y: 0 } },
+          { id: "model-1", type: "model3d" },
           { id: "image-1", type: "image", position: { x: 160, y: 0 } }
         ]
       },
@@ -74,7 +76,7 @@ async function readyRoomWithReferences(canvasId: string, storageKey: string): Pr
     document: {
       ...base.document,
       nodes: [
-        { id: "model-1", type: "model3d" as const, position: { x: 0, y: 0 } },
+        { id: "model-1", type: "model3d" as const },
         { id: "img-1", type: "image" as const, position: { x: 200, y: 0 } },
         { id: "txt-1", type: "text" as const, position: { x: 400, y: 0 } }
       ],
@@ -234,7 +236,7 @@ describe("ModelMcpService.submitScript", () => {
     await initializeFixture(room, {
       canvas: {
         ...base,
-        document: { ...base.document, nodes: [{ id: "m3d-1", type: "model3d", position: { x: 0, y: 0 } }] },
+        document: { ...base.document, nodes: [{ id: "m3d-1", type: "model3d" }] },
         nodeData: {
           "m3d-1": {
             title: "3D 模型",
@@ -242,7 +244,8 @@ describe("ModelMcpService.submitScript", () => {
             modelScriptLanguage: "javascript",
             modelScriptVersion: "woohaa-model-js-v2",
             modelContentVersion: { revision: 1, sourceHash: "s1", contentHash: "c1" },
-            modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 }
+            modelPlacement: { offset: { x: 0, y: 0, z: 0 }, scale: 1, yaw: 0 },
+            sharedWorldInstance: newWorldInstance("instance-m3d-1", { x: 0, y: 0 })
           } as unknown as CanvasNodeData
         }
       },
@@ -558,8 +561,7 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
       renderVersion: "woohaa-model-render-v1",
       width: 512,
       height: 512,
-      background: "transparent",
-      cameraPreset: "dimetric"
+      background: "transparent"
     });
     expect(outcome.metadata.sourceHash).toBeTruthy();
     // renderer 只收到规范化 Scene IR，没有 JavaScript 源码。
@@ -661,250 +663,6 @@ scene.segment({ id: "arm", from: [0,0,0], to: [0,1,0], width: 0.3, material: m }
   });
 });
 
-describe("ModelMcpService 读取镜头（change: add-model-camera-mcp-crud）", () => {
-  const CAMERAS = [
-    { id: "cam-a", name: "正面", order: 0, azimuth: 0, elevation: 0, distance: 3, aspect: "16:9" as const },
-    { id: "cam-b", name: "右侧", order: 1, azimuth: 1.5, elevation: 0, distance: 5, aspect: "1:1" as const, focusOffset: { x: 1, y: 0, z: 0 } }
-  ];
-
-  it("getModelNode 按稳定顺序返回规范化镜头，且读取不推进 revision", async () => {
-    const { room } = await readyRoom("canvas-cam-read", { "model-1": { modelCameras: CAMERAS } as CanvasNodeData });
-    const before = room.currentRevision;
-    const outcome = await serviceFor(room).getModelNode({ canvasId: "canvas-cam-read", nodeId: "model-1" });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.cameras.map((camera) => camera.id)).toEqual(["cam-a", "cam-b"]);
-    expect(outcome.cameras[1]!.focusOffset).toEqual({ x: 1, y: 0, z: 0 });
-    expect(room.currentRevision).toBe(before);
-  });
-
-  it("无镜头或非法镜头时返回空集合", async () => {
-    const empty = await readyRoom("canvas-cam-empty");
-    const emptyOutcome = await serviceFor(empty.room).getModelNode({ canvasId: "canvas-cam-empty", nodeId: "model-1" });
-    expect(emptyOutcome.ok && emptyOutcome.cameras).toEqual([]);
-
-    const bad = await readyRoom("canvas-cam-bad", { "model-1": { modelCameras: [{ id: "x" }] } as CanvasNodeData });
-    const badOutcome = await serviceFor(bad.room).getModelNode({ canvasId: "canvas-cam-bad", nodeId: "model-1" });
-    expect(badOutcome.ok && badOutcome.cameras).toEqual([]);
-  });
-
-  it("listModelNodes 暴露镜头数量", async () => {
-    const { room } = await readyRoom("canvas-cam-count", { "model-1": { modelCameras: CAMERAS } as CanvasNodeData });
-    const outcome = await serviceFor(room).listModelNodes({ canvasId: "canvas-cam-count" });
-    expect(outcome.ok && outcome.nodes[0]!.cameraCount).toBe(2);
-  });
-});
-
-describe("ModelMcpService.mutateCameras（change: add-model-camera-mcp-crud）", () => {
-  function camerasOf(room: CanvasRoom): Array<{ id: string; name: string; order: number; distance: number; aspect: string }> {
-    const exported = room.exportCanvas();
-    if (!exported.ok) throw new Error("export failed");
-    const data = exported.canvas.nodeData["model-1"] as CanvasNodeData | undefined;
-    return (data?.modelCameras ?? []) as never;
-  }
-
-  it("create 派生稳定 id/默认名称/连续 order，并保留 aspect/focusOffset", async () => {
-    const { room } = await readyRoom("canvas-cam-create", {
-      "model-1": {
-        modelCameras: [{ id: "cam-a", name: "正面", order: 0, azimuth: 0, elevation: 0, distance: 3, aspect: "16:9" }]
-      } as CanvasNodeData
-    });
-    const outcome = await serviceFor(room).mutateCameras({
-      canvasId: "canvas-cam-create",
-      nodeId: "model-1",
-      requestId: "r1",
-      mutation: { kind: "create", azimuth: 1, distance: 4, aspect: "4:5", focusOffset: { x: 0, y: 1, z: 0 } }
-    });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.cameras).toHaveLength(2);
-    const created = outcome.cameras[1]!;
-    expect(created.name).toBe("镜头 2");
-    expect(created.order).toBe(1);
-    expect(created.aspect).toBe("4:5");
-    expect(created.focusOffset).toEqual({ x: 0, y: 1, z: 0 });
-    expect(created.id.startsWith("cam-")).toBe(true);
-    expect(camerasOf(room)).toHaveLength(2);
-  });
-
-  it("update 只改匹配镜头并保留其它字段与镜头", async () => {
-    const { room } = await readyRoom("canvas-cam-update", {
-      "model-1": {
-        modelCameras: [
-          { id: "cam-a", name: "正面", order: 0, azimuth: 0, elevation: 0, distance: 3, aspect: "16:9" },
-          { id: "cam-b", name: "右侧", order: 1, azimuth: 1.5, elevation: 0, distance: 5, aspect: "1:1" }
-        ]
-      } as CanvasNodeData
-    });
-    const outcome = await serviceFor(room).mutateCameras({
-      canvasId: "canvas-cam-update",
-      nodeId: "model-1",
-      requestId: "r1",
-      mutation: { kind: "update", id: "cam-b", distance: 8 }
-    });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    const updated = outcome.cameras.find((camera) => camera.id === "cam-b")!;
-    expect(updated.distance).toBe(8);
-    expect(updated.azimuth).toBe(1.5);
-    expect(updated.aspect).toBe("1:1");
-    expect(outcome.cameras.find((camera) => camera.id === "cam-a")!.distance).toBe(3);
-  });
-
-  it("remove/rename/reset 单条镜头", async () => {
-    const { room } = await readyRoom("canvas-cam-ops", {
-      "model-1": {
-        modelCameras: [
-          { id: "cam-a", name: "正面", order: 0, azimuth: 0.2, elevation: 0, distance: 3, aspect: "16:9", focusOffset: { x: 9, y: 9, z: 9 } }
-        ]
-      } as CanvasNodeData
-    });
-    const service = serviceFor(room);
-    const renamed = await service.mutateCameras({
-      canvasId: "canvas-cam-ops", nodeId: "model-1", requestId: "rn", mutation: { kind: "rename", id: "cam-a", name: "主视角" }
-    });
-    expect(renamed.ok && renamed.cameras[0]!.name).toBe("主视角");
-
-    const reset = await service.mutateCameras({
-      canvasId: "canvas-cam-ops", nodeId: "model-1", requestId: "rr", mutation: { kind: "reset", id: "cam-a", azimuth: 0, distance: 2 }
-    });
-    expect(reset.ok).toBe(true);
-    if (!reset.ok) return;
-    expect(reset.cameras[0]!.azimuth).toBe(0);
-    expect(reset.cameras[0]!.distance).toBe(2);
-    expect(reset.cameras[0]!.focusOffset).toBeUndefined();
-
-    const removed = await service.mutateCameras({
-      canvasId: "canvas-cam-ops", nodeId: "model-1", requestId: "rm", mutation: { kind: "remove", id: "cam-a" }
-    });
-    expect(removed.ok && removed.cameras).toEqual([]);
-  });
-
-  it("未知 id 与非法数值在写入前稳定拒绝", async () => {
-    const { room } = await readyRoom("canvas-cam-reject", {
-      "model-1": { modelCameras: [{ id: "cam-a", name: "正面", order: 0, azimuth: 0, elevation: 0, distance: 3, aspect: "16:9" }] } as CanvasNodeData
-    });
-    const service = serviceFor(room);
-    const unknown = await service.mutateCameras({
-      canvasId: "canvas-cam-reject", nodeId: "model-1", requestId: "r1", mutation: { kind: "update", id: "nope", distance: 1 }
-    });
-    expect(unknown.ok).toBe(false);
-    if (!unknown.ok) expect(unknown.code).toBe("unknown-camera");
-
-    const bad = await service.mutateCameras({
-      canvasId: "canvas-cam-reject", nodeId: "model-1", requestId: "r2", mutation: { kind: "update", id: "cam-a", distance: -1 }
-    });
-    expect(bad.ok).toBe(false);
-    expect(camerasOf(room)).toHaveLength(1);
-  });
-
-  it("相同 requestId 重试幂等，且并发单条写入不互相覆盖", async () => {
-    const { room } = await readyRoom("canvas-cam-idem", {
-      "model-1": { modelCameras: [] } as CanvasNodeData
-    });
-    const service = serviceFor(room);
-    // 同一 requestId 重试：第二次返回 duplicate，不新增镜头。
-    const first = await service.mutateCameras({
-      canvasId: "canvas-cam-idem", nodeId: "model-1", requestId: "same", mutation: { kind: "create", azimuth: 0, distance: 3 }
-    });
-    const retry = await service.mutateCameras({
-      canvasId: "canvas-cam-idem", nodeId: "model-1", requestId: "same", mutation: { kind: "create", azimuth: 0, distance: 3 }
-    });
-    expect(first.ok && retry.ok).toBe(true);
-    if (first.ok && retry.ok) {
-      expect(retry.duplicate).toBe(true);
-      expect(retry.cameras).toHaveLength(1);
-    }
-
-    // 不同 requestId 并发：基于权威集合读改写，两个镜头都保留。
-    await Promise.all([
-      service.mutateCameras({ canvasId: "canvas-cam-idem", nodeId: "model-1", requestId: "c2", mutation: { kind: "create", azimuth: 1, distance: 4 } }),
-      service.mutateCameras({ canvasId: "canvas-cam-idem", nodeId: "model-1", requestId: "c3", mutation: { kind: "create", azimuth: 2, distance: 5 } })
-    ]);
-    expect(camerasOf(room)).toHaveLength(3);
-  });
-
-  it("非模型节点返回 invalid-node-type", async () => {
-    const { room } = await readyRoom("canvas-cam-type");
-    const outcome = await serviceFor(room).mutateCameras({
-      canvasId: "canvas-cam-type", nodeId: "image-1", requestId: "r", mutation: { kind: "create", azimuth: 0, distance: 1 }
-    });
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.code).toBe("invalid-node-type");
-  });
-});
-
-describe("ModelMcpService.mutateCamerasBatch（change: 2026-10-08-add-chatgpt-oauth-3d-generation，任务 4.4）", () => {
-  function camerasOf(room: CanvasRoom): Array<{ id: string; distance: number }> {
-    const exported = room.exportCanvas();
-    if (!exported.ok) throw new Error("export failed");
-    const data = exported.canvas.nodeData["model-1"] as CanvasNodeData | undefined;
-    return (data?.modelCameras ?? []) as never;
-  }
-
-  it("整批原子提交受约束变更", async () => {
-    const { room } = await readyRoom("canvas-cam-batch", {
-      "model-1": {
-        modelCameras: [
-          { id: "cam-a", name: "正面", order: 0, azimuth: 0, elevation: 0, distance: 3, aspect: "16:9" },
-          { id: "cam-b", name: "右侧", order: 1, azimuth: 1, elevation: 0, distance: 4, aspect: "16:9" }
-        ]
-      } as CanvasNodeData
-    });
-    const outcome = await serviceFor(room).mutateCamerasBatch({
-      canvasId: "canvas-cam-batch",
-      nodeId: "model-1",
-      requestId: "b1",
-      mutations: [
-        { kind: "update", id: "cam-a", distance: 9 },
-        { kind: "remove", id: "cam-b" }
-      ]
-    });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.cameras).toHaveLength(1);
-    expect(outcome.cameras[0]!.distance).toBe(9);
-    expect(camerasOf(room)).toHaveLength(1);
-  });
-
-  it("批量含非法条目不部分写入", async () => {
-    const { room } = await readyRoom("canvas-cam-batch-bad", {
-      "model-1": { modelCameras: [{ id: "cam-a", name: "正面", order: 0, azimuth: 0, elevation: 0, distance: 3, aspect: "16:9" }] } as CanvasNodeData
-    });
-    const outcome = await serviceFor(room).mutateCamerasBatch({
-      canvasId: "canvas-cam-batch-bad",
-      nodeId: "model-1",
-      requestId: "b2",
-      mutations: [
-        { kind: "update", id: "cam-a", distance: 12 },
-        { kind: "remove", id: "missing" }
-      ]
-    });
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.code).toBe("unknown-camera");
-    // 合法部分不得写入。
-    expect(camerasOf(room)[0]!.distance).toBe(3);
-  });
-
-  it("相同 requestId 重试幂等", async () => {
-    const { room } = await readyRoom("canvas-cam-batch-idem", { "model-1": { modelCameras: [] } as CanvasNodeData });
-    const service = serviceFor(room);
-    const first = await service.mutateCamerasBatch({
-      canvasId: "canvas-cam-batch-idem", nodeId: "model-1", requestId: "same",
-      mutations: [{ kind: "create", azimuth: 0, distance: 5 }]
-    });
-    const retry = await service.mutateCamerasBatch({
-      canvasId: "canvas-cam-batch-idem", nodeId: "model-1", requestId: "same",
-      mutations: [{ kind: "create", azimuth: 0, distance: 5 }]
-    });
-    expect(first.ok && retry.ok).toBe(true);
-    if (first.ok && retry.ok) {
-      expect(retry.duplicate).toBe(true);
-      expect(camerasOf(room)).toHaveLength(1);
-    }
-  });
-});
-
 describe("模型规模统计（change: 2026-10-18-align-model-statistics-with-agent）", () => {
   /** 与聚焦面板同一口径：segment 缺省是 capsule（400 点 / 288 面）。 */
   const SEGMENT_SCRIPT =
@@ -976,7 +734,11 @@ describe("模型规模统计（change: 2026-10-18-align-model-statistics-with-ag
       canvasId: "canvas-stats-errors",
       commandId: "add-empty-model",
       baseRevision: 0,
-      commands: [{ type: "node.add", node: { id: "model-2", type: "model3d", position: { x: 0, y: 0 } } }]
+      commands: [{
+        type: "node.add",
+        node: { id: "model-2", type: "model3d" },
+        nodeData: { sharedWorldInstance: newWorldInstance("instance-model-2", { x: 0, y: 0 }) }
+      }]
     });
     expect(added.ok).toBe(true);
     const invalid = await service.getModelStatistics({

@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
   "extensionId": "cos-storage",
-  "hostPlugin": { "module": "./backend", "factory": "createCosStoragePlugin", "features": ["storage"], "order": 15 }
+  "hostPlugin": { "module": "./backend", "factory": "createCosStoragePlugin", "features": ["storage"], "order": 15 },
+  "version": "0.1.0"
 }

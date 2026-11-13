@@ -49,6 +49,8 @@ pub mod orbit_camera;
 /// 预览渲染层/槽的统一分配与回收
 /// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
 pub mod preview_layers;
+mod preview_readiness;
+mod render_work;
 /// 通用 transform 动画插件（change: refactor-bevy-reusable-components）。
 pub mod transform_animation;
 /// 可复用 transform gizmo（change: refactor-bevy-reusable-components）。
@@ -80,7 +82,6 @@ mod history_preview;
 #[cfg(feature = "canvas-core")]
 mod world_capture;
 #[cfg(feature = "canvas-core")]
-mod model_preview;
 #[cfg(feature = "canvas-core")]
 mod pick_index;
 #[cfg(feature = "canvas-core")]
@@ -281,7 +282,7 @@ pub fn set_viewport(json: &str) -> Result<u32, BoundaryError> {
     Ok(generation)
 }
 
-/// 聚焦观察镜头增量：复用最近 full scene 的世界几何，只更新 `modelFocus` 与节点 `modelPreview`。
+/// 聚焦观察镜头增量：复用最近 full scene 的世界几何，只更新 `modelFocus`。
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_observer(json: &str) -> Result<u32, BoundaryError> {

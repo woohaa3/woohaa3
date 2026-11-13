@@ -131,7 +131,7 @@ export function createSupervisorProcessManager(options: ProcessManagerOptions, s
       env.OPENCODE_SERVER_PASSWORD = password;
       httpHeaders = { Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` };
     }
-    const result = await call("ensure", {
+    const result = await call("proc.ensure", {
       adapterId: input.adapterId, owner: input.owner, connectionId: input.connectionId,
       requestId: input.requestId,
       command: await options.executableFor(input.adapterId), args: [...input.args], cwd: workDir,
@@ -151,7 +151,7 @@ export function createSupervisorProcessManager(options: ProcessManagerOptions, s
     const key = `${input.adapterId}\u0000${input.owner}\u0000${input.connectionId}`;
     handles.get(key)?.stdio?.close();
     handles.delete(key);
-    await call("stop", { adapterId: input.adapterId, owner: input.owner, connectionId: input.connectionId });
+    await call("proc.stop", { adapterId: input.adapterId, owner: input.owner, connectionId: input.connectionId });
   };
   return {
     probe: async adapterId => {

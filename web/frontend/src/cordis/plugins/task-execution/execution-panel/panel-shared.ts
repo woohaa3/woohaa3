@@ -1,3 +1,5 @@
+import { summarizeParameters, migratePresentedParameters } from "@woohaa3/contracts";
+import { generationParameterError } from "@woohaa3/ui/assistant";
 /**
  * 执行面板共享工具与 hooks
  * （change: 2026-09-28-split-frontend-god-plugins，task 6；从 ExecutionPanel.tsx 拆出）。
@@ -41,16 +43,7 @@ export function summarize(
 	fields: ReadonlyArray<ExecutionPanelParameterField>,
 	parameters: Record<string, unknown>,
 ): string {
-	return fields
-		.filter((field) => !hiddenBy(field, parameters))
-		.flatMap((field) => {
-			if (field.type !== "select" && field.control !== "slider") return [];
-			const value = parameters[field.key] ?? field.defaultValue;
-			if (value === undefined || value === null || value === "") return [];
-			const label = field.options?.find((option) => option.value === String(value))?.label ?? String(value);
-			return [`${label}${field.unit ?? ""}`];
-		})
-		.join(" · ");
+	return summarizeParameters(fields, parameters);
 }
 
 /**
@@ -68,19 +61,8 @@ export function parametersAfterModelSwitch(
 ): Record<string, unknown> {
 	const fields = config.parameterSchemaByModel?.[nextModel] ?? [];
 	const defaults = config.defaultsByModel?.[nextModel] ?? {};
-	const kept: Record<string, unknown> = {};
-	for (const field of fields) {
-		if (!Object.hasOwn(parameters, field.key)) continue;
-		const value = parameters[field.key];
-		if (field.type === "select" && field.options?.length) {
-			if (!field.options.some((option) => option.value === String(value))) continue;
-		}
-		if (field.type === "number" && typeof value === "number") {
-			if (field.minimum !== undefined && value < field.minimum) continue;
-			if (field.maximum !== undefined && value > field.maximum) continue;
-		}
-		kept[field.key] = value;
-	}
+    const previousFields = config.parameterSchemaByModel?.[String(parameters.model ?? config.defaultModel)] ?? [];
+    const kept = migratePresentedParameters(previousFields, fields, parameters);
 	return { model: nextModel, ...defaults, ...kept };
 }
 
@@ -103,7 +85,7 @@ export function parametersOnOpen(
 	const merged: Record<string, unknown> = { ...defaults };
 	for (const [key, value] of Object.entries(parameters)) {
 		// 只有真正的值才算「已有」：null/空串不压掉默认值。
-		if (value === undefined || value === null || value === "") continue;
+		if (value === undefined) continue;
 		merged[key] = value;
 	}
 	return { ...merged, model };
@@ -143,38 +125,10 @@ export function parameterViolationReasons(
 	fields: ReadonlyArray<ExecutionPanelParameterField>,
 	parameters: Record<string, unknown>,
 ): string[] {
-	const reasons: string[] = [];
-	for (const field of fields) {
-		if (hiddenBy(field, parameters)) continue;
-		const value = parameters[field.key];
-		if (value === undefined || value === null || value === "") continue;
-		if (field.type === "select") {
-			const options = field.options ?? [];
-			if (options.length === 0) continue;
-			if (!options.some((option) => option.value === String(value))) {
-				reasons.push(
-					`${field.label}只支持 ${options.map((option) => option.label).join("、")}，当前为「${String(value)}」`,
-				);
-			}
-			continue;
-		}
-		if (field.type === "number") {
-			const numeric =
-				typeof value === "number"
-					? value
-					: typeof value === "string" && value.trim() !== ""
-						? Number(value)
-						: Number.NaN;
-			if (!Number.isFinite(numeric)) continue;
-			const unit = field.unit ?? "";
-			if (field.minimum !== undefined && numeric < field.minimum) {
-				reasons.push(`${field.label}不能小于 ${field.minimum}${unit}，当前为 ${numeric}${unit}`);
-			} else if (field.maximum !== undefined && numeric > field.maximum) {
-				reasons.push(`${field.label}不能大于 ${field.maximum}${unit}，当前为 ${numeric}${unit}`);
-			}
-		}
-	}
-	return reasons;
+    return fields.filter(field => !hiddenBy(field, parameters)).flatMap(field => {
+      const error = generationParameterError(field, parameters);
+      return error ? [error] : [];
+    });
 }
 
 /**

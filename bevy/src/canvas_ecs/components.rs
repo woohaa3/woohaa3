@@ -26,7 +26,6 @@ pub(crate) struct CardGeometryInput {
     pub(crate) busy: bool,
     pub(crate) history: bool,
     pub(crate) model: bool,
-    pub(crate) model_preview: bool,
     pub(crate) ghost: bool,
 }
 
@@ -87,7 +86,6 @@ impl CardVisual {
                 busy: node.busy,
                 history: crate::canvas_query::layout::has_history_strip(node),
                 model: node.model.is_some(),
-                model_preview: node.model_preview.is_some(),
                 ghost: node.ghost,
             },
             labels: CardLabelsInput { title: node.title.clone(), type_label: node.type_label.clone(), body: node.body.clone(), card_label: node.card_label.clone() },
@@ -176,7 +174,6 @@ pub(crate) struct CardPresentation {
     pub(crate) media_loading: bool,
     pub(crate) ghost: bool,
     pub(crate) model: bool,
-    pub(crate) model_preview: bool,
     pub(crate) history: bool,
 }
 

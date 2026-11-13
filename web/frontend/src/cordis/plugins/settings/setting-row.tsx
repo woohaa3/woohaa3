@@ -46,9 +46,12 @@ export function SettingRow({
   const [draft, setDraft] = useState(entryBaseline);
   // 保存成功后以**权威提交值**重设基线；权威快照随后回流只会带来源/已配置状态变化。
   const [baseline, setBaseline] = useState(entryBaseline);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<false | "test" | "save" | "save-anyway">(false);
   const [error, setError] = useState<string | null>(null);
+  const [testNotice, setTestNotice] = useState<string | null>(null);
+  const [testFailed, setTestFailed] = useState(false);
   const locked = entry.lockedBy !== null;
+  const isProviderSecret = entry.secret && entry.key.startsWith("providers.");
 
   const parsedDraft = (): SettingsWriteValue => (entry.kind === "integer" ? Number(draft) : draft.trim());
   const dirty = entry.secret ? draft.trim() !== "" : draft.trim() !== baseline.trim();
@@ -56,11 +59,53 @@ export function SettingRow({
   const clearable = !locked && (entry.source === "file" || entry.source === "secrets");
 
   // 只在该行参与设置工作区时汇总；凭据弹窗等独立语境不受影响。
-  useSettingsEditReport(editSession, `row:${entry.key}`, { dirty, pending: busy });
+  useSettingsEditReport(editSession, `row:${entry.key}`, { dirty, pending: Boolean(busy) });
 
-  const save = async (value: SettingsWriteValue) => {
-    setBusy(true);
+  const runTest = async () => {
+    if (busy || !store.test) return;
+    setBusy("test");
     setError(null);
+    setTestNotice(null);
+    try {
+      const value = dirty ? parsedDraft() : undefined;
+      const payload = value !== undefined ? { [entry.key]: value } : { [entry.key]: entry.value ?? "" };
+      const result = await store.test(payload);
+      if (result.ok) {
+        setTestFailed(false);
+        setTestNotice(result.message || "测试通过");
+      } else {
+        setTestFailed(true);
+        setError(result.issues.find((issue) => issue.key === entry.key)?.message ?? result.error);
+      }
+    } catch {
+      setTestFailed(true);
+      setError("连接测试失败，请重试。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async (value: SettingsWriteValue, force = false) => {
+    setBusy(force ? "save-anyway" : "save");
+    setError(null);
+    setTestNotice(null);
+    if (isProviderSecret && value !== null && !force && store.test) {
+      try {
+        const tested = await store.test({ [entry.key]: value });
+        if (!tested.ok) {
+          setBusy(false);
+          setTestFailed(true);
+          setError(tested.issues.find((issue) => issue.key === entry.key)?.message ?? tested.error);
+          return;
+        }
+      } catch {
+        setBusy(false);
+        setTestFailed(true);
+        setError("连接测试失败，请重试。");
+        return;
+      }
+    }
+    setTestFailed(false);
     const result = await store.save({ [entry.key]: value });
     setBusy(false);
     if (!result.ok) {
@@ -99,7 +144,7 @@ export function SettingRow({
         {entry.kind === "boolean" ? (
           <Switch
             checked={entry.value === true}
-            disabled={locked || busy}
+            disabled={locked || Boolean(busy)}
             onCheckedChange={(next) => void save(next)}
             aria-label={entry.label}
             testId={`setting-input-${entry.key}`}
@@ -111,16 +156,16 @@ export function SettingRow({
             <select
               className="settings-page__select"
               value={draft}
-              disabled={locked || busy}
+              disabled={locked || Boolean(busy)}
               aria-label={entry.label}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => { setDraft(event.target.value); setTestFailed(false); setTestNotice(null); }}
               data-testid={`setting-select-${entry.key}`}
             >
               {options.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
-            <Button size="sm" tone="primary" disabled={locked || busy || !dirty} loading={busy} onClick={() => void save(parsedDraft())} data-testid={`setting-save-${entry.key}`}>
+            <Button size="sm" tone="primary" disabled={locked || Boolean(busy) || !dirty} loading={busy === "save"} onClick={() => void save(parsedDraft())} data-testid={`setting-save-${entry.key}`}>
               保存
             </Button>
           </>
@@ -133,20 +178,44 @@ export function SettingRow({
               spellCheck={false}
               value={locked && !entry.secret ? String(entry.value ?? "") : draft}
               placeholder={entry.secret ? (entry.configured ? "已配置，输入以覆盖" : "未配置") : entry.kind === "url" ? `${(entry.protocols ?? []).join(" / ")}//…` : ""}
-              disabled={locked || busy}
-              onChange={(event) => setDraft(event.target.value)}
+              disabled={locked || Boolean(busy)}
+              onChange={(event) => { setDraft(event.target.value); setTestFailed(false); setTestNotice(null); }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && dirty) void save(parsedDraft());
               }}
               data-testid={`setting-input-${entry.key}`}
             />
-            <Button size="sm" tone="primary" disabled={locked || busy || !dirty} loading={busy} onClick={() => void save(parsedDraft())} data-testid={`setting-save-${entry.key}`}>
+            {isProviderSecret ? (
+              <Button
+                size="sm"
+                tone="ghost"
+                disabled={locked || Boolean(busy) || (!dirty && !entry.configured)}
+                loading={busy === "test"}
+                onClick={() => void runTest()}
+                data-testid={`setting-test-${entry.key}`}
+              >
+                测试
+              </Button>
+            ) : null}
+            {isProviderSecret && testFailed ? (
+              <Button
+                size="sm"
+                tone="ghost"
+                disabled={locked || Boolean(busy) || !dirty}
+                loading={busy === "save-anyway"}
+                onClick={() => void save(parsedDraft(), true)}
+                data-testid={`setting-save-anyway-${entry.key}`}
+              >
+                仍然保存
+              </Button>
+            ) : null}
+            <Button size="sm" tone="primary" disabled={locked || Boolean(busy) || !dirty} loading={busy === "save"} onClick={() => void save(parsedDraft())} data-testid={`setting-save-${entry.key}`}>
               保存
             </Button>
           </>
         )}
         {clearable ? (
-          <Button size="sm" tone="ghost" disabled={busy} onClick={() => void save(null)} data-testid={`setting-clear-${entry.key}`}>
+          <Button size="sm" tone="ghost" disabled={Boolean(busy)} onClick={() => void save(null)} data-testid={`setting-clear-${entry.key}`}>
             清除
           </Button>
         ) : null}
@@ -156,6 +225,7 @@ export function SettingRow({
           {related}
         </p>
       ) : null}
+      {testNotice ? <p className="settings-page__hint">{testNotice}</p> : null}
       {error ? <p className="settings-page__error" role="alert">{error}</p> : null}
     </li>
   );

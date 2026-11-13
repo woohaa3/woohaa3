@@ -46,9 +46,6 @@ export function createDoubleClickHandler(core: InteractionCore) {
       const node = canvasState.document.nodes.find(node => node.id === id);
       return node ? { canvas: canvasState, node, data: canvasState.nodeData[id] } : null;
     };
-    const capabilitiesOf = (id: string) => {
-      const context = contextOf(id); return context ? resolver.resolve(context) : null;
-    };
     const focusKind = (id: string) => {
       const context = contextOf(id); return context ? resolver.resolve(context).focus?.kind(context) : null;
     };
@@ -56,10 +53,8 @@ export function createDoubleClickHandler(core: InteractionCore) {
       ? canvasState.document.nodes.find((candidate) => candidate.id === cardNodeId)
       : undefined;
 
-    // 模型 picking；普通模型按内嵌预览卡片命中进入聚焦。
-    // 命中由 Rust 相机/bounds/placement 派生（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-    // 没有命中任何卡片，或命中的就是模型卡片时才尝试模型 picking。
-    // 射线未打中网格时，双击模型卡片本身仍然进入：网格画在卡片下方，常被底部面板挡住。
+    // 模型 picking：共享世界模型没有卡片，双击模型表面由 Rust 相机/bounds 派生命中。
+    // 没有命中任何卡片，或卡片本身提供聚焦时才尝试模型 picking。
     if (!cardNodeId || (cardEntry && !!focusKind(cardEntry.id))) {
       const surface = surfaceSize();
       const runtime = options.getRuntime();
@@ -67,10 +62,10 @@ export function createDoubleClickHandler(core: InteractionCore) {
       const pick = runtime?.queryModelPick
         ? runtime.queryModelPick({ generation, x: point.x, y: point.y, width: surface.width, height: surface.height })
         : ({ ok: false as const, reason: "unavailable" as const });
-      const meshHit: FocusHitResult | null = pick.ok && pick.value && !(cardEntry && !!capabilitiesOf(cardEntry.id)?.modelPreview)
+      const meshHit: FocusHitResult | null = pick.ok && pick.value
         ? { ok: true, nodeId: pick.value.nodeId, target: pick.value.target, radius: pick.value.radius }
         : null;
-      // 卡片回退：射线未命中网格但指针在模型卡片上时，仍进入聚焦（网格常被底部面板遮挡）。
+      // 卡片回退：仅对仍提供卡片 + 聚焦能力的环境（扩展实现）保留。
       const cardFallback: FocusHitResult | null = !meshHit && cardEntry && !!focusKind(cardEntry.id)
         ? (() => {
             const targets = options.getModelFocusTargets?.() ?? [];

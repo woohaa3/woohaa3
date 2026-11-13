@@ -5,22 +5,17 @@
  *
  *   node web/scripts/build-extension-backend.mjs [--cwd <extensionDir>] [--outdir backend-dist]
  *
- * 把 extension.json 声明的后端模块（backend / hostPlugin / metadata / publicRoutes 的导出）打成**一个**
+ * 把 extension.json 声明的后端模块（backend / executors / hostPlugin / metadata / publicRoutes）打成**一个**
  * ESM 文件 backend-dist/entry.mjs，只转出声明里用到的具名导出。受管扩展（.wxt 安装）不在 pnpm 工作区里，
  * 运行时拿不到 workspace:* 依赖，所以：
  *
  * - node: builtin 保持外部（进程内运行，design D5）；
- * - @woohaa3/contracts / @woohaa3/provider-sdk 按源码内联（纯函数/常量，tree-shake）；
+ * - 公共扩展支持包按 INLINE_WORKSPACE_PACKAGES 内联（tree-shake）；
  *   注意内联的是副本：依赖 instanceof 判断宿主类（如 StorageObjectNotFoundError）的代码要改用 code/name 判断；
  * - 其他 @woohaa3/*（宿主服务、前端、其他扩展）一律拒绝；
  * - 其余 npm 依赖全部内联；产物里不得残留任何非 node: 的外部 import。
  *
  * 不声明 canvasContent / bootstrap：受管扩展禁止这两类声明（预检拒绝），本构建也拒绝。
- *
- * 声明了 hostPlugin 时额外产出 backend-dist/config-schema.json（change: 2026-10-21-isolate-extension-host-process，
- * 任务 6.1）：在**独立 node 子进程**里 import 刚产出的 entry.mjs、调用工厂一次，取插件的 name / label /
- * configPrefix / Config.fields / modelRefresh / 是否实现 health，以及 metadata 与 publicPathExport 常量。
- * 求值只发生在打包机上（不在宿主），结果是纯 JSON；宿主据此构造代理插件而不 import 受管扩展代码。
  *
  * 输出 { outFile, exports, modules }；不改写扩展目录里的 extension.json / package.json（改写由 pack:extension 在暂存目录完成）。
  */
@@ -47,12 +42,18 @@ export const BACKEND_ENTRY_SUBPATH = "./backend-dist/entry";
 /** 允许按源码内联的工作区包 → 源码入口目录。 */
 const INLINE_WORKSPACE_PACKAGES = {
   "@woohaa3/contracts": path.join(WEB_DIR, "contracts"),
+  "@woohaa3/agent-connections": path.join(WEB_DIR, "services", "agent-connections"),
+  "@woohaa3/runtime-components": path.join(WEB_DIR, "runtime-components"),
+  "woohaa3-executor": path.resolve(WEB_DIR, "../packages/execution-runtime"),
   "@woohaa3/provider-sdk": path.join(WEB_DIR, "framework", "provider-sdk"),
   // pptask 是 Provider 的执行面（vendor 源码包）：受管 Provider 打包时按源码内联，扩展目录不必在工作区里。
   // 其自身依赖（ai、@ai-sdk/provider）从 pptask 目录的 node_modules 解析并一并内联。
   "@sdppp/pptask": path.join(WEB_DIR, "vendor", "pptask")
 };
 const BUILTINS = new Set(builtinModules.flatMap((name) => [name, "node:" + name]));
+// These dependencies are optional try/require probes in SDK dependencies. Native addons cannot
+// ship in .wxt; absent optional modules must not accidentally resolve from the host installation.
+const OMITTED_OPTIONAL_MODULES = new Set(["supports-color", "bufferutil", "utf-8-validate", "encoding"]);
 
 function readArg(name) {
   const index = process.argv.indexOf("--" + name);
@@ -65,6 +66,7 @@ export function declaredBackendExports(descriptor) {
   if (descriptor.bootstrap) throw new Error("build:backend 不支持 bootstrap 声明（受管扩展不得提供槽位实现）");
   if (descriptor.canvasContent) throw new Error("build:backend 不支持 canvasContent 声明（受管扩展不得提供画布内容端口）");
   if (descriptor.migrate) throw new Error("build:backend 不支持 migrate 声明（需要进程隔离支持）");
+  for (const entry of descriptor.executors ?? []) out.push({ field: "executors", subpath: entry.module, exportName: entry.export });
   if (descriptor.backend) out.push({ field: "backend", subpath: descriptor.backend.module ?? "./backend", exportName: descriptor.backend.factory });
   if (descriptor.hostPlugin) out.push({ field: "hostPlugin", subpath: descriptor.hostPlugin.module ?? "./backend", exportName: descriptor.hostPlugin.factory });
   if (descriptor.metadata) out.push({ field: "metadata", subpath: descriptor.metadata.module ?? "./shared", exportName: descriptor.metadata.export });
@@ -129,8 +131,9 @@ export async function buildExtensionBackend(options = {}) {
       build.onResolve({ filter: /^[^./]/ }, (args) => {
         const specifier = args.path;
         if (BUILTINS.has(specifier)) return { path: specifier.startsWith("node:") ? specifier : "node:" + specifier, external: true };
+        if (OMITTED_OPTIONAL_MODULES.has(specifier) && args.kind === "require-call") return { path: specifier, external: true };
         for (const [name, root] of Object.entries(INLINE_WORKSPACE_PACKAGES)) {
-          if (specifier === name) return { path: path.join(root, "src", "index.ts") };
+          if (specifier === name) return { path: existsSync(path.join(root, "index.mjs")) ? path.join(root, "index.mjs") : path.join(root, "src", "index.ts") };
           if (specifier.startsWith(name + "/")) {
             const rest = specifier.slice(name.length + 1);
             const candidates = [path.join(root, "src", rest + ".ts"), path.join(root, "src", rest, "index.ts"), path.join(root, rest)];
@@ -140,7 +143,7 @@ export async function buildExtensionBackend(options = {}) {
           }
         }
         if (specifier.startsWith("@woohaa3/")) {
-          return { errors: [{ text: "受管扩展后端不得依赖宿主/其他扩展的运行时代码：" + specifier + "（只允许内联 @woohaa3/contracts 与 @woohaa3/provider-sdk）" }] };
+          return { errors: [{ text: "受管扩展后端不得依赖宿主/其他扩展的运行时代码：" + specifier + "（须使用公共扩展支持包）" }] };
         }
         return undefined; // 其他 npm 依赖：交给 esbuild 正常解析并内联。
       });
@@ -159,7 +162,9 @@ export async function buildExtensionBackend(options = {}) {
     target: "node22",
     absWorkingDir: dir,
     // CJS 依赖在 ESM 产物里需要 require：用 createRequire 垫片，避免 "Dynamic require is not supported"。
-    banner: { js: 'import { createRequire as __woohaaCreateRequire } from "node:module"; const require = __woohaaCreateRequire(import.meta.url);' },
+    // Throw at each probe, before createRequire can consult host node_modules. A bundled CJS
+    // module that throws would be cached by esbuild before throwing and succeed on the next probe.
+    banner: { js: 'import { createRequire as __woohaaCreateRequire } from "node:module"; const __woohaaNodeRequire = __woohaaCreateRequire(import.meta.url); const __woohaaOmittedOptional = new Set(' + JSON.stringify([...OMITTED_OPTIONAL_MODULES]) + '); const require = Object.assign((id) => { if (__woohaaOmittedOptional.has(id)) throw new Error("Optional module omitted from extension bundle: " + id); return __woohaaNodeRequire(id); }, __woohaaNodeRequire);' },
     minify: false,
     sourcemap: false,
     metafile: true,
@@ -171,7 +176,7 @@ export async function buildExtensionBackend(options = {}) {
   const externals = [];
   for (const output of Object.values(result.metafile.outputs)) {
     for (const edge of output.imports ?? []) {
-      if (edge.external && !edge.path.startsWith("node:")) externals.push(edge.path);
+      if (edge.external && !edge.path.startsWith("node:") && !(edge.kind === "require-call" && OMITTED_OPTIONAL_MODULES.has(edge.path))) externals.push(edge.path);
     }
   }
   if (externals.length > 0) throw new Error("backend 产物残留外部依赖（必须内联）：" + [...new Set(externals)].join("、"));

@@ -104,6 +104,19 @@ test('Codex accepts a ChatGPT app bundle without an exact version allowlist', { 
 test('configuration rejects unknown fields and user trust root replacement', async t => {
   const f = await fixture(t); await fs.mkdir(path.join(f.root, 'config')); await fs.writeFile(f.manager.configPath, JSON.stringify({ trustKeys: [] })); await assert.rejects(f.manager.list(), { code: 'INVALID_CONFIG' });
 });
+test('deployment npm mirrors are accepted only as HTTPS and never from user config', async t => {
+  const f = await fixture(t);
+  const defaults = JSON.parse(await fs.readFile(f.options.defaultsPath, 'utf8'));
+  defaults.registry = { mirrors: ['http://mirror.example.test/'] };
+  await fs.writeFile(f.options.defaultsPath, JSON.stringify(defaults));
+  await assert.rejects(f.manager.list(), { code: 'INVALID_CONFIG' });
+  defaults.registry = { mirrors: ['https://mirror.example.test/'] };
+  await fs.writeFile(f.options.defaultsPath, JSON.stringify(defaults));
+  await assert.doesNotReject(f.manager.list());
+  await fs.mkdir(path.join(f.root, 'config'));
+  await fs.writeFile(f.manager.configPath, JSON.stringify({ registry: { baseUrl: 'https://other.example.test/' } }));
+  await assert.rejects(f.manager.list(), { code: 'INVALID_CONFIG' });
+});
 test('interrupted archive resumes only with matching ETag and verified whole-file hash', async t => {
   const f = await fixture(t); let attempts = 0; const split = Math.floor(f.body.length / 2); let range;
   const fetchImpl = async (url, options) => {

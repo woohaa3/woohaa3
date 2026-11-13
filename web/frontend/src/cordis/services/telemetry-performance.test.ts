@@ -181,8 +181,7 @@ describe("帧窗口聚合", () => {
       stageMainFrames: 60,
       stageModelMs: 180,
       stageModelFrames: 60,
-      pacing: "active:previews",
-      previews: "d2,v3,l1,r4,b48"
+      pacing: "active:previews"
     });
     clock = 60_000;
     timers.tick();
@@ -195,8 +194,8 @@ describe("帧窗口聚合", () => {
     expect(sink.events[0]?.attributes?.mainMs).toBe(20);
     expect(sink.events[0]?.attributes?.modelMs).toBe(3);
     expect(sink.events[0]?.attributes?.pacing).toBe("active:previews");
-    // 预览规模是快照而不是累计量：直接透传，不做差分。
-    expect(sink.events[0]?.attributes?.previews).toBe("d2,v3,l1,r4,b48");
+    // 模型卡片预览队列已删除：帧事件不再携带 previews 快照。
+    expect(sink.events[0]?.attributes?.previews).toBeUndefined();
     window.dispose();
   });
 

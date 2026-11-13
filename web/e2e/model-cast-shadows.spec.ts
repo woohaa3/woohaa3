@@ -298,16 +298,18 @@ test("hardware canvas shadows and isolated shooting views survive view reuse", a
         position: [-1.5 + (i % 4), 1, -1 + Math.floor(i / 4)], color: "#dddddd" })),
     ]);
     scene.modelFocus = null;
-    scene.nodes = [{ id: "preview", type: "model", x: -200, y: -200, width: 420, height: 380,
-      model, modelPreview: { azimuth: .7, elevation: .6, distanceScale: 1 } }];
+    // 世界模型：位置只由 sharedWorldInstance 表达（change: 2026-11-10-remove-legacy-model-card-nodes）。
+    scene.nodes = [{ id: "preview", type: "model", model,
+      sharedWorldInstance: { kind: "world-instance", version: "shared-world-v1", instanceId: "preview",
+        transform: { version: "shared-world-v1", position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } } }];
     await submit();
     return JSON.parse(mod.canvas_work_diagnostics()).models;
   });
   await page.screenshot({ path: info.outputPath("pad-preview-spatial-large.png") });
   const previewLow = await frame!.evaluate(async () => {
     const { scene, submit, mod } = (window as any).shadowEvidence;
-    scene.nodes[0].width = 90;
-    scene.nodes[0].height = 80;
+    // 缩小世界实例 → 世界投影占比降到低档（不再按卡片尺寸分档）。
+    scene.nodes[0].sharedWorldInstance.transform.scale = 0.15;
     await submit();
     return JSON.parse(mod.canvas_work_diagnostics()).models;
   });

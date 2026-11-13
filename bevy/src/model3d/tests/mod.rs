@@ -23,9 +23,34 @@ use bevy::prelude::*;
 use super::runtime::{FocusVisuals, ModelAssets, ModelVisuals, sync_models};
 use crate::protocol::{GraphNode, ModelPlacement, ModelReference, ModelSnapshot, Scene};
 
+/// 测试用共享世界实例（同一 nodeId 得到稳定实例身份）。
+pub(super) fn world_instance_for(node_id: &str) -> crate::protocol::WorldInstance {
+    serde_json::from_value(serde_json::json!({
+        "kind": "world-instance",
+        "version": "shared-world-v1",
+        "instanceId": format!("instance-{node_id}"),
+        "transform": {
+            "version": "shared-world-v1",
+            "position": {"u": 0.0, "v": 0.0, "h": 0.0},
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": 1.0
+        }
+    }))
+    .unwrap()
+}
+
+/// 让节点成为受支持的共享世界模型（世界根只读实例 transform）。
+pub(super) fn with_world_instance(node: &mut GraphNode) {
+    if node.shared_world_instance.is_none() {
+        let instance = world_instance_for(&node.id);
+        node.shared_world_instance = Some(instance);
+    }
+}
+
 /// 用给定节点与可选模型引用构造单节点场景。
 pub(super) fn scene_with(node: &GraphNode, model: Option<ModelReference>) -> Scene {
     let mut node = node.clone();
+    with_world_instance(&mut node);
     node.model = model;
     Scene {
         nodes: vec![node],
@@ -33,8 +58,10 @@ pub(super) fn scene_with(node: &GraphNode, model: Option<ModelReference>) -> Sce
     }
 }
 
-/// 由内容快照 + placement 构造节点模型引用（resource_key = sceneVersion:signature）。
-pub(super) fn reference_for(snapshot: &ModelSnapshot, placement: ModelPlacement) -> ModelReference {
+/// 由内容快照构造节点模型引用（resource_key = sceneVersion:signature）。
+///
+/// `modelPlacement` 已不再进入场景 wire；参数只为兼容既有夹具签名。
+pub(super) fn reference_for(snapshot: &ModelSnapshot, _placement: ModelPlacement) -> ModelReference {
     let scene_version = snapshot.scene_version.clone();
     ModelReference { ground_anchor_local: None, part_rotations: None,
         resource_key: format!(
@@ -44,7 +71,6 @@ pub(super) fn reference_for(snapshot: &ModelSnapshot, placement: ModelPlacement)
         ),
         scene_version,
         signature: snapshot.signature.clone(),
-        placement,
     }
 }
 

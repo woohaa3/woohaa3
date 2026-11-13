@@ -32,15 +32,10 @@ export function worldToScreen(point: Point, viewport: { x: number; y: number; zo
   return { x: point.x * viewport.zoom + viewport.x, y: point.y * viewport.zoom + viewport.y };
 }
 
-/**
- * 卡片级命中的节点身份（`node` / `model-preview`）。
- *
- * 这两个命中共有的语义是「指针落在该节点本体上」，因此选择、拖动、双击与连线落点都必须
- * 按同一节点身份分派。
- */
+/** 卡片级命中的节点身份：指针落在该节点本体上（`node`）。 */
 export function cardHitNodeId(hit: HitTarget | null): string | null {
   if (!hit) return null;
-  return hit.kind === "node" || hit.kind === "model-preview" ? hit.nodeId : null;
+  return hit.kind === "node" ? hit.nodeId : null;
 }
 
 /** 取节点实际尺寸（优先快照携带的 width/height）。 */

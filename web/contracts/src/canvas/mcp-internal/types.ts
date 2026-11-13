@@ -7,7 +7,6 @@
  */
 import type { CanvasCommand } from "../commands.js";
 import type { ModelReferenceInput } from "../domain/model-reference-inputs.js";
-import type { ModelCamera, ModelCameraAspect, ModelCameraFocusOffset } from "../model-cameras.js";
 import type { ModelSceneStatistics, ModelSceneStatisticsBreakdown } from "../scene-ir-v2/stats.js";
 
 /** 内部协议基路径（不经公网 ingress；`/internal/*` 一律拒绝）。 */
@@ -100,7 +99,6 @@ export type McpRenderPreviewRequest = {
   width?: number;
   height?: number;
   background?: string;
-  cameraPreset?: string;
   /** 动画节点采样时刻（秒）；缺省 0。 */
   timeSeconds?: number;
 };
@@ -122,52 +120,8 @@ export type McpApplyCommandsRequest = {
  * MCP 只表达意图；Canvas 侧在 room 串行队列内读出权威集合、应用契约纯函数变更，再提交
  * 完整规范化 `nodeData.patch`。因此两个并发单条写入不会互相覆盖。
  */
-export type McpCameraMutation =
-  | {
-      kind: "create";
-      azimuth: number;
-      distance: number;
-      name?: string;
-      elevation?: number;
-      aspect?: ModelCameraAspect;
-      focusOffset?: ModelCameraFocusOffset;
-    }
-  | {
-      kind: "update";
-      id: string;
-      azimuth?: number;
-      distance?: number;
-      elevation?: number;
-      aspect?: ModelCameraAspect;
-      focusOffset?: ModelCameraFocusOffset;
-    }
-  | { kind: "remove"; id: string }
-  | { kind: "rename"; id: string; name: string }
-  | { kind: "reset"; id: string; azimuth: number; distance: number; elevation?: number };
 
-export type McpMutateCamerasRequest = {
-  canvasId: string;
-  nodeId: string;
-  requestId: string;
-  mutation: McpCameraMutation;
-};
 
-/**
- * 批量镜头变更请求（change: 2026-10-08-add-chatgpt-oauth-3d-generation，任务 4.4）。
- *
- * 生成层一次提交受约束的镜头意图列表；Canvas 侧在权威串行边界整批原子应用。整批非法整批
- * 拒绝，绝不部分写入。
- */
-export type McpMutateCamerasBatchRequest = {
-  canvasId: string;
-  nodeId: string;
-  requestId: string;
-  mutations: McpCameraMutation[];
-};
-
-// ---------------------------------------------------------------------------
-// 响应 DTO
-// ---------------------------------------------------------------------------
 
 export type McpModelNodeSummary = {
   nodeId: string;
@@ -178,8 +132,6 @@ export type McpModelNodeSummary = {
   hasScript: boolean;
   status?: "ok" | "failed";
   pending: boolean;
-  /** 当前规范镜头数量（change: add-model-camera-mcp-crud）；缺失或非法时为 0。 */
-  cameraCount: number;
 };
 
 export type McpListNodesResult =
@@ -205,8 +157,6 @@ export type McpGetNodeResult =
       status?: "ok" | "failed";
       error?: string | null;
       references: ModelReferenceInput[];
-      /** 当前规范化镜头集合（change: add-model-camera-mcp-crud）；缺失或非法时为空数组。 */
-      cameras: ModelCamera[];
       /**
        * 当前权威脚本的规模统计（change: 2026-10-18-align-model-statistics-with-agent）。
        * 与模型聚焦信息面板同一 `modelSceneStatistics`；脚本失败或为空时省略。
@@ -262,7 +212,6 @@ export type McpRenderPreviewMetadata = {
   width: number;
   height: number;
   background: string;
-  cameraPreset: string;
   /** 动画预览附加的实际身份（change: 2026-10-06-fix-model-media...）。 */
   animation?: {
     modelContentHash: string;
@@ -284,18 +233,6 @@ export type McpApplyCommandsResult =
   | { ok: true; canvasId: string; commandId: string; duplicate: boolean; noop: boolean }
   | { ok: false; code: string; message: string };
 
-export type McpMutateCamerasResult =
-  | {
-      ok: true;
-      canvasId: string;
-      nodeId: string;
-      commandId: string;
-      duplicate: boolean;
-      noop: boolean;
-      /** 提交后的规范化镜头集合。 */
-      cameras: ModelCamera[];
-    }
-  | { ok: false; code: string; message: string };
 
 export type McpMutateCamerasBatchResult =
   | {
@@ -305,7 +242,5 @@ export type McpMutateCamerasBatchResult =
       commandId: string;
       duplicate: boolean;
       noop: boolean;
-      /** 提交后的规范化镜头集合。 */
-      cameras: ModelCamera[];
     }
   | { ok: false; code: string; message: string; failedIndex?: number };

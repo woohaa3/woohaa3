@@ -26,8 +26,8 @@ async function verifyRecovery(real: boolean) {
   // Short path is intentional: macOS Unix domain sockets have a 104-byte limit.
   const root = mkdtempSync(path.join("/tmp", "ir-"));
   const socketPath = path.join(root, "s");
-  const supervisor = spawn(process.execPath, [path.resolve(import.meta.dirname, "../../../../../scripts/agent-runtime-supervisor.mjs"),
-    "--socket", socketPath, "--state", root, "--token", "test", "--workspace", "recovery"], { stdio: "ignore" });
+  const supervisor = spawn(process.execPath, [path.resolve(import.meta.dirname, "../../../../../packages/execution-runtime/dist/cli.js"),
+    "daemon", "--socket", socketPath, "--state", root, "--token", "test", "--workspace", "recovery"], { stdio: "ignore" });
   const identity = { adapterId: "codex-appserver", owner: "recovery", connectionId: "isolated-check" };
   const managers: ReturnType<typeof createSupervisorProcessManager>[] = [];
   const createHost = () => {

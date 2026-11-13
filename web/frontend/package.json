@@ -23,7 +23,7 @@
     "build:desktop": "tsc -b && vite build --mode desktop"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis": "4.1.0",
     "@lexical/react": "^0.51.0",
     "@woohaa3/contracts": "workspace:*",
     "lexical": "^0.51.0",

@@ -150,7 +150,7 @@ fn configure_canvas(app: &mut App) {
         .add_plugins(model3d::shadows::ModelShadowsPlugin)
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
-        .add_plugins(crate::model_preview::ModelPreviewPlugin)
+        .add_plugins(crate::preview_readiness::PreviewReadinessPlugin)
         .add_plugins(crate::history_preview::HistoryThumbnailPlugin)
         .add_plugins(crate::world_capture::WorldCapturePlugin)
         .add_plugins(crate::isometric_grid::IsometricGridPlugin)
@@ -208,7 +208,6 @@ fn configure_canvas(app: &mut App) {
                         // 页面内历史缩略图：同一 App 内一次性离屏渲染，排在模型根同步之后
                         // （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
                         crate::history_preview::sync,
-                        crate::model_preview::sync,
                         scene3d::sync_editor_gizmo,
                         scene3d::sync_shot_main_view,
                     )

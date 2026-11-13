@@ -7,8 +7,6 @@
  */
 import type { CanvasRoom } from "../sync/index.js";
 import type {
-  ModelCamera,
-  ModelCameraMutation,
   ModelContentVersion,
   ModelReferenceInput,
   NodeHistoryModelPlacement,
@@ -108,7 +106,6 @@ export type GetModelNodeOutcome =
       status?: "ok" | "failed";
       error?: string | null;
       references: ModelReferenceInput[];
-      cameras: ModelCamera[];
       /** 当前权威脚本的规模统计（与聚焦信息面板同源）；脚本为空或执行失败时省略。 */
       statistics?: import("@woohaa3/contracts").ModelSceneStatistics;
       breakdown?: import("@woohaa3/contracts").ModelSceneStatisticsBreakdown;
@@ -128,7 +125,6 @@ export type ModelNodeSummary = {
   status?: "ok" | "failed";
   /** 是否仍缺可执行内容；文件模型只按状态判定（不要求脚本）。 */
   pending: boolean;
-  cameraCount: number;
 };
 
 export type ListModelNodesOutcome =
@@ -142,7 +138,6 @@ export type RenderPreviewInput = {
   width?: number;
   height?: number;
   background?: string;
-  cameraPreset?: string;
   /** 采样时刻（秒）；静态模型只接受 0。 */
   timeSeconds?: number;
 };
@@ -158,7 +153,6 @@ export type RenderPreviewMetadata = {
   width: number;
   height: number;
   background: string;
-  cameraPreset: string;
 };
 
 export type RenderPreviewOutcome =
@@ -176,46 +170,6 @@ export type ApplyCommandsInput = {
 export type ApplyCommandsOutcome =
   | { ok: true; canvasId: string; commandId: string; duplicate: boolean; noop: boolean }
   | { ok: false; code: string; message: string };
-
-/** 单条镜头变更输入（change: add-model-camera-mcp-crud）。 */
-export type MutateCamerasInput = {
-  canvasId: string;
-  nodeId: string;
-  requestId: string;
-  mutation: ModelCameraMutation;
-};
-
-export type MutateCamerasOutcome =
-  | {
-      ok: true;
-      canvasId: string;
-      nodeId: string;
-      commandId: string;
-      duplicate: boolean;
-      noop: boolean;
-      cameras: ModelCamera[];
-    }
-  | { ok: false; code: string; message: string };
-
-/** 批量镜头变更输入（change: 2026-10-08-add-chatgpt-oauth-3d-generation，任务 4.4）。 */
-export type MutateCamerasBatchInput = {
-  canvasId: string;
-  nodeId: string;
-  requestId: string;
-  mutations: readonly ModelCameraMutation[];
-};
-
-export type MutateCamerasBatchOutcome =
-  | {
-      ok: true;
-      canvasId: string;
-      nodeId: string;
-      commandId: string;
-      duplicate: boolean;
-      noop: boolean;
-      cameras: ModelCamera[];
-    }
-  | { ok: false; code: string; message: string; failedIndex?: number };
 
 export type ModelMcpServiceDependencies = {
   resolveRoom: (canvasId: string) => Promise<CanvasRoom | null>;

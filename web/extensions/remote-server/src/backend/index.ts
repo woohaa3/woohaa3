@@ -25,6 +25,10 @@ import type {
 } from "@woohaa3/contracts";
 import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
+  agentConnectionProviderCapabilityId,
+  agentConversationAdapterCapabilityId,
+} from "@woohaa3/contracts";
+import {
   CANVAS_SERVICE,
   IDENTITY_SERVICE,
   LOCAL_ONLY_SNAPSHOT,
@@ -81,10 +85,13 @@ import {
   type RemoteDiagnosticsSnapshot,
   type RemoteDeviceLoginStart,
   type RemoteServerLoginInput,
-  type RemoteServerSnapshot
+  type RemoteServerSnapshot,
+  REMOTE_ASSISTANT_ADAPTER_ID
 } from "../shared.js";
 import { readRemoteServerDeployment, type RemoteServerDeployment } from "../deployment.js";
 import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
+import { createRemoteAssistant } from "./assistant/index.js";
+import { createCanvasToolChannel } from "./assistant/canvas-tools.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
 import { createOAuthLogin } from "./oauth-login.js";
 import { createRemoteTelemetryExport } from "./telemetry-export.js";
@@ -118,6 +125,14 @@ export type RemoteServerExtensionOptions = {
   loginAssertionHeaders?: readonly string[];
   /** 部署配置读取（缺省读扩展目录 config.local.json + 环境变量）。 */
   deployment?: () => RemoteServerDeployment;
+  /**
+   * 激活时若配了 `serverUrl` 与 `deviceToken`，是否自动用凭证换一次会话（缺省 true）。
+   *
+   * 关掉它的场景只有测试：多数用例断言的是别的行为，一次后台登录会打乱它们的请求计数。
+   * 生产不该关——部署凭证的含义就是"这台机器不用人登录"，等一次存储操作才换会话会让
+   * 应用一直停在纯本地。
+   */
+  autoLoginWithDeviceToken?: boolean;
   /** 出站 fetch（测试注入）。 */
   fetchImpl?: typeof globalThis.fetch;
   /** 时钟（测试注入）。 */
@@ -727,7 +742,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
 
       const generationBridge = createRemoteGenerationBridge({
         // 宿主没有生成扩展点时省略：bridge 会安静跳过（旧宿主/纯本地宿主）。
-        ...(ctx.generation ? { registerGeneration: (provider: import("@woohaa3/contracts").GenerationProvider) => { ctx.generation!.register(provider); } } : {}),
+        ...(ctx.generation ? { registerGeneration: (provider: import("@woohaa3/contracts").GenerationProvider) => ctx.generation!.register(provider) } : {}),
         session: () => sessionSource.current(),
         fetchImpl,
         log,
@@ -737,8 +752,93 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
         putReference: async (input) => (referenceUploader === null ? undefined : referenceUploader(input))
       });
       generationBridge.activate();
+      // 卸载时把 Provider 摘掉：扩展热重载会重建 bridge，旧注册留着会让新实例撞
+      // "生成 Provider 已注册"，整条宿主重启失败（改服务端地址就是这条路径）。
+      ctx.effect(() => () => generationBridge.dispose());
       // 已有会话（本进程登录过或从文档存储恢复）时立即拉一次目录；没有会话就是安静休眠。
       void generationBridge.refresh().catch(() => undefined);
+
+      /**
+       * 远端助手通路：连接发现 + 会话适配器。
+       *
+       * 与 generationBridge 是**两条独立的路径**，不是同一个能力的两面：
+       * - generationBridge 让远端模型进入任务目录（SubmitTask/GetTask，画布 ACL）；
+       * - 这里让远端模型进入助手目录（/v1/chat/completions，部署级授权）。
+       *
+       * 互相不牵连：生成目录因协议协商失败而休眠时助手仍可用，反之亦然。唯一的共同
+       * 依赖是远端会话本身。
+       *
+       * 宿主没有 `registerCapability` 或没有 agent 相关扩展点时整体跳过（旧宿主 /
+       * 纯本地宿主），不影响接入本身。
+       */
+      const remoteAssistant = createRemoteAssistant({
+        fetchImpl,
+        session: () => sessionSource.current(),
+        // 模型启停策略：与设置页「生成的模型」同源。宿主不提供时按全部可用处理。
+        policy: () => ctx.generation?.policySnapshot?.(),
+        log: (event) => log({ event: String(event.event ?? "remote-assistant"), ...event }),
+        // 画布工具通道：只有宿主装配了工具授权面时才有，否则这条连接只做文本与讨论。
+        ...(ctx.services?.authoring?.tools
+          ? {
+              toolChannel: (input) =>
+                createCanvasToolChannel(input, {
+                  tools: ctx.services!.authoring!.tools,
+                  endpoint: canvasMcpEndpoint(ctx.deployment?.basePath ?? ""),
+                  fetchImpl,
+                  log: (event) => log({ event: String(event.event ?? "remote-assistant-tool"), ...event })
+                })
+            }
+          : {})
+      });
+      if (ctx.capabilities) {
+        // 与 canvasUpstream 同一注册面：返回注销函数，交给 Cordis 托管。
+        const undoProvider = ctx.capabilities.register(
+          agentConnectionProviderCapabilityId(REMOTE_SERVER_EXTENSION_ID),
+          remoteAssistant.provider
+        );
+        const undoAdapter = ctx.capabilities.register(
+          agentConversationAdapterCapabilityId(REMOTE_ASSISTANT_ADAPTER_ID),
+          remoteAssistant.adapter
+        );
+        ctx.effect(() => () => {
+          undoAdapter();
+          undoProvider();
+          // 会话一变就让助手目录失效：登出/切服后继续展示旧模型会让"可用"变成假象。
+          remoteAssistant.invalidate();
+        });
+      }
+
+      /**
+       * 配了部署凭证就在激活时换一次会话。
+       *
+       * `ensure()` 原本只有存储客户端在真正读写对象时才调用，于是"配了地址与凭证、但没人
+       * 打开过任何云端的画布"会一直停在纯本地：界面显示未连接、托管生成的目录永远拉不到。
+       * 部署凭证的含义恰恰是"这台机器不用人登录"，不该等一次存储操作来触发。
+       *
+       * 失败只记日志：凭证过期、服务端没开都是部署问题，不该让扩展激活失败（那会把
+       * 整个宿主拖下水，而用户可能只想用本地画布）。
+       *
+       * 测试可以通过 `options.autoLoginWithDeviceToken === false` 关掉：多数用例断言的
+       * 是别的行为，一次后台登录会打乱它们的请求计数。
+       */
+      if (options.autoLoginWithDeviceToken !== false) {
+        void (async () => {
+          const deployment = readDeployment();
+          if (deployment.serverUrl === null || deployment.deviceToken === null) return;
+          const result = await sessionSource.ensure();
+          if (result.ok) {
+            // 会话刚建立：目录、存储后端、同步上游都还没跟上，各自推一次。
+            void generationBridge.refresh().catch(() => undefined);
+            return;
+          }
+          log({
+            event: "remote-session-unavailable",
+            level: "warn",
+            reason: result.code,
+            serverUrl: deployment.serverUrl
+          });
+        })().catch(() => undefined);
+      }
 
       // 遥测上报出口（change: 2026-10-20-add-local-client-telemetry，tasks 7.3/7.4）。
       // 与存储后端同形：谁注册谁收回。宿主没有遥测能力时（纯本地宿主/旧版本）静默跳过，
@@ -2442,6 +2542,17 @@ function toWsBase(serverUrl: string): string {
  * 为什么不记完整地址：部署路径可能带环境名，query 可能带一次性参数——两者都不该进日志。
  * 同源挂载（`/remote`）保留路径本身：它不含 origin，无法折成 host，而路径是排查必需的。
  */
+/**
+ * 画布 MCP 端点的本机地址。
+ *
+ * 与 `sdk-agent` 用同一套约定（同源 `/mcp/model-canvas`）：端点只接受回环来源，
+ * grant 不落浏览器。部署挂在子路径时前缀要带上，否则请求打到宿主的根上。
+ */
+function canvasMcpEndpoint(basePath: string): string {
+  const prefix = basePath === "" || basePath === "/" ? "" : basePath.replace(/\/+$/, "");
+  return `http://127.0.0.1:${process.env.WOOHAA3_BACKEND_PORT ?? process.env.PORT ?? 5180}${prefix}/mcp/model-canvas`;
+}
+
 function serverHostOf(serverUrl: string): string {
   if (serverUrl.startsWith("/")) return serverUrl;
   try {

@@ -13,7 +13,8 @@ import { createOwnerResolver, deriveSessionSecret } from "./identity.js";
 import { ChatGptOAuth } from "./oauth.js";
 import { createChatGptAuthorizationService, type ChatGptAuthorizationService } from "./authorization.js";
 import { createChatGptModelCatalog } from "./models.js";
-import { createCodexAdapter, type CodexAdapter, type CodexFactoryOptions, type CodexLike } from "./codex-adapter.js";
+import { createExecutorCodexAdapter } from "./execution-client.js";
+import { type CodexAdapter } from "./codex-adapter.js";
 import { createChatGptGenerationService, type ChatGptGenerationService } from "./generation.js";
 import { createChatGptWorkJournal, type ChatGptWorkJournal } from "./work-journal.js";
 import { createChatGptApiHandler } from "./handler.js";
@@ -34,8 +35,7 @@ export type ChatGptServiceOptions = {
   publicPosture?: boolean;
   /** 显式本地开发姿态（测试）；缺省由 `WOOHAA3_CHATGPT_ALLOW_LOCAL_CALLBACK` 推导。 */
   localDev?: boolean;
-  /** SDK 工厂覆盖（测试注入 fake SDK）。 */
-  createCodex?: (options: CodexFactoryOptions) => CodexLike;
+  executor?: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade;
   /** OAuth/JWKS/模型目录 fetch 覆盖（测试注入）。 */
   fetchImpl?: typeof globalThis.fetch;
   /** JWKS 解析器覆盖（测试注入本地 JWKS）。 */
@@ -50,6 +50,16 @@ export type ChatGptServiceOptions = {
   deploymentBasePath?: string;
   logger?: (event: Record<string, unknown>) => void;
   now?: () => number;
+  /**
+   * 宿主角色准备（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 业务入口只提交角色 id 与输入；准备、能力匹配与规范消息由宿主完成。缺失时直连生成入口
+   * 明确不可用，不回退到自带的业务模板。
+   */
+  prepareGenerationRole?: (input: {
+    ownerId: string;
+    request: import("@woohaa3/contracts").ChatGptGenerateRequest;
+  }) => Promise<{ ok: true; prepared: import("@woohaa3/contracts").PreparedAgentRoleTurn } | { ok: false; code: string; message: string }>;
 };
 
 export type ChatGptService = {
@@ -83,6 +93,8 @@ export type ChatGptService = {
    * `agent_message` 与阶段，界面不伪造 token 流。未启用（disabled）时返回 available=false。
    */
   converse: (input: {
+    requestId: string;
+    prepared: import("@woohaa3/contracts").PreparedAgentRoleTurn;
     ownerId: string;
     model: string;
     reasoningEffort?: import("@woohaa3/contracts").ChatGptReasoningEffort;
@@ -180,14 +192,14 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
 
   const models = createChatGptModelCatalog({ ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
 
-  const codex: CodexAdapter = createCodexAdapter({
+  const codex: CodexAdapter = createExecutorCodexAdapter({
+    executor: options.executor,
     codexHomeDir: config.codexHomeDir,
     workspaceDir: config.workspaceDir,
     codexBin: config.codexBin,
     accessTokenFor: (ownerId) => authorization.ensureAccessToken(ownerId),
     // 受控 MCP 工具面（design D4b）：默认连本应用同源 MCP 端点（与应用既有 Agent 工具板同一信任边界）。
     mcpTools: { name: "woohaa3_model_canvas", url: config.mcpUrl },
-    ...(options.createCodex ? { createCodex: options.createCodex } : {}),
     logger: (event) => log({ module: "chatgpt-codex", ...event })
   });
 
@@ -200,7 +212,6 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
   const generation = createChatGptGenerationService({
     ports: options.canvasPorts,
     codex,
-    toolsEnabled: true,
     workJournal,
     ...(options.toolGrants ? { toolGrants: options.toolGrants } : {}),
     logger: (event) => log({ module: "chatgpt-generation", ...event })
@@ -215,6 +226,7 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
     authorization,
     generation,
     models: { list: (token) => models.list(token) },
+    ...(options.prepareGenerationRole ? { prepareGenerationRole: options.prepareGenerationRole } : {}),
     onOwnerDisconnect: (ownerId) => {
       generation.cancelOwner(ownerId);
       // 断开/重绑改变授权 epoch：旧在途工作的授权已失效（任务 4.1 / design D5）。
@@ -245,7 +257,7 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
       const prompt = buildConversationPrompt(input.history, input.prompt);
       try {
         const { finalResponse } = await codex.runStreamed(
-          { ownerId: input.ownerId, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: true, ...(input.images ? { images: input.images } : {}), ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}), ...(input.signal ? { signal: input.signal } : {}) },
+          { ownerId: input.ownerId, requestId: input.requestId, prepared: input.prepared, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: true, ...(input.images ? { images: input.images } : {}), ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}), ...(input.signal ? { signal: input.signal } : {}) },
           (event) => {
             if (event.type === "progress") input.onStage?.(event.stage);
           }

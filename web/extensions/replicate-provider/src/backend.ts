@@ -14,7 +14,7 @@ import { discoverReplicateModels } from "./discovery.js";
 import { createProviderLifecycleFetch, createGuardedFetch, registerModelRefreshRoute } from "@woohaa3/provider-sdk";
 import { createReplicateProvider, type ReplicateCatalog } from "./provider.js";
 import { replicateModelDefinitions, type ReplicateModel } from "./schema.js";
-import { DEFAULT_REPLICATE_BASE_URL, parseModelIds, REPLICATE_PLUGIN_ID, REPLICATE_PROVIDER_ID } from "./shared.js";
+import { DEFAULT_REPLICATE_BASE_URL, parseModelIds, REPLICATE_PLUGIN_ID, REPLICATE_PROVIDER_ID, replicateOrigin } from "./shared.js";
 
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
@@ -136,6 +136,36 @@ export function createReplicateProviderPlugin(deps: ReplicatePluginDependencies 
             ? parsed.message
             : "未填写模型。格式为 owner/name，例如 black-forest-labs/flux-schnell";
       return { state: "degraded" as const, diagnostics: [{ code: "provider-credentials-missing", message }] };
+    },
+    async testConnection(config) {
+      const apiKey = (config.apiKey ?? "").trim();
+      const baseUrl = (config.baseUrl ?? DEFAULT_REPLICATE_BASE_URL).trim();
+      if (!apiKey || !baseUrl) return { ok: false, message: "请先填写 Replicate API Token 和地址" };
+      const parsed = parseModelIds(config.models);
+      if (!parsed.ok) return { ok: false, message: parsed.message };
+      if (parsed.ids.length > 0) {
+        const result = await discoverReplicateModels({
+          baseUrl,
+          apiKey,
+          modelIds: parsed.ids,
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+          timeoutMs: 10_000
+        });
+        if (!result.ok) return { ok: false, message: result.message };
+        return { ok: true, message: `测试通过，已验证 ${result.models.length} 个模型` };
+      }
+      const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+      try {
+        const response = await fetchImpl(`${replicateOrigin(baseUrl)}/account`, {
+          method: "GET",
+          headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" },
+          signal: AbortSignal.timeout(10_000)
+        });
+        if (!response.ok) return { ok: false, message: `Replicate Token 验证失败（HTTP ${response.status}）` };
+        return { ok: true, message: "Replicate API Token 测试通过" };
+      } catch (error) {
+        return { ok: false, message: `Replicate 连接失败：${error instanceof Error ? error.message : String(error)}` };
+      }
     },
     async apply(ctx, config) {
       const apiKey = config.apiKey?.trim() ?? "";

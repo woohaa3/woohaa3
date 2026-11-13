@@ -58,7 +58,17 @@ export type SdkAgentConfigureInput = {
   expectedEpoch?: number;
   expectedRevision?: number;
 };
+export type SdkAgentTestConnectionResult = {
+  ok: boolean;
+  models?: string[];
+  message: string;
+  code?: string;
+};
+
 export type SdkAgentRemote = {
+  testConnection?: (
+    input: SdkAgentConfigureInput,
+  ) => Promise<SdkAgentRemoteResult<SdkAgentTestConnectionResult>>;
   configure: (
     input: SdkAgentConfigureInput,
   ) => Promise<
@@ -144,6 +154,20 @@ export function createSdkAgentRemote(
   });
 
   return {
+    async testConnection(input) {
+      const result = await transport.request({
+        path: path("test-connection"),
+        method: "POST",
+        body: input,
+      });
+      if (!result.ok) return fail(result, "连接测试失败");
+      if (!isRecord(result.data) || typeof result.data.ok !== "boolean")
+        return { ok: false, error: "测试响应无法识别" };
+      return {
+        ok: true,
+        value: result.data as unknown as SdkAgentTestConnectionResult,
+      };
+    },
     async configure(input) {
       const result = await transport.request({
         path: path("configure"),

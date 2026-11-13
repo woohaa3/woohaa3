@@ -46,6 +46,33 @@ function snapshot(): ConversationSnapshot {
   return { conversation: summary(), turns: [turn()], messages: [], events: [], cursor: 3, resyncRequired: false };
 }
 
+describe("Agent 角色提交前匹配", () => {
+  it("角色不可用时保留草稿、不创建会话也不提交", async () => {
+    const create = vi.fn(async () => ({ ok: true as const, value: { conversation: summary() } }));
+    const accept = vi.fn();
+    const roles = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        roles: [{
+          ref: { namespacedId: "test/role", roleId: "role", extensionId: "test", revision: "1", descriptorDigest: "d", artifactId: "a" },
+          title: "角色",
+          specialty: "专长",
+          requirements: { imageInput: false, toolCalling: true, structuredOutput: "none" as const },
+          outputKind: "tool-receipts" as const,
+          available: false,
+          reason: "缺少必要工具：submit_model_script"
+        }]
+      }
+    }));
+    const service = createAgentConversationService({ remote: fakeRemote({ create, accept, roles }) });
+    const result = await service.submitTurn({ canvasId: "cv", adapterId: "adapter", requestId: "req-role", entry: { action: "discuss", canvasId: "cv", roleId: "test/role", prompt: "你好" } });
+    expect(result).toMatchObject({ ok: false, code: "role-requirement-unsatisfied" });
+    expect(create).not.toHaveBeenCalled();
+    expect(accept).not.toHaveBeenCalled();
+    expect(service.getSnapshot().error).toContain("缺少必要工具");
+  });
+});
+
 describe("exact assistant request reads", () => {
   it("creates an independent director conversation without source-image pending state or conversation reuse", async () => {
     const findForTarget = vi.fn();
@@ -461,6 +488,39 @@ describe("agent conversation service · 节点会话复用与清空（design D8�
     expect(failure.ok).toBe(false);
     expect(failing.getSnapshot().contextRevision).toBe(0);
   });
+
+  it("连接版本推进或版本冲突后丢弃目录缓存，下一次选择读到迁移后的版本", async () => {
+    const connections = [
+      { connectionId: "c1", adapterId: "a", extensionId: "sdk-agent", name: "A", runCategory: "agent-sdk", authMode: "api-key", configRevision: 2, credentialEpoch: 0, status: { transport: { state: "ready" }, credential: { state: "ready" }, modelAccess: { state: "ready" }, tools: { state: "ready" } }, ready: true, capabilities: { discussion: true, imageInput: false, tools: true, structuredResult: true, cancel: true, resume: false }, models: [], credentialConfigured: true }
+    ] as never[];
+    const listConnections = vi.fn(async () => ({ ok: true as const, value: { connections } }));
+    const create = vi.fn(async () => ({ ok: true as const, value: { conversation: summary({ conversationId: "conv-new" }) } }));
+    const accept = vi.fn(async () => ({ ok: true as const, value: {
+      conversation: summary({ conversationId: "conv-new" }),
+      turn: turn({ connection: { connectionId: "c1", adapterId: "a", configRevision: 2, credentialEpoch: 0 } }),
+      reused: false
+    } }));
+    const service = createAgentConversationService({ remote: fakeRemote({ listConnections, create: create as never, accept }) });
+    await service.listConnections();
+    await service.listConnections();
+    expect(listConnections).toHaveBeenCalledTimes(1);
+    await service.submitTurn({ canvasId: "cv", adapterId: "a", connectionId: "c1", requestId: "req-advance", entry: {
+      action: "discuss", canvasId: "cv", prompt: "hi",
+      connection: { connectionId: "c1", adapterId: "a", configRevision: 1, credentialEpoch: 0 }
+    } });
+    await service.listConnections();
+    expect(listConnections).toHaveBeenCalledTimes(2);
+
+    const retryList = vi.fn(async () => ({ ok: true as const, value: { connections } }));
+    const rejecting = createAgentConversationService({ remote: fakeRemote({ listConnections: retryList,
+      create: async () => ({ ok: true as const, value: { conversation: summary({ conversationId: "conv-new" }) } }),
+      accept: async () => ({ ok: false as const, code: "connection-unavailable", error: "助手连接版本已变更，请重新选择" }) }) });
+    await rejecting.listConnections();
+    const rejected = await rejecting.submitTurn({ canvasId: "cv", adapterId: "a", connectionId: "c1", requestId: "req-conflict", entry: { action: "discuss", canvasId: "cv", prompt: "hi" } });
+    expect(rejected).toMatchObject({ ok: false, code: "connection-unavailable" });
+    await rejecting.listConnections();
+    expect(retryList).toHaveBeenCalledTimes(2);
+  });
 });
 
 it("target submission resolves the node conversation without a whole-set context", async () => {
@@ -478,4 +538,32 @@ it("target submission resolves the node conversation without a whole-set context
   await service.submitTurn({ canvasId: "cv", conversationId: "legacy", requestId: "legacy-request", entry: { ...entry, clipId: "old-clip", itemId: "old-item" } });
   expect(accept.mock.calls[1][0]).toBe("legacy");
   expect(create).not.toHaveBeenCalled();
+});
+
+describe("host restart recovery (task 5.2)", () => {
+  it("keeps showing the real running stage from the executor cursor without duplicating messages", async () => {
+    const messages = [
+      { messageId: "m1", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "user" as const, content: "生成一张图", truncated: false, sequence: 1, createdAt: "2026-10-13T00:00:00.000Z" },
+      { messageId: "m2", conversationId: "conv-1", turnId: "turn-1", requestId: "req-1", role: "assistant" as const, content: "正在写模型", truncated: false, sequence: 2, createdAt: "2026-10-13T00:00:01.000Z" }
+    ];
+    const adopted: ConversationSnapshot = {
+      conversation: summary(),
+      turns: [turn({ status: "running", stage: "writing", executorCursor: 7 })],
+      messages,
+      events: [],
+      cursor: 7,
+      resyncRequired: false
+    };
+    const read = vi.fn(async () => ({ ok: true as const, value: adopted }));
+    const accept = vi.fn();
+    const service = createAgentConversationService({ remote: fakeRemote({ read, accept }) });
+    await service.openDetail("conv-1");
+    // 断流后重新读取：只按 cursor 恢复快照，不重新提交。
+    await service.openDetail("conv-1");
+    const detail = service.getDetail();
+    expect(detail?.turns[0]).toMatchObject({ status: "running", stage: "writing", executorCursor: 7 });
+    expect(detail?.messages).toEqual(messages);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(accept).not.toHaveBeenCalled();
+  });
 });

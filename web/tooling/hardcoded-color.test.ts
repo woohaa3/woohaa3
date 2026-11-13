@@ -56,7 +56,6 @@ export const COLOR_ALLOWLIST: Record<string, string> = {
   // showcase 夹具：用户标注色默认值（领域内容色），与 ExecutionPanel 同类。
   "web/ui/showcase/src/video-dialog-fixtures.tsx": "用户标注色默认值（领域内容色）",
   // showcase 夹具：程序化模型 fixture 的 Scene IR 输入（领域内容色，非 app chrome）。
-  "web/ui/showcase/src/fixtures/shot-camera-fixture.tsx": "程序化模型 Scene IR 输入（领域内容色）",
   // showcase 夹具：图片编辑色板/原图占位内容色（领域内容色，与生产色板一致）。
   "web/ui/showcase/src/image-focus-fixtures.tsx": "图片编辑色板与原图占位内容色（领域内容色）"
 };

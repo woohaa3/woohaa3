@@ -23,6 +23,13 @@ import { createSqliteAgentConversationStore as openConversationStore } from "../
 import { loadNodeSqlite } from "../repository/sqlite-loader.js";
 import { createAgentAdapterRegistry } from "./agent-adapter-registry.js";
 import { createExtensionAssistants } from "./extension-assistants.js";
+import { createAgentRoleRegistry } from "../agent-roles/registry.js";
+
+/**
+ * 本套件关注会话账本/事件/取消，不关注角色语义：给每个服务注入一个无工具、
+ * 无内建能力要求的测试角色，避免每条用例重复角色样板。
+ */
+import { testRoleRegistry } from "./test-role-registry.js";
 import { createAgentConversationService, hashIntent } from "./agent-conversation-service.js";
 
 const dirs: string[] = [];
@@ -46,6 +53,8 @@ type FakeAdapterControls = {
   queries: Array<{ owner: string; requestId: string }>;
   /** 手动 resolve 当前 run（用于在途查询/取消）。 */
   pending: Array<(outcome: AgentAdapterRunOutcome) => void>;
+  /** 宿主重启接管（任务 3.2/3.3）：可选，记录每次接管的输入。 */
+  resume?: (input: AgentAdapterRunInput) => Promise<AgentAdapterRunOutcome | null>;
 };
 
 function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
@@ -66,7 +75,8 @@ function fakeAdapter(controls: FakeAdapterControls): AgentConversationAdapter {
     },
     async cancel() {
       /* fake：由调用方通过 pending 收尾 */
-    }
+    },
+    ...(controls.resume ? { resume: controls.resume } : {})
   };
 }
 
@@ -79,7 +89,7 @@ function fakeRegistry(adapter: AgentConversationAdapter) {
   });
 }
 
-function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number) {
+function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number, agentRoles = testRoleRegistry()) {
   const controls: FakeAdapterControls = {
     seen: [],
     outcomes: [],
@@ -92,6 +102,7 @@ function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageCh
     store,
     maxMessageChars,
     registry: fakeRegistry(fakeAdapter(controls)),
+    agentRoles,
     now: () => "2026-10-13T00:00:00.000Z",
     createId: (() => {
       let n = 0;
@@ -117,6 +128,7 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
   action: "discuss" as const,
   canvasId: "canvas-1",
   prompt: "你好",
+  roleId: "test/discussion",
   ...overrides
 });
 
@@ -184,6 +196,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "mixed", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     input.emit({ type: "stage", stage: "reasoning", summary: "公开摘要" });
     input.emit({ type: "message", role: "assistant", content: "先读取" });
@@ -212,6 +226,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "stream", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     // 真增量：多个 append 分片属于同一条助手消息。
     for (const chunk of ["一", "段", "流式", "文本"]) input.emit({ type: "message", role: "assistant", content: chunk, delivery: "append" });
@@ -236,6 +252,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "snapshot", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     input.emit({ type: "message", role: "assistant", content: "你", delivery: "replace", streamId: "part-1" });
     input.emit({ type: "message", role: "assistant", content: "你好", delivery: "replace", streamId: "part-1" });
@@ -255,6 +273,8 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "split", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    // 角色准备是异步前置：等 adapter 真正收到本回合后再注入事件。
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const input = controls.seen[0]!;
     input.emit({ type: "message", role: "assistant", content: "先看一下", delivery: "append" });
     input.emit({ type: "tool-started", tool: "get_model", callId: "a" });
@@ -347,6 +367,7 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "aggregate", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     for (const event of events) controls.seen[0]!.emit(event);
     controls.pending[0]!({ status: "succeeded", assistantText: summary });
     await dispatched;
@@ -363,6 +384,7 @@ describe("agent conversation service", () => {
     const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "long", entry: entry() });
     if (!accepted.ok) throw new Error("accept failed");
     const dispatched = service.dispatchTurn(accepted.turn.turnId);
+    await vi.waitFor(() => expect(controls.seen).toHaveLength(1));
     const text = "一段超过消息预算的回复";
     controls.seen[0]!.emit({ type: "message", role: "assistant", content: text });
     controls.pending[0]!({ status: "succeeded", assistantText: text });
@@ -428,6 +450,33 @@ describe("agent conversation service", () => {
     expect(conflict.ok).toBe(false);
     if (conflict.ok) return;
     expect(conflict.error.code).toBe("request-id-reused");
+  });
+
+  it("相同 requestId 改变思考强度也返回 request-id-reused", () => {
+    const { service } = setup();
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const convId = created.conversation.conversationId;
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-effort", entry: entry({ reasoningEffort: "low" }) })).toMatchObject({ ok: true });
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-effort", entry: entry({ reasoningEffort: "high" }) })).toMatchObject({ ok: false, error: { code: "request-id-reused" } });
+    expect(service.acceptTurn({ owner: "user-a", conversationId: convId, requestId: "req-effort", entry: entry({ reasoningEffort: "low" }) })).toMatchObject({ ok: true, reused: true });
+  });
+
+  it("回合冻结 capabilityRevision 并记录 reasoning 请求/应用结果", async () => {
+    const { service, controls } = setup();
+    const binding = { connectionId: "c", adapterId: "fake", configRevision: 2, credentialEpoch: 1, capabilityRevision: "rev-9" };
+    vi.spyOn(service, "resolveConnectionBinding").mockResolvedValue({ ok: true, binding });
+    controls.outcomes.push({ status: "succeeded", assistantText: "ok", receipt: { commandId: "cmd" }, reasoning: { requested: "high", applied: true } });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "req-reasoning", entry: entry({ model: "m", reasoningEffort: "high" }), connection: binding });
+    if (!accepted.ok) throw new Error(accepted.error.message);
+    expect(accepted.turn.target.capabilityRevision).toBe("rev-9");
+    await service.dispatchTurn(accepted.turn.turnId);
+    await service.whenSettled(accepted.turn.turnId);
+    const queried = service.queryTurn({ owner: "user-a", requestId: "req-reasoning" });
+    expect(queried).toMatchObject({ ok: true, turn: { reasoning: { requested: "high", applied: true }, connection: { capabilityRevision: "rev-9" } } });
+    expect(JSON.stringify(queried)).not.toContain("chain-of-thought");
   });
 
   it("同会话可以受理多个独立回合（不再有单活动回合门禁）", () => {
@@ -775,7 +824,7 @@ describe("trusted structured assistant execution", () => {
     const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"ok":true}'}]});
     const created=service.createConversation({owner:"owner",canvasId:"canvas",adapterId:"fake"});
     if (!created.ok) throw new Error("create failed");
-    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"structured",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design"},candidate};
+    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"structured",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design",roleId:"test/discussion"},candidate};
     const accepted=service.acceptStructuredTurn(input);if(!accepted.ok)throw new Error("accept failed");
     expect(accepted.turn.target.structuredInputHash).toBeTruthy();
     await service.dispatchTurn(accepted.turn.turnId);expect(controls.seen).toHaveLength(0);
@@ -792,7 +841,7 @@ describe("trusted structured assistant execution", () => {
   it("restart and cancellation never restart structured inference",async()=>{
     const {service,controls}=setup();
     const created=service.createConversation({owner:"owner",canvasId:"canvas",adapterId:"fake"});if(!created.ok)throw Error();
-    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"lost",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design"},candidate};
+    const input={owner:"owner",conversationId:created.conversation.conversationId,requestId:"lost",entry:{action:"discuss" as const,canvasId:"canvas",prompt:"design",roleId:"test/discussion"},candidate};
     const accepted=service.acceptStructuredTurn(input);if(!accepted.ok)throw Error();
     await service.reconcileUnknown();
     await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);
@@ -801,31 +850,42 @@ describe("trusted structured assistant execution", () => {
     service.cancelTurn({owner:"owner",requestId:"lost"});
     await service.dispatchStructuredTurn(accepted.turn.turnId,candidate);expect(controls.seen).toHaveLength(0);
   });
-  it("extension facade freezes connections, scopes identities and reads canvas image bytes before execution",async()=>{
-    const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"design":true}'}]});
+  it("extension role facade freezes connections, scopes identities and reads canvas image bytes before execution",async()=>{
+    const registry=createAgentRoleRegistry({availableTools:()=>["get_model_node","submit_model_script"]});
+    const registered=registry.register({extensionId:"extension",artifactId:"extension@1",implementation:{
+      definition:{id:"writer",revision:"1",title:"写作",specialty:"写模型",instructions:"你是模型作者。",
+        inputSchema:{type:"object",additionalProperties:false,required:["prompt"],properties:{prompt:{type:"string",minLength:1}}},
+        contextSchema:{type:"object"},tools:{required:["get_model_node"],optional:["submit_model_script"]},
+        nativeCapabilities:{required:[],optional:[]},requirements:{imageInput:false,toolCalling:true,structuredOutput:"none"},
+        output:{kind:"tool-receipts"}},
+      prepare:({input})=>({messages:[{role:"user",content:String((input as {prompt:string}).prompt)}]})
+    }});
+    if(!registered.ok)throw Error(registered.message);
+    const {service,controls}=setup({outcomes:[{status:"succeeded",assistantText:'{"design":true}'}]},undefined,registry);
     const binding={connectionId:"selected",adapterId:"fake",configRevision:2,credentialEpoch:3};
     vi.spyOn(service,"resolveConnectionBinding").mockResolvedValue({ok:true,binding});
     const read=vi.fn(async()=>candidate.images[0]);
     const services={canvasAccess:{authorize:vi.fn(async({subject,canvasId})=>({ok:subject==="owner" && canvasId==="canvas"}))},media:{verify:vi.fn(async()=>({exists:true,metadata:{checksum:"hash",contentType:"image/png"}})),resources:{read}}} as unknown as import("@woohaa3/contracts").ApplicationExtensionServices;
-    const facade=createExtensionAssistants("extension",services,()=>service);
-    const input={subject:"owner",canvasId:"canvas",nodeId:"node",requestId:"request",connection:binding,model:"chosen",reasoningEffort:"high" as const,prompt:"design",outputSchema:candidate.outputSchema,references:[{storageKey:"key",checksum:"hash"}]};
-    expect(await facade.submit({...input,connection:{...binding,credentialEpoch:1}})).toMatchObject({ok:false,code:"connection-unavailable"});
-    const accepted = await facade.submit(input);
+    const facade=createExtensionAssistants("extension",services,()=>service,()=>registry);
+    const input={subject:"owner",canvasId:"canvas",nodeId:"node",requestId:"request",connection:binding,roleId:"extension/writer",roleInput:{prompt:"design"},roleContext:{},model:"chosen",reasoningEffort:"high" as const,references:[{storageKey:"key",checksum:"hash"}]};
+    expect(await facade.submitRole({...input,connection:{...binding,credentialEpoch:1}})).toMatchObject({ok:false,code:"connection-unavailable"});
+    const accepted = await facade.submitRole(input);
     expect(accepted).toMatchObject({ok:true,conversation:{conversationId:expect.any(String),requestId:expect.stringMatching(/^extension-/)}});
     if (!accepted.ok || !accepted.conversation) throw Error("missing ledger reference");
     expect(accepted.conversation.requestId).not.toBe(input.requestId);
     await vi.waitFor(()=>expect(controls.seen).toHaveLength(1));
     await service.whenSettled(controls.seen[0].turnId);
-    expect(controls.seen[0]).toMatchObject({connection:binding,candidate,intent:{model:"chosen",reasoningEffort:"high"}});
+    expect(controls.seen[0]).toMatchObject({connection:binding,intent:{roleId:"extension/writer",model:"chosen",reasoningEffort:"high"}});
+    expect(controls.seen[0].candidate).toMatchObject({outputSchema:{},referenceIdentity:input.references});
     expect(read).toHaveBeenCalledWith("key","canvas");
     expect(await facade.query(input)).toMatchObject({state:"succeeded",text:'{"design":true}',conversation:accepted.conversation});
     expect(service.queryTurn({owner:input.subject,requestId:accepted.conversation.requestId})).toMatchObject({ok:true,turn:{conversationId:accepted.conversation.conversationId}});
-    expect(await facade.submit(input)).toEqual(accepted);expect(controls.seen).toHaveLength(1);
-    expect(await facade.submit({...input,prompt:"changed"})).toMatchObject({ok:false,code:"request-id-reused"});
+    expect(await facade.submitRole(input)).toEqual(accepted);expect(controls.seen).toHaveLength(1);
+    expect(await facade.submitRole({...input,roleInput:{prompt:"changed"}})).toMatchObject({ok:false,code:"request-id-reused"});
     expect(await facade.query({...input,nodeId:"other"})).toBeNull();
-    expect(await createExtensionAssistants("other-extension",services,()=>service).query(input)).toBeNull();
+    expect(await createExtensionAssistants("other-extension",services,()=>service,()=>registry).query(input)).toBeNull();
     await expect(facade.query({...input,subject:"other"})).rejects.toThrow();
-    expect(await facade.submit({...input,canvasId:"other"})).toMatchObject({ok:false,code:"authorization-unavailable"});
+    expect(await facade.submitRole({...input,canvasId:"other"})).toMatchObject({ok:false,code:"authorization-unavailable"});
     await facade.cancel(input);expect(controls.seen).toHaveLength(1);
   });
 });
@@ -856,4 +916,130 @@ it("whole-set context persists separately from legacy local conversations withou
   expect(service.findConversationForTarget({ ...scope, connectionId: "other", contextKey: "film-set:whole" }).conversation).toBeNull();
   const read = service.readConversation({ owner: scope.owner, conversationId: legacy.conversation.conversationId });
   expect(read.ok).toBe(true);
+});
+
+describe("in-flight turn adoption across host restarts", () => {
+  const adoptionEntry = () => entry({ action: "modify", nodeId: "node-1" });
+
+  it("adopts a running turn from the executor cursor, emits each event once, and settles once", async () => {
+    const resumed: AgentAdapterRunInput[] = [];
+    const { controls, service, store } = setup({
+      resume: async (input) => {
+        resumed.push(input);
+        // 执行器 journal 里已有两条未读事件；宿主按 cursor 幂等落库。
+        input.emitExecutor?.(1, { type: "stage", stage: "writing" });
+        input.emitExecutor?.(2, { type: "message", role: "assistant", content: "adopted reply", delivery: "replace", streamId: "s1" });
+        return { status: "succeeded", assistantText: "adopted reply", receipt: { commandId: "adopted" } };
+      }
+    });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "adopt-1", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    store.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: 0 }, "2026-10-13T00:00:30.000Z");
+
+    const discovered = await service.reconcileUnknown();
+    expect(discovered.some((turn) => turn.turnId === accepted.turn.turnId)).toBe(true);
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]!.resumeCursor).toBe(0);
+    expect(controls.seen).toHaveLength(0); // 没有重新调用 run / 推理
+
+    // 再核对一次：终态不再接管，不重复写消息。
+    await service.reconcileUnknown();
+    const read = service.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) return;
+    expect(read.snapshot.messages.filter((message) => message.role === "assistant" && message.content === "adopted reply")).toHaveLength(1);
+    expect(service.queryTurn({ owner: "user-a", requestId: "adopt-1" })).toMatchObject({ ok: true, turn: { status: "succeeded" } });
+  });
+
+  it("starts legacy turns without a cursor from the journal head and records a recovered event", async () => {
+    let cursor: number | "head" | undefined;
+    const { service, store } = setup({
+      resume: async (input) => {
+        cursor = input.resumeCursor;
+        return { status: "succeeded", receipt: { commandId: "legacy" } };
+      }
+    });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "legacy", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    store.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: null }, "2026-10-13T00:00:30.000Z");
+    await service.reconcileUnknown();
+    expect(cursor).toBe("head");
+    const read = service.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) return;
+    expect(read.snapshot.events.some((event) => event.type === "recovered")).toBe(true);
+  });
+
+  it("allows only one host to adopt the same turn", async () => {
+    const file = path.join(tempDir(), "shared.sqlite");
+    const firstStore = createSqliteAgentConversationStore({ path: file });
+    const secondStore = createSqliteAgentConversationStore({ path: file });
+    let resumeCalls = 0;
+    const resume = async (input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome | null> => {
+      resumeCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      input.emitExecutor?.(1, { type: "message", role: "assistant", content: "only once", delivery: "replace", streamId: "s1" });
+      return { status: "succeeded", assistantText: "only once", receipt: { commandId: "c" } };
+    };
+    const make = (store: typeof firstStore) => createAgentConversationService({
+      store,
+      registry: fakeRegistry(fakeAdapter({ seen: [], outcomes: [], queries: [], pending: [], resume })),
+      agentRoles: testRoleRegistry(),
+      now: () => "2026-10-13T00:00:00.000Z"
+    });
+    const first = make(firstStore);
+    const created = first.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = first.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "dual", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    firstStore.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: 0 }, "2026-10-13T00:00:30.000Z");
+    const second = make(secondStore);
+    await Promise.all([first.reconcileUnknown(), second.reconcileUnknown()]);
+    expect(resumeCalls).toBe(1);
+    const read = second.readConversation({ owner: "user-a", conversationId: created.conversation.conversationId });
+    if (!read.ok) return;
+    expect(read.snapshot.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+  });
+
+  it("settles failed when the executor journal no longer holds the turn", async () => {
+    const { service, store, controls } = setup({ resume: async () => null });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "lost", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    store.updateTurn(accepted.turn.turnId, { status: "running", stage: "running", executorCursor: 4 }, "2026-10-13T00:00:30.000Z");
+    await service.reconcileUnknown();
+    expect(service.queryTurn({ owner: "user-a", requestId: "lost" })).toMatchObject({ ok: true, turn: { status: "failed" } });
+    expect(controls.seen).toHaveLength(0); // 不自动重跑
+  });
+
+  it("persists the turn authority before dispatch", async () => {
+    const { service } = setup({ outcomes: [{ status: "succeeded", receipt: { commandId: "x" } }] });
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "auth", entry: adoptionEntry() });
+    if (!accepted.ok) return;
+    await service.dispatchTurn(accepted.turn.turnId);
+    await service.whenSettled(accepted.turn.turnId);
+    expect(service.turnAuthority(accepted.turn.turnId)).toMatchObject({ owner: "user-a", canvasId: "canvas-1", adapterId: "fake", revokedAt: null });
+  });
+});
+
+describe("turn authority revocation", () => {
+  it("revokes the persisted authority when the user cancels a turn", async () => {
+    const { service, controls } = setup();
+    const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+    if (!created.ok) return;
+    const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "cancel-authority", entry: entry({ action: "modify", nodeId: "node-1" }) });
+    if (!accepted.ok) return;
+    void service.dispatchTurn(accepted.turn.turnId);
+    while (controls.seen.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(service.turnAuthority(accepted.turn.turnId)?.revokedAt).toBeNull();
+    service.cancelTurn({ owner: "user-a", requestId: "cancel-authority" });
+    expect(service.turnAuthority(accepted.turn.turnId)?.revokedAt).not.toBeNull();
+    controls.pending[0]?.({ status: "cancelled" });
+    await service.whenSettled(accepted.turn.turnId);
+  });
 });

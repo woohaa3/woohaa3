@@ -12,7 +12,6 @@ import {
   decodeMcpListNodesRequest,
   decodeMcpModelScriptBatchRequest,
   decodeMcpModelStatisticsRequest,
-  decodeMcpMutateCamerasRequest,
   decodeMcpRenderPreviewRequest,
   decodeMcpSubmitScriptRequest,
   MCP_INTERNAL_PATHS,
@@ -23,11 +22,9 @@ import {
   type CanvasCommand,
   type GetModelNodesInput,
   type McpApplyCommandsResult,
-  type McpCameraMutation,
   type McpGetNodeResult,
   type McpListNodesResult,
   type McpModelStatisticsResult,
-  type McpMutateCamerasResult,
   type McpRenderPreviewResult,
   type McpSubmitScriptResult,
   type ModelNodesOutcome,
@@ -86,13 +83,6 @@ export type CanvasMcpClient = {
     baseRevision: number;
     commands: CanvasCommand[];
   }): Promise<McpApplyCommandsResult>;
-  /** 单条镜头读改写；Canvas 侧按最新权威集合应用。 */
-  mutateCameras(input: {
-    canvasId: string;
-    nodeId: string;
-    requestId: string;
-    mutation: McpCameraMutation;
-  }): Promise<McpMutateCamerasResult>;
   /** readiness 探针：Canvas 内部面可达且协议兼容。 */
   ready(): Promise<{ ready: boolean; reason?: string }>;
 };
@@ -168,7 +158,6 @@ export function createCanvasMcpClient(options: CanvasMcpClientOptions): CanvasMc
     submitScript: (input) => call<McpSubmitScriptResult>(MCP_INTERNAL_PATHS.submitScript, decodeMcpSubmitScriptRequest(input)),
     renderPreview: (input) => call<McpRenderPreviewResult>(MCP_INTERNAL_PATHS.renderPreview, decodeMcpRenderPreviewRequest(input)),
     applyCommands: (input) => call<McpApplyCommandsResult>(MCP_INTERNAL_PATHS.applyCommands, decodeMcpApplyCommandsRequest(input)),
-    mutateCameras: (input) => call<McpMutateCamerasResult>(MCP_INTERNAL_PATHS.mutateCameras, decodeMcpMutateCamerasRequest(input)),
     // 模型批量作者（model-script-batch）：与单节点脚本同一受认证内部面，actorId 由 Canvas 侧派生。
     getModelNodes: (input) => call<ModelNodesOutcome>(MCP_INTERNAL_PATHS.getModelNodes, decodeMcpGetModelNodesRequest(input)),
     validateScripts: (input) => call<ModelScriptBatchOutcome>(MCP_INTERNAL_PATHS.validateModelScripts, decodeMcpModelScriptBatchRequest(input)),

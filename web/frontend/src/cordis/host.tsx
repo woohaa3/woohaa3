@@ -175,6 +175,12 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const explicitSelectionRevision = useRef(0);
   const pendingSourceSwitch = useRef(false);
   const dialogs = useOptionalService("dialogs");
+  const extensionStatus = useOptionalService("applicationExtensionStatus");
+  const extensionStatusLoading = useSyncExternalStore(
+    listener => extensionStatus?.subscribe(listener) ?? (() => undefined),
+    () => extensionStatus?.getSnapshot().loading ?? false,
+    () => false
+  );
   const credentialsOpen = useSyncExternalStore(
     listener => dialogs?.subscribe(listener) ?? (() => undefined),
     () => dialogs?.getSnapshot().stack.some(entry => entry.dialogId === "agent-assistant") ?? false,
@@ -198,6 +204,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const selectedConnection = hostOwnedConnections.find((entry) => entry.connectionId === effectiveConnectionId);
   const effectiveSourceId = selectedConnection?.adapterId ?? selectedSourceId;
   const activeSource = sources.find((source) => source.sourceId === effectiveSourceId) ?? null;
+  const sourceDisabled = Boolean(effectiveSourceId && !activeSource && !extensionStatusLoading);
   useEffect(() => {
     if (props.sourceSelection) return;
     const store = selectionMemory;
@@ -208,7 +215,10 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
     let cancelled = false;
     const revision = explicitSelectionRevision.current;
     void conversation.findConversationForTarget({ canvasId: props.canvasId, nodeId: props.nodeId, ...(contextKey ? { contextKey } : {}) }).then((result) => {
-      if (!cancelled && revision === explicitSelectionRevision.current && result.ok && result.value.conversation?.connectionId) setSelectedConnectionId(result.value.conversation.connectionId);
+      if (!cancelled && revision === explicitSelectionRevision.current && result.ok && result.value.conversation?.connectionId) {
+        setSelectedConnectionId(result.value.conversation.connectionId);
+        if (result.value.conversation.adapterId) setSelectedSourceId(result.value.conversation.adapterId);
+      }
     });
     return () => { cancelled = true; };
   }, [conversation, props.canvasId, props.nodeId, contextKey]);
@@ -272,7 +282,7 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
   const hostSourceSelection: import("./contract/authoring.js").AuthoringGenerationProps["sourceSelection"] = props.sourceSelection ?? {
         sources: [
           ...sources.map((source) => ({ sourceId: source.sourceId, label: source.label })),
-          ...(selectedSourceId && !activeSource ? [{ sourceId: selectedSourceId, label: "先前来源（已停用）" }] : [])
+          ...(sourceDisabled && effectiveSourceId ? [{ sourceId: effectiveSourceId, label: "先前来源（已停用）" }] : [])
         ],
         selectedSourceId: effectiveSourceId ?? "",
         connections: hostOwnedConnections.map((entry) => ({
@@ -307,14 +317,25 @@ function AuthoringGenerateContent(props: import("./contract/authoring.js").Autho
               setSelectedSourceId(sourceId);
               const store = selectionMemory;
               store.set("last-explicit", { sourceId, connectionId });
-              if (sourceId) rememberAssistantPreference(conversation.getDataScopeId?.() ?? "page", { sourceId, connectionId });
+              const scopeId = conversation.getDataScopeId?.() ?? "page";
+              const previous = readAssistantPreference(scopeId);
+              if (sourceId) rememberAssistantPreference(scopeId, {
+                sourceId,
+                connectionId,
+                ...(previous?.connectionId === connectionId
+                  ? {
+                      ...(previous.model !== undefined ? { model: previous.model } : {}),
+                      ...(previous.reasoningEffort !== undefined ? { reasoningEffort: previous.reasoningEffort } : {})
+                    }
+                  : {})
+              });
             }
             else setConnectionsError(result.error);
           }).catch(() => setConnectionsError("切换连接失败，请重试。"))
             .finally(() => setSwitching(false));
         },
         loading: connectionsLoading,
-        error: selectedSourceId && !activeSource ? "先前使用的来源已停用。请选择其他来源，或在插件管理中重新启用。" : connectionsError,
+        error: sourceDisabled ? "先前使用的来源已停用。请选择其他来源，或在插件管理中重新启用。" : connectionsError,
         blockedReason: switching ? "正在切换连接…" : null,
         onRefresh: () => { conversation.invalidateDirectory?.(); setRefreshRevision(value => value + 1); }
       };

@@ -9,7 +9,6 @@
  * 纯函数、无 DOM 依赖、不做任何本地 store 写入（规范状态只由服务端 Yjs update 回流）。
  */
 import {
-  bevyNodeSize,
   createHighEntropyId,
   createWoohaa3CanvasNodeId,
   isValidWoohaa3CanvasConnection,
@@ -52,22 +51,19 @@ export type NodeDataPatchIntent = {
 /** 创建节点（可选连线）→ 服务端命令。 */
 export function planInsertNode(intent: InsertNodeIntent): CanvasCommand[] {
   const id = intent.nodeId ?? createWoohaa3CanvasNodeId(intent.nodeType);
-  // 普通模型使用内嵌预览卡片尺寸；复合资产矩形即内容框，用默认尺寸。
-  const compactModelSize = intent.nodeType === "model3d"
-    ? bevyNodeSize("image")
-    : intent.nodeType === "composite-asset"
-      ? { width: 260, height: 195 }
-      : null;
-  const width = intent.width ?? compactModelSize?.width;
-  const height = intent.height ?? compactModelSize?.height;
+  // 复合资产矩形即内容框，用默认尺寸；模型没有卡片（change: 2026-11-10-remove-legacy-model-card-nodes）。
+  const defaultSize = intent.nodeType === "composite-asset" ? { width: 260, height: 195 } : null;
+  const width = intent.width ?? defaultSize?.width;
+  const height = intent.height ?? defaultSize?.height;
+  const position = intent.position ? { ...intent.position } : { x: 0, y: 0 };
   return [{
     type: "node.add",
     node: {
       id,
       type: intent.nodeType,
-      // 无卡片对象（导演区/世界实例）的落点不影响 3D 呈现，但 `node.add` 结构与
-      // `edit.apply` 的 node-add 都要求有限位置：缺省用 (0,0)，不能让缺键变成 `{}`。
-      position: intent.position ? { ...intent.position } : { x: 0, y: 0 },
+      // 模型的位置只由 `sharedWorldInstance` 表达；其余节点保留卡片坐标
+      // （导演区/世界实例的落点不影响 3D 呈现，但结构与边界校验都要求有限位置）。
+      ...(intent.nodeType === "model3d" ? {} : { position }),
       ...(width !== undefined ? { width } : {}),
       ...(height !== undefined ? { height } : {})
     },

@@ -41,7 +41,6 @@ pub(crate) fn node<'a>(scene: &Scene, original: &'a GraphNode) -> Cow<'a, GraphN
     node.resizable = false;
     node.history_strip = None;
     node.model = None;
-    node.model_preview = None;
     node.texture = false;
     node.busy = false;
     node.media_loading = false;
@@ -133,7 +132,7 @@ mod tests {
             overlay
                 .nodes
                 .iter()
-                .all(|n| n.model.is_none() && n.model_preview.is_none() && !n.texture)
+                .all(|n| n.model.is_none() && !n.texture)
         );
     }
     #[test]

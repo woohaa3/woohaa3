@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PptaskProvider } from "@sdppp/pptask";
 import { createCephalonProviderPlugin, createCephalonRegistration, CEPHALON_CONFIG } from "../src/backend.js";
+import { createCephalonProvider } from "../src/provider.js";
 import { cephalonModelDefinitions, parseModelList } from "../src/discovery.js";
 import MODELS from "./fixtures/models.json";
 
@@ -153,6 +154,51 @@ describe("端脑云插件装配", () => {
     expect(serialized).toContain("cephalon-model-discovery-failed");
   });
 
+  it("文本模型按 chat-completions 接入助手，端点固定", () => {
+    const { registration } = createCephalonRegistration({ apiKey: SECRET, models: parseModelList(MODELS) });
+    expect(registration.serviceConnectionFactory).toMatchObject({
+      protocols: ["chat-completions"],
+      assistantProtocol: "chat-completions",
+      endpoints: { "chat-completions": "https://cephalon.cloud/user-center/v1/model" }
+    });
+  });
+
+  it("助手能力只取平台声明的视觉证据", () => {
+    const { registration } = createCephalonRegistration({ apiKey: SECRET, models: parseModelList(MODELS) });
+    expect(registration.languageCapabilities?.("deepseek-v4-flash")).toEqual({ imageInput: true });
+    expect(registration.languageCapabilities?.("deepseek-v4.1-flash")).toEqual({ imageInput: false });
+    expect(registration.languageCapabilities?.("NanoBanana2")).toBeUndefined();
+    expect(registration.languageCapabilities?.("missing-model")).toBeUndefined();
+  });
+
+  it("助手来源使用来源自己的 Key，仍只发往固定平台地址", async () => {
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") });
+      return Response.json({ choices: [{ message: { content: "好的" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    });
+    const validate = vi.fn(async () => undefined);
+    const input = { prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } as never;
+    const { registration } = createCephalonRegistration({
+      apiKey: SECRET,
+      models: parseModelList(MODELS),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+    const source = registration.serviceConnectionFactory!.create({
+      secret: "sk-personal-source",
+      endpoint: "https://cephalon.cloud/user-center/v1/model",
+      validate
+    }) as PptaskProvider;
+    const result = await source.languageModel("deepseek-v4.1-flash").doGenerate?.(input);
+    expect(result && "content" in result ? result.content : []).not.toHaveLength(0);
+    expect(validate).toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      url: "https://cephalon.cloud/user-center/v1/model/chat/completions",
+      authorization: "Bearer sk-personal-source"
+    });
+  });
+
   it("注册项把描述交给 describeModel，并按需下载图片", async () => {
     const imageBytes = new Uint8Array([1, 2, 3]);
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
@@ -173,5 +219,48 @@ describe("端脑云插件装配", () => {
     const provider = registration.provider as PptaskProvider;
     const result = await provider.imageModel("NanoBanana2").doGenerate?.({ prompt: "一只猫" } as never);
     expect(result && "images" in result ? result.images[0] : undefined).toEqual(imageBytes);
+  });
+});
+
+describe("端脑云作为助手来源", () => {
+  it("声明可信 assistant 协议，宿主才会生成 sdk-agent 绑定", () => {
+    const { registration } = createCephalonRegistration({ apiKey: SECRET, models: parseModelList(MODELS) });
+    const factory = registration.serviceConnectionFactory;
+    // 没有这段声明时，这条连接只能给生成侧用，导演区等助手面板看不到它。
+    expect(factory).toBeDefined();
+    expect(factory?.protocols).toEqual(["chat-completions"]);
+    expect(factory?.assistantProtocol).toBe("chat-completions");
+    // 端点声明到模型前缀：OpenAI 兼容客户端自行追加 `/chat/completions`。
+    expect(factory?.endpoints?.["chat-completions"]).toBe("https://cephalon.cloud/user-center/v1/model");
+  });
+
+  it("语言模型的图片能力取平台声明，不按名字推测", () => {
+    const models = parseModelList(MODELS);
+    const { registration } = createCephalonRegistration({ apiKey: SECRET, models });
+    const language = models.filter(model => model.modelType === "language");
+    const vision = language.find(model => model.supportsVision === true);
+    const textOnly = language.find(model => model.supportsVision !== true);
+    if (vision) expect(registration.languageCapabilities?.(vision.id)?.imageInput).toBe(true);
+    if (textOnly) expect(registration.languageCapabilities?.(textOnly.id)?.imageInput).toBe(false);
+    expect(registration.languageCapabilities?.("不存在的模型")).toBeUndefined();
+  });
+
+  it("文本与图片都只发往平台固定 origin，来源不能改写主机", async () => {
+    const models = parseModelList(MODELS);
+    const language = models.find(model => model.modelType === "language");
+    const image = models.find(model => model.modelType === "image");
+    if (!language || !image) return;
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return Response.json({ choices: [{ message: { content: "ok" } }], data: [{ url: "https://cdn.example/out.png" }] });
+    }) as unknown as typeof globalThis.fetch;
+    const handle = createCephalonProvider({ apiKey: SECRET, models, fetch: fetchImpl });
+    await handle.languageModel(language.id).doGenerate?.({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } as never);
+    expect(urls[0]).toBe("https://cephalon.cloud/user-center/v1/model/chat/completions");
+    urls.length = 0;
+    await handle.imageModel(image.id).doGenerate?.({ prompt: "hi" } as never);
+    // 图片与文本同域：凭据只发往声明的平台主机。
+    expect(urls[0]?.startsWith("https://cephalon.cloud/")).toBe(true);
   });
 });

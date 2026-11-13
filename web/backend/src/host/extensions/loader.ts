@@ -80,6 +80,7 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
     ...(plugin.website ? { website: plugin.website } : {}),
     ...(plugin.setupOrder !== undefined ? { setupOrder: plugin.setupOrder } : {}),
     ...(plugin.modelRefresh ? { modelRefresh: plugin.modelRefresh } : {}),
+    ...(plugin.testConnection ? { testConnection: plugin.testConnection.bind(plugin) } : {}),
     configPrefix: prefix,
     siteManaged: gated
   });
@@ -104,6 +105,20 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
     if (error !== undefined) {
       const code = codeOf(error);
       log({ event, extension: plugin.name, message: message(error), ...(code ? { code } : {}) });
+    }
+  };
+  /**
+   * 非站点插件的启动结果同时写给设置面：这类插件没有 `actualState`，`apply` 抛错时
+   * 过去只有一行日志，设置页照旧显示「还没有模型」。站点插件的状态由控制面投影，不重复记录。
+   */
+  const recordActivation = (error: unknown) => {
+    if (gated) return;
+    const failure = error === undefined ? null : message(error);
+    try {
+      config.setPluginActivationFailure(plugin.name, failure);
+    } catch (recordError) {
+      // 设置服务缺失/异常不能反过来影响装载本身。
+      log({ event: "extension-activation-record-failed", extension: plugin.name, message: message(recordError) });
     }
   };
   const values = () => config.section(prefix);
@@ -156,6 +171,7 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
       ...(surface?.webServer ? { webServer: surface.webServer } : {}),
       ...(surface?.capabilities ? { capabilities: surface.capabilities } : {}),
       ...(surface?.mediaFormats ? { mediaFormats: surface.mediaFormats } : {}),
+      ...(surface?.agentRoles ? { agentRoles: surface.agentRoles } : {}),
       ...(surface?.services ? { services: surface.services } : {}),
       ...(surface?.diagnostics ? { diagnostics: surface.diagnostics } : {}),
       deployment: { basePath: applicationHost()?.basePath ?? "" }
@@ -225,31 +241,44 @@ function loadExtension(ctx: HostContext, services: LoaderServices, plugin: AnyEx
         : {})
     });
   } else {
-    started = serial(start).then((error) => report("extension-start-failed", error));
+    started = serial(start).then((error) => {
+      report("extension-start-failed", error);
+      // 成功也写一次（清除上一次失败）：重启后状态要能自己回到正常。
+      if (error === undefined) recordActivation(undefined);
+      else recordActivation(error);
+    });
   }
 
   const keys = Object.keys(fields).map((key) => `${prefix}.${key}`);
   const stopConfig = config.subscribe(keys, () =>
     serial(async () => {
       if (!fiber) {
-        if (!gated) report("extension-start-failed", await start());
+        if (!gated) {
+          const error = await start();
+          report("extension-start-failed", error);
+          recordActivation(error);
+        }
         return;
       }
       try {
         fiber.update(values());
       } catch (error) {
         report("extension-config-invalid", error);
+        recordActivation(error);
         return;
       }
       const current = fiber;
       try {
         await withDeadline(current.await(), limits.activation(), "activation-timeout");
+        // 用新配置重启成功：上一次失败（例如宿主要求的接口还没就绪）不再成立。
+        recordActivation(undefined);
       } catch (error) {
         report("extension-restart-failed", error);
         if (isDeadlineError(error) && fiber === current) {
           // 重启挂起：释放这个 fiber，不留下半启动实例；不自动重试。
           await stop();
         }
+        recordActivation(error);
       }
     })
   );

@@ -170,7 +170,7 @@ const HISTORY_ENTRY_KEYS = [
   "completionKey", "canvasId", "cameraId", "runId", "completionId", "settingsVersion", "createdAt", "snapshot"
 ] as const;
 
-const INTENTS: readonly SceneAreaPlanIntent[] = ["move", "resize", "delete-area", "delete-area-with-contents"];
+const INTENTS: readonly SceneAreaPlanIntent[] = ["move", "rotate", "resize", "delete-area", "delete-area-with-contents"];
 const CONTAINMENTS = ["writable", "read-only", "outside", "unknown"] as const;
 const RUN_STATES: readonly WorldToolContextRun["state"][] = ["active", "cancelled", "stopped"];
 const OCCUPANCY_STATES: readonly WorldScopeOccupancySnapshot["state"][] = ["idle", "occupied", "unknown"];

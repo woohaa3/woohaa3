@@ -41,6 +41,8 @@ const ALLOWED_RUNTIME_PREFIXES = [
   "cordis/ui/assistant-execution/",
   // Pure same-origin URL constructors shared by remote adapters and upload planning.
   "cordis/services/paths.js",
+  // Zero-import protocol URL constructor used by the public native document editor bridge.
+  "desktop/native-protocol.js",
   // change: 2026-10-15-support-configurable-app-base-path，design D6：通用公开 URL 解析能力
   // （逻辑路径 ↔ 当前挂载公开路径）作为叶子模块经 extension-api 转出给 extension 前端。
   "cordis/services/app-base-path.js",

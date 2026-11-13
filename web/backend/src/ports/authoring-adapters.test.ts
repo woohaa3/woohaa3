@@ -120,7 +120,7 @@ describe("进程内 authoring 适配器", () => {
       token: "g1",
       canvasIds: ["c1"],
       nodeIds: ["n1"],
-      tools: ["submit_model_script", "set_model_camera"],
+      tools: ["submit_model_script", "set_world_camera"],
       workId: "w1"
     });
 
@@ -133,7 +133,7 @@ describe("进程内 authoring 适配器", () => {
     expect(registry.authorize({ token: "g1", tool: "submit_model_script", canvasId: "c1", nodeId: "n2" })).toEqual({ ok: false, reason: "node-not-allowed" });
     // 合法调用没有可耗尽额度（超过原 40 次仍成功）。
     for (let index = 0; index < 120; index += 1) {
-      expect(registry.authorize({ token: "g1", tool: "set_model_camera", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: true });
+      expect(registry.authorize({ token: "g1", tool: "set_world_camera", canvasId: "c1", nodeId: "n1" })).toEqual({ ok: true });
     }
 
     // 未知 token。
@@ -145,8 +145,8 @@ describe("进程内 authoring 适配器", () => {
   });
   it("captured camera grants reject other cameras and unrelated writes", () => {
     const registry = createToolGrantRegistry();
-    registry.issue({ token: "camera", canvasIds: ["c"], nodeIds: ["n"], tools: ["update_model_camera"], cameraId: "scene-camera", workId: "w-camera" });
-    const call = { token: "camera", tool: "update_model_camera", canvasId: "c", nodeId: "n", cameraId: "scene-camera" };
+    registry.issue({ token: "camera", canvasIds: ["c"], nodeIds: ["n"], tools: ["set_world_camera"], cameraId: "scene-camera", workId: "w-camera" });
+    const call = { token: "camera", tool: "set_world_camera", canvasId: "c", nodeId: "n", cameraId: "scene-camera" };
     expect(registry.authorize({ ...call, cameraId: "other" })).toEqual({ ok: false, reason: "camera-not-allowed" });
     expect(registry.authorize({ ...call, cameraId: undefined })).toEqual({ ok: false, reason: "camera-not-allowed" });
     expect(registry.authorize({ ...call, tool: "submit_model_script" }).ok).toBe(false);

@@ -42,7 +42,8 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 
 | 字段 | 作用 |
 | --- | --- |
-| `backend` | 站点插件宿主的后端定义工厂（宿主核心站点插件走静态可信清单时才需要）。声明的导出必须真的存在，否则 `pnpm extensions:check` 失败 |
+| `backend` | Application 后端定义工厂；与 `site` 配合由控制面激活。声明的导出必须存在，否则预检失败 |
+| `executors` | 独立 daemon 执行模块 `{id,module,export}`；须有 `backend` 与 `site`，不可混用 `hostPlugin` |
 | `hostPlugin` | 插件树扩展层的 Cordis 插件：`provider`（向 `ctx.generation` 注册）或 `storage`（向 `ctx.storage` 注册）；声明模块、工厂、顺序与是否可选 |
 | `canvasContent` | 画布内容端口：工厂返回 `CanvasContentRuntime`（可选分组 `frames` 预览/历史帧、`conversion` 转换服务构造、`mcp` 扩展 MCP 能力面），宿主装配 canvas-service 时注入；canvas-service 不 import 扩展实现。与 `hostPlugin` 不同，它不参与插件树 |
 | `metadata` | 设置面元数据导出（`/api/settings` 的插件卡片用它） |
@@ -59,8 +60,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 只有 `hostPlugin`、没有 `site` 的 Provider / 存储后端不进控制面，它们的 `defaultEnabled` 与
 配置文件里的 `enabled` 都不生效。
 
-Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
-`ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
+Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节。刷新路由**不要自己取 `ctx.gateway`**：扩展可见的服务面里没有 `gateway`（见[本机宿主插件树](../../../docs/code-map/backend-host.md)），用 `@woohaa3/provider-sdk` 的 `registerModelRefreshRoute(ctx, { path, refresh })` 注册，鉴权（`MODELS_MANAGE_ACTION`）与响应形状都由它统一处理。走 `ctx.webServer` 的扩展只能拿到 `register` / `registerHttp` / `registerRawHttp` 三个登记口，路由键为 `<extensionId>/<相对 route>`。插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
 **上游没有模型列表接口时不要声明 `modelRefresh`**：目录改成源码里的手写表，并在表头注释与
 `assets/README.md` 里写清每个数字来自哪一页官方文档。[bailian-provider](bailian-provider) 是这种形态：
@@ -74,7 +74,10 @@ DashScope 的 `/api/v1/models` 与 OpenAI 兼容 `/compatible-mode/v1/models` �
 （避免凭据被改写到任意主机）；模型目录完全来自 `GET /user-center/v1/models`，代码里没有内置 id 清单，模态只看平台的
 `model_type`（`language` / `picture` / `video`，其余跳过），发现失败时保留上一次成功目录。视频是平台私有的异步任务协议
 （请求头 `Model-Name` + PascalCase 的 `Prompt` / `FileInfos` / `OutputConfig`），所以它在 `routes.ts` 里自己翻译，
-不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。
+不走通用 OpenAI 形状；平台没有取消端点，模型定义声明 `cancel: "unsupported"`。文本模型另外以
+`serviceConnectionFactory.assistantProtocol: "chat-completions"` 接入助手：固定端点是
+`https://cephalon.cloud/user-center/v1/model`，宿主据此把站点来源投影成 `sdk-agent` 的共享助手连接；
+该 `create` 只换来源 Key，不读取来源端点，凭据不会发往别的主机。
 
 [bailian-provider](bailian-provider)（阿里云百炼 / DashScope）是**单模态 + 手写目录 + 同步接口**的变体：
 `modelTypes: ["image"]`，文生图与参考图编辑共用一个同步接口，参考图直接放进
@@ -85,6 +88,62 @@ DashScope 的 `/api/v1/models` 与 OpenAI 兼容 `/compatible-mode/v1/models` �
 `modelTypes: ["language"]`，地址固定 `https://api.deepseek.com`，目录来自 `GET /models`
 （官方自带输出上限、输入模态与思考档位），执行只有 `/v1/chat/completions`。思考模式用
 `thinking.type` 开合、档位用 `reasoning_effort`，并只转发目录声明过的档位。
+
+## 独立 executor 扩展
+
+模型提供商扩展负责两部分：宿主 backend 提供登录/连接配置、模型目录和 `AgentConversationAdapter`；executor 模块提供实际推理。SDK、OAuth 与 App Server 都使用这个拆分，角色仍由独立 AgentRole 贡献，executor 只消费准备好的回合。
+
+在 `extension.json` 中保留完整 `site` 元数据，并声明：
+
+```json
+{
+  "backend": { "module": "./backend", "factory": "createBackend" },
+  "executors": [
+    { "id": "vendor-agent", "module": "./executor", "export": "createExecutor" }
+  ]
+}
+```
+
+`module` 必须是包内相对子路径，并通过 `package.json.exports` 指向对应产物。同包各模块的具名导出不能重名（单文件产物会拒绝冲突）。独立构建应生成 executor 入口；`build:backend` / `pack:extension` 会把声明的工厂一起导出到 `backend-dist/entry.mjs`，`.wxt` 安装预检会核对导出。工厂应无启动副作用，资源在回合内创建并在 `finally` 释放：
+
+```ts
+import type { Executor } from "woohaa3-executor/protocol";
+
+export function createExecutor(): Executor {
+  return {
+    id: "vendor-agent",
+    kind: "agent",
+    async run(turn, context) {
+      if (!turn.prepared || !context.host) throw new Error("Missing prepared turn or host lease");
+      const credential = await context.host.call<string>("vendor.access-token");
+      // 用该凭据调用提供商 SDK / App Server，传入 context.signal；
+      // context.emit(type, payload) 只发布可持久化的公开进度，禁止发送凭据。
+      return { status: "succeeded", result: { message: "completed" } };
+    }
+  };
+}
+```
+
+示例中的 SDK 调用需由扩展实现。宿主 backend 在 `activate(host)` 中取 `host.services.executor`；缺失时拒绝执行。可信 adapter 的 `run(input)` 调用：
+
+```ts
+return executor.run({
+  executor: "vendor-agent", owner: input.owner, requestId: input.requestId,
+  prepared: input.prepared, payload: { model: input.intent.model },
+  signal: input.signal,
+  hostCall: async method => {
+    if (method !== "vendor.access-token") throw new Error("Unknown host method");
+    return readCredentialForTrustedOwner(input.owner);
+  },
+  onEvent: event => publishPublicProgress(event)
+});
+```
+
+这里的凭据读取和进度发布由扩展自己的宿主适配层实现。owner、连接版本、授权目标与工具集合必须来自可信宿主回合；`hostCall` 对每个方法单独校验，不接受 daemon 参数替换身份或扩大权限。凭据只经该临时端口读取，不能塞进 `payload`、事件或结果。`query/cancel` 使用相同 executor、owner、requestId；取消会撤销端口权限并等执行清理完成。
+
+激活时自动注册模块，调用前确认 daemon 已装配；daemon 重启后的新请求会重新注册，旧回合保持中断记录。释放 activation 时拒绝新请求、取消和排空在途执行、撤销回合端口、注销模块；升级按独立 activation 身份与制品摘要加载。站点控制面若因已有领域工作而处于 draining，会先保留该 activation 供收尾。没有 daemon 或模块加载失败直接报错，没有宿主执行回退。
+
+凭据存储、工具授权、Canvas 提交和会话账本留在宿主；推理、流、取消和执行 journal 在 daemon。模块运行可信 Node 代码，独立进程不提供代码沙箱。现有实现见 `sdk-agent/src/backend/{execution-client,executor}.ts`、`oauth-agent/src/backend/{execution-client,executor}.ts` 和 `local-agent/src/backend/executor.ts`。
 
 ## 前端入口与 metadata
 
@@ -238,15 +297,13 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 | 受管扩展可以 | 受管扩展不可以（预检拒绝） |
 | --- | --- |
 | `server-active` / `browser-local` 前端入口：安装后已打开页面**不刷新**即可装配 | `always` / `required` activation |
-| 后端 `hostPlugin.kind = provider`：在**独立子进程**（Extension Host）里运行；首次安装、升级、回滚都不重启宿主（升级为蓝绿切换） | `bootstrap` 槽位、`canvasContent`、市场来源（`marketplace-source`）——只允许内置根 |
-| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）与 `permissions`（**强制**：出网只到 `network` 白名单，存储只到 `storageNamespaces`，公开路由要 `publicRoutes`） | `hostPlugin.kind = storage`（存储后端必须进程内）、包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
-| 用 `ctx.log`、自身配置段、`ctx.generation`、`ctx.gateway.route`（限 `/api/extensions/<id>/` 与刷新路由）、health | `migrate`（本期不支持数据迁移）、`workspace:` 依赖；documents / canvas / MCP / marketplace 等其它 ctx 面（访问即 `permission-denied`） |
+| 后端 `hostPlugin` 或带 `site` 的 `backend`：在宿主内加载；独立形态可热装配，executor 在 daemon 加载 | `bootstrap` 槽位、`canvasContent`、`content` 声明、市场来源（`marketplace-source`）、`hostPlugin.features` 含 `storage`（存储后端必须进程内）——只允许内置根 |
+| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）；公开路径用 `publicRoutes` 声明 | 包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
+| 使用所装配的公共宿主端口、配置与路由；权限由宿主端口执行 | `migrate`（本期不支持数据迁移）、未内联的 `workspace:` 运行时依赖 |
 
 升级保留上一版本：新版本有观察期，期间激活失败或健康持续失败会**自动回滚**；也可在卡片上手动回滚。卸载先经站点控制面停用并等在途工作收尾，再删指针；勾选「同时清除数据」会删除该扩展的 documents。
 
-**进程隔离**（change: 2026-10-21-isolate-extension-host-process，细节见 [extensions.md 的「Extension Host 子进程」](../../docs/code-map/extensions.md#extension-host-子进程)）：每个受管后端扩展一个子进程，堆上限缺省 256 MiB，只拿到最小环境变量（不含宿主凭据），配置按段经 RPC 下发。子进程崩溃只撤销它自己的 Provider 与路由（路由回 503，在途调用 `extension-crashed`），然后退避重启；5 分钟内崩溃 3 次进入 `quarantined`，需升级版本或在卡片上「解除隔离」。本机 `extensions.host.isolation = false` 可关闭隔离退回进程内 + 受控重启，只用于降级排障。
-
-**剩余风险**：子进程隔离**不是 OS 级沙箱**——它与宿主同一操作系统用户，文件系统访问不受限；出网守卫在 JS 层，原生模块与 `process.binding` 可绕过（因此预检拒绝 `.node`）。只安装来自可信签名者的包。另外后端单文件内联了一份 contracts，且跨进程传递的对象都是序列化副本，**不要**用 `instanceof` 判断宿主类，改用错误码。
+受管 backend 和 hostPlugin 均在宿主进程动态 import；旧 Extension Host 子进程隔离已取消，`permissions` 声明也已移除并会被校验拒绝。executor 模块另在 daemon 加载，两种模块都拥有当前操作系统用户的 Node 权限；只装配可信代码。后端单文件内联 contracts，跨 daemon 对象经过序列化，错误匹配使用错误码。
 
 ### 经 woohaa-server 市场分发
 
@@ -256,10 +313,74 @@ change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extensio
 2. **提交与审核**：上传 `.wxt` 后提交（需要 `marketplace.publish`），版本进入「待审核」；管理端「扩展市场」页由持有 `marketplace.review` 的管理员通过、拒绝（必填理由）或撤回。拒绝与撤回都是终态，同一版本号不能复用，重新发布要升版本。
 3. **客户端信任**：官方市场的发布公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码），因此官方包不需要再手工配置；本机 `extensions.marketplace.trustedKeys` 只能**追加**其它发布者，不能移除内置官方 key。服务端 `GetMarketplaceInfo` 下发的其它公钥仍然只展示，管理员确认后才会写入。
 4. **从市场安装**：设置「插件配置 → 从市场安装」，或 `POST /api/extensions/install` 的 `{ sourceId: "woohaa-server", extensionId, range }`。安装仍走同一条校验链（摘要、签名、预检），服务端返回的审核状态与 keyId 不参与信任判断。
-5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`，否则 `package.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级。计划经市场发布的内置插件应让分发版本与 `site.version` / provider metadata 的 `version` 保持一致，否则设置面可能同时显示站点版本与内置包版本。
+5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级，`pnpm ext:release` 会在打包前直接拒绝这类扩展。分发版本与 `site.version` / provider metadata 的 `version` 必须一致，否则预检与 `build:browser` 都会失败（见下文「扩展发版」）。
 6. **发布者绑定**：内置扩展只接受官方发布者 key 的覆盖；已安装受管扩展绑定首次安装的签名 key（TOFU），后续更新 key 变了会被 `MARKETPLACE_PUBLISHER_CHANGED` 拒绝，需要先卸载再安装。未签名本地包不能升级已签名扩展。
 
 撤回立即阻止新的解析与下载（含未过期的下载地址），但**不会**卸载已安装的副本。
+
+### 扩展发版
+
+change: 2026-11-13-add-extension-version-governance。改完扩展只提交代码、不推进版本，会让市场升级判定失真：
+受管版本必须**严格高于**内置分发版本才允许覆盖，因此「内置版本从不变化」等于用户装过一次市场版之后，
+再发多少客户端版本都拿不回这个扩展。发版因此变成一条固定流程：
+
+**1. 版本只有一个真源**：`extension.json` 的 `version`。其余三处是它的副本，必须相等：
+
+| 位置 | 消费者 |
+| --- | --- |
+| `extension.json.version` | 市场升级判定、受管覆盖比较、`.wxt` 包名（**真源**） |
+| `extension.json.site.version` | 站点控制面与站点目录展示 |
+| `package.json.version` | npm 口径；受管预检与服务端 `pkgformat` 双向比对 |
+| `src/frontend/metadata.ts` / `extension.json` 声明的 `metadata.export`（如 `src/shared.ts`） | 浏览器与后端插件卡片的展示版本 |
+
+`pnpm extensions:check` 对不一致报 `EXTENSION_VERSION_MISMATCH`；`build:browser` 在求值 metadata
+后补最后一道（覆盖 `version: SOME_CONSTANT.version` 这类静态读不到的写法）。
+
+**历史分叉只向上对齐，绝不向下压平**：部分扩展的插件元数据版本被单独维护过（`runninghub-provider`
+是 2.2.0，`remote-server` 与若干 provider 是 1.0.0），而 `extension.json` 原先没有版本字段。
+两者分叉时**取最大值**统一——把分发版本抬上去，而不是把元数据压低。理由：压低会让设置面显示的
+版本突然倒退，用户看到「v2.2.0 → v0.1.0」；而抬上去之后展示不变，升级判定也拿到同一个数字。
+
+```bash
+pnpm ext:bump <extensionId> --align     # 把四处收口到最高值（不递增）
+```
+
+**2. 推进版本**：
+
+```bash
+pnpm ext:bump <extensionId|目录> --patch     # 或 --minor / --major / --version 1.2.0
+```
+
+一次改全四处并追加 `CHANGELOG.md`。命令**不推断**这次改动算不算破坏兼容——`patch` / `minor` / `major`
+由发布者决定。新版本必须严格高于当前值；目标不更高时命令失败且不写任何文件。四处尚未对齐时会
+拒绝执行并提示先跑 `--align`。
+
+**3. 门禁：改了就必须 bump**：
+
+```bash
+pnpm extensions:check                                  # 基线缺省 HEAD，直接检查工作树改动
+pnpm extensions:check --strict --bump-base origin/main # CI 口径（失败而非告警）
+pnpm extensions:check --no-bump-check                  # 确实不该检查时显式关闭
+```
+
+扩展目录在基线之后有改动而分发版本没变时报告 `EXTENSION_VERSION_NOT_BUMPED`；该告警缺省不阻断、
+`--strict` 时失败。**基线缺省是 `HEAD`**，因为默认命令才是 agent 与开发者真正会跑的那条——如果只有
+显式传 `--bump-base` 才检查，这个门禁在实践中等于不存在。
+
+判定用 git 而不是 mtime，因此可跨 checkout 复现；仓库不可用 git 时只告警跳过，不让非 git 环境无法预检。
+
+**4. 发布**：
+
+```bash
+pnpm ext:release <extensionId|目录> --notes "修了 X" [--approve]
+```
+
+先做两项判定，再转交父仓 `pnpm release:extension`（打包、签名、上传、提交、审核只有那一份实现）：
+
+- **不可被市场覆盖的形态直接拒绝**：站点 `backend` 工厂（运行期 `checkBuiltinUpgrade` 会拒绝）与
+  `bootstrap` 槽位（受管根禁止）只能随客户端发版。当前 `local-agent` / `oauth-agent` / `sdk-agent` /
+  `prompt-skills` / `standard-agent-roles` / `infinspire-migration` 属于这一类。
+- **有未发版改动时拒绝**，并提示先运行 `ext:bump`。
 
 ### 经 GitHub Release 分发
 

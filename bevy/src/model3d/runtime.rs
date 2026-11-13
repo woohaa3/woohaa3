@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
-use crate::protocol::{GraphNode, ModelPlacement, ModelSnapshot, Scene};
+use crate::protocol::{GraphNode, ModelSnapshot, Scene};
 
 use super::animation::TransformAnimationPlayback;
 use super::layout::model_root_transform;
@@ -64,14 +64,8 @@ pub(crate) struct ModelVisuals {
 pub(crate) struct HotPathCounters {
     pub(crate) focus_visibility_inserts: u64,
     pub(crate) focus_visibility_skips: u64,
-    pub(crate) preview_layer_inserts: u64,
-    pub(crate) preview_layer_skips: u64,
     pub(crate) resource_reference_rebuilds: u64,
     pub(crate) resource_reference_skips: u64,
-    pub(crate) preview_sprite_inserts: u64,
-    pub(crate) preview_sprite_skips: u64,
-    pub(crate) preview_pose_inserts: u64,
-    pub(crate) preview_pose_skips: u64,
 }
 
 /// 资源归属的廉价指纹：摘要所有会影响共享资源存活集合的身份。
@@ -146,10 +140,10 @@ pub(crate) struct ModelRoot {
     pub(super) texture_revision: u64,
     /// 该资源表条目的 `Arc`；保证本帧引用期间不被 LRU 淘汰。
     pub(super) resource: std::sync::Arc<ModelSnapshot>,
-    /// 实例的 placement；placement 变化只刷新根 transform，不重建。
-    pub(super) placement: ModelPlacement,
     /// 根 transform 布局（重建时记录，刷新时按最新 placement/viewport 重算）。
     pub(super) layout: ModelRootLayout,
+    /// 世界包围盒（渲染器坐标，Y-up）：诊断/E2E 定位无卡片模型用。
+    pub(super) aabb: Option<([f32; 3], [f32; 3])>,
     /// 该模型创建/复用的 mesh handle；重建或删除时释放。
     pub(super) mesh_handles: Vec<Handle<Mesh>>,
     pub(super) active_mesh_handles: Vec<Handle<Mesh>>,
@@ -197,10 +191,11 @@ pub(super) fn apply_root_transform(
     commands: &mut Commands,
     layout: &ModelRootLayout,
     node: &GraphNode,
-    model: &ModelSnapshot,
-    placement: &ModelPlacement,
 ) {
-    let transform = model_root_transform(node, model, placement);
+    // 世界根只读 `sharedWorldInstance`；没有实例的旧卡片节点不创建/移动模型根。
+    let Some(transform) = model_root_transform(node) else {
+        return;
+    };
     let ModelRootLayout::V2 { root } = layout;
     if let Ok(mut entity) = commands.get_entity(*root) {
         entity.insert(transform);
@@ -253,6 +248,10 @@ pub(crate) fn sync_models(
         {
             continue;
         }
+        // 旧卡片节点（无 sharedWorldInstance）只显示诊断卡片，不创建模型根。
+        if node.shared_world_instance.is_none() {
+            continue;
+        }
         let Some(reference) = &node.model else {
             continue;
         };
@@ -265,10 +264,6 @@ pub(crate) fn sync_models(
         // placement/viewport 变化只刷新根 transform。
         let content_signature = reference.signature.as_str();
         let allowed = models.batching_strategy.merges();
-        #[cfg(feature = "explicit-instancing")]
-        let allowed = allowed
-            && (models.batching_strategy != super::batch_strategy::BatchStrategy::Explicit
-                || node.model_preview.is_some());
         // Joint samples address stable hierarchical part entities. Keep this instance
         // unbatched for the whole timeline, including frames before its first key.
         let part_motion = reference.part_rotations.is_some();
@@ -304,13 +299,12 @@ pub(crate) fn sync_models(
             if let Some(previous) = models.roots.remove(&node.id) {
                 despawn_root(commands, materials, previous);
             }
-            let mut root = spawn_model(
+            let Some(mut root) = spawn_model(
                 commands,
                 meshes,
                 materials,
                 node,
                 resource,
-                &reference.placement,
                 super::quality::initial(
                     node,
                     scene,
@@ -321,12 +315,15 @@ pub(crate) fn sync_models(
                 &mut models.shared,
                 batched,
                 models.batching_strategy,
-            );
+            ) else {
+                continue;
+            };
             root.representation_generation = generation;
+            root.aabb = super::layout::model_world_aabb_for_node(resource, node)
+                .map(|aabb| (aabb.min, aabb.max));
             root.content_signature = content_signature.to_owned();
             root.texture_revision = texture_revision;
             root.resource = resource.clone();
-            root.placement = reference.placement.clone();
             // 重建后的新动画实体按当前门禁初始化：只有目标仍是唯一合法 hover 模型时从零播放，
             // 否则保持 inactive（change: play-model-animations-on-hover，任务 2.3）。
             let start_active = models.active_model.as_deref() == Some(node.id.as_str());
@@ -340,14 +337,7 @@ pub(crate) fn sync_models(
             let root = models.roots.get_mut(&node.id).expect("root exists");
             // 内容 signature 不变，但 placement 可能变化：刷新根 transform，保持资源引用。
             root.resource = resource.clone();
-            root.placement = reference.placement.clone();
-            apply_root_transform(
-                commands,
-                &root.layout,
-                node,
-                &root.resource,
-                &root.placement,
-            );
+            apply_root_transform(commands, &root.layout, node);
         }
     }
     if let Some(playback) = &scene.animation_playback {
@@ -433,59 +423,6 @@ impl ModelVisuals {
             && self.roots.get(id).is_some_and(|root| !root.animation_entities.is_empty())
     }
 
-    pub(crate) fn preview_meshes(&self, id: &str) -> Vec<bevy::asset::AssetId<Mesh>> {
-        self.roots
-            .get(id)
-            .map(|root| root.active_mesh_handles.iter().map(|h| h.id()).collect())
-            .unwrap_or_default()
-    }
-    pub(crate) fn preview_materials(
-        &self,
-        id: &str,
-    ) -> Vec<bevy::asset::AssetId<StandardMaterial>> {
-        self.roots
-            .get(id)
-            .map(|root| root.material_handles.iter().map(|h| h.id()).collect())
-            .unwrap_or_default()
-    }
-    /// 计算卡片的渲染层（纯函数，不写命令）；供调用方做重复写入去重。
-    pub(crate) fn preview_layers(
-        &self,
-        id: &str,
-        layer: usize,
-        focused: bool,
-    ) -> Option<bevy::camera::visibility::RenderLayers> {
-        self.roots.get(id)?;
-        let mut layers = bevy::camera::visibility::RenderLayers::from_layers(&[layer]);
-        if focused {
-            layers = layers.with(0);
-        }
-        #[cfg(feature = "canvas-core")]
-        if focused || self.high_demand.contains(id) {
-            layers = layers.with(super::capture::CAPTURE_LAYER);
-        }
-        Some(layers)
-    }
-
-    /// Isolate an existing root without cloning its mesh/material resources.
-    ///
-    /// `RenderLayers` 不随层级继承，因此必须逐实体写入；返回实际写入的实体数，
-    /// 供调用方做目标层未变时的跳过与工作量统计（design D7）。
-    pub(crate) fn preview_layer(
-        &self,
-        commands: &mut Commands,
-        id: &str,
-        layer: usize,
-        focused: bool,
-    ) -> Option<u64> {
-        let layers = self.preview_layers(id, layer, focused)?;
-        let root = self.roots.get(id)?;
-        for entity in &root.entities {
-            commands.entity(*entity).insert(layers.clone());
-        }
-        Some(root.entities.len() as u64)
-    }
-
     /// 只更新可见性；退出镜头过渡期间也可保留指定模型，不重建场景。
     ///
     /// 只写层级根：Bevy 的可见性传播会把 `Hidden`/`Inherited` 传给全部后代
@@ -500,12 +437,9 @@ impl ModelVisuals {
         let mut inserts = 0u64;
         let mut skips = 0u64;
         for (id, root) in &self.roots {
-            let visible = focus_node.is_none_or(|selected| selected == id)
-                || (crate::canvas_query::focus_context::contains(scene, id)
-                    && scene
-                        .nodes
-                        .iter()
-                        .any(|n| n.id == *id && n.model_preview.is_some()));
+            // 普通画布始终可见；聚焦/编辑/捕获集合内的模型额外保留。
+        let visible = focus_node.is_none_or(|selected| selected == id)
+            || crate::canvas_query::focus_context::contains(scene, id);
             let visibility = if visible {
                 Visibility::Inherited
             } else {

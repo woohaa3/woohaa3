@@ -51,7 +51,10 @@ export type AgentAdapterRegistry = {
   resolveByCapabilityId(capabilityId: string): ResolveAgentAdapterResult;
 };
 
-export function createAgentAdapterRegistry(host: AgentAdapterRegistryHost): AgentAdapterRegistry {
+export function createAgentAdapterRegistry(
+  host: AgentAdapterRegistryHost,
+  options: { wrapAdapter?: (handle: AgentAdapterHandle) => AgentConversationAdapter } = {}
+): AgentAdapterRegistry {
   const resolveById = (adapterId: string): ResolveAgentAdapterResult => {
     const capabilityId = agentConversationAdapterCapabilityId(adapterId);
     if (!host.hasCapability(capabilityId)) {
@@ -70,13 +73,16 @@ export function createAgentAdapterRegistry(host: AgentAdapterRegistryHost): Agen
       return { ok: false, code: "adapter-unavailable", message: "Agent adapter 能力声明失败" };
     }
     if (!isAgentAdapterCapabilities(capabilities)) return { ok: false, code: "adapter-unavailable", message: "Agent adapter 能力声明非法" };
+    const handle: AgentAdapterHandle = {
+      owner: { adapterId, extensionId: owner.extensionId, configVersion: owner.configVersion, mode: owner.mode },
+      adapter: value,
+      capabilities
+    };
     return {
       ok: true,
-      handle: {
-        owner: { adapterId, extensionId: owner.extensionId, configVersion: owner.configVersion, mode: owner.mode },
-        adapter: value,
-        capabilities
-      }
+      handle: options.wrapAdapter
+        ? { ...handle, adapter: options.wrapAdapter(handle) }
+        : handle
     };
   };
 

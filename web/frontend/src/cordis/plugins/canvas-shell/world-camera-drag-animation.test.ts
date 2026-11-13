@@ -73,6 +73,20 @@ it("adds the area origin to relative camera positions", () => {
   expect(sample!.camera.position).toEqual({ u: 11, v: 22, h: 1 });
 });
 
+it("converts a world drag back into a rotated area's animation coordinates", () => {
+  const { canvas } = canvasWithAnimatedCamera({ origin: { u: 10, v: 20 } });
+  (canvas.nodeData.area!.sceneArea as any).animationQuarterTurns = 1;
+  const times = new Map([["area", 0]]);
+  const sample = animatedCameraAt(canvas, "camera-1", times)!;
+  expect(sample.camera.position).toEqual({ u: 12, v: 19, h: 1 });
+  const start = beginWorldCameraDrag(canvas, "camera-node", { u: 0, v: 0 }, "move", sample.camera)!;
+  const plan = planWorldCameraMoveWithAnimationParts(canvas, start, { u: 2, v: 3 }, times)!;
+  const command = plan.forwardAreas[0]!;
+  if (command.type !== "nodeData.patch") throw new Error("expected animation patch");
+  canvas.nodeData.area = { ...canvas.nodeData.area, ...command.value };
+  expect(animatedCameraAt(canvas, "camera-1", times)!.camera.position).toEqual({ u: 14, v: 22, h: 1 });
+});
+
 it("shifts camera position tracks with the drag and restores them on undo", () => {
   const { canvas } = canvasWithAnimatedCamera();
   const times = new Map([["area", 0]]);

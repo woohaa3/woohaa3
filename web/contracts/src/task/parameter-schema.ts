@@ -1,3 +1,5 @@
+import { validateAgainstSchema } from "./schema-validation.js";
+
 /**
  * 生成参数语义。
  *
@@ -309,3 +311,106 @@ function normalizeAdaptive(
     label: adaptive.label ?? ADAPTIVE_PARAMETER_LABEL,
   };
 }
+
+/** Optional presentation hints. Invalid members are ignored independently; JSON Schema stays authoritative. */
+export const PPTASK_PARAMETER_PRESENTATION = "x-pptask-presentation";
+export type ParameterPresentation = {
+  section?: "common" | "advanced";
+  order?: number;
+  summaryOrder?: number;
+  semanticId?: string;
+  control?: "segmented" | "search-select" | "slider" | "number" | "switch" | "textarea";
+};
+export function parameterPresentation(schema: Record<string, unknown>): ParameterPresentation {
+  const raw = schema[PPTASK_PARAMETER_PRESENTATION];
+  const value = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const result: ParameterPresentation = {};
+  if (value.section === "common" || value.section === "advanced") result.section = value.section;
+  for (const key of ["order", "summaryOrder"] as const) {
+    if (typeof value[key] === "number" && Number.isFinite(value[key])) result[key] = value[key];
+  }
+  if (typeof value.semanticId === "string" && value.semanticId.trim()) result.semanticId = value.semanticId;
+  const control = value.control;
+  const numeric = schema.type === "number" || schema.type === "integer";
+  if ((control === "slider" || control === "number") && numeric ||
+      control === "switch" && schema.type === "boolean" ||
+      control === "textarea" && schema.type === "string" && !Array.isArray(schema.enum) ||
+      (control === "segmented" || control === "search-select") && Array.isArray(schema.enum)) {
+    result.control = control as ParameterPresentation["control"];
+  }
+  const semantic = schema[PPTASK_PARAMETER_CONTROL];
+  if (isPptaskParameterControl(semantic)) {
+    result.section ??= "common";
+    result.summaryOrder ??= PARAMETER_CONTROLS.indexOf(semantic);
+    result.semanticId ??= `pptask.${semantic}`;
+  }
+  return result;
+}
+
+/** Stable within a section, with original schema order breaking ties. */
+export function orderParameterFields<T extends { presentation?: ParameterPresentation }>(fields: readonly T[]): T[] {
+  return fields.map((field, index) => ({ field, index })).sort((a, b) =>
+    (a.field.presentation?.order ?? 0) - (b.field.presentation?.order ?? 0) || a.index - b.index
+  ).map(({ field }) => field);
+}
+
+export type PresentableParameter = {
+  key: string; label: string; type?: string; unit?: string; defaultValue?: unknown;
+  /** Original property schema, used for constraints beyond the basic control. */
+  schema?: Record<string, unknown>;
+  presentation?: ParameterPresentation;
+  options?: readonly { value: string; label: string }[];
+  minimum?: number; maximum?: number; step?: number; integer?: boolean;
+  hiddenWhen?: readonly { field: string; equals: unknown }[];
+  requiresByValue?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+};
+export function changedParameterKeys(fields: readonly PresentableParameter[], values: Record<string, unknown>): string[] {
+  const forced = new Set(fields.flatMap(f => Object.keys(f.requiresByValue?.[String(values[f.key] ?? "")] ?? {})));
+  return fields.filter(f => !forced.has(f.key) && !f.hiddenWhen?.some(r => values[r.field] === r.equals) &&
+    values[f.key] !== undefined && (values[f.key] !== "" || f.defaultValue !== undefined && (f.type === "text" || f.type === "textarea")) && values[f.key] !== f.defaultValue).map(f => f.key);
+}
+export function summarizeParameters(fields: readonly PresentableParameter[], values: Record<string, unknown>): string {
+  const selected = fields.filter(f => f.presentation?.summaryOrder !== undefined &&
+    !f.hiddenWhen?.some(r => values[r.field] === r.equals) &&
+    (values[f.key] ?? f.defaultValue) !== undefined && (values[f.key] ?? f.defaultValue) !== "")
+    .sort((a, b) => a.presentation!.summaryOrder! - b.presentation!.summaryOrder!).slice(0, 3);
+  const labels = selected.map(f => {
+    const value = values[f.key] ?? f.defaultValue;
+    const label = f.options?.find(o => o.value === String(value))?.label;
+    return label ? `${label}${f.unit ?? ""}` : typeof value === "boolean" ? `${f.label}：${value ? "开" : "关"}` :
+      f.unit ? `${value}${f.unit}` : `${f.label}：${String(value)}`;
+  });
+  const rest = changedParameterKeys(fields, values).filter(key => !selected.some(f => f.key === key)).length;
+  if (rest) labels.push(`+${rest}`);
+  return labels.join(" · ");
+}
+export function validPresentedParameter(field: PresentableParameter, value: unknown): boolean {
+  if (value === undefined || value === null || value === "") return false;
+  if (field.schema && !validateAgainstSchema(value, field.schema).ok) return false;
+  if (field.type === "select") return !!field.options?.some(o => o.value === String(value));
+  if (field.type === "number") return typeof value === "number" && Number.isFinite(value) &&
+    (!field.integer || Number.isInteger(value)) && (field.minimum === undefined || value >= field.minimum) &&
+    (field.maximum === undefined || value <= field.maximum);
+  if (field.type === "boolean") return typeof value === "boolean";
+  return (field.type === "text" || field.type === "textarea") && typeof value === "string";
+}
+/** Migrate only explicit matching semantics, compatible units/types and valid target values. */
+export function migratePresentedParameters(from: readonly PresentableParameter[], to: readonly PresentableParameter[], values: Record<string, unknown>) {
+  const migrated: Record<string, unknown> = {};
+  for (const target of to) {
+    if (!target.presentation?.semanticId) continue;
+    const source = from.find(f => f.presentation?.semanticId === target.presentation?.semanticId && f.type === target.type && f.unit === target.unit);
+    if (source && validPresentedParameter(target, values[source.key])) migrated[target.key] = values[source.key];
+  }
+  return migrated;
+}
+
+/** Display identities are opaque; only the business owner resolves a selection to an execution request. */
+export type GenerationModelEntry = {
+  identity: string; sourceIdentity: string; modelIdentity: string; label: string; modelId: string;
+  sourceLabel: string; detail?: string; unavailableReason?: string; isDefault?: boolean;
+};
+export type GenerationSourceEntry = {
+  identity: string; label: string; status: "ready" | "loading" | "unloaded" | "failed";
+  error?: string; unavailableReason?: string;
+};

@@ -38,10 +38,13 @@ import {
   type WorldTransform
 } from "./shared-world.js";
 
+import { rotateGroundBoundsQuarterTurn, rotateGroundQuarterTurns, rotateWorldQuarterTurn, rotateWorldTransformQuarterTurn } from "./world-quarter-turn.js";
+
 type JsonRecord = Record<string, unknown>;
 
 const INTENTS: readonly SceneAreaPlanIntent[] = [
   "move",
+  "rotate",
   "resize",
   "delete-area",
   "delete-area-with-contents"
@@ -531,6 +534,27 @@ function buildMovePlan(
   };
 }
 
+function buildRotatePlan(
+  request: Extract<SceneAreaPlanRequest, { intent: "rotate" }>,
+  source: SceneAreaPlan["source"]
+): SceneAreaPlan {
+  const bounds = request.area.bounds;
+  const pivot = { u: (bounds.min.u + bounds.max.u) / 2, v: (bounds.min.v + bounds.max.v) / 2 };
+  const plan = buildMovePlan({ ...request, intent: "move", delta: { u: 0, v: 0 } }, source);
+  return { ...plan, intent: "rotate", commands: [
+    { kind: "set-scene-area-bounds", areaId: request.area.areaId, expectedScopeVersion: request.area.scopeVersion, bounds: rotateGroundBoundsQuarterTurn(bounds) },
+    ...request.members.instances.map((member): SceneAreaPlanCommand => ({
+      kind: "set-instance-transform", target: { ...member.identity }, expectedVersion: member.version,
+      transform: rotateWorldTransformQuarterTurn(member.transform, pivot)
+    })),
+    ...request.members.cameras.map((member): SceneAreaPlanCommand => ({
+      kind: "set-world-camera-pose", target: { ...member.identity }, expectedVersion: member.version,
+      position: { ...member.camera.position, ...rotateGroundQuarterTurns(member.camera.position, pivot) },
+      rotation: rotateWorldQuarterTurn(member.camera.rotation)
+    }))
+  ] };
+}
+
 function buildResizePlan(
   request: Extract<SceneAreaPlanRequest, { intent: "resize" }>,
   source: { area: SceneAreaPlanAreaSource; members: SceneAreaPlanMemberSet }
@@ -668,6 +692,8 @@ export function planSceneAreaOperation(request: SceneAreaPlanRequest): SceneArea
   switch (typed.intent) {
     case "move":
       return { ok: true, plan: buildMovePlan(typed, source) };
+    case "rotate":
+      return { ok: true, plan: buildRotatePlan(typed, source) };
     case "resize":
       return { ok: true, plan: buildResizePlan(typed, source) };
     case "delete-area":

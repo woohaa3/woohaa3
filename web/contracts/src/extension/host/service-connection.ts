@@ -3,7 +3,13 @@
  */
 export type ServiceConnectionScope = "personal" | "site";
 export type ServiceConnectionKind = "api" | "oauth";
-export type ServiceConnectionPurpose = "discussion" | "target-execution" | "text" | "image" | "video" | "audio" | "candidate";
+/**
+ * 服务连接能力用途。
+ *
+ * `text` 同时表示「可作为文本模型」和「可作为 Agent 模型」：所有文本模型都视为支持工具调用，
+ * 不再单独区分 discussion / target-execution。媒体用途仍按模态区分。
+ */
+export type ServiceConnectionPurpose = "text" | "image" | "video" | "audio" | "candidate";
 export type ServiceConnectionProtocol = "responses" | "messages" | "chat-completions" | "gemini" | `provider:${string}`;
 export type ServiceConnectionVersion = { configRevision: number; credentialEpoch: number };
 export type ServiceConnectionEndpoint = { protocol: ServiceConnectionProtocol; baseUrl: string };
@@ -13,6 +19,8 @@ export type ServiceConnectionCapability = {
   modelId: string;
   imageInput: boolean;
   evidence: "adapter" | "model-directory" | "tested";
+  /** 与 Agent 目录同一份 reasoning 事实；缺省表示该来源未声明。 */
+  reasoning?: import("../assistant/conversation.js").AgentReasoningCapability;
 };
 export type ServiceConsumerBinding = {
   bindingId: string;

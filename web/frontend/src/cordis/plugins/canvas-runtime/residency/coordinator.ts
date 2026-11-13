@@ -69,13 +69,6 @@ export type ResidencyProjectionInput = {
     eligible: boolean;
     /** 是否不受卡片视口裁剪（共享世界模型没有卡片 rect）。 */
     alwaysVisible?: boolean;
-    /**
-     * 是否消耗离屏预览渲染槽（模型/复合资产）。
-     *
-     * 缺省视为 `false`：只有明确需要离屏预览相机的需求才占槽。`collectResidencyCandidates`
-     * 总是显式给出该值（模型/复合资产 true，图片/视频 false）。
-     */
-    previewSlot?: boolean;
   }[];
 };
 
@@ -297,7 +290,7 @@ export class CanvasResourceCoordinator {
     this.evictDerivedForPriority(priorityBytes, next);
     // 需求超过预览槽/预算时按 purpose 裁剪；interactive 与 pins 永不裁剪。
     const candidatesById = new Map(input.candidates.map((candidate) => [candidate.nodeId, candidate]));
-    const admitted = this.applyBudget(next, pins, candidatesById);
+    const admitted = this.applyBudget(next, pins);
     // 离屏宽限（design D1）：因视口移动而离开需求的节点在 `offscreenGraceMs` 内保留上一次
     // 合法需求，避免平移/缩放抖动反复丢弃并重解码同一批媒体；宽限结束或超出预算才真正撤销。
     // 无有效 surface、页面隐藏、内容失效都不享受宽限：那不是「暂时看不见」而是「不该驻留」。
@@ -322,25 +315,16 @@ export class CanvasResourceCoordinator {
       }
       // 宽限保留同样受页预算约束：按剩余 GPU 估算余量依次保留，超预算立即淘汰。
       let gpu = this.claimedGpuBytes();
-      let previewSlots = 0;
-      for (const [nodeId, demand] of admitted) {
-        gpu += estimateDemandBytes(demand);
-        if (candidatesById.get(nodeId)?.previewSlot === true) previewSlots += 1;
-      }
-      const slots = Math.max(1, Math.floor(this.policy.previewSlots));
+      for (const demand of admitted.values()) gpu += estimateDemandBytes(demand);
       // 最久离屏的排在最后，预算不足时先放弃它们。
       const pending = [...this.offscreenSince.entries()].sort((a, b) => b[1] - a[1]);
       for (const [nodeId, since] of pending) {
         if (nowMs - since > this.policy.offscreenGraceMs) { this.offscreenSince.delete(nodeId); continue; }
         const demand = this.demands.get(nodeId);
         if (!demand || admitted.has(nodeId)) continue;
-        // 宽限同样按类别收敛：预览槽只对离屏预览需求计数，普通媒体卡不因槽满被丢弃。
-        const slot = candidatesById.get(nodeId)?.previewSlot === true;
-        if (slot && previewSlots >= slots) continue;
         const cost = estimateDemandBytes(demand);
         if ((admitted.size > 0 || this.claimedGpuBytes() > 0) && gpu + cost > this.policy.gpuDerivedBytes) break;
         gpu += cost;
-        if (slot) previewSlots += 1;
         admitted.set(nodeId, demand);
       }
     } else {
@@ -563,20 +547,14 @@ export class CanvasResourceCoordinator {
    * 预算裁剪：interactive/pin 全保留；visible 按屏幕面积（大的优先，代表更值得驻留）排序；
    * warm/prefetch 只在剩余容量内保留。裁剪不删除文档节点，只影响重资源准入。
    *
-   * 两个预算**分开**（design D3）：
-   * - `previewSlots` 只限制需要离屏预览相机的需求（模型/复合资产）。图片与视频的纹理是卡片
-   *   贴图，不占预览渲染槽；把预览槽当成全页媒体准入上限，会让视口内超过预览槽数量的卡片
-   *   永远不被准入，只能靠 hover 提升为 interactive 才显示（真实故障：整屏卡片「hover 才能
-   *   加载」）。
-   * - `gpuDerivedBytes` 是**全页**估算预算，对两类需求合计生效。
+   * `gpuDerivedBytes` 是**全页**估算预算：视口内的普通媒体卡不因单一类别上限被误判为
+   * 「hover 才能加载」（真实故障：整屏卡片不显示）。
    */
   private applyBudget(
     next: Map<string, NodeResidencyDemand>,
-    pins: ReadonlySet<string>,
-    candidatesById: ReadonlyMap<string, { previewSlot?: boolean }>
+    pins: ReadonlySet<string>
   ): Map<string, NodeResidencyDemand> {
     if (!next.size) return next;
-    const slots = Math.max(1, Math.floor(this.policy.previewSlots));
     const ordered = [...next.values()].sort((a, b) => {
       const rank = purposeRankOf(a.purpose) - purposeRankOf(b.purpose);
       if (rank !== 0) return rank;
@@ -590,29 +568,20 @@ export class CanvasResourceCoordinator {
     });
     const admitted = new Map<string, NodeResidencyDemand>();
     let gpu = this.claimedGpuBytes();
-    let previewSlots = 0;
     for (const demand of ordered) {
       const pinned = demand.purpose === "interactive" || pins.has(demand.nodeId);
-      // 只有明确声明需要离屏预览相机的需求才占用预览槽（生产路径由
-      // `collectResidencyCandidates` 显式给出；图片/视频为 false）。
-      const slot = candidatesById.get(demand.nodeId)?.previewSlot === true;
       if (pinned && this.claimedGpuBytes() > 0 && gpu + estimateDemandBytes(demand) > this.policy.gpuDerivedBytes) {
         continue;
       }
       if (!pinned) {
-        // 预览槽只对需要离屏预览相机的需求计数；超槽的只有该项延后，不能中断整轮准入
-        // （否则排在前面的第 17 个模型会让后面所有普通媒体卡一并被丢掉）。
-        if (slot && previewSlots >= slots) continue;
         // GPU 估算预算：超预算时只对实际竞争需求排队，不无限扩大预算。
         const cost = estimateDemandBytes(demand);
         if (gpu + cost > this.policy.gpuDerivedBytes && (admitted.size > 0 || this.claimedGpuBytes() > 0)) break;
         gpu += cost;
-        if (slot) previewSlots += 1;
       } else {
         // Priority demands may exceed the limit, but their cost still reduces the
         // capacity available to ordinary work.
         gpu += estimateDemandBytes(demand);
-        if (slot) previewSlots += 1;
       }
       admitted.set(demand.nodeId, demand);
     }

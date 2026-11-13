@@ -69,10 +69,10 @@ describe("createChatGptRemote（经 Application 通用传输）", () => {
       progress: (event) => events.push(`p:${event.stage}`),
       done: (receipt) => events.push(`d:${receipt.status}`)
     };
-    remote.generate({ requestId: "r", canvasId: "c", nodeId: "n", mode: "model3d", model: "m", prompt: "x" }, sink);
+    remote.generate({ roleId: "test/role", requestId: "r", canvasId: "c", nodeId: "n", mode: "model3d", model: "m", prompt: "x" }, sink);
     expect(captured).not.toBeNull();
-    captured!.onEvent({ type: "progress", data: JSON.stringify({ requestId: "r", stage: "reasoning" }) });
-    captured!.onEvent({ type: "result", data: JSON.stringify({ status: "succeeded", requestId: "r", mode: "model3d", canvasId: "c", nodeId: "n", commandId: "cmd" }) });
+    captured!.onEvent({ type: "progress", data: JSON.stringify({ roleId: "test/role", requestId: "r", stage: "reasoning" }) });
+    captured!.onEvent({ type: "result", data: JSON.stringify({ status: "succeeded", roleId: "test/role", requestId: "r", mode: "model3d", canvasId: "c", nodeId: "n", commandId: "cmd" }) });
     expect(events).toEqual(["p:reasoning", "d:succeeded"]);
   });
 
@@ -87,7 +87,7 @@ describe("createChatGptRemote（经 Application 通用传输）", () => {
     };
     const remote = createChatGptRemote({ transport });
     let failed: string | null = null;
-    remote.generate({ requestId: "r", canvasId: "c", nodeId: "n", mode: "model3d", model: "m", prompt: "x" }, {
+    remote.generate({ roleId: "test/role", requestId: "r", canvasId: "c", nodeId: "n", mode: "model3d", model: "m", prompt: "x" }, {
       done: (receipt) => { failed = receipt.status; }
     });
     captured!.onError("生成请求失败", "unavailable");

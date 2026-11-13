@@ -39,7 +39,9 @@ export const CANVAS_SHELL_PLUGIN_ID = "canvas-shell";
 export function canvasShellExtension(): Plugin.Function<void> {
   return definePlugin(
     (ctx: Context) => {
-      const downloads = new NodeDownloadService({ getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()), mediaContent: ctx.mediaContent });
+      const downloads = new NodeDownloadService({ getCanvas: () => workingCanvasOf(woohaa3CanvasStore.getState()), mediaContent: ctx.mediaContent,
+        getCanonicalCanvas: () => woohaa3CanvasStore.getState().canvas,
+        prepareSceneArea: (input, signal) => ctx.canvasRemote.prepareSceneArea(input, signal) });
       const offDownload = ctx.on("ui.node-download.save-requested", ({ nodeId }) => { void downloads.download(nodeId); });
       // 节点顶部操作横条的**宿主下载贡献**（change: 2026-10-13-add-node-to-film-set-shortcut，任务 3.2）。
       // 横条由 Web 渲染：本贡献提供纯数据描述与动作派发，复用同一
@@ -53,8 +55,7 @@ export function canvasShellExtension(): Plugin.Function<void> {
         available: () => true,
         describe: ({ nodeId, nodeType }) => {
           if (nodeType === "audio" || nodeType === "composite-asset" || nodeType === "world-camera") return null;
-          // 2D 组/导演区没有可下载的作品内容，横条只保留各自的组织动作。
-          if (nodeType === "workflow-group-2d" || nodeType === "scene-area") return null;
+          if (nodeType === "workflow-group-2d") return null;
           const readiness = resolveNodeDownloadAvailability({
             canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
             nodeId,
@@ -243,6 +244,6 @@ export function canvasShellExtension(): Plugin.Function<void> {
       // page scope dispose 时关闭查找，避免跨画布残留（任务 4.2）。
       ctx.effect(() => () => canvasSearchStore.close(), "canvas-shell-search-reset");
     },
-    { name: CANVAS_SHELL_PLUGIN_ID, inject: ["mediaContent", "nodeImplementations", "slots", "canvasRuntime", "canvasLocate", "canvasEdit", "canvasSession", "canvasNavigation"] }
+    { name: CANVAS_SHELL_PLUGIN_ID, inject: ["mediaContent", "nodeImplementations", "slots", "canvasRuntime", "canvasRemote", "canvasLocate", "canvasEdit", "canvasSession", "canvasNavigation"] }
   );
 }

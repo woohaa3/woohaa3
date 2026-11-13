@@ -16,6 +16,7 @@
  */
 import type { AgentConversationAdapterEvent, AgentAdapterRunOutcome } from "@woohaa3/contracts";
 import { coerceSseEvents, createSseParser } from "./sse.js";
+import { toolResultDetail } from "./tool-detail.js";
 
 export const CODEBUDDY_ACP_VERSION = "acp/1";
 
@@ -119,7 +120,9 @@ export function createAcpEventDecoder(): {
           const tool = typeof payload.tool === "string" ? payload.tool : "tool";
           const callId = typeof payload.callId === "string" ? payload.callId : undefined;
           if (payload.status === "completed" || payload.status === "failed") {
-            emitted.push({ type: "tool-completed", tool, ok: payload.status === "completed", ...(callId ? { callId } : {}) });
+            const failed = payload.status === "failed";
+            const detail = failed ? toolResultDetail(payload) : undefined;
+            emitted.push({ type: "tool-completed", tool, ok: !failed, ...(detail ? { summary: detail } : {}), ...(callId ? { callId } : {}) });
           } else {
             emitted.push({ type: "tool-started", tool, ...(callId ? { callId } : {}) });
           }

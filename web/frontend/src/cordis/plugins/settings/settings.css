@@ -473,6 +473,12 @@
 /* 启停控制：卡片脚与配置弹窗头共用同一份状态。 */
 .plugin-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .plugin-state__label { font-size: 11px; color: var(--mc-text-muted); }
+.plugin-failure { min-width: 0; font-size: 12px; }
+.plugin-failure > summary { width: fit-content; cursor: pointer; color: var(--app-status-warning); }
+.plugin-failure > summary:hover { text-decoration: underline; text-underline-offset: 3px; }
+.plugin-failure__reasons { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--mc-text); }
+.plugin-failure__reasons p { margin: 8px 0 0; }
+.plugin-row > .plugin-failure { grid-column: 1 / -1; padding: 0 0 4px 45px; }
 .plugin-state__label[data-actual-state="active"] { color: var(--app-status-success); }
 .plugin-state__label[data-actual-state="degraded"],
 .plugin-state__label[data-pending="true"] { color: var(--app-status-warning); }

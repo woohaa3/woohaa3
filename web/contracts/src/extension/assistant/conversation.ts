@@ -18,6 +18,8 @@
  */
 import { isBoolean, isBoundedId, isJsonObject, isStringArray } from "../../validation.js";
 import type { AssistantWorldScopeSelection } from "../../canvas/assistant-world-authority.js";
+import type { AgentRoleRef, PreparedAgentRoleTurn } from "./agent-role.js";
+import { isAgentNativeCapability } from "./agent-role.js";
 
 /** Agent 会话 API 的固定同源前缀（宿主拥有）。 */
 export const AGENT_CONVERSATION_BASE_PATH = "/api/agent-conversations" as const;
@@ -132,7 +134,7 @@ export type AgentEntryReference = {
  * 与目标、模型一起纳入请求幂等指纹：同一 requestId 换连接/配置/凭据版本 MUST 拒绝，
  * 不切换凭据、不重新推理。原生会话 id 是执行索引，不能跨连接或 owner 复用。
  *
- * 既有历史行没有这些字段时映射为该 owner 的兼容默认连接（既有 ChatGPT），不改变其归属。
+ * 没有连接身份的历史行不会自动绑定或发起新执行。
  */
 export type AgentConnectionBinding = {
   connectionId: string;
@@ -142,6 +144,8 @@ export type AgentConnectionBinding = {
   configRevision: number;
   /** 冻结时的凭据 epoch（替换/清除密钥使旧运行失效）。 */
   credentialEpoch: number;
+  /** 冻结时该模型 reasoning 能力快照的修订号；旧回合缺省表示能力未知。 */
+  capabilityRevision?: string;
 };
 
 /** 仅开放运行时或模型目录明确支持的思考强度；省略时沿用模型默认。 */
@@ -149,6 +153,84 @@ export const AGENT_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "hig
 export type AgentReasoningEffort = (typeof AGENT_REASONING_EFFORTS)[number];
 export function isAgentReasoningEffort(value: unknown): value is AgentReasoningEffort {
   return typeof value === "string" && (AGENT_REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
+/** 模型级 reasoning 事实：unknown / unsupported / 带可执行档位的 supported。 */
+export const AGENT_REASONING_CAPABILITY_STATES = ["unknown", "unsupported", "supported"] as const;
+export type AgentReasoningCapabilityState = (typeof AGENT_REASONING_CAPABILITY_STATES)[number];
+export function isAgentReasoningCapabilityState(value: unknown): value is AgentReasoningCapabilityState {
+  return typeof value === "string" && (AGENT_REASONING_CAPABILITY_STATES as readonly string[]).includes(value);
+}
+
+/** 能力事实来源：上游目录、运行时发现或经过验证的测试。 */
+export const AGENT_REASONING_CAPABILITY_SOURCES = ["provider", "runtime", "tested"] as const;
+export type AgentReasoningCapabilitySource = (typeof AGENT_REASONING_CAPABILITY_SOURCES)[number];
+export function isAgentReasoningCapabilitySource(value: unknown): value is AgentReasoningCapabilitySource {
+  return typeof value === "string" && (AGENT_REASONING_CAPABILITY_SOURCES as readonly string[]).includes(value);
+}
+
+export type AgentReasoningOption = { id: AgentReasoningEffort; label?: string };
+
+/**
+ * 可追溯的模型 reasoning 能力。
+ *
+ * `supported` 但没有 `efforts` 表示上游确认支持推理、却没有给出可安全展示的精确档位；
+ * 此时界面只保留默认语义。能力修订号用于回合冻结与目录刷新后的失效判断。
+ */
+export type AgentReasoningCapability = {
+  state: AgentReasoningCapabilityState;
+  efforts?: readonly AgentReasoningOption[];
+  source: AgentReasoningCapabilitySource;
+  revision: string;
+};
+
+/** 严格校验：未知状态/来源、重复档位、空 id 与非法修订号均不接受。 */
+export function isAgentReasoningCapability(value: unknown): value is AgentReasoningCapability {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  if (!isAgentReasoningCapabilityState(candidate.state) || !isAgentReasoningCapabilitySource(candidate.source)) return false;
+  if (typeof candidate.revision !== "string" || candidate.revision.length === 0 || candidate.revision.length > 128) return false;
+  if (candidate.efforts === undefined) return true;
+  if (!Array.isArray(candidate.efforts)) return false;
+  if (candidate.state !== "supported" && candidate.efforts.length > 0) return false;
+  const seen = new Set<string>();
+  for (const option of candidate.efforts) {
+    if (typeof option !== "object" || option === null) return false;
+    const entry = option as Record<string, unknown>;
+    if (!isAgentReasoningEffort(entry.id)) return false;
+    if (entry.label !== undefined && (typeof entry.label !== "string" || entry.label.length === 0 || entry.label.length > 80)) return false;
+    if (seen.has(entry.id)) return false;
+    seen.add(entry.id);
+  }
+  return true;
+}
+
+/** 旧模型的 `reasoningEfforts` 解码兼容：缺失/空数组归一为 unknown，非空视为 supported。 */
+export function reasoningCapabilityOf(model: { reasoning?: AgentReasoningCapability; reasoningEfforts?: readonly AgentReasoningEffort[] }): AgentReasoningCapability {
+  if (model.reasoning) return model.reasoning;
+  const efforts = model.reasoningEfforts ?? [];
+  return efforts.length > 0
+    ? { state: "supported", source: "provider", revision: "legacy", efforts: efforts.map((id) => ({ id })) }
+    : { state: "unknown", source: "provider", revision: "legacy" };
+}
+
+/** 仅返回可安全展示、可执行的 canonical 档位。 */
+export function reasoningEffortsOf(model: { reasoning?: AgentReasoningCapability; reasoningEfforts?: readonly AgentReasoningEffort[] }): readonly AgentReasoningEffort[] {
+  const capability = reasoningCapabilityOf(model);
+  return capability.state === "supported" ? (capability.efforts ?? []).map((option) => option.id) : [];
+}
+
+/** 稳定的能力修订号（短字符串；只用于失效判断，不是安全摘要）。 */
+export function agentReasoningRevision(...parts: readonly (string | number | boolean | undefined)[]): string {
+  const text = parts.map((part) => part === undefined ? "" : String(part)).join("\u0000");
+  let first = 5381;
+  let second = 52711;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    first = ((first << 5) + first + code) >>> 0;
+    second = ((second << 5) + second ^ code) >>> 0;
+  }
+  return `${first.toString(36)}${second.toString(36)}`.slice(0, 24);
 }
 
 /** 一次回合的显式目标快照（camera/clip/item 使用稳定 id，不用索引）。 */
@@ -175,10 +257,20 @@ export type AgentTargetSnapshot = {
    */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
-  /** 冻结的来源连接 id（未显式选择时为兼容默认连接，由宿主补齐）。 */
+  /** 受理时冻结的模型 reasoning 能力修订号（旧回合缺省）。 */
+  capabilityRevision?: string;
+  /** 冻结的显式来源连接 id。 */
   connectionId?: string;
   /** 领域并发 precondition（模型内容哈希 / 片场 snapshotHash，按模式）。 */
   expectedContentHash?: string;
+  /**
+   * 受理时冻结的角色身份（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 旧回合缺省即 legacy：不补造角色指纹，查询/取消/回执恢复仍按原身份。
+   */
+  role?: AgentRoleRef;
+  /** 受理时冻结的准备内容摘要（与角色修订、真实工具集合共同用于原生上下文隔离）。 */
+  rolePreparedHash?: string;
 };
 
 /** 生成面板/详情提交的 entry intent（首轮与详情后续消息共用）。 */
@@ -198,8 +290,14 @@ export type AgentEntryIntent = {
   /** 冻结的账户模型 id（来自真实目录）；缺失时由 adapter 按当前目录处理或拒绝。 */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
-  /** 显式选定的来源连接；缺失时宿主解析该 owner 的兼容默认连接（既有历史/兼容请求）。 */
+  /** 显式选定的来源连接；新请求缺失时拒绝。 */
   connectionId?: string;
+  /**
+   * 显式选定的完整角色 id（`<extensionId>/<roleId>`）。
+   *
+   * 业务入口必须提交明确角色；核心不按 mode 猜角色，也不接受把连接 id 当角色。
+   */
+  roleId?: string;
   expectedContentHash?: string;
   prompt: string;
   /** 显式引用（不从节点版本伪造历史）。 */
@@ -223,6 +321,11 @@ export type AgentAdapterCapabilities = {
   targets: readonly AgentTargetMode[];
   tools: boolean;
   models: "remote" | "none";
+  /**
+   * 通道真实支持的内建执行能力（change: 2026-11-07-add-pluggable-agent-roles）。
+   * 角色声明与本集合求交；缺省表示不支持任何内建能力（不从旧回合继承）。
+   */
+  nativeCapabilities?: readonly import("./agent-role.js").AgentNativeCapability[];
 };
 
 /** adapter 授权状态（复用 provider 自身边界；绝不携带 token）。 */
@@ -240,13 +343,20 @@ export function isAgentAdapterAuthState(value: unknown): value is AgentAdapterAu
 }
 
 /** 账户模型目录项（使用账户实际返回的 slug/displayName）。 */
-export type AgentModelView = { id: string; label: string; reasoningEfforts?: readonly AgentReasoningEffort[] };
+export type AgentModelView = {
+  id: string;
+  label: string;
+  /** 旧版兼容字段；新投影同时携带 `reasoning`。 */
+  reasoningEfforts?: readonly AgentReasoningEffort[];
+  reasoning?: AgentReasoningCapability;
+};
 
-export type AgentCatalogSnapshot = { models: AgentModelView[]; error?: string };
+export type AgentCatalogSnapshot = { models: AgentModelView[]; capabilityRevision?: string; error?: string };
 
 /** 目录/授权/能力查询响应（`GET /catalog`）。 */
 export type AgentCatalogResponse = {
   models: AgentModelView[];
+  capabilityRevision?: string;
   error?: string;
   authState: AgentAdapterAuthState;
   capabilities: AgentAdapterCapabilities;
@@ -259,7 +369,7 @@ export type ConversationSummary = {
   conversationId: string;
   canvasId: string;
   adapterId: string;
-  /** 当前会话冻结的来源连接 id（旧数据映射兼容默认连接）。 */
+  /** 当前会话冻结的来源连接 id；不自动绑定默认连接。 */
   connectionId?: string;
   title: string;
   status: ConversationStatus;
@@ -296,6 +406,14 @@ export type ConversationToolActivity = {
   createdAt?: string;
 };
 
+/** 一个回合请求与传输的 reasoning 事实；不保存隐藏推理文本。 */
+export type AgentReasoningApplication = {
+  requested?: AgentReasoningEffort;
+  /** true=已按显式值应用；false=传输拒绝；provider-default=省略字段交由上游默认。 */
+  applied: true | false | "provider-default";
+  code?: string;
+};
+
 /** 一个回合的权威投影。 */
 export type ConversationTurn = {
   turnId: string;
@@ -305,6 +423,8 @@ export type ConversationTurn = {
   status: ConversationTurnStatus;
   stage: string;
   target: AgentTargetSnapshot;
+  /** 请求的思考强度与实际传输应用结果（不包含隐藏推理内容）。 */
+  reasoning?: AgentReasoningApplication;
   /** 助手文本（来自真实 adapter 输出；不是权威终态）。 */
   assistantText?: string;
   /** 工具过程（按 sequence 有界记录）。 */
@@ -316,6 +436,14 @@ export type ConversationTurn = {
   receipt?: unknown;
   /** 该回合冻结的连接身份（旧数据缺省；用于「修改连接后用原 requestId 重试」拒绝）。 */
   connection?: AgentConnectionBinding;
+  /** 该回合冻结的角色身份；旧回合缺省即 legacy，不补造。 */
+  role?: AgentRoleRef;
+  /**
+   * 执行器 journal 的已消费事件 cursor（change: 2026-11-10-split-agent-runtime-lifecycle）。
+   *
+   * 宿主重启后从这里继续；旧回合缺省表示尚未建立游标。
+   */
+  executorCursor?: number;
   error?: { code: string; message: string };
   createdAt: string;
   updatedAt: string;
@@ -323,7 +451,9 @@ export type ConversationTurn = {
 
 /**
  * 事件类型：accepted/stage/message-delta/message-completed/tool-started/tool-completed/
- * task-linked/receipt/error。
+ * task-linked/receipt/error/recovered。
+ *
+ * `recovered` 只表示宿主重启后按执行器 journal 接回了原回合，不是伪造的助手消息。
  *
  * `message-delta` 标记一条消息**开始**并有内容更新（payload 只带 `messageId`/`role`；正文从快照
  * 读取，避免按 token 膨胀事件窗口）；`message-completed` 标记该消息结束。同一条消息只有这两个
@@ -339,6 +469,7 @@ export const CONVERSATION_EVENT_TYPES = [
   "task-linked",
   "receipt",
   "error",
+  "recovered",
   "skill-step-updated"
 ] as const;
 export type ConversationEventType = (typeof CONVERSATION_EVENT_TYPES)[number];
@@ -419,12 +550,21 @@ export type AgentAdapterRunOutcome = {
   runId?: string;
   taskId?: string;
   receipt?: unknown;
+  /** 本回合请求的思考强度与实际传输结果；不含隐藏推理内容。 */
+  reasoning?: AgentReasoningApplication;
   error?: { code: string; message: string };
 };
 
 export type AgentAdapterRunInput = {
   /** Trusted host-only input; never decoded from a browser entry intent. */
   candidate?: { images: readonly AgentImageInput[]; outputSchema: Record<string, unknown> };
+  /**
+   * 宿主准备好的角色回合（change: 2026-11-07-add-pluggable-agent-roles）。
+   *
+   * 通道只消费它：不得再按业务 mode 构造角色提示词或选择业务工具。缺失表示旧回合/旧路径，
+   * 新目标回合不会以空 prepared 执行（宿主在受理时已拒绝）。
+   */
+  prepared?: PreparedAgentRoleTurn;
   owner: string;
   canvasId: string;
   conversationId: string;
@@ -443,6 +583,20 @@ export type AgentAdapterRunInput = {
   images?: readonly { bytes: Uint8Array; contentType: string }[];
   signal: AbortSignal;
   emit: (event: AgentConversationAdapterEvent) => void;
+  /**
+   * 宿主重启接管（change: 2026-11-10-split-agent-runtime-lifecycle，任务 3.2）。
+   *
+   * 只由宿主在 `resume` 路径注入：表示从执行器 journal 的哪个 cursor 继续。
+   * 缺省表示新回合，从头跟随。旧回合没有 cursor 时由宿主传 `"head"`，跳过历史重放。
+   */
+  resumeCursor?: number | "head";
+  /**
+   * 带执行器 cursor 的事件投递（宿主接管时注入）。
+   *
+   * 提供时通道用它替代 `emit`：宿主按 `(turnId, cursor)` 幂等落库，重复重放不重复写
+   * 消息/阶段；没有 cursor 的旧通道仍调用 `emit`。
+   */
+  emitExecutor?: (cursor: number, event: AgentConversationAdapterEvent) => void;
 };
 
 export type AgentImageInput = { bytes: Uint8Array; contentType: string };
@@ -450,6 +604,8 @@ export type AgentImageInput = { bytes: Uint8Array; contentType: string };
 export type AgentConversationAdapter = {
   /** adapter 稳定 id（registry key）。 */
   id: string;
+  /** 声明后只能经该 daemon executor 执行；宿主不提供进程内执行回退。 */
+  runtimeExecutor?: string;
   capabilities(): AgentAdapterCapabilities;
   /** 授权状态（真实 provider 状态；不携带 token）。 */
   authorization(input: { owner: string }): Promise<AgentAdapterAuthState>;
@@ -457,6 +613,12 @@ export type AgentConversationAdapter = {
   models(input: { owner: string }): Promise<AgentCatalogSnapshot>;
   /** 讨论或目标执行；未声明能力时调用方 MUST 拒绝并说明原因。 */
   run(input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome>;
+  /**
+   * 宿主重启接管：按冻结输入接回执行器 journal，从 cursor 继续跟随事件并返回终态。
+   *
+   * 缺失时宿主退回「查询一次 + 按事实结算」；不得为了接管而重新推理或重放写动作。
+   */
+  resume?(input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome | null>;
   /** 重启后核对领域回执（不自动重推理）。 */
   query?(input: { owner: string; requestId: string }): Promise<AgentAdapterRunOutcome | null>;
   /** 取消在途回合（不撤销已提交领域动作）。 */
@@ -536,6 +698,7 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
     const candidate = value.candidateGeneration;
     if (!isJsonObject(candidate) || !isBoolean(candidate.imageInput) || !Number.isSafeInteger(candidate.maxImages) || (candidate.maxImages as number) < 1) return false;
   }
+  if (value.nativeCapabilities !== undefined && (!Array.isArray(value.nativeCapabilities) || !value.nativeCapabilities.every(isAgentNativeCapability))) return false;
   return value.targets.every(isAgentTargetMode);
 }
 
@@ -559,7 +722,15 @@ export const AGENT_CONVERSATION_ERROR_CODES = [
   "connection-unavailable",
   "capability-unsupported",
   "budget-exceeded",
-  "storage-failed"
+  "storage-failed",
+  // 角色（change: 2026-11-07-add-pluggable-agent-roles）
+  "role-not-found",
+  "role-unavailable",
+  "role-version-conflict",
+  "role-input-invalid",
+  "role-context-invalid",
+  "role-requirement-unsatisfied",
+  "role-prepare-failed"
 ] as const;
 export type AgentConversationErrorCode = (typeof AGENT_CONVERSATION_ERROR_CODES)[number];
 

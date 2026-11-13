@@ -34,9 +34,8 @@ pub(super) struct SnapshotNode {
     pub(super) output_port: Option<Vec2>,
     /// 底部历史条命中矩形（change: 2026-10-12-unify-generation-history-strip）。
     pub(super) history_strip: Option<(f32, f32, f32, f32)>,
-    pub(super) preview: Option<(f32, f32, f32, f32)>,
-    /// 选中时显示的右下角 resize 抓手。
-    pub(super) resize: Option<ResizeGrip>,
+    /// 选中时显示的四角 resize 抓手。
+    pub(super) resize: Option<[ResizeGrip; 4]>,
     pub(super) resizable: bool,
     /// `chrome.kind == "none"` 的世界模型没有内容卡片：不再保留卡片矩形、端口、
     /// 历史条与选中抓手的命中（change: shared-world 直接地面拖动）。
@@ -337,8 +336,6 @@ fn snapshot_node(
         // 命中与拖拽按“可交互画布对象”判定：2D 组空框也要能选中；世界对象仍排除。
         card: interactable,
         frame: matches!(node.chrome, crate::protocol::NodeChrome::Frame { .. }),
-        preview: (card && node.model_preview.is_some() && node.model.is_some())
-            .then(|| layout::content_rect(node)),
         node_actions,
     }
 }
@@ -352,7 +349,7 @@ pub(super) fn apply_selection(snapshot: &mut InteractionSnapshot, selected: &[St
         if set.len() != 1 || !set.contains(node.id.as_str()) || !node.resizable {
             node.resize = None;
         } else {
-            node.resize = Some(ResizeGrip::for_bounds(
+            node.resize = Some(ResizeGrip::all_for_bounds(
                 node.bounds.0,
                 node.bounds.1,
                 node.bounds.2,
@@ -562,27 +559,19 @@ impl InteractionSnapshot {
             }
             // resize 抓手优先于历史条：若仍重叠则 resize 胜出
             // （change: 2026-10-12-unify-generation-history-strip，design D4）。
-            if let Some(grip) = &node.resize
-                && grip.hit(world, radius)
-            {
-                return Some(PointHit::Resize {
-                    node_id: node.id.clone(),
-                    handle: None,
-                });
+            if let Some(grips) = &node.resize {
+                if let Some(grip) = grips.iter().find(|grip| grip.hit(world, radius)) {
+                    return Some(PointHit::Resize {
+                        node_id: node.id.clone(),
+                        handle: Some(grip.handle.to_owned()),
+                    });
+                }
             }
             if node
                 .history_strip
                 .is_some_and(|rect| layout::in_rect(world, rect))
             {
                 return Some(PointHit::History {
-                    node_id: node.id.clone(),
-                });
-            }
-            if node
-                .preview
-                .is_some_and(|rect| layout::in_rect(world, rect))
-            {
-                return Some(PointHit::ModelPreview {
                     node_id: node.id.clone(),
                 });
             }

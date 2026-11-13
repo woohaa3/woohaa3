@@ -3,8 +3,10 @@ import {
   createBoundedHttpClient,
   createEndpointPolicy,
   createModelTransport,
+  type ConnectionModelInput,
   type ConnectionService,
 } from "@woohaa3/agent-connections";
+import { agentReasoningRevision, isAgentReasoningEffort, reasoningEffortsForModel, type AgentReasoningCapability } from "@woohaa3/contracts";
 import { findSdkAgentAdapter, sdkEngineForAdapter } from "../shared.js";
 import type { SdkAgentHandlerDeployment } from "./handler.js";
 
@@ -19,15 +21,187 @@ export type ModelServiceInput = {
   expectedRevision?: number;
 };
 
-export function normalizeModelBaseUrl(raw: string, defaultPath = "/v1"): string {
+export type ModelServiceTestResult =
+  | { ok: true; models: string[]; message: string }
+  | { ok: false; message: string; code?: string };
+
+/** 从上游 `/models` 条目读取 reasoning 事实：只有精确可执行档位才进入 efforts。 */
+export function reasoningFromDirectoryItem(item: Record<string, unknown>): AgentReasoningCapability {
+  const info = item.model_info && typeof item.model_info === "object" ? item.model_info as Record<string, unknown> : {};
+  const capabilities = item.capabilities && typeof item.capabilities === "object" ? item.capabilities as Record<string, unknown> : {};
+  const rawEfforts = [info.reasoning_efforts, info.reasoningEfforts, item.reasoning_efforts, capabilities.reasoning_efforts,
+    Array.isArray(capabilities.efforts) ? capabilities.efforts : undefined]
+    .find((value) => Array.isArray(value)) as unknown[] | undefined;
+  const modelId = typeof item.id === "string" ? item.id : typeof item.name === "string" ? item.name : "";
+  const upstreamEfforts = [...new Set((rawEfforts ?? []).filter(isAgentReasoningEffort))];
+  const efforts = upstreamEfforts.length ? upstreamEfforts : reasoningEffortsForModel(modelId) ?? [];
+  const supported = info.supports_reasoning === true || capabilities.reasoning === true || capabilities.thinking === true || efforts.length > 0;
+  const revision = agentReasoningRevision("provider", modelId, supported, efforts.join(","));
+  return supported
+    ? { state: "supported", source: "provider", revision, ...(efforts.length ? { efforts: efforts.map((id) => ({ id })) } : {}) }
+    : { state: "unknown", source: "provider", revision };
+}
+
+export function normalizeModelBaseUrl(raw: string, defaultPath = ""): string {
   const url = new URL(raw.trim());
   url.pathname = url.pathname
     .replace(/\/+$/, "")
     .replace(/\/(?:chat\/completions|responses|messages|models)$/, "");
-  if (!url.pathname || url.pathname === "/") url.pathname = defaultPath;
+  if ((!url.pathname || url.pathname === "/") && defaultPath) url.pathname = defaultPath;
   if (url.search || url.hash || url.username || url.password)
     throw new Error("请填写不含查询参数、账号或密码的 Base URL。");
   return url.toString().replace(/\/$/, "");
+}
+
+export async function testModelServiceConnection(
+  service: ConnectionService,
+  deployment: SdkAgentHandlerDeployment,
+  owner: string,
+  input: ModelServiceInput,
+): Promise<{ status: number; body: ModelServiceTestResult }> {
+  const fail = (status: number, code: string, message: string) => ({
+    status,
+    body: { ok: false as const, code, message },
+  });
+  const adapter = findSdkAgentAdapter(input.adapterId);
+  if (!adapter)
+    return fail(400, "connection-unsupported", "请选择支持的 API 协议。");
+  let baseUrl: string;
+  try {
+    const rawBaseUrl = input.baseUrl?.trim();
+    baseUrl = rawBaseUrl
+      ? normalizeModelBaseUrl(rawBaseUrl, adapter.adapterId === "gemini-agent-adk" ? new URL(adapter.officialBaseUrl).pathname : "")
+      : normalizeModelBaseUrl(adapter.officialBaseUrl, new URL(adapter.officialBaseUrl).pathname);
+  } catch {
+    return fail(
+      400,
+      "malformed-request",
+      "Base URL 无效，请填写服务地址，例如 https://api.openai.com/v1。",
+    );
+  }
+  if (!adapter.allowCustomBaseUrl && baseUrl !== adapter.officialBaseUrl)
+    return fail(400, "endpoint-not-allowed", "当前接入方式不支持自定义 Base URL。");
+  const policy = createEndpointPolicy({
+    allowedHosts: deployment.allowedHosts,
+    allowHttp: deployment.allowHttp,
+  });
+  const allowed = policy.check(baseUrl);
+  if (!allowed.ok) return fail(400, allowed.code, allowed.message);
+  const existing = input.connectionId ? await service.get(owner, input.connectionId) : null;
+  if (input.connectionId && !existing)
+    return fail(404, "not-found", "服务不存在或无权访问。");
+  let secret = input.secret?.trim() ?? "";
+  const endpointChanged = Boolean(
+    existing &&
+      (existing.adapterId !== adapter.adapterId ||
+        (existing.baseUrl ??
+          findSdkAgentAdapter(existing.adapterId)?.officialBaseUrl) !==
+          baseUrl),
+  );
+  if (!secret && existing && !endpointChanged) {
+    const stored = await service.readCredential<{ secret: string }>({
+      owner,
+      connectionId: existing.connectionId,
+      purpose: "model-api-key",
+    });
+    secret = stored?.secret ?? "";
+  }
+  if (!secret)
+    return fail(
+      400,
+      "credential-missing",
+      "请填写 API Key。修改地址或格式时需要重新填写 Key。",
+    );
+
+  const apiType = sdkEngineForAdapter(adapter.adapterId)!.apiType;
+  const headers: Record<string, string> =
+    apiType === "anthropic"
+      ? {
+          "x-api-key": secret,
+          "anthropic-version": "2023-06-01",
+        }
+      : apiType === "gemini"
+        ? { "x-goog-api-key": secret }
+        : { authorization: `Bearer ${secret}` };
+  let relay: Awaited<ReturnType<typeof createModelTransport>> | undefined;
+  try {
+    if (!deployment.fetchImpl)
+      relay = await createModelTransport({
+        apiType,
+        upstream: baseUrl,
+        apiKey: secret,
+        policy,
+        valid: () => true,
+      });
+    const client = createBoundedHttpClient({
+      policy: relay ? createEndpointPolicy({ allowedHosts: ["127.0.0.1"], allowHttp: true }) : policy,
+      fetchImpl: deployment.fetchImpl,
+      timeoutMs: 8000,
+    });
+    const result = await client.request<{ data?: unknown[]; models?: unknown[] }>({
+      method: "GET",
+      url: `${relay?.baseUrl ?? baseUrl}/models`,
+      headers: relay ? { authorization: `Bearer ${relay.token}` } : headers,
+      includeErrorBody: false,
+    });
+    const directory = result.ok ? (apiType === "gemini" ? result.value?.models : result.value?.data) : undefined;
+    const models: string[] = [];
+    if (Array.isArray(directory)) {
+      const seen = new Set<string>();
+      for (const item of directory) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        const rawId =
+          "id" in record && typeof record.id === "string"
+            ? record.id
+            : apiType === "gemini" && "name" in record && typeof record.name === "string"
+              ? record.name
+              : "";
+        const id = rawId.replace(/^models\//, "").trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        models.push(id);
+      }
+    }
+    const manualModels = (input.models ?? []).map((id) => id.trim()).filter(Boolean);
+    if (!result.ok) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          message: `连接测试未通过${result.status ? `（HTTP ${result.status}）` : ""}，请检查 Base URL 与 API Key。`,
+        },
+      };
+    }
+    if (models.length === 0 && manualModels.length === 0) {
+      return {
+        status: 200,
+        body: {
+          ok: false,
+          message: "连接测试未返回可用模型列表，请检查 Base URL 或手动填写模型 ID。",
+        },
+      };
+    }
+    const effectiveModels = models.length > 0 ? models : manualModels;
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        models: effectiveModels,
+        message: `测试通过，已发现 ${effectiveModels.length} 个模型。`,
+      },
+    };
+  } catch {
+    return {
+      status: 200,
+      body: {
+        ok: false,
+        message: "连接测试超时或服务不可达，请检查 Base URL 与网络。",
+      },
+    };
+  } finally {
+    await relay?.close();
+  }
 }
 
 export async function configureModelService(
@@ -45,7 +219,10 @@ export async function configureModelService(
     return fail(400, "connection-unsupported", "请选择支持的 API 协议。");
   let baseUrl: string;
   try {
-    baseUrl = normalizeModelBaseUrl(input.baseUrl || adapter.officialBaseUrl, new URL(adapter.officialBaseUrl).pathname);
+    const rawBaseUrl = input.baseUrl?.trim();
+    baseUrl = rawBaseUrl
+      ? normalizeModelBaseUrl(rawBaseUrl, adapter.adapterId === "gemini-agent-adk" ? new URL(adapter.officialBaseUrl).pathname : "")
+      : normalizeModelBaseUrl(adapter.officialBaseUrl, new URL(adapter.officialBaseUrl).pathname);
   } catch {
     return fail(
       400,
@@ -126,12 +303,11 @@ export async function configureModelService(
     if (!reset.ok) return fail(500, reset.error.code, reset.error.message);
   }
   const configured = await service.get(owner, connectionId);
-  let models = [
-    ...new Set((input.models ?? []).map((id) => id.trim()).filter(Boolean)),
+  let modelEntries: ConnectionModelInput[] = [
+    ...new Map((input.models ?? []).map((id) => id.trim()).filter(Boolean).map((id) => [id, { id }])).values(),
   ];
   let modelsError: string | undefined;
-  const modelCapabilities: Record<string, { tools?: boolean }> = {};
-  if (models.length === 0) {
+  if (modelEntries.length === 0) {
     const credential = await service.readCredential<{ secret: string }>({
       owner,
       connectionId,
@@ -166,24 +342,20 @@ export async function configureModelService(
       });
       const directory = result.ok ? (apiType === "gemini" ? result.value?.models : result.value?.data) : undefined;
       if (Array.isArray(directory)) {
-        for (const item of directory) {
-          if (!item || typeof item !== "object" || !("id" in item) || typeof item.id !== "string" || !("capabilities" in item)) continue;
-          const capabilities = item.capabilities;
-          if (capabilities && typeof capabilities === "object" && "tools" in capabilities && typeof capabilities.tools === "boolean") modelCapabilities[item.id] = { tools: capabilities.tools };
-        }
-        models = [
-          ...new Set(
-            directory.flatMap((item) =>
-              item &&
-              typeof item === "object" &&
-              (("id" in item && typeof item.id === "string") || (apiType === "gemini" && "name" in item && typeof item.name === "string"))
-                ? [String("id" in item ? item.id : item.name).replace(/^models\//, "")]
-                : [],
-            ),
-          ),
-        ];
+        const seen = new Set<string>();
+        modelEntries = directory.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const record = item as Record<string, unknown>;
+          const rawId = "id" in record && typeof record.id === "string"
+            ? record.id
+            : apiType === "gemini" && "name" in record && typeof record.name === "string" ? record.name : "";
+          const id = rawId.replace(/^models\//, "").trim();
+          if (!id || seen.has(id)) return [];
+          seen.add(id);
+          return [{ id, reasoning: reasoningFromDirectoryItem(record) }];
+        });
       }
-      if (!result.ok || models.length === 0)
+      if (!result.ok || modelEntries.length === 0)
         modelsError = result.ok
           ? "服务没有返回模型列表，可在下方填写模型 ID。"
           : `模型列表读取失败${result.status ? `（HTTP ${result.status}）` : ""}，可填写模型 ID 后重试。`;
@@ -191,8 +363,8 @@ export async function configureModelService(
       modelsError = "模型列表读取超时或服务不可达，可填写模型 ID 后重试。";
     } finally { await relay?.close(); }
   }
-  if (models.length === 0)
-    models =
+  if (modelEntries.length === 0)
+    modelEntries =
       existing?.models?.length && !endpointChanged
         ? [...existing.models]
         : [];
@@ -207,10 +379,10 @@ export async function configureModelService(
       "version-conflict",
       "读取模型期间设置已变化，请重新读取后再保存。",
     );
-  const updated = await service.update(owner, connectionId, { models, modelCapabilities }, configured ?? undefined);
+  const updated = await service.update(owner, connectionId, { models: modelEntries, ...(modelsError ? { modelCatalogError: modelsError } : {}) }, configured ?? undefined);
   if (!updated.ok) return fail(updated.error.code === "version-conflict" ? 409 : 500, updated.error.code, updated.error.message);
   return {
     status: 200,
-    body: { connectionId, models, ...(modelsError ? { modelsError } : {}) },
+    body: { connectionId, models: modelEntries.map((entry) => typeof entry === "string" ? entry : entry.id), ...(modelsError ? { modelsError } : {}) },
   };
 }

@@ -1,6 +1,7 @@
 /** Site Providers retain SettingsService as their single authority, including env locks and advanced fields. */
 import { createHash } from "node:crypto";
 import type {
+  AgentReasoningCapability,
   GenerationModelDefinition,
   GenerationProvider,
   ServiceConnectionCapability,
@@ -11,6 +12,7 @@ import type {
   ServiceConnectionPurpose
 } from "@woohaa3/contracts";
 import type { GenerationModelStoreSnapshot } from "@woohaa3/application-service";
+import { agentReasoningRevision, isAgentReasoningEffort } from "@woohaa3/contracts";
 import type { SettingsService } from "../../settings/settings-service.js";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -56,6 +58,22 @@ export function enabledAssistantModels(
   });
 }
 
+/** Provider 的能力事实 → Agent 目录同一份 reasoning 事实；布尔能力不扩展档位。 */
+function reasoningOf(model: GenerationModelDefinition): AgentReasoningCapability | undefined {
+  const facts = model.capabilityFacts?.reasoning;
+  if (!facts) return undefined;
+  const efforts = (facts.efforts ?? []).filter(isAgentReasoningEffort);
+  const revision = agentReasoningRevision(model.providerModelId, facts.supported, efforts.join(","));
+  return facts.supported
+    ? { state: "supported", source: "provider", revision, ...(efforts.length ? { efforts: efforts.map((id) => ({ id })) } : {}) }
+    : { state: "unsupported", source: "provider", revision };
+}
+
+/** 目录身份 → 上游模型 ID；Provider 未声明映射时两者相同。 */
+function toUpstreamModelId(mapper: ((modelId: string) => string) | undefined, modelId: string): string {
+  return mapper ? mapper(modelId) : modelId;
+}
+
 export function createSiteProviderSource(options: {
   providerId: string; extensionId: string; label: string; prefix: string;
   settings: SettingsService; provider: () => GenerationProvider | undefined;
@@ -81,36 +99,30 @@ export function createSiteProviderSource(options: {
     const capabilities = (provider?.models ?? []).map(model => {
       const purpose: ServiceConnectionPurpose = model.modelType === "language" ? "text" : model.modelType;
       purposes.add(purpose);
-      return { purpose, protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const };
+      return { purpose, protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const, ...(reasoningOf(model) ? { reasoning: reasoningOf(model) } : {}) };
     });
     const baseUrl = typeof values.baseUrl === "string" ? values.baseUrl : typeof values.baseURL === "string" ? values.baseURL : undefined;
     const assistantProtocol = factory?.assistantProtocol;
     // 助手模型必须与任务目录同一判据：站点策略里没启用的模型不进助手下拉。
     const assistantModels = assistantProtocol ? enabledAssistantModels(provider, options.policy?.()) : [];
-    // Per-model evidence only: a provider that cannot prove tools for a model must not project
-    // target execution. Catalog absence of evidence is treated as unsupported.
-    const assistantCapabilities: ServiceConnectionCapability[] = assistantModels.flatMap(model => {
+    // 所有文本模型都支持工具调用：assistant 协议下的语言模型统一投影为 text 能力；
+    // vision 证据仍用于图片输入。
+    const assistantCapabilities: ServiceConnectionCapability[] = assistantModels.map(model => {
       const evidence = provider?.languageCapabilities?.(model.providerModelId);
-      const discussion: ServiceConnectionCapability = {
-        purpose: "discussion", protocol: assistantProtocol!, modelId: model.providerModelId,
-        imageInput: evidence?.imageInput === true, evidence: "adapter"
+      return {
+        // 助手通道把模型名原样发给上游：目录身份若带来源前缀（如 RunningHub 的 `llm/`），
+        // 必须换成上游认识的 ID，否则上游 404 拒绝本轮。
+        purpose: "text", protocol: assistantProtocol!, modelId: toUpstreamModelId(factory?.upstreamModelId, model.providerModelId),
+        imageInput: evidence?.imageInput === true, evidence: "adapter", ...(reasoningOf(model) ? { reasoning: reasoningOf(model) } : {})
       };
-      return [
-        discussion,
-        ...(evidence?.tools === true ? [{ purpose: "target-execution" as const, protocol: assistantProtocol!, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const }] : [])
-      ];
     });
-    // A trusted assistant protocol is executable Agent evidence for discussion (and, per model,
-    // target execution). The stable binding lets the SDK Agent bridge project this source without
-    // an explicit admin opt-in.
-    const assistantPurposes: ServiceConnectionPurpose[] = [
-      "discussion",
-      ...(assistantCapabilities.some(capability => capability.purpose === "target-execution") ? ["target-execution" as const] : [])
-    ];
+    // 带可信 assistant 协议的来源可直接被 SDK Agent 桥接投影，无需管理员逐模型开启。
+    const assistantPurposes: ServiceConnectionPurpose[] = ["text"];
     const assistantBinding = assistantProtocol && assistantModels.length ? {
       bindingId: `provider-assistant:${options.providerId}`, extensionId: "sdk-agent", consumer: "agent" as const,
       consumerId: `shared:${assistantProtocol}`, purposes: assistantPurposes,
-      modelKeys: assistantModels.map(model => model.providerModelId),
+      // 与上方能力证据同一口径：来源授权按上游 ID 匹配，binding 不能保留目录身份。
+      modelKeys: assistantModels.map(model => toUpstreamModelId(factory?.upstreamModelId, model.providerModelId)),
     } : null;
     const endpoints: ServiceConnectionEndpoint[] = [];
     for (const declared of factory?.protocols ?? []) {

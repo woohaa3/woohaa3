@@ -132,11 +132,11 @@ describe("OpenCode v2 model catalog", () => {
   it("按 location 读取真实目录，身份用 providerID/modelID，Variant 只保留宿主认识的取值", async () => {
     const mock = openCodeMock("connected", catalog);
     const result = await createOpenCodeTransport(mock).models!(directory);
-    expect(result).toEqual({ models: [
+    expect(result.models).toMatchObject([
       { id: "openai/gpt-6", label: "GPT-6 (openai)", reasoningEfforts: ["low", "high"] },
       { id: "custom/gpt-6", label: "GPT-6 (custom)" },
       { id: "solo-provider/solo", label: "Solo (solo-provider)" }
-    ] });
+    ]);
     const request = mock.requests.find(entry => entry.path === "/api/model")!;
     expect(request.search).toBe("?location%5Bdirectory%5D=%2Fwork");
     expect(request.authorization).toBe("Basic process-auth");
@@ -156,7 +156,7 @@ describe("OpenCode v2 model catalog", () => {
       if (path === "/api/model") return json({ data: calls++ === 0 ? [] : [{ modelID: "m", providerID: "p", name: "M" }] });
       throw new Error(`Unexpected route ${path}`);
     });
-    expect(await createOpenCodeTransport({ fetchImpl, modelCatalogRetryMs: 0 }).models!(directory)).toEqual({ models: [{ id: "p/m", label: "M (p)" }] });
+    expect(await createOpenCodeTransport({ fetchImpl, modelCatalogRetryMs: 0 }).models!(directory)).toMatchObject({ models: [{ id: "p/m", label: "M (p)" }] });
     expect(calls).toBe(2);
   });
   it("目录读取失败如实返回原因，且 4xx 不重试", async () => {
@@ -283,6 +283,35 @@ describe("OpenCode v2 remote MCP", () => {
     });
     expect(await createOpenCodeTransport({ ...mock, catalogSettleMs: 0 }).run(input({ resumeNativeId: "session-1" }))).toMatchObject({ ok: true, outcome: { assistantText: "new reply" } });
     expect(mock.fetchImpl.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+  });
+
+  it("模型在 OpenCode 中不存在或配置移除时，从非 assistant 的 idle 消息读取 provider.no-route 并给出明确模型不可用提示", async () => {
+    const mock = openCodeMock();
+    const original = mock.fetchImpl.getMockImplementation()!;
+    mock.fetchImpl.mockImplementation(async (url, init) => {
+      const parsed = new URL(String(url));
+      const path = parsed.pathname;
+      if (path.endsWith("/message")) {
+        expect(parsed.searchParams.get("type")).toBeNull();
+        return json({
+          data: [
+            { id: "msg-user", type: "user", text: "prompt" },
+            { id: "msg-idle", type: "idle", outcome: "failed", error: { type: "provider.no-route", message: "Model unavailable: tencentwoa/deepseek-v4.1-flash" } }
+          ]
+        });
+      }
+      if (path === "/api/session/session-1" && init?.method === "GET") {
+        return json({ data: { id: "session-1", outcome: "failed" } });
+      }
+      return original(url, init);
+    });
+    const result = await createOpenCodeTransport({ ...mock, catalogSettleMs: 0 }).run(input({ model: "tencentwoa/deepseek-v4.1-flash" }));
+    expect(result).toEqual({
+      ok: false,
+      code: "model-access-denied",
+      message: "OpenCode 模型不可用或已从配置中移除：tencentwoa/deepseek-v4.1-flash（请重新选择模型）",
+      nativeId: "session-1"
+    });
   });
 });
 

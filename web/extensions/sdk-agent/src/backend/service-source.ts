@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ApplicationServiceConnectionFacade, ServiceConnectionProtocol, ServiceConnectionSourceAdapter, ServiceConnectionSourceSnapshot, ServiceConnectionPurpose } from "@woohaa3/contracts";
-import type { ConnectionService } from "@woohaa3/agent-connections";
+import { connectionModelCatalogRevision, modelCatalogForRecord, type ConnectionModelCapabilityRecord, type ConnectionService } from "@woohaa3/agent-connections";
 import { findSdkAgentAdapter, sdkEngineForAdapter } from "../shared.js";
 
 export function sdkSourceProtocol(adapterId: string): ServiceConnectionProtocol {
@@ -14,13 +14,10 @@ export function createSdkServiceSource(service: ConnectionService): ServiceConne
     const descriptor = record && findSdkAgentAdapter(record.adapterId);
     if (!record || !descriptor || record.serviceConnectionId || record.authMode !== "api-key") return null;
     const protocol = sdkSourceProtocol(record.adapterId);
-    const purposes: ServiceConnectionPurpose[] = ["discussion", "target-execution"];
+    const purposes: ServiceConnectionPurpose[] = ["text"];
     return { legacyId: id, scope: "personal", kind: "api", name: record.name,
       endpoints: [{ protocol, baseUrl: record.baseUrl ?? descriptor.officialBaseUrl }],
-      capabilities: (record.models ?? []).flatMap(modelId => [
-        { purpose: "discussion" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const },
-        ...(record.modelCapabilities?.[modelId]?.tools === true ? [{ purpose: "target-execution" as const, protocol, modelId, imageInput: false, evidence: "adapter" as const }] : []),
-      ]),
+      capabilities: modelCatalogForRecord(record).models.map((model) => ({ purpose: "text" as const, protocol, modelId: model.id, imageInput: false, evidence: "adapter" as const, reasoning: model.reasoning })),
       bindings: [{ bindingId: `sdk:${id}`, extensionId: "sdk-agent", consumer: "agent", consumerId: id, purposes, modelKeys: record.models ?? [] }],
       enabled: true, removed: false, locked: false,
       credentialConfigured: await service.credentialConfigured({ owner, connectionId: id, purpose: "model-api-key" }),
@@ -34,9 +31,11 @@ export function createSdkServiceSource(service: ConnectionService): ServiceConne
       return (await service.readCredential<{ secret: string }>({ owner, connectionId: id, purpose: "model-api-key" }))?.secret ?? null;
     } };
 }
-export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, owner: string, connectionId: string, service?: ConnectionService) {
+export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, owner: string, connectionId: string, service?: Pick<ConnectionService, "get">) {
   const record = await service?.get(owner, connectionId);
   if (record?.serviceConnectionId) return port.get(owner, record.serviceConnectionId);
+  // 旧式手填连接按 `consumerId === connectionId` 查找绑定。找不到绑定说明该来源没有声明
+  // 助手可用协议，返回 null 由调用方决定如何呈现（可见但不可用），而不是在这里静默丢失。
   return (await port.list(owner)).find(source => source.bindings.some(binding => binding.extensionId === "sdk-agent" && binding.consumerId === connectionId)) ?? null;
 }
 
@@ -44,33 +43,50 @@ export async function sdkSourceFor(port: ApplicationServiceConnectionFacade, own
  * Mutation handlers keep the raw service so their original CAS contract remains unchanged.
  */
 export function withServiceSources(service: ConnectionService, port: ApplicationServiceConnectionFacade): ConnectionService {
+  /**
+   * Project one stored connection onto its effective service source.
+   *
+   * A connection whose source is disabled, removed, or missing an `sdk-agent` binding is still
+   * returned — with `enabled: false` and a `reason` — instead of disappearing. Hiding it made
+   * a real configuration gap ("this provider never declared an assistant protocol") look like
+   * "the connection was never created", so the assistant panel silently lost the provider with
+   * no way to tell why.
+   */
   const project = async (owner: string, record: Awaited<ReturnType<ConnectionService["get"]>>) => {
     if (!record) return null;
     const source = await sdkSourceFor(port, owner, record.connectionId, service);
-    // A disabled, removed or opted-out source stops projecting its Agent connection; conversation history stays.
-    if (!source || !source.enabled || source.removed) return null;
-    const binding = source.bindings.find(item => item.extensionId === "sdk-agent" && (record.serviceConnectionId
-      ? item.consumerId === `shared:${sdkSourceProtocol(record.adapterId)}`
-      : item.consumerId === record.connectionId));
-    if (!binding?.purposes.includes("discussion")) return null;
-    const revision = Number.parseInt(createHash("sha256").update(JSON.stringify([record.configRevision, source.serviceConnectionId, source.configRevision, source.credentialEpoch, source.enabled, source.removed])).digest("hex").slice(0, 12), 16);
-    // Per-model evidence: a provider-declared assistant binding only grants target execution for
-    // models whose catalog explicitly proves tool support. Self-filled protocol bindings remain
-    // discussion-only, so they keep explicit tools:false evidence.
+    if (!source || source.removed) return null;
     const protocol = sdkSourceProtocol(record.adapterId);
-    const discussion = source.capabilities.filter(capability => capability.purpose === "discussion" && capability.protocol === protocol);
-    const modelCapabilities = Object.fromEntries(discussion.map(capability => [capability.modelId, {
-      tools: source.capabilities.some(item => item.purpose === "target-execution" && item.protocol === protocol && item.modelId === capability.modelId)
-    }]));
-    const shared = record.serviceConnectionId ? { name: source.name, models: discussion.map(capability => capability.modelId), modelCapabilities } : {};
-    return { ...record, ...shared, configRevision: revision,
-      baseUrl: source.endpoints.find(endpoint => endpoint.protocol === sdkSourceProtocol(record.adapterId))?.baseUrl ?? record.baseUrl };
+    const binding = source.bindings.find(item => item.extensionId === "sdk-agent" && (record.serviceConnectionId
+      ? item.consumerId === `shared:${protocol}`
+      : item.consumerId === record.connectionId));
+    // 所有文本模型都支持工具调用：来源里同一协议下的 text 能力直接就是可用的 Agent 模型。
+    const textModels = source.capabilities.filter(capability => capability.purpose === "text" && capability.protocol === protocol);
+    const revision = Number.parseInt(createHash("sha256").update(JSON.stringify([record.configRevision, source.serviceConnectionId, source.configRevision, source.credentialEpoch, source.enabled, source.removed])).digest("hex").slice(0, 12), 16);
+    const sharedModels: ConnectionModelCapabilityRecord[] = [...new Map(textModels.map((capability) => [capability.modelId, capability])).values()].map((capability) => ({
+      id: capability.modelId,
+      reasoning: capability.reasoning
+        ? { state: capability.reasoning.state, source: capability.reasoning.source, revision: capability.reasoning.revision, ...(capability.reasoning.efforts ? { efforts: capability.reasoning.efforts.map((option) => ({ ...option })) } : {}) }
+        : { state: "unknown", source: "provider", revision: "source-unreported" }
+    }));
+    const shared = record.serviceConnectionId ? { name: source.name, models: sharedModels.map((model) => model.id), modelCatalog: { revision: connectionModelCatalogRevision(sharedModels), models: sharedModels, capturedAt: "" } } : {};
+    const projected = {
+      ...record,
+      ...shared,
+      configRevision: revision,
+      baseUrl: source.endpoints.find(endpoint => endpoint.protocol === protocol)?.baseUrl ?? record.baseUrl
+    };
+    if (!source.enabled) return { ...projected, enabled: false, reason: "该服务连接已停用，重新启用后可用于助手" };
+    if (!binding?.purposes.includes("text")) {
+      return { ...projected, enabled: false, reason: "该服务连接没有声明助手可用的文本协议，无法在助手面板中使用" };
+    }
+    return projected;
   };
   const ensureShared = async (owner: string) => {
     const existing = await service.list(owner);
     for (const source of await port.list(owner)) {
       if (!source.enabled || source.kind !== "api") continue;
-      for (const binding of source.bindings.filter(binding => binding.extensionId === "sdk-agent" && binding.consumerId.startsWith("shared:") && binding.purposes.includes("discussion"))) {
+      for (const binding of source.bindings.filter(binding => binding.extensionId === "sdk-agent" && binding.consumerId.startsWith("shared:") && binding.purposes.includes("text"))) {
         const protocol = binding.consumerId.slice("shared:".length);
         const adapterId = ({ responses: "openai-responses", messages: "anthropic-messages", "chat-completions": "compat-chat", gemini: "gemini-agent-adk" } as Record<string, string>)[protocol];
         if (!adapterId || existing.some(record => record.serviceConnectionId === source.serviceConnectionId && record.adapterId === adapterId)) continue;
@@ -86,7 +102,7 @@ export function withServiceSources(service: ConnectionService, port: Application
       const record = await service.get(input.owner, input.connectionId);
       if (input.purpose !== "model-api-key" || !record) return service.credentialConfigured(input);
       const source = await sdkSourceFor(port, input.owner, record.connectionId, service);
-      return !!source?.enabled && !source.removed && source.credentialConfigured && source.bindings.some(binding => binding.extensionId === "sdk-agent" && binding.purposes.includes("discussion") && binding.consumerId === (record.serviceConnectionId ? `shared:${sdkSourceProtocol(record.adapterId)}` : record.connectionId));
+      return !!source?.enabled && !source.removed && source.credentialConfigured && source.bindings.some(binding => binding.extensionId === "sdk-agent" && binding.purposes.includes("text") && binding.consumerId === (record.serviceConnectionId ? `shared:${sdkSourceProtocol(record.adapterId)}` : record.connectionId));
     },
     get: async (owner, id) => project(owner, await service.get(owner, id)),
     list: async owner => (await Promise.all((await ensureShared(owner)).map(record => project(owner, record)))).filter((record): record is NonNullable<typeof record> => !!record),

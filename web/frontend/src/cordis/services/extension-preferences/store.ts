@@ -3,7 +3,7 @@
  * （change: add-frontend-plugin-manager，任务 2.1/2.2 / design D3/D6；
  *  其后按「配置文件是事实来源」重写：启停不再写浏览器 localStorage）。
  *
- * store 是配置文件 `extensions.frontend.<id>.enabled` 在浏览器侧的**只读投影 + 写入转发**：
+ * store 是配置文件 `extensions.<id>.enabled` 在浏览器侧的**只读投影 + 写入转发**：
  * - 读取：由调用方注入从宿主设置快照投影出的目标状态（`defaults` 兜底，缺省启用）；
  * - 写入：交给注入的 `persist`（走宿主设置 API，写进宿主配置文件并热生效），
  *   store 自己不持有任何持久化介质；
@@ -38,7 +38,7 @@ export type ExtensionPreferenceStoreOptions = {
    */
   defaults?: Readonly<Record<string, boolean>>;
   /**
-   * 从宿主设置快照投影出的目标状态（配置文件 `extensions.frontend.<id>.enabled`）。
+   * 从宿主设置快照投影出的目标状态（配置文件 `extensions.<id>.enabled`）。
    * 缺省表示宿主未提供：回退 `defaults`（再缺省启用）。
    */
   desired?: FrontendExtensionPreferences;

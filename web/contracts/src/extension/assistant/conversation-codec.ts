@@ -10,6 +10,7 @@ import { isBoundedId, isJsonObject, isNonEmptyString } from "../../validation.js
 import { decodeAssistantWorldScope } from "../../canvas/assistant-world-authority.js";
 import {
   isAgentEntryAction,
+  isAgentReasoningCapability,
   isAgentReasoningEffort,
   type AgentReasoningEffort,
   isAgentTargetMode,
@@ -101,7 +102,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   if (Object.keys(body).some(key => !["requestId", "entry"].includes(key))) return fail("malformed-request", "请求包含私有或未知字段");
   const entryRaw = body.entry;
   if (!isJsonObject(entryRaw)) return fail("malformed-request", "entry 必须是对象");
-  if (Object.keys(entryRaw).some(key => !["action", "canvasId", "nodeId", "mode", "cameraId", "clipId", "itemId", "worldScope", "model", "reasoningEffort", "connectionId", "connection", "expectedContentHash", "prompt", "references"].includes(key))) return fail("malformed-request", "entry 包含私有或未知字段");
+  if (Object.keys(entryRaw).some(key => !["action", "canvasId", "nodeId", "mode", "cameraId", "clipId", "itemId", "worldScope", "model", "reasoningEffort", "connectionId", "roleId", "connection", "expectedContentHash", "prompt", "references"].includes(key))) return fail("malformed-request", "entry 包含私有或未知字段");
   if (entryRaw.mode === "text" && ["cameraId", "clipId", "itemId", "worldScope"].some(key => entryRaw[key] !== undefined)) return fail("malformed-request", "文本目标不能带镜头或世界范围身份");
   if (entryRaw.mode === "world" && entryRaw.worldScope === undefined) return fail("malformed-request", "世界目标必须带可信范围选择");
   if (entryRaw.mode === "canvas-group" && entryRaw.nodeId === undefined) return fail("malformed-request", "2D 组目标必须带根组节点");
@@ -111,7 +112,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
     if (!scope.ok) return fail("malformed-request", scope.message);
   }
   const binding = entryRaw.connection;
-  if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0))) return fail("malformed-request", "connection 非法");
+  if (binding !== undefined && (!isJsonObject(binding) || Object.keys(binding).some(key => !["connectionId", "adapterId", "configRevision", "credentialEpoch", "capabilityRevision"].includes(key)) || !isBoundedId(binding.connectionId) || !isBoundedId(binding.adapterId) || ![binding.configRevision, binding.credentialEpoch].every(n => Number.isSafeInteger(n) && (n as number) >= 0) || (binding.capabilityRevision !== undefined && !isBoundedId(binding.capabilityRevision)))) return fail("malformed-request", "connection 非法");
   const action = entryRaw.action;
   if (!isAgentEntryAction(action)) return fail("malformed-request", "action 必须是 discuss / generate / modify");
   const canvasId = readId(entryRaw.canvasId, "canvasId");
@@ -129,6 +130,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
   }
   if (entryRaw.model !== undefined && !isBoundedId(entryRaw.model)) return fail("malformed-request", "model 非法");
   if (entryRaw.connectionId !== undefined && !isBoundedId(entryRaw.connectionId)) return fail("malformed-request", "connectionId 非法");
+  if (!isBoundedId(entryRaw.roleId)) return fail("malformed-request", "必须明确指定有效 roleId");
   if (entryRaw.reasoningEffort !== undefined && !isAgentReasoningEffort(entryRaw.reasoningEffort)) return fail("malformed-request", "reasoningEffort 非法");
   const references = decodeReferences(entryRaw.references);
   if (references === null) return fail("malformed-request", "references 非法");
@@ -147,6 +149,7 @@ export function decodeAcceptTurnRequest(body: unknown): AgentConversationDecodeR
     ...(entryRaw.model === undefined ? {} : { model: entryRaw.model as string }),
     ...(entryRaw.reasoningEffort === undefined ? {} : { reasoningEffort: entryRaw.reasoningEffort as AgentReasoningEffort }),
     ...(entryRaw.connectionId === undefined ? {} : { connectionId: entryRaw.connectionId as string }),
+    ...(entryRaw.roleId === undefined ? {} : { roleId: entryRaw.roleId as string }),
     ...(entryRaw.expectedContentHash === undefined ? {} : { expectedContentHash: entryRaw.expectedContentHash as string }),
     prompt: entryRaw.prompt,
     ...(references === undefined ? {} : { references })
@@ -216,8 +219,9 @@ export function decodeAdapterQuery(value: string | null | undefined): string | u
 export function isAgentCatalogSnapshot(value: unknown): value is AgentCatalogSnapshot {
   if (!isJsonObject(value)) return false;
   if (!Array.isArray(value.models)) return false;
-  const shapeOk = value.models.every((entry) => isJsonObject(entry) && isBoundedId(entry.id) && typeof entry.label === "string" && (entry.reasoningEfforts === undefined || (Array.isArray(entry.reasoningEfforts) && entry.reasoningEfforts.every(isAgentReasoningEffort))));
+  const shapeOk = value.models.every((entry) => isJsonObject(entry) && isBoundedId(entry.id) && typeof entry.label === "string" && (entry.reasoningEfforts === undefined || (Array.isArray(entry.reasoningEfforts) && entry.reasoningEfforts.every(isAgentReasoningEffort))) && (entry.reasoning === undefined || isAgentReasoningCapability(entry.reasoning)));
   if (!shapeOk) return false;
+  if (value.capabilityRevision !== undefined && !isBoundedId(value.capabilityRevision)) return false;
   return value.error === undefined || typeof value.error === "string";
 }
 
@@ -235,6 +239,7 @@ export function isAgentEntryIntent(value: unknown): value is AgentEntryIntent {
   if (value.model !== undefined && !isBoundedId(value.model)) return false;
   if (value.reasoningEffort !== undefined && !isAgentReasoningEffort(value.reasoningEffort)) return false;
   if (value.connectionId !== undefined && !isBoundedId(value.connectionId)) return false;
+  if (value.roleId !== undefined && !isBoundedId(value.roleId)) return false;
   if (value.references !== undefined) {
     if (!Array.isArray(value.references)) return false;
     if (!value.references.every((entry) => isJsonObject(entry) && (entry.kind === "asset" || entry.kind === "node"))) return false;

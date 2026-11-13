@@ -18,7 +18,6 @@ import { observeContentResolver, type ContentContributionResolver } from "../con
 import type { CanvasNodeData } from "./types";
 import type { Woohaa3CanvasJsonObject } from "./core";
 import { normalizeVideoEditIntents } from "../../video/video-edit.js";
-import { decodeModelCameras } from "../model-cameras.js";
 import { decodeModel3DNodeData } from "../canvas-node-model.js";
 import { model3DNodeDataFields } from "../animation-snapshot.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
@@ -141,12 +140,6 @@ export function sanitizeRuntimeNodeConfigPatch(input: unknown, context?: { conte
     if (!pose.ok) return pose;
     if (Object.keys(pose.value).length > 0) value.shotPose = pose.value;
   }
-  if ("modelCameras" in input) {
-    const cameras = decodeModelCameras(input.modelCameras);
-    if (!cameras.ok) return { ok: false, reason: cameras.reason };
-    // 空数组是合法的“删除所有镜头”，因此即使为空也写入（与 modelPlacement 语义不同）。
-    value.modelCameras = cameras.value as unknown as Woohaa3CanvasJsonObject[string];
-  }
 
   if (Object.keys(value).length === 0) {
     // 只包含越权/未知字段：运行时不得借此写入任何规范数据。
@@ -206,13 +199,6 @@ export function sanitizeNodeDataForClipboard(input: unknown, context?: { content
     // 模型镜头：只复制规范化后的安全子集（丢弃未知字段/非法元素），
     // 绝不复制 selection、preview URL、Blob 或 capture 状态
     // （change: add-model-editor-gizmo-shot-capture，design D2）。
-    if (key === "modelCameras") {
-      const normalized = decodeModelCameras(raw);
-      if (normalized.ok && normalized.value.length > 0) {
-        value[key] = normalized.value as unknown as Woohaa3CanvasJsonObject[string];
-      }
-      continue;
-    }
     // 自包含 3D 节点：复制时携带完整自身定义，不依赖来源节点。
     if (!owned && key === "modelContentVersion") {
       const model = decodeModel3DNodeData(source);

@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 use crate::isometric_grid::CANVAS_CAMERA_Z;
 
+mod near;
+
 /// 单个模型的候选世界 AABB（由 model3d 派生后传入）。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ModelCandidate {
@@ -211,6 +213,9 @@ pub(crate) fn pick_query_json(json: &str) -> String {
         y: f32,
         width: f32,
         height: f32,
+        /// 可选：指针到最近露出表面的屏幕像素容差（细长/带孔模型的胖点选）。
+        #[serde(default)]
+        tolerance: Option<f32>,
     }
     let request = match serde_json::from_str::<Request>(json) {
         Ok(request) => request,
@@ -274,6 +279,8 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     let mut candidates = CANDIDATES.with(|slot| slot.borrow().iter().filter(|candidate| !candidate.shared_world).cloned().collect::<Vec<_>>());
     SHARED_CURRENT.with(|slot| candidates.extend(slot.borrow().iter().cloned()));
     let camera = CAMERA.with(|slot| *slot.borrow());
+    // 普通正交画布才提供像素容差的兜底（聚焦是单模型透视编辑，点选保持精确）。
+    let mut ordinary_view: Option<crate::isometric_grid::IsometricGridView> = None;
     let (origin, direction, max_t) = if let Some(focus) = camera.focus {
         let width = if camera.surface[0].is_finite() && camera.surface[0] > 1.0 {
             camera.surface[0]
@@ -308,12 +315,29 @@ pub(crate) fn pick_query_json(json: &str) -> String {
         (position, (rotation * local).normalize_or_zero(), 200_000.0)
     } else {
         let view = crate::isometric_grid::IsometricGridView { x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2] };
+        ordinary_view = Some(view);
         let projection = crate::isometric_grid::canvas_camera_projection();
         let origin = crate::isometric_grid::screen_point_to_world(bevy::prelude::Vec2::new(request.x, request.y), CANVAS_CAMERA_Z - projection.near, &view);
         let direction = crate::isometric_grid::canvas_camera_rotation() * bevy::prelude::Vec3::NEG_Z;
         (origin, direction, projection.far - projection.near)
     };
-    let picked = pick_candidates(&candidates, origin, direction, max_t);
+    let mut picked = pick_candidates(&candidates, origin, direction, max_t);
+    // 精确射线穿过表面空隙（细长/带孔模型）时，仅在有界像素容差内补一次最近露出表面；
+    // 包围盒内的空白不算命中，否则大模型会把导演区外的空白点击吞成选中。
+    if picked.is_none()
+        && let Some(view) = ordinary_view
+        && let Some(tolerance) = request.tolerance
+        && tolerance.is_finite()
+        && tolerance > 0.0
+    {
+        picked = near::pick_candidates_near(
+            &candidates,
+            &view,
+            request.x,
+            request.y,
+            tolerance.min(near::MAX_TOLERANCE_PX),
+        );
+    }
     let result = match picked {
         Some((node_id, target, radius)) => ModelPickResult {
             available: true,
@@ -400,34 +424,8 @@ fn marquee_node_ids(
         if !seen.insert(candidate.node_id.as_str()) {
             continue;
         }
-        if !candidate.min.iter().chain(candidate.max.iter()).all(|value| value.is_finite()) {
-            continue;
-        }
-        let mut sx_min = f32::INFINITY;
-        let mut sx_max = f32::NEG_INFINITY;
-        let mut sy_min = f32::INFINITY;
-        let mut sy_max = f32::NEG_INFINITY;
-        for xi in [candidate.min[0], candidate.max[0]] {
-            for yi in [candidate.min[1], candidate.max[1]] {
-                for zi in [candidate.min[2], candidate.max[2]] {
-                    let point = crate::isometric_grid::screen_point_from_world(
-                        bevy::prelude::Vec3::new(xi, yi, zi),
-                        view,
-                    );
-                    if !point.x.is_finite() || !point.y.is_finite() {
-                        continue;
-                    }
-                    sx_min = sx_min.min(point.x);
-                    sx_max = sx_max.max(point.x);
-                    sy_min = sy_min.min(point.y);
-                    sy_max = sy_max.max(point.y);
-                }
-            }
-        }
-        if !sx_min.is_finite() || !sy_min.is_finite() {
-            continue;
-        }
-        if sx_min < right && sx_max > left && sy_min < bottom && sy_max > top {
+        let Some((low, high)) = near::screen_bounds(candidate.min, candidate.max, view) else { continue };
+        if low.x < right && high.x > left && low.y < bottom && high.y > top {
             out.push(candidate.node_id.clone());
         }
     }

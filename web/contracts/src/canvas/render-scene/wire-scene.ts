@@ -6,7 +6,7 @@
  * 也不依赖具体业务领域模块（仅引用叶子 wire 类型）。
  */
 import type { AppThemeSnapshot } from "../../theme/index.js";
-import type { BevyModelPreview, BevyModelReference } from "./wire-model.js";
+import type { BevyModelReference } from "./wire-model.js";
 import type { BevyNodeKind } from "./node-geometry.js";
 import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wire-transient.js";
 
@@ -87,7 +87,10 @@ import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wi
 // v41: transient assistant execution feedback on scope borders.
 // v42: world-camera cards carry derived `cameraShot` (video duration/status). Older
 //      renderers would ignore it and keep claiming a static image card.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v42" as const;
+// v43: legacy model cards are gone. `modelPreview` / `ModelReference.placement` are removed and
+//      `model3d` without `sharedWorldInstance` only projects a read-only diagnostic card; older
+//      renderers would draw a preview card or a stale orbit pose, so reject mixed combinations.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v43" as const;
 
 /**
  * 非内容节点的画布 chrome。
@@ -157,7 +160,7 @@ export type BevyRenderNode = {
   mediaLoading?: boolean;
   /** 是否有可显示纹理（图片/视频封面）。 */
   texture: boolean;
-  /** 是否绘制右下角 resize 抓手（仅单选节点，change: add-node-resize）。 */
+  /** 是否绘制四角 resize 抓手（仅单选节点，change: add-node-resize）。 */
   resizable: boolean;
   /**
    * 是否上传中的幽灵节点（只渲染、不可交互；change: add-paste-import-workflows）。
@@ -171,10 +174,8 @@ export type BevyRenderNode = {
    * 「3D 模型」与「导演场」，避免两类都显示同一分类名。
    */
   cardLabel?: string;
-  /** 3D 模型轻量引用（仅 model3d 且脚本执行成功时）。 */
+  /** 3D 模型轻量引用（仅受支持的共享世界模型且资源已准备时）。 */
   model?: BevyModelReference;
-  /** Browser-local orbit view rendered into the card, never into canonical nodeData. */
-  modelPreview?: BevyModelPreview;
   /**
    * 节点下方独立历史条呈现（change: 2026-10-12-unify-generation-history-strip，design D4）。
    *
@@ -188,7 +189,7 @@ export type BevyRenderNode = {
 export type BevyNodeAction = {
   /** 通用动作强调与图标呈现。 */
   tone?: "primary" | "neutral";
-  icon?: "download" | "edit" | "box" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups";
+  icon?: "download" | "edit" | "box" | "arrange-horizontal" | "arrange-vertical" | "arrange-grid" | "arrange-diagonal-up" | "arrange-diagonal-down" | "collapse-groups" | "expand-groups" | "rotate-clockwise";
   iconOnly?: boolean;
   /** 稳定动作 ID；Rust 命中后回传，贡献据此派发。 */
   id: string;

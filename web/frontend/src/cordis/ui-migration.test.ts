@@ -31,7 +31,6 @@ export const FIRST_WAVE_SURFACES: Record<string, string[]> = {
   // task-activity 浮层已迁至独立 extension 包
   // （change: 2026-10-10-extract-optional-feature-extensions），宿主不再持有该 surface 实现。
   "dialog-surface": ["cordis/services/dialogs/DialogHost.tsx"],
-  "model-editor-toolbar": ["cordis/plugins/model-editor/model-editor-toolbar.tsx"]
 };
 
 /**

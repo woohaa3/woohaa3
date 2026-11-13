@@ -28,8 +28,6 @@ pub(super) fn sync_focus(
     scene: Res<CurrentScene>,
     observer: Res<FocusObserverRig>,
     mut rig: ResMut<FocusRig>,
-    previews: Res<crate::model_preview::Previews>,
-    preview_cameras: Query<(&Transform, &Projection), Without<model3d::grid::ModelCanvasCamera>>,
     mut observer_rig: Query<(
         &mut orbit_camera::OrbitCameraPose,
         &mut orbit_camera::OrbitCameraTarget,
@@ -44,34 +42,17 @@ pub(super) fn sync_focus(
     };
     let focused = scene.0.model_focus.is_some();
     let view = model3d::grid::scene_view(&scene.0);
-    // Model cards have their own camera. Expand that camera to the canvas while preserving
-    // the card's current screen position; the global isometric camera never saw this image.
+    // 聚焦只在世界相机与画布相机之间过渡：模型没有卡片相机，退出时不再对齐卡片取景
+    // （change: 2026-11-10-remove-legacy-model-card-nodes）。
     let preview_id = scene
         .0
         .model_focus
         .as_ref()
         .map(|focus| focus.node_id.as_str())
         .or(rig.focus_node.as_deref());
-    let overview = preview_id.and_then(|id| {
-        let node = scene
-            .0
-            .nodes
-            .iter()
-            .find(|node| node.id == id && node.model_preview.is_some())?;
-        let (pose, projection) = preview_cameras.get(previews.camera(id)?).ok()?;
-        model3d::focus_transition::overview_camera(
-            &scene.0,
-            node,
-            pose,
-            projection,
-            previews.pivot(id)?,
-        )
-    });
     let target = match &scene.0.model_focus {
         Some(focus) => model3d::focus::focus_camera_transform(focus),
-        None => overview.as_ref().map(|(pose, _)| *pose).unwrap_or_else(|| {
-            model3d::focus::home_camera_transform(surface_size(&scene.0), &view)
-        }),
+        None => model3d::focus::home_camera_transform(surface_size(&scene.0), &view),
     };
     let duration = model3d::focus::FOCUS_TRANSITION_SECS;
 
@@ -94,7 +75,7 @@ pub(super) fn sync_focus(
         let (from, from_projection) = if rig.animating() {
             (*transform, projection.clone())
         } else {
-            overview.clone().unwrap_or((*transform, projection.clone()))
+            (*transform, projection.clone())
         };
         rig.transition = crate::camera_transition::CameraTransition {
             from,
@@ -134,9 +115,6 @@ pub(super) fn sync_focus(
         let from_projection = projection.clone();
         let mut to_projection = projection.clone();
         apply_focus_projection(&mut to_projection, false, &scene, &mut camera2d);
-        if let Some((_, overview_projection)) = &overview {
-            to_projection = overview_projection.clone();
-        }
         to_projection.update(
             surface_size(&scene.0).map(|s| s.0).unwrap_or(1.0),
             surface_size(&scene.0).map(|s| s.1).unwrap_or(1.0),

@@ -12,6 +12,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createStaticHandler, send } from "./lib/static-server.mjs";
+import { applyHostHttpTiming } from "./lib/host-http-timing.mjs";
 import { resolveAppPageTitle } from "./lib/app-html.mjs";
 import { loadExtensionHost } from "./lib/extension-host.mjs";
 import { injectReleaseLinkHtml } from "./lib/extension-release-catalog.mjs";
@@ -78,7 +79,7 @@ const serveStatic = createStaticHandler(dist, {
 	...(extensionHost?.browserRelease ? { transformHtml: (html) => { const href = currentReleaseHref(); return href ? injectReleaseLinkHtml(html, href) : html; } } : {})
 });
 
-const server = http.createServer((req, res) => {
+const server = applyHostHttpTiming(http.createServer((req, res) => {
 	if (serviceEnv.WOOHAA_IMAGE_THREADS_ISOLATION === "1") {
 		res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 		res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
@@ -96,7 +97,7 @@ const server = http.createServer((req, res) => {
 			if (!res.headersSent) send(res, 502, "backend failure");
 			else res.end();
 		});
-});
+}));
 
 // WebSocket upgrade（Canvas Session）交给后端进程内的 Canvas 同步面；WS 不进行无尾斜杠重定向。
 server.on("upgrade", (req, socket, head) => {

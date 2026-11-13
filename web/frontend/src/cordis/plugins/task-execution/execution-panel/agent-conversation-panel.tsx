@@ -8,6 +8,7 @@
  *
  * 纯展示 + 受控导航；DOM/几何避让由宿主在注册 panel definition 处按宽度上报 `setContentRect`。
  */
+import { AGENT_ROLE_BINDINGS, roleIdForTarget } from "../../../services/agent-role-bindings.js";
 import {
   useCallback,
   useEffect,
@@ -17,6 +18,7 @@ import {
 } from "react";
 import {
   UNCONFIRMED_WRITE_ERROR_CODE,
+  reasoningEffortsOf,
   type AgentEntryIntent,
   type ConversationSnapshot,
   type ConversationTurn,
@@ -30,7 +32,7 @@ import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from
 import { AssistantComposer } from "@woohaa3/ui/assistant";
 import { AssistantToolbar } from "@woohaa3/ui/assistant";
 import { Button } from "@woohaa3/ui/primitives";
-import { AssistantModelSelector, AssistantListSelector } from "@woohaa3/ui/assistant";
+import { AssistantConfiguration, ReasoningParameters } from "../../../ui/assistant-execution/configuration.js";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
 import {
@@ -170,9 +172,16 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const replyModels = agentDirectoryModels(replyConnection?.models, replyConnection ? directoryView.catalogs[replyConnection.adapterId]?.models : undefined);
   const modelKey = replyConnectionId ?? "legacy";
   const replyModel = input.draft.models[modelKey] ?? latest?.target.model ?? "";
-  const replyEffort = input.draft.efforts[modelKey] ?? (input.draft.models[modelKey] === undefined ? latest?.target.reasoningEffort : undefined) ?? "";
+  const effortKey = `${modelKey}:${replyModel}`;
+  const replyEffort = input.draft.efforts[effortKey] ?? (input.draft.models[modelKey] === undefined ? latest?.target.reasoningEffort : undefined) ?? "";
   const toolDefault = replyConnection?.authMode === "local-login";
   const modelSelection = agentModelSelection(replyModels, replyModel, replyEffort, Boolean(replyConnection) && !toolDefault);
+  useEffect(() => {
+    if (modelSelection.invalidEffort && directoryView.ready && !directoryView.loadingMessage) {
+      controller.edit({ efforts: { ...controller.getSnapshot().draft.efforts, [effortKey]: "" } });
+      setReplyError("新模型不支持原思考强度，已恢复默认");
+    }
+  }, [controller, effortKey, modelSelection.invalidEffort, directoryView.ready, directoryView.loadingMessage]);
   const replyBinding = input.draft.connection ?? latest?.connection;
   const rememberReply = (model = replyModel, reasoningEffort: typeof replyEffort = replyEffort) => {
     if (replyConnection) rememberAssistantPreference(service.getDataScopeId?.() ?? "page", { sourceId: replyConnection.adapterId, connectionId: replyConnection.connectionId, model, reasoningEffort });
@@ -180,16 +189,20 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const selectionReason = !replyConnectionId ? "" : !directoryView.ready ? "正在读取助手连接…"
     : !replyConnection ? "原助手连接已失效，请选择其他连接"
     : !replyConnection.ready ? replyConnection.reason ?? "原助手尚未就绪"
-    : !replyConnection.capabilities.discussion ? "此连接不支持讨论，请切换助手"
+    : !replyConnection.capabilities.tools ? "此连接不支持修改作品，请切换助手"
     : replyBinding && (replyBinding.configRevision !== replyConnection.configRevision || replyBinding.credentialEpoch !== replyConnection.credentialEpoch) ? "助手连接版本已变更，请重新选择"
     : modelSelection.invalidModel || modelSelection.missingRequiredModel ? "原模型已失效，请重新选择"
-    : modelSelection.invalidEffort ? "原 Variant 已失效，请重新选择" : "";
-  const chooseConnection = async (id: string) => {
+    : modelSelection.invalidEffort ? "原思考强度 已失效，请重新选择" : "";
+  const chooseConnection = async (id: string, model: string) => {
     const connection = directoryView.connections.find(connection => connection.connectionId === id);
     if (!connection || input.busy || switchingConnection || snapshot.detail?.turns.some(turn => !isTurnSettled(turn.status))) return;
     if (id === replyConnectionId) {
+      const nextEffort = input.draft.efforts[`${id}:${model}`] ?? "";
+      const options = replyModels.find(m => m.id === model) ? reasoningEffortsOf(replyModels.find(m => m.id === model)!) : [];
+      if (replyEffort && !nextEffort && !options.includes(replyEffort)) setReplyError("新模型不支持原思考强度，已恢复默认");
       controller.edit({ connection: { connectionId: id, adapterId: connection.adapterId, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch } });
-      rememberReply();
+      controller.edit({ models: { ...input.draft.models, [modelKey]: model } });
+      rememberReply(model, nextEffort);
       return;
     }
     if (!props.nodeId || !snapshot.detail) { setReplyError("请返回作品面板切换助手连接。"); return; }
@@ -205,7 +218,8 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
       const selection = { sourceId: connection.adapterId, connectionId: id };
       memory.set(`${snapshot.detail.conversation.canvasId}:${props.nodeId}`, selection);
       memory.set("last-explicit", selection);
-      rememberAssistantPreference(service.getDataScopeId?.() ?? "page", { sourceId: connection.adapterId, connectionId: id });
+      rememberAssistantPreference(service.getDataScopeId?.() ?? "page", { sourceId: connection.adapterId, connectionId: id, model });
+      controller.edit({ connection: { connectionId: id, adapterId: connection.adapterId, configRevision: connection.configRevision, credentialEpoch: connection.credentialEpoch }, models: { ...input.draft.models, [id]: model } });
       props.onClose();
     }
     else setReplyError(result.error);
@@ -244,12 +258,13 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
       setReplyError("场景范围已失效，请回到导演区或镜头面板重新打开助手。");
       return;
     }
-    // 在点击时重读写权限、目标及内容版本；不可写时保留草稿，不降级成纯讨论。
-    const execution = modifying ? props.targetExecution?.() : null;
-    if (modifying && (!execution || execution.nodeId !== props.nodeId || execution.canvasId !== snapshot.detail.conversation.canvasId)) {
+    // 会话只用于继续修改原目标；没有可写目标时不再提供“纯讨论”回退。
+    if (!generateText && !modifying) { setReplyError("该会话没有可修改的目标。"); return; }
+    const execution = generateText ? null : props.targetExecution?.();
+    if (!generateText && (!execution || execution.nodeId !== props.nodeId || execution.canvasId !== snapshot.detail.conversation.canvasId)) {
       setReplyError("当前作品不可修改，请确认作品仍存在且画布可写。"); return;
     }
-    if (modifying && replyConnection && !replyConnection.capabilities.tools) {
+    if (replyConnection && !replyConnection.capabilities.tools) {
       setReplyError("此连接不支持修改作品，请切换支持修改作品的助手。"); return;
     }
     setReplyError(null);
@@ -262,7 +277,10 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
       entry: {
         ...(snapshot.detail.conversation.connectionId ? { connectionId: snapshot.detail.conversation.connectionId } : {}),
         ...(replyBinding ? { connection: replyBinding } : {}),
-        action: generateText ? "generate" : modifying ? "modify" : "discuss", canvasId: snapshot.detail.conversation.canvasId,
+        action: generateText ? "generate" : "modify", canvasId: snapshot.detail.conversation.canvasId,
+        roleId: generateText
+          ? AGENT_ROLE_BINDINGS.textAuthor
+          : execution?.roleId ?? roleIdForTarget({ ...(continuationMode ? { mode: continuationMode } : {}), ...(continuationWorldScope ? { worldScope: continuationWorldScope } : {}) }),
         ...(props.nodeId ? { nodeId: props.nodeId } : {}), prompt,
         ...(continuationMode ? { mode: continuationMode } : {}),
         ...(continuationWorldScope ? { worldScope: continuationWorldScope } : {}),
@@ -495,19 +513,18 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
       {turn?.target.mode === "text" ? <Button tone="neutral" disabled={!props.targetExecution?.() || input.busy || !draft.trim() || Boolean(selectionReason)} onClick={() => submitReply(undefined, true)}>按描述继续生成文本</Button> : null}
       <form className="agent-detail__reply" onSubmit={submitReply}>
         <AssistantComposer className="agent-detail__reply-input" rows={2}
-          placeholder={modifying ? "描述要继续修改的内容" : "继续讨论（不会修改作品）"}
+          placeholder={modifying || turn?.target.mode === "text" ? "描述要继续修改的内容" : "该会话没有可修改的目标"}
           value={draft} onChange={setDraft} disabled={!detail || input.busy || turnActive || switchingConnection} onSubmit={() => submitReply()} />
         <AssistantToolbar disabled={input.busy || switchingConnection || turnActive} refreshing={Boolean(directoryView.loadingMessage)}
           onRefresh={() => void directory.load(true)} onManage={props.onManageAssistant}
-          assistant={replyConnectionId ? <AssistantListSelector label="选择助手" model={replyConnectionId} options={directoryView.connections.map(connection => ({ value: connection.connectionId, label: connection.name, detail: connection.reason ?? undefined }))}
-            open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)} onChange={id => void chooseConnection(id)} />
-            : undefined}
-          parameters={replyConnectionId ? <AssistantModelSelector label="选择助手模型" model={replyModel} options={replyModels.map(model => ({ value: model.id, label: model.label }))}
-            open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={input.busy || turnActive || Boolean(input.pending) || toolDefault} keepOpenOnModelSelect
-            onChange={model => { controller.edit({ models: { ...input.draft.models, [modelKey]: model }, efforts: { ...input.draft.efforts, [modelKey]: "" } }); rememberReply(model, ""); }}
-            variant={modelSelection.supportedEfforts.length ? { value: replyEffort, options: [{ value: "", label: "默认 Variant" }, ...modelSelection.supportedEfforts.map(value => ({ value, label: value }))],
-              onChange: effort => { controller.edit({ efforts: { ...input.draft.efforts, [modelKey]: effort as typeof replyEffort } }); rememberReply(replyModel, effort as typeof replyEffort); } } : undefined} /> : undefined}
-          submit={<Button type="submit" tone="primary" disabled={input.busy || draft.trim() === "" || turnActive || Boolean(selectionReason && !input.pending)}>{modifying ? "发送并修改" : "发送讨论"}</Button>} />
+          assistant={<AssistantConfiguration service={service} connectionId={replyConnectionId ?? ""} model={replyModel} purpose={turn?.target.mode ?? "reply"}
+            open={selector === "assistant"} onOpenChange={open => setSelector(open ? "assistant" : null)} disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)} onManage={props.onManageAssistant}
+            reasonFor={c => !c.capabilities.tools && modifying ? "此连接不支持修改作品" : undefined}
+            onSelect={(c, model) => void chooseConnection(c.connectionId, model)} />}
+          parameters={<ReasoningParameters value={replyEffort} options={modelSelection.supportedEfforts} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={input.busy || turnActive || Boolean(input.pending)}
+            onChange={effort => { controller.edit({ efforts: { ...input.draft.efforts, [effortKey]: effort as typeof replyEffort } }); rememberReply(replyModel, effort as typeof replyEffort); }} />}
+
+          submit={<Button type="submit" tone="primary" disabled={input.busy || draft.trim() === "" || turnActive || (!modifying && turn?.target.mode !== "text") || Boolean(selectionReason && !input.pending)}>发送并修改</Button>} />
         {selectionReason ? <p className="agent-detail__reply-error">{selectionReason}</p> : null}
         {input.pending ? <button type="button" disabled={input.busy} onClick={() => void controller.query(port)}>核对原请求</button> : null}
         {input.notice ? <p className="agent-detail__reply-error">{input.notice}</p> : null}

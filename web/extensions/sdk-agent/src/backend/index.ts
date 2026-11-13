@@ -27,7 +27,8 @@ import type {
 import { agentConnectionProviderCapabilityId, agentConversationAdapterCapabilityId } from "@woohaa3/contracts";
 import { createConnectionService, createConnectionProvider, redactEvent } from "@woohaa3/agent-connections";
 import { SDK_AGENT_PLUGIN_ID, readAllowedHostsFromEnv, readAllowHttpFromEnv } from "../shared.js";
-import { createSdkAgentDescriptors, createSdkAgentConversationAdapter } from "./sdk-agent-connections.js";
+import { createSdkAgentConversationAdapter } from "./execution-client.js";
+import { createSdkAgentDescriptors } from "./sdk-agent-connections.js";
 import { createSdkAgentHandler } from "./handler.js";
 import { SDK_AGENT_ADAPTERS, sdkEngineForAdapter } from "../shared.js";
 
@@ -89,7 +90,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         ...(host.services.secrets ? { secrets: host.services.secrets } : {})
       });
 
-      const releaseConsumer = host.services.serviceConnections?.registerConsumer({ protocols: ["responses", "messages", "chat-completions", "gemini"], purposes: ["discussion", "target-execution"] });
+      const releaseConsumer = host.services.serviceConnections?.registerConsumer({ protocols: ["responses", "messages", "chat-completions", "gemini"], purposes: ["text"] });
       const releaseSource = host.services.serviceConnections?.registerSource(createSdkServiceSource(service));
       const executionService = host.services.serviceConnections ? withServiceSources(service, host.services.serviceConnections) : service;
 
@@ -101,6 +102,7 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
       const runtime = agentSdkDirs ? createFixedEngineRuntime(agentSdkDirs) : undefined;
       const inFlight = new Set<Promise<unknown>>();
       const runtimeOptions = {
+        executor: host.services.executor,
         ...(runtime ? { runtime } : {}),
         ...(host.services.authoring?.authoring ? { authoring: host.services.authoring.authoring } : {}),
         service: executionService,
@@ -149,7 +151,8 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         service,
         runtimeOptions,
         deployment: { allowedHosts, allowHttp, ...(agentSdkDirs ? { agentSdkDirs } : {}), get mcpServerUrl() { return mcpServerUrlOf(); }, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) },
-        ...(host.services.authoring?.tools ? { tools: host.services.authoring.tools } : {})
+        ...(host.services.authoring?.tools ? { tools: host.services.authoring.tools } : {}),
+        ...(host.services.agentRoles ? { prepareRole: host.services.agentRoles } : {})
       });
 
       const register = (route: string, method: "GET" | "POST" | "DELETE", purpose: "read" | "new-work" | "work-control" | "auth-transaction") => {
