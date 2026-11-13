@@ -1,6 +1,6 @@
 /**
  * browser-local 插件启停的配置来源
- * （配置文件是事实来源：`extensions.frontend.<id>.enabled`）。
+ * （配置文件是事实来源：`extensions.<id>.enabled`）。
  *
  * 三个职责，全部经宿主设置 API：
  * - `readFrontendExtensionPreferences`：从 `GET /api/settings` 快照投影目标状态；

@@ -129,7 +129,7 @@ export function createSettingsApiHandler(deps: SettingsApiDependencies): (req: I
     }
 
     if (frontendPluginWrite) {
-      // browser-local 插件启停：写入宿主的同一个配置文件（extensions.frontend.<id>.enabled），
+      // browser-local 插件启停：写入宿主的同一个配置文件（extensions.<id>.enabled），
       // 与 provider 参数同层；前端随后按配置热装/热卸，不再自持 localStorage。
       if (req.method !== "PUT") {
         sendJson(res, 405, { code: "unsupported", message: "仅支持 PUT" });

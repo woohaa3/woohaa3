@@ -173,7 +173,7 @@ export type FrontendRuntime = {
 /**
  * 运行期按 id 装配/卸下 optional 插件的能力（plugin hot swap）。
  *
- * 供 composition root 跟随宿主配置（\`extensions.frontend.<id>.enabled\`）在**不重建页面 scope**的
+ * 供 composition root 跟随宿主配置（\`extensions.<id>.enabled\`）在**不重建页面 scope**的
  * 前提下装回或卸下某个 optional 插件：启用时按定义装配新 fiber，禁用时释放该 fiber 并撤销它
  * 注册的 contribution。required 插件不可卸载（调用方负责不把它列进可换清单）。
  */

@@ -21,7 +21,7 @@ export type SettingsRemote = {
   test?(values: Record<string, SettingsWriteValue>): Promise<SettingsTestRemoteResult>;
   /**
    * 写一个 browser-local 插件的启停目标状态：宿主把
-   * `extensions.frontend.<id>.enabled` 写进配置文件，并热生效。
+   * `extensions.<id>.enabled` 写进配置文件，并热生效。
    */
   setExtensionToggle?(extensionId: string, enabled: boolean): Promise<SettingsRemoteResult>;
 };

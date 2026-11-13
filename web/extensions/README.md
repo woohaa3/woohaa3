@@ -60,8 +60,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 只有 `hostPlugin`、没有 `site` 的 Provider / 存储后端不进控制面，它们的 `defaultEnabled` 与
 配置文件里的 `enabled` 都不生效。
 
-Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
-`ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
+Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节。刷新路由**不要自己取 `ctx.gateway`**：扩展可见的服务面里没有 `gateway`（见[本机宿主插件树](../../../docs/code-map/backend-host.md)），用 `@woohaa3/provider-sdk` 的 `registerModelRefreshRoute(ctx, { path, refresh })` 注册，鉴权（`MODELS_MANAGE_ACTION`）与响应形状都由它统一处理。走 `ctx.webServer` 的扩展只能拿到 `register` / `registerHttp` / `registerRawHttp` 三个登记口，路由键为 `<extensionId>/<相对 route>`。插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
 **上游没有模型列表接口时不要声明 `modelRefresh`**：目录改成源码里的手写表，并在表头注释与
 `assets/README.md` 里写清每个数字来自哪一页官方文档。[bailian-provider](bailian-provider) 是这种形态：
@@ -298,8 +297,8 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 | 受管扩展可以 | 受管扩展不可以（预检拒绝） |
 | --- | --- |
 | `server-active` / `browser-local` 前端入口：安装后已打开页面**不刷新**即可装配 | `always` / `required` activation |
-| 后端 `hostPlugin` 或带 `site` 的 `backend`：在宿主内加载；独立形态可热装配，executor 在 daemon 加载 | `bootstrap` 槽位、`canvasContent`、市场来源（`marketplace-source`）——只允许内置根 |
-| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）；公开路径用 `publicRoutes` 声明 | `hostPlugin.kind = storage`（存储后端必须进程内）、包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
+| 后端 `hostPlugin` 或带 `site` 的 `backend`：在宿主内加载；独立形态可热装配，executor 在 daemon 加载 | `bootstrap` 槽位、`canvasContent`、`content` 声明、市场来源（`marketplace-source`）、`hostPlugin.features` 含 `storage`（存储后端必须进程内）——只允许内置根 |
+| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）；公开路径用 `publicRoutes` 声明 | 包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
 | 使用所装配的公共宿主端口、配置与路由；权限由宿主端口执行 | `migrate`（本期不支持数据迁移）、未内联的 `workspace:` 运行时依赖 |
 
 升级保留上一版本：新版本有观察期，期间激活失败或健康持续失败会**自动回滚**；也可在卡片上手动回滚。卸载先经站点控制面停用并等在途工作收尾，再删指针；勾选「同时清除数据」会删除该扩展的 documents。
