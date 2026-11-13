@@ -1,11 +1,12 @@
 /** Deterministic SOMA77 template: fixed official bind frames, official skinned human or editable rigid armor. */
+import {somaBodyData} from './body-presets.js';
 import {SOMA_SKIN} from './skin-data.js';
 import {SOMA77_JOINTS} from './skeleton.js';
 import type {Vec3} from '../model-transform.js';
 
 type Builder={mesh(o:Record<string,unknown>):string;group(o:Record<string,unknown>):string;material(o:Record<string,unknown>):string;box(o:Record<string,unknown>):string;sphere(o:Record<string,unknown>):string;segment(o:Record<string,unknown>):string};
 export type SomaHumanoidHandle={root:string;joint(name:string):string};
-const keys=new Set(['id','style','armorColor','jointColor','accentColor','lightColor']);
+const keys=new Set(['id','style','armorColor','jointColor','accentColor','lightColor','bodyPreset']);
 const color=(value:unknown,fallback:string)=>{
  const c=value===undefined?fallback:value;
  if(typeof c!=='string'||!/^#[0-9a-fA-F]{6}$/.test(c))throw new Error('SOMA colors must be #rrggbb');
@@ -20,14 +21,17 @@ export function createSomaHumanoid(scene:Builder,options:Record<string,unknown>=
  for(const k of Object.keys(options))if(!keys.has(k))throw new Error(`Unknown SOMA option ${k}; skeleton is fixed`);
  const id=options.id??'humanoid';if(typeof id!=='string'||!id||id.length>80)throw new Error('Invalid SOMA id');
  const style=options.style??'mecha';if(style!=='mecha'&&style!=='humanoid')throw new Error('SOMA style must be mecha or humanoid');
+ if(options.bodyPreset!==undefined&&style!=='humanoid')throw new Error('SOMA body presets require humanoid style');
+ const body=options.bodyPreset===undefined?undefined:somaBodyData(options.bodyPreset);
+ const joints=body?.joints??SOMA77_JOINTS, skin=body?.skin??SOMA_SKIN;
  const armorColor=color(options.armorColor,'#cbd5d1'),jointColor=color(options.jointColor,'#17242c'),accentColor=color(options.accentColor,'#ed542c'),lightColor=color(options.lightColor,'#45d7ff');
  const root=scene.group({id});
- const named=new Map(SOMA77_JOINTS.map(j=>[j.name,j]));
+ const named=new Map(joints.map(j=>[j.name,j]));
  const joint=(name:string)=>{if(!named.has(name))throw new Error(`Unknown SOMA joint ${name}`);return `${id}.${name}`;};
- for(const j of SOMA77_JOINTS)scene.group({id:joint(j.name),parent:j.parent<0?root:joint(SOMA77_JOINTS[j.parent]!.name),position:[...j.position],rotation:[...j.rotation]});
+ for(const j of joints)scene.group({id:joint(j.name),parent:j.parent<0?root:joint(joints[j.parent]!.name),position:[...j.position],rotation:[...j.rotation]});
  if(style==='humanoid'){
   const material=scene.material({id:`${id}.material.skin`,baseColor:'#eeeeea',roughness:.8,metallic:0});
-  scene.mesh({id:`${id}.skin`,parent:root,material,vertices:SOMA_SKIN.vertices,faces:SOMA_SKIN.faces,skin:{jointIds:SOMA77_JOINTS.map(j=>joint(j.name)),inverseBindMatrices:SOMA_SKIN.inverseBindMatrices,indices:SOMA_SKIN.indices,weights:SOMA_SKIN.weights}});
+  scene.mesh({id:`${id}.skin`,parent:root,material,vertices:skin.vertices,faces:skin.faces,skin:{jointIds:joints.map(j=>joint(j.name)),inverseBindMatrices:skin.inverseBindMatrices,indices:skin.indices,weights:skin.weights}});
   return Object.freeze({root,joint});
  }
  const mat=(suffix:string,c:string,metallic:number,emission=false)=>scene.material({id:`${id}.material.${suffix}`,baseColor:c,metallic,roughness:.36,...(emission?{emissive:c,emissiveStrength:2}:{})});

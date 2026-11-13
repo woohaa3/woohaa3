@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decodeSomaNpy, prepareSomaMotion, sampleSomaMotion } from "./index";
+import { decodeSomaNpy, prepareSomaMotion, prepareSomaStandardMotion, sampleSomaMotion } from "./index";
 function npy(descr: string, shape: number[], values: number[]) {
   const header = `{'descr': '${descr}', 'fortran_order': False, 'shape': (${shape.join(",")}${shape.length === 1 ? "," : ""}), }\n`;
   const bytes = new Uint8Array(10 + header.length + values.length * 4);
@@ -33,6 +33,14 @@ const fixture = (name: string) =>
   new Uint8Array(
     readFileSync(new URL(`./fixtures/${name}.npz`, import.meta.url)),
   );
+it("preflights the full standard skeleton and refuses mismatched or malformed motion", async () => {
+  const prepared = await prepareSomaStandardMotion(fixture("standard-body-motion"));
+  expect(prepared.jointNames).toHaveLength(77);
+  expect(prepared.frameCount).toBe(3);
+  expect(Array.from(sampleSomaMotion(prepared, 2 / 30).positions).every(Number.isFinite)).toBe(true);
+  await expect(prepareSomaStandardMotion(fixture("motion"))).rejects.toThrow();
+  await expect(prepareSomaStandardMotion(new Uint8Array([1, 2, 3]))).rejects.toThrow();
+});
 it("decodes compressed Unicode/int64 skins and deterministically samples FK and LBS", async () => {
   const p = await prepareSomaMotion(fixture("skin"), fixture("motion"));
   expect(p.jointNames).toEqual(["Hips", "骨骼"]);

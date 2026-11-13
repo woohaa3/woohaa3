@@ -648,12 +648,12 @@ mod part_position_tests {
     }
 }
 
-/// Column-major inverse bind matrices; all eight influences are authoritative.
+/// Column-major inverse bind matrices; every exported influence is authoritative.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ModelSkin {
  pub joint_ids: Vec<String>,
  pub inverse_bind_matrices: Vec<[f32;16]>,
- pub indices: Vec<[usize;8]>,
- pub weights: Vec<[f32;8]>,
+ pub indices: Vec<Vec<usize>>,
+ pub weights: Vec<Vec<f32>>,
 }

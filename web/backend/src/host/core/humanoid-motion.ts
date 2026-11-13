@@ -3,7 +3,7 @@ import {validateRaisedWavePrerequisite} from '../../ports/humanoid-motion-gestur
 import {createHumanoidSceneLap} from '../../ports/humanoid-scene-lap.js';
 import { validateHumanoidMotionPath, type HumanoidMotionPathInput } from '../../ports/humanoid-motion-path.js';
 import { createHash } from 'node:crypto';
-import { type HumanoidInteractionInput, inspectSomaRootTravel, decodeSomaRootPositions, isSomaMotionMetadata, decodeSomaPosedJoints, inspectSomaMotionTiming, executeWorldAnimationScript, removeWorldAnimationInstanceTracks, serializeWorldAnimationScript, somaSkeletonPrefix, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteInput, type AssistantWorldWriteOutcome, type BackendTaskPort, type CanvasTaskCatalog, type TaskResultSummary, type StoredAsset } from '@woohaa3/contracts';
+import { type HumanoidInteractionInput, inspectSomaRootTravel, decodeSomaRootPositions, isSomaMotionMetadata, decodeSomaPosedJoints, inspectSomaMotionTiming, executeWorldAnimationScript, removeWorldAnimationInstanceTracks, serializeWorldAnimationScript, somaSkeletonPrefix, somaSkeletonIdentity, prepareSomaStandardMotion, validateSomaBodyAdaptation, SOMA_BODY_ADAPTATION_VERSION, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteInput, type AssistantWorldWriteOutcome, type BackendTaskPort, type CanvasTaskCatalog, type TaskResultSummary, type StoredAsset } from '@woohaa3/contracts';
 
 type Binding = { canvasId:string; contextId:string; instanceId:string };
 type Generate = Binding & { expectedVersion:string; prompt:string; duration:number; requestId:string; steps?:number };
@@ -29,9 +29,10 @@ export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,ass
   const model=view.sceneModels?.find(m=>m.instanceId===input.instanceId);
   if(!version||!model)return {ok:false as const,code:'outside-scope',message:'目标不在当前可写集合'};
   if(expectedVersion!==undefined&&version.version!==expectedVersion)return {ok:false as const,code:'version-conflict',message:'模型内容版本已变化'};
-  const prefix=somaJointPrefix(model.animationRig?.groups??[]);
-  if(!prefix)return {ok:false as const,code:'invalid-data',message:'目标不是实际编译的标准 SOMA77 骨架'};
-  return {ok:true as const,view,model,prefix,version:version.version};
+  const skeleton=somaSkeletonIdentity(model.animationRig?.groups??[]);
+  const prefix=skeleton?.prefix;
+  if(!prefix)return {ok:false as const,code:'invalid-data',message:'目标不是实际编译的已登记 SOMA77 绑定骨架'};
+  return {ok:true as const,view,model,prefix,bodyPreset:skeleton?.bodyPreset,version:version.version};
  }
  const tag=(input:Binding,view:AssistantWorldContextView)=>`humanoid-${digest([input.canvasId,view.scope.scope,input.instanceId])}-`;
  async function lookup(input:Lookup){
@@ -165,6 +166,18 @@ export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,ass
     catch(error){return fail('motion-quality-rejected',error instanceof Error?error.message:'复合动作合成失败');}
    }
    const t=await target(input,input.expectedVersion);if(!t.ok)return t;
+   if(t.bodyPreset){
+    if(!deps.readBytes)return fail('capability-unsupported','当前宿主无法预检体型动作，原动画未替换');
+    try{
+     const stored=asset.asset as StoredAsset,m=stored.metadata;
+     if(!m||typeof m.storageKey!=='string'||typeof m.size!=='number'||!Number.isInteger(m.size)||m.size<=0||m.size>128*1024*1024||m.checksum!==asset.checksum)throw Error('体型动作缺少稳定字节身份');
+     const bytes=await deps.readBytes({canvasId:input.canvasId,storageKey:m.storageKey,maxBytes:128*1024*1024});
+     if(bytes.byteLength!==m.size||createHash('sha256').update(bytes).digest('hex')!==asset.checksum)throw Error('体型动作字节校验失败');
+     const prepared=await prepareSomaStandardMotion(bytes,{fps:Number(asset.fps)});
+     if(prepared.frameCount!==asset.frameCount)throw Error('体型动作帧数不一致');
+     validateSomaBodyAdaptation(prepared,t.bodyPreset);
+    }catch(error){return fail('invalid-data',error instanceof Error?error.message:'体型动作适配预检失败，原动画未替换');}
+   }
    const saved=t.view.sceneArea?.animationScript;
    let planned:ReturnType<typeof createHumanoidSceneLap>|undefined;
    if(input.locomotion==='scene-lap'){
@@ -176,7 +189,7 @@ export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,ass
     if(!deps.readBytes||!t.view.bounds||!t.model.animationRig?.spatial?.groundAnchorLocal)return fail('capability-unsupported','当前宿主无法验证动作位移路径');
     const existing=saved?executeWorldAnimationScript(saved.script,saved):null;
     if(!input.replaceExisting&&existing?.ok&&existing.ir.instanceTracks.some(track=>track.targetId===input.instanceId))return fail('invalid-data','位移动作不能与同角色独立位置、旋转或缩放轨道同时应用');
-    try{await validateHumanoidMotionPath({canvasId:input.canvasId,asset:asset.asset as StoredAsset,transform:t.model.transform,bounds:t.view.bounds,groundAnchorLocal:t.model.animationRig.spatial.groundAnchorLocal,readBytes:deps.readBytes});}
+    try{await validateHumanoidMotionPath({canvasId:input.canvasId,asset:asset.asset as StoredAsset,transform:t.model.transform,bounds:t.view.bounds,groundAnchorLocal:t.model.animationRig.spatial.groundAnchorLocal,bodyPreset:t.bodyPreset,readBytes:deps.readBytes});}
     catch(error){return fail('invalid-data',error instanceof Error?error.message:'动作路径校验失败');}
    }
    let gestureVerification:Record<string,unknown>|undefined;
@@ -196,7 +209,7 @@ export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,ass
    if(!Number.isFinite(sourceStartTime)||sourceStartTime<0||sourceStartTime>=sourceDuration||!Number.isFinite(blendInDuration)||blendInDuration<0||blendInDuration>Math.min(1,sourceDuration-sourceStartTime)||!Number.isFinite(input.startTime)||input.startTime<0)return fail('invalid-data','动作片内起点或过渡时间无效');
    if((sourceStartTime>0||blendInDuration>0)&&(input.rootMotion==='translate'||planned))return fail('capability-unsupported','当前片内裁切仅支持原地动作；位移和绕场继续使用完整素材');
    const endTime=input.startTime+sourceDuration-sourceStartTime;
-   const clip={assetId:asset.assetId,checksum:asset.checksum,fps:asset.fps,frameCount:asset.frameCount,startTime:input.startTime,endTime,...(input.sourceStartTime!==undefined?{sourceStartTime}:{}),...(blendInDuration>0||input.blendInDuration!==undefined?{blendInDuration}:{}),jointPrefix:t.prefix,rootMotion:planned?'in-place':input.rootMotion??'in-place',...(planned?{route:planned.route}:{})};
+   const clip={...(t.bodyPreset?{targetBodyPreset:t.bodyPreset,adaptationVersion:SOMA_BODY_ADAPTATION_VERSION}:{}),assetId:asset.assetId,checksum:asset.checksum,fps:asset.fps,frameCount:asset.frameCount,startTime:input.startTime,endTime,...(input.sourceStartTime!==undefined?{sourceStartTime}:{}),...(blendInDuration>0||input.blendInDuration!==undefined?{blendInDuration}:{}),jointPrefix:t.prefix,rootMotion:planned?'in-place':input.rootMotion??'in-place',...(planned?{route:planned.route}:{})};
    const declaration=`motion.soma.clip(${JSON.stringify(input.instanceId)},${JSON.stringify(clip)});`;
    const compiled=saved?executeWorldAnimationScript(saved.script,saved):null;
    const alreadyBound=compiled?.ok && compiled.ir.somaTracks?.some(track=>track.targetId===input.instanceId&&(track.sourceStartTime??0)===sourceStartTime&&(track.blendInDuration??0)===blendInDuration&&Object.entries(clip).every(([key,value])=>JSON.stringify((track as unknown as Record<string,unknown>)[key])===JSON.stringify(value)));

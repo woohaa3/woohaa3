@@ -1,3 +1,5 @@
+import { SOMA_SKIN } from "../soma-humanoid/skin-data.js";
+import { SOMA77_JOINTS } from "../soma-humanoid/skeleton.js";
 import { composeWalkingWave } from "./compose.js";
 /** Bounded, pickle-free SOMA array codec. Matrices use NumPy row-major order. */
 const MAX_BYTES = 128 * 1024 * 1024;
@@ -288,6 +290,25 @@ export async function prepareSomaMotion(
     "posed_joints",
     "root_positions",
   ]);
+  return prepareSomaArrays(s, m, options);
+}
+let standardSkin: Record<string, SomaArray> | undefined;
+/** Host preflight against the embedded official source; never trusts an asset's target/rest label. */
+export async function prepareSomaStandardMotion(motionBytes:Uint8Array,options:{fps?:number}={}):Promise<PreparedSomaMotion> {
+  const array=(shape:number[],values:number[]|string[]):SomaArray=>({shape,values});
+  standardSkin ??= {
+    bind_vertices:array([SOMA_SKIN.vertices.length,3],SOMA_SKIN.vertices.flat()),
+    faces:array([SOMA_SKIN.faces.length,3],SOMA_SKIN.faces.flat()),
+    bind_rig_transform:array([77,4,4],SOMA77_JOINTS.flatMap(j=>j.bind.flat())),
+    rig_joint_names:array([77],SOMA77_JOINTS.map(j=>j.name)),
+    lbs_indices:array([SOMA_SKIN.vertices.length,8],SOMA_SKIN.indices.flat()),
+    lbs_weights:array([SOMA_SKIN.vertices.length,8],SOMA_SKIN.weights.flat()),
+    rig_joint_connections:array([76,2],SOMA77_JOINTS.flatMap((j,i)=>j.parent<0?[]:[j.parent,i]))
+  };
+  const motion=await unzip(motionBytes,['local_rot_mats','global_rot_mats','posed_joints','root_positions']);
+  return prepareSomaArrays(standardSkin,motion,options);
+}
+function prepareSomaArrays(s:Record<string,SomaArray>,m:Record<string,SomaArray>,options:{fps?:number}):PreparedSomaMotion {
   const j = s.rig_joint_names.shape[0],
     v = s.bind_vertices.shape[0],
     f = m.local_rot_mats.shape[0],

@@ -1045,9 +1045,9 @@ describe("assistant spatial failure codes", () => {
 describe("SOMA director clip authority",()=>{
  const checksum='a'.repeat(64);
  const asset:any={id:'wave',title:'wave',source:'generated',mediaKind:'motion',status:'ready',createdAt:now,metadata:{storageKey:'generation-outputs/wave.npz',checksum,contentType:'application/x-npz',size:120,motion:{fps:30,frameCount:60,skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1'}}};
- async function setup(change?:'animation'|'model'|'scope'|'canvas',wrongSkeleton=false){
+ async function setup(change?:'animation'|'model'|'scope'|'canvas',wrongSkeleton=false,bodyPreset?:string){
   const canvas=canvasFixture();canvas.nodeData.area={sceneArea:{kind:'scene-area',version:'shared-world-v1',areaId:'area-1',scopeVersion:'scope-1',animationOrigin:{u:0,v:0},bounds:{min:{u:0,v:0},max:{u:10,v:10}}}};
-  canvas.nodeData['model-node']!.modelScript=wrongSkeleton?'scene.box({});':'scene.somaHumanoid({id:"pilot"});';
+  canvas.nodeData['model-node']!.modelScript=wrongSkeleton?'scene.box({});':bodyPreset?`scene.somaHumanoid({id:"pilot",style:"humanoid",bodyPreset:${JSON.stringify(bodyPreset)}});`:'scene.somaHumanoid({id:"pilot"});';
   const identity={kind:'instance' as const,instanceId:'instance-1'};const version=worldObjectVersion(canvas,identity)!;
   const h=harness({canvas,context:contextFor(scope,[{...identity,version}]),...(change?{beforeDerive:()=>{
    if(change==='canvas')canvas.revision++;
@@ -1056,16 +1056,33 @@ describe("SOMA director clip authority",()=>{
    else (canvas.nodeData.area!.sceneArea as any).animationScript=createWorldAnimationScript({script:'// concurrent camera',duration:2,loop:false,revision:1});
   }}:{})});
   const issued=await h.service.issue({canvasId:canvas.id,requestId:'req-1',runId:'run-1',epoch:0,executionId:'exec-1',scope:{kind:'scene-area',areaId:'area-1'}});if(!issued.ok)throw Error(issued.message);
-  const operation:any={kind:'set-scene-animation-script',operationId:'apply-wave',motionBaseRevision:0,motionTarget:{instanceId:'instance-1',expectedVersion:version,scopeVersion:'scope-1',canvasRevision:canvas.revision},motionAsset:asset,script:`motion.soma.clip("instance-1",${JSON.stringify({assetId:asset.id,checksum,fps:30,frameCount:60,startTime:0,jointPrefix:'pilot'})});`,duration:2,loop:false};
+  const operation:any={kind:'set-scene-animation-script',operationId:'apply-wave',motionBaseRevision:0,motionTarget:{instanceId:'instance-1',expectedVersion:version,scopeVersion:'scope-1',canvasRevision:canvas.revision},motionAsset:asset,script:`motion.soma.clip("instance-1",${JSON.stringify({assetId:asset.id,checksum,fps:30,frameCount:60,startTime:0,jointPrefix:'pilot',...(bodyPreset?{targetBodyPreset:bodyPreset,adaptationVersion:'soma-body-retarget-v1'}:{})})});`,duration:2,loop:false};
   return {h,issued,operation};
  }
  it('commits stable motion asset and clip in one canonical batch',async()=>{
   const {h,issued,operation}=await setup();expect(await h.service.write({contextId:issued.context.contextId,operation})).toMatchObject({ok:true});
   const result:any=h.submitted.at(-1);expect(result.batch.commands.map((c:any)=>c.type)).toEqual(['asset.upsert','nodeData.patch']);
  });
+ it('requires the exact compiled body identity rather than a valid catalog label',async()=>{
+  const {SOMA_BODY_PRESETS}=await import('@woohaa3/contracts');
+  for(const preset of SOMA_BODY_PRESETS){
+   const a=await setup(undefined,false,preset.id);
+   expect(await a.h.service.write({contextId:a.issued.context.contextId,operation:a.operation})).toMatchObject({ok:true});
+  }
+  const b=await setup(undefined,false,'soma-body-v1/female-10-fat');
+  b.operation.script=b.operation.script.replace('female-10-fat','male-7-slim');
+  expect(await b.h.service.write({contextId:b.issued.context.contextId,operation:b.operation})).toMatchObject({ok:false,code:'invalid-data'});
+  expect(b.h.submitted).toHaveLength(0);
+ },30000);
  it('rejects non-SOMA actor and mismatched asset identity before commit',async()=>{
   const a=await setup(undefined,true);expect(await a.h.service.write({contextId:a.issued.context.contextId,operation:a.operation})).toMatchObject({ok:false,code:'invalid-data'});expect(a.h.submitted).toHaveLength(0);
   const b=await setup();b.operation.motionAsset={...asset,metadata:{...asset.metadata,checksum:'b'.repeat(64)}};expect(await b.h.service.write({contextId:b.issued.context.contextId,operation:b.operation})).toMatchObject({ok:false,code:'invalid-data'});
+ });
+ it('requires host preflight for a new body clip submitted through script editing',async()=>{
+  const {h,issued,operation}=await setup(undefined,false,'soma-body-v1/female-10-fat');
+  delete operation.motionAsset;
+  expect(await h.service.write({contextId:issued.context.contextId,operation})).toMatchObject({ok:false,code:'invalid-data'});
+  expect(h.submitted).toHaveLength(0);
  });
  it.each(['animation','model','scope','canvas'] as const)('rechecks %s version inside queued commit',async(change)=>{
   const {h,issued,operation}=await setup(change);expect(await h.service.write({contextId:issued.context.contextId,operation})).toMatchObject({ok:false,code:'version-conflict'});

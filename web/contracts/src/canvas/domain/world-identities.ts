@@ -1,3 +1,4 @@
+import { resolveSomaBodyPreset } from "../soma-humanoid/body-presets.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
 import { decodeWorldCamera } from "../world-camera-codec.js";
@@ -134,7 +135,13 @@ export function validateWorldIdentities(nodes: readonly { id: string; type: stri
       }
       if (fields.directorCharacterCreation !== undefined) {
         const marker = fields.directorCharacterCreation;
-        if (node.type !== "model3d" || !record(marker) || Object.keys(marker).length !== 3 || typeof marker.areaId !== "string" || !marker.areaId.trim() || typeof marker.scopeVersion !== "string" || !marker.scopeVersion.trim() || (marker.kind !== "capsule" && marker.kind !== "humanoid")) return `Invalid directorCharacterCreation on ${node.id}`;
+        if (node.type !== "model3d" || !record(marker) || Object.keys(marker).some(key => !["areaId", "scopeVersion", "kind", "bodyPreset", "capsulePreset"].includes(key)) || typeof marker.areaId !== "string" || !marker.areaId.trim() || typeof marker.scopeVersion !== "string" || !marker.scopeVersion.trim() || (marker.kind !== "capsule" && marker.kind !== "humanoid")) return `Invalid directorCharacterCreation on ${node.id}`;
+        if (marker.capsulePreset !== undefined && (marker.kind !== "capsule" || marker.capsulePreset !== "two-heads" || marker.bodyPreset !== undefined)) return `Invalid directorCharacterCreation on ${node.id}`;
+        if (marker.bodyPreset !== undefined) {
+          if (marker.kind !== "humanoid") return `Invalid directorCharacterCreation on ${node.id}`;
+          try { resolveSomaBodyPreset(marker.bodyPreset); }
+          catch { return `Invalid directorCharacterCreation on ${node.id}`; }
+        }
       }
       if (fields.inputMapping !== undefined && !validInputMapping(fields.inputMapping)) return `Invalid inputMapping on ${node.id}`;
       if (Object.entries(fields).some(([key, value]) => key !== "parameters" && (LOCAL_FIELDS.has(key) || /^gpu/i.test(key) || containsLocalState(value)))) return `Transient state on ${node.id}`;

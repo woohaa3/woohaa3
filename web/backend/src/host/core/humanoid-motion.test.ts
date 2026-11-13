@@ -1,6 +1,7 @@
+import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {describe,it,expect,vi} from 'vitest';
-import {executeWorldAnimationScript,SOMA77_JOINTS} from '@woohaa3/contracts';
+import {executeWorldAnimationScript,SOMA77_JOINTS,SOMA_BODY_PRESETS,somaBodyJoints,SOMA_BODY_ADAPTATION_VERSION} from '@woohaa3/contracts';
 import {somaJointPrefix,createHumanoidMotionTools} from './humanoid-motion.js';
 function archive(values:Float64Array,frames:number){
  const npy=(data:Float64Array,shape:string)=>{
@@ -31,15 +32,15 @@ describe('director humanoid motions',()=>{
   expect(somaJointPrefix(groups().slice(0,-1))).toBeNull();
   const stretched=groups();stretched[0]!.scale=[2,1,1];expect(somaJointPrefix(stretched)).toBeNull();
  });
- const setup=(options:{bytes?:Uint8Array}={})=>{
+ const setup=(options:{bytes?:Uint8Array;frameCount?:number}={})=>{
   const view:any={canvasId:'canvas',contextId:'context',worldWritable:true,scope:{scope:{kind:'scene-area',areaId:'director'}},writable:[{kind:'instance',instanceId:'actor',version:'v1'}],sceneModels:[{instanceId:'actor',nodeId:'model',animationRig:{groups:groups()}}],sceneArea:{revision:1,scopeVersion:'scope',animationOrigin:{u:0,v:0},animationQuarterTurns:0,animationScript:{script:'// keep camera',duration:2,loop:true,revision:1}}};
   const submit=vi.fn(async(r:any)=>({state:'queued',reused:false,...r}));
-  const status=vi.fn(async()=>submit.mock.calls.length?({canvasId:'canvas',nodeId:submit.mock.calls[0]?.[0].nodeId,modelType:'motion',state:'succeeded',result:{mediaKind:'motion',motion:{skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1',fps:30,frameCount:90}}}):null);
+  const status=vi.fn(async()=>submit.mock.calls.length?({canvasId:'canvas',nodeId:submit.mock.calls[0]?.[0].nodeId,modelType:'motion',state:'succeeded',result:{mediaKind:'motion',motion:{skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1',fps:30,frameCount:options.frameCount??90}}}):null);
   const write=vi.fn(async(_input:any)=>({ok:true}));
   const catalog=vi.fn(async()=>({available:true,defaultModels:{motion:'kimodo'},models:[{modelType:'motion',modelKey:'kimodo',defaultInput:{steps:20},interaction:{}}]}) as any);
   const readBytes=vi.fn(async()=>options.bytes??new Uint8Array());
   const materialize=vi.fn(async()=>options.bytes?({assetId:'asset',checksum:createHash('sha256').update(options.bytes).digest('hex'),asset:{id:'asset',metadata:{storageKey:'test.npz',size:options.bytes.byteLength,checksum:createHash('sha256').update(options.bytes).digest('hex')}}}):({assetId:'asset',checksum:'a'.repeat(64),asset:{id:'asset'}}));
-  const api=createHumanoidMotionTools({readBytes,readAsset:async(_canvasId,assetId)=>({id:assetId,status:'ready',mediaKind:'motion',metadata:{checksum:'a'.repeat(64),storageKey:'test.npz',size:1,contentType:'application/x-npz',motion:{skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1',fps:30,frameCount:90}}} as any),world:{read:()=>({ok:true,view}),write} as any,compose:vi.fn(),task:{submit,status} as any,catalog,materialize:materialize as any});
+  const api=createHumanoidMotionTools({readBytes,readAsset:async(_canvasId,assetId)=>({id:assetId,status:'ready',mediaKind:'motion',metadata:{checksum:'a'.repeat(64),storageKey:'test.npz',size:1,contentType:'application/x-npz',motion:{skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1',fps:30,frameCount:options.frameCount??90}}} as any),world:{read:()=>({ok:true,view}),write} as any,compose:vi.fn(),task:{submit,status} as any,catalog,materialize:materialize as any});
   return {api,view,submit,status,write,catalog,readBytes};
  };
  const input={canvasId:'canvas',contextId:'context',instanceId:'actor',expectedVersion:'v1',prompt:'wave',duration:3,requestId:'run'};
@@ -69,6 +70,30 @@ describe('director humanoid motions',()=>{
   expect(await api.apply({...input,generationId:String(generated.generationId),startTime:0,replaceExisting:true})).toMatchObject({ok:true,timing:{blendInDuration:0}});
   expect(write).toHaveBeenCalledTimes(1);
   expect(write.mock.calls[0]![0].operation.script).not.toContain('blendInDuration');
+ });
+ it('binds catalog bodies with distinct target and adapter identities and refuses forged frames',async()=>{
+  for(const preset of SOMA_BODY_PRESETS){
+   const bytes=new Uint8Array(readFileSync(new URL('../../../../contracts/src/canvas/soma-motion/fixtures/standard-body-motion.npz',import.meta.url)));
+   const {api,view,write}=setup({bytes,frameCount:3});
+   const joints=somaBodyJoints(preset.id);
+   view.sceneModels[0].animationRig.groups=[{id:'robot'},...joints.map(j=>({id:`robot.${j.name}`,parent:j.parent<0?'robot':`robot.${joints[j.parent]!.name}`,position:j.position,rotation:j.rotation,scale:[1,1,1]}))];
+   const generated=await api.generate(input);
+   expect(await api.apply({...input,generationId:String(generated.generationId),startTime:0})).toMatchObject({ok:true});
+   const op=write.mock.calls[0]![0].operation,compiled=executeWorldAnimationScript(op.script,op);
+   expect(compiled.ok).toBe(true);
+   if(compiled.ok)expect(compiled.ir.somaTracks?.[0]).toMatchObject({targetBodyPreset:preset.id,adaptationVersion:SOMA_BODY_ADAPTATION_VERSION});
+   view.sceneModels[0].animationRig.groups[5].position=[1,2,3];
+   expect(await api.apply({...input,generationId:String(generated.generationId),startTime:0})).toMatchObject({ok:false,code:'invalid-data'});
+   expect(write).toHaveBeenCalledTimes(1);
+  }
+ });
+ it('retains the old action when stable NPZ cannot be adapted to a preset',async()=>{
+  const {api,view,write}=setup({bytes:new Uint8Array([1,2,3]),frameCount:3});
+  const joints=somaBodyJoints('soma-body-v1/female-10-fat');
+  view.sceneModels[0].animationRig.groups=[{id:'robot'},...joints.map(j=>({id:`robot.${j.name}`,parent:j.parent<0?'robot':`robot.${joints[j.parent]!.name}`,position:j.position,rotation:j.rotation,scale:[1,1,1]}))];
+  const saved=structuredClone(view.sceneArea.animationScript),generated=await api.generate(input);
+  expect(await api.apply({...input,generationId:String(generated.generationId),startTime:0})).toMatchObject({ok:false,code:'invalid-data'});
+  expect(write).not.toHaveBeenCalled();expect(view.sceneArea.animationScript).toEqual(saved);
  });
  it('durably submits deterministic keys without creating motion nodes',async()=>{
   const {api,submit}=setup();const a=await api.generate(input),b=await api.generate(input);

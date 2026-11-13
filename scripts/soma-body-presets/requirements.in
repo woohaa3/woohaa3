@@ -1,0 +1,13 @@
+# CPU is sufficient for offline geometry generation; GPU is required for visual acceptance.
+--extra-index-url https://download.pytorch.org/whl/cpu
+py-soma-x @ git+https://github.com/NVlabs/SOMA-X.git@01ab5b5c0876058bd27d34b1607d74b2e55e0cf4
+anny==0.2.0
+torch==2.10.0+cpu
+numpy==1.26.4
+scipy==1.15.3
+warp-lang==1.11.1
+trimesh==4.11.1
+rtree==1.4.1
+cholespy==2.2.0
+usd-core==26.3
+Pillow==12.1.1

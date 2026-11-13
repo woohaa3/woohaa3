@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DirectorSomaMotionCache } from './director-soma-motion.js';
 import type { ServerCanvas, PreparedSomaMotion, WorldSomaClipTrack } from '@woohaa3/contracts';
-const mocks = vi.hoisted(() => ({ load: vi.fn(), tracks: [] as unknown[] }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), validateBody: vi.fn(), tracks: [] as unknown[] }));
 vi.mock('./soma-motion.js', () => ({ loadSomaMotion: mocks.load }));
 vi.mock('./media-remote.js', () => ({ resolveCanonicalMediaUrl: (asset: {id:string} | undefined) => asset ? '/api/media/'+asset.id : null }));
-vi.mock('@woohaa3/contracts', async original => ({ ...await original<object>(), decodeSceneAreaData: (value: {script?:string}|undefined) => ({ok:true,value:{animationScript:{script:value?.script ?? '',duration:1,loop:false}}}), executeWorldAnimationScript: (source: string) => ({ok:true,ir:{somaTracks:source === 'bad' ? [{assetId:'missing'}] : mocks.tracks}}) }));
+vi.mock('@woohaa3/contracts', async original => ({ ...await original<object>(), validateSomaBodyAdaptation: mocks.validateBody, decodeSceneAreaData: (value: {script?:string}|undefined) => ({ok:true,value:{animationScript:{script:value?.script ?? '',duration:1,loop:false}}}), executeWorldAnimationScript: (source: string) => ({ok:true,ir:{somaTracks:source === 'bad' ? [{assetId:'missing'}] : mocks.tracks}}) }));
 const track = (id: string) => ({targetId:'actor',assetId:id,checksum:'a'.repeat(64),fps:30,frameCount:2,startTime:0,endTime:1,jointPrefix:'soma'}) as WorldSomaClipTrack;
 const canvas = (ids: string[]) => ({id:'c', document:{nodes:[{id:'area'}]},nodeData:{area:{}},assets:ids.map(id=>({id}))}) as unknown as ServerCanvas;
 describe('director SOMA cache', () => {
@@ -68,3 +68,14 @@ it('retries a failed load only on request, preserving prepared clips and resourc
  cache.retryFailed();
  expect(mocks.load).toHaveBeenCalledTimes(3);
 });
+
+ it('shares one immutable source across all adult and age target adaptation identities',async()=>{
+  const {SOMA_BODY_PRESETS,SOMA_BODY_ADAPTATION_VERSION}=await import('@woohaa3/contracts');
+  mocks.load.mockReset().mockResolvedValue({frameCount:2});mocks.validateBody.mockClear();
+  const tracks=SOMA_BODY_PRESETS.map((p):WorldSomaClipTrack=>({...track('shared'),targetId:p.id,targetBodyPreset:p.id,adaptationVersion:SOMA_BODY_ADAPTATION_VERSION}));
+  mocks.tracks=tracks;const cache=new DirectorSomaMotionCache();cache.sync(canvas(['shared']),vi.fn());
+  await cache.ready();expect(mocks.load).toHaveBeenCalledTimes(1);
+  expect(new Set(mocks.validateBody.mock.calls.map(call=>call[1])).size).toBe(SOMA_BODY_PRESETS.length);
+  for(const t of tracks)expect(cache.resolve(t)).toBe(cache.resolve(tracks[0]!));
+  cache.dispose();
+ });

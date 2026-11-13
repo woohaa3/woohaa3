@@ -40,7 +40,7 @@ describe("atomic director character guard", () => {
   });
 });
 
-it("atomically rejects an empty director's active run without persisting a node", async () => {
+it.each([undefined,"two-heads","soma-body-v1/female-10-fat","soma-body-v1/baby","soma-body-v1/male-child","soma-body-v1/female-child","soma-body-v1/male-teen","soma-body-v1/female-teen"] as const)("atomically creates/retries and reopens %s without half writes", async (bodyPreset) => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -50,6 +50,15 @@ it("atomically rejects an empty director's active run without persisting a node"
   const { CanvasRoom } = await import("../sync/room.js");
   const { YJS_SYNC_PROTOCOL_VERSION } = await import("@woohaa3/contracts/canvas-yjs");
   const { before, after, authority } = setup();
+  if(bodyPreset==='two-heads'){
+    const {directorCharacterScript}=await import('@woohaa3/contracts');
+    after.nodeData.character.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'capsule',capsulePreset:bodyPreset};
+    after.nodeData.character.modelScript=directorCharacterScript('capsule',undefined,bodyPreset);
+  }else if(bodyPreset){
+    const {directorCharacterScript}=await import('@woohaa3/contracts');
+    after.nodeData.character.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'humanoid',bodyPreset};
+    after.nodeData.character.modelScript=directorCharacterScript('humanoid',bodyPreset);
+  }
   await authority.prepareCanvas(before, { kind: "scene-area", areaId: "a" });
   const dir = mkdtempSync(join(tmpdir(), "director-create-"));
   const file = join(dir, "canvas.sqlite");
@@ -75,5 +84,55 @@ it("atomically rejects an empty director's active run without persisting a node"
     expect(prepared.ok && prepared.snapshot.objects.find(object => object.nodeId === "character")?.containment).toBe("writable");
     expect(await room.submit(request)).toMatchObject({ ok: true });
     expect((await repository.loadYjsState(before.id))?.projection?.document.nodes).toHaveLength(2);
+    const savedFields=structuredClone(persisted.nodeData.character);
+    const savedNode=structuredClone(persisted.document.nodes.find(node=>node.id==='character')!);
+    const apply=async(commandId:string,commands:unknown[])=>{
+      const latest=(await repository.loadYjsState(before.id))!.projection!;
+      await authority.prepareCanvas(latest,{kind:'scene-area',areaId:'a'});
+      return room.submit({protocolVersion:YJS_SYNC_PROTOCOL_VERSION,canvasId:before.id,actorId:'user',commandId,baseRevision:latest.revision,commands} as never);
+    };
+    expect(await apply('undo-create',[{type:'node.remove',nodeIds:['character']}])).toMatchObject({ok:true});
+    expect((await repository.loadYjsState(before.id))!.projection!.nodeData.character).toBeUndefined();
+    expect(await apply('redo-create',[{type:'node.add',node:savedNode,nodeData:savedFields}])).toMatchObject({ok:true});
+    const copy=structuredClone(savedFields),instance=copy.sharedWorldInstance as any;
+    instance.instanceId='copy';instance.transform.position.v+=1;
+    expect(await apply('copy-body',[{type:'node.add',node:{...savedNode,id:'copy'},nodeData:copy}])).toMatchObject({ok:true});
+    const copied=(await repository.loadYjsState(before.id))!.projection!;
+    expect(copied.nodeData.copy.modelScript).toBe(savedFields.modelScript);
+    expect(copied.document.nodes).toHaveLength(3);
+    const reopened = new CanvasRoom({ canvasId: before.id, repository });
+    expect(await reopened.load()).toMatchObject({ok:true});
+    expect((await repository.loadYjsState(before.id))!.projection!.nodeData.character.modelScript).toBe(after.nodeData.character.modelScript);
+    if(bodyPreset==='two-heads')expect((await repository.loadYjsState(before.id))!.projection!.nodeData.character.directorCharacterCreation).toMatchObject({capsulePreset:bodyPreset});
+    else if(bodyPreset)expect((await repository.loadYjsState(before.id))!.projection!.nodeData.character.directorCharacterCreation).toMatchObject({bodyPreset});
   } finally { repository.close(); db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('accepts all catalog factories and rejects substituted preset identities or forged geometry',async()=>{
+ const {SOMA_BODY_PRESETS,directorCharacterScript}=await import('@woohaa3/contracts');
+ const {before,after,authority}=setup();await authority.prepareCanvas(before,{kind:'scene-area',areaId:'a'});
+ for(const preset of SOMA_BODY_PRESETS){
+  const fields=after.nodeData.character;
+  fields.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'humanoid',bodyPreset:preset.id};
+  fields.modelScript=directorCharacterScript('humanoid',preset.id);
+  expect(authority.userCreateTargets!(before,after)).toEqual([]);
+  fields.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'humanoid',bodyPreset:'soma-body-v1/unknown'};
+  expect(()=>authority.userCreateTargets!(before,after)).toThrow();
+  fields.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'humanoid',bodyPreset:preset.id};
+  fields.modelScript+='scene.box({id:"extra",size:[10,10,10]});';
+  expect(()=>authority.userCreateTargets!(before,after)).toThrow();
+ }
+},30000);
+
+it('guards the two-head capsule identity and exact geometry',async()=>{
+ const {directorCharacterScript}=await import('@woohaa3/contracts');
+ const {before,after,authority}=setup();await authority.prepareCanvas(before,{kind:'scene-area',areaId:'a'});
+ const fields=after.nodeData.character;
+ fields.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'capsule',capsulePreset:'two-heads'};
+ fields.modelScript=directorCharacterScript('capsule',undefined,'two-heads');
+ expect(authority.userCreateTargets!(before,after)).toEqual([]);
+ fields.modelScript=DIRECTOR_CHARACTER_SCRIPTS.capsule;expect(()=>authority.userCreateTargets!(before,after)).toThrow();
+ fields.modelScript=directorCharacterScript('capsule',undefined,'two-heads');
+ fields.directorCharacterCreation={areaId:'a',scopeVersion:'v1',kind:'humanoid',capsulePreset:'two-heads'};
+ expect(()=>authority.userCreateTargets!(before,after)).toThrow();
 });

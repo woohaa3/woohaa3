@@ -18,9 +18,9 @@ pub(crate) fn deform(
         .map(|(i, p)| {
             let mut result = Vec3::ZERO;
             if let (Some(indices), Some(weights)) = (skin.indices.get(i), skin.weights.get(i)) {
-                for k in 0..8 {
-                    if let Some(m) = matrices.get(indices[k]) {
-                        result += m.transform_point3(Vec3::from_array(*p)) * weights[k];
+                for (&index, &weight) in indices.iter().zip(weights) {
+                    if let Some(m) = matrices.get(index) {
+                        result += m.transform_point3(Vec3::from_array(*p)) * weight;
                     }
                 }
             }
@@ -76,12 +76,26 @@ pub(crate) fn update(
 mod tests {
     use super::*;
     #[test]
+    fn all_ten_body_preset_influences_survive_protocol_and_deformation() {
+        let skin: crate::protocol::ModelSkin = serde_json::from_value(serde_json::json!({
+            "jointIds": (0..10).map(|i| i.to_string()).collect::<Vec<_>>(),
+            "inverseBindMatrices": vec![Mat4::IDENTITY.to_cols_array(); 10],
+            "indices": [(0..10).collect::<Vec<_>>()],
+            "weights": [vec![0.1; 10]]
+        })).unwrap();
+        let mut matrices = vec![Mat4::IDENTITY; 10];
+        matrices[9] = Mat4::from_translation(Vec3::Y * 10.);
+        let result = deform(&[[0., 0., 0.]], &skin, &matrices);
+        assert!(Vec3::from_array(result[0]).abs_diff_eq(Vec3::Y, 1e-6));
+        assert_eq!(skin.indices[0].len(), 10);
+    }
+    #[test]
     fn all_eight_influences_are_used_and_instances_are_independent() {
         let skin = crate::protocol::ModelSkin {
             joint_ids: (0..8).map(|i| i.to_string()).collect(),
             inverse_bind_matrices: vec![Mat4::IDENTITY.to_cols_array(); 8],
-            indices: vec![[0, 1, 2, 3, 4, 5, 6, 7]],
-            weights: vec![[0.125; 8]],
+            indices: vec![vec![0, 1, 2, 3, 4, 5, 6, 7]],
+            weights: vec![vec![0.125; 8]],
         };
         let rest = vec![[1., 2., 3.]];
         let bind = vec![Mat4::IDENTITY; 8];
@@ -124,8 +138,8 @@ mod tests {
         let skin = crate::protocol::ModelSkin {
             joint_ids: vec!["joint".into()],
             inverse_bind_matrices: vec![Mat4::IDENTITY.to_cols_array()],
-            indices: vec![[0; 8]; vertices.len()],
-            weights: vec![[1., 0., 0., 0., 0., 0., 0., 0.]; vertices.len()],
+            indices: vec![vec![0; 8]; vertices.len()],
+            weights: vec![vec![1., 0., 0., 0., 0., 0., 0., 0.]; vertices.len()],
         };
         let mut entities = Vec::new();
         for (handle, joint) in [(first.clone(), moved), (second.clone(), rest)] {

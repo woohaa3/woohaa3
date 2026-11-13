@@ -69,3 +69,24 @@ describe("director character creation", () => {
     expect(edit.record).not.toHaveBeenCalled();
   });
 });
+
+it('creates every body with its canonical script, durable marker and combination name',async()=>{
+ const {SOMA_BODY_PRESETS,somaBodyPresetName,directorCharacterScript}=await import('@woohaa3/contracts');
+ const {input,edit}=setup();
+ for(const preset of SOMA_BODY_PRESETS){
+  edit.record.mockClear();await createDirectorCharacter({...input,kind:'humanoid',bodyPreset:preset.id});
+  const fields=(edit.record.mock.calls[0] as unknown as [Array<{nodeData:Record<string,unknown>}>])[0][0].nodeData;
+  expect(fields.modelScript).toBe(directorCharacterScript('humanoid',preset.id));
+  expect(fields.directorCharacterCreation).toMatchObject({bodyPreset:preset.id});expect(fields.title).toBe(somaBodyPresetName(preset.id));
+ }
+},30000);
+
+it('persists the short capsule marker, title and canonical factory',async()=>{
+ const {input,edit}=setup();await createDirectorCharacter({...input,kind:'capsule',capsulePreset:'two-heads'});
+ const fields=(edit.record.mock.calls[0] as unknown as [Array<{nodeData:Record<string,unknown>}>])[0][0].nodeData;
+ expect(fields.directorCharacterCreation).toMatchObject({kind:'capsule',capsulePreset:'two-heads'});
+ expect(fields.title).toBe('胶囊人 · 2头身');
+ const {directorCharacterScript}=await import('@woohaa3/contracts');
+ expect(fields.modelScript).toBe(directorCharacterScript('capsule',undefined,'two-heads'));
+ expect(decodeModel3DNodeData(fields).ok).toBe(true);
+});

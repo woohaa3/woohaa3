@@ -1,8 +1,8 @@
-import { decodeSceneAreaData, executeWorldAnimationScript, type ServerCanvas, type WorldSomaClipTrack, type PreparedSomaMotion } from '@woohaa3/contracts';
+import { decodeSceneAreaData, executeWorldAnimationScript, type ServerCanvas, type WorldSomaClipTrack, type PreparedSomaMotion, validateSomaBodyAdaptation, type SomaBodyPresetId } from '@woohaa3/contracts';
 import { resolveCanonicalMediaUrl } from './media-remote.js';
 import { loadSomaMotion } from './soma-motion.js';
 
-type Entry = { track: WorldSomaClipTrack; url: string; abort: AbortController; value?: PreparedSomaMotion; error?: unknown; pending?: Promise<void> };
+type Entry = { bodyPresets: Set<SomaBodyPresetId>; track: WorldSomaClipTrack; url: string; abort: AbortController; value?: PreparedSomaMotion; error?: unknown; pending?: Promise<void> };
 const keyFor = (track: WorldSomaClipTrack) => JSON.stringify([track.assetId, track.checksum, track.fps, track.frameCount]);
 /** Page-owned prepared clips. No decoded arrays or clocks live in the document. */
 export class DirectorSomaMotionCache {
@@ -29,6 +29,7 @@ export class DirectorSomaMotionCache {
     this.scope = scope;
     this.identity = canvas;
     const wanted = new Map<string, Entry>();
+    for (const entry of this.entries.values()) entry.bodyPresets = new Set();
     if (canvas) for (const node of canvas.document.nodes) {
       if (areaIds && !areaIds.has(node.id)) continue;
       const area = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
@@ -37,12 +38,17 @@ export class DirectorSomaMotionCache {
       if (!result.ok) continue;
       for (const track of result.ir.somaTracks ?? []) {
         const key = keyFor(track);
-        if (wanted.has(key)) continue;
+        if (wanted.has(key)) { if (track.targetBodyPreset) wanted.get(key)!.bodyPresets.add(track.targetBodyPreset); continue; }
         const asset = canvas.assets.find(asset => asset.id === track.assetId);
         const url = resolveCanonicalMediaUrl(asset, canvas.id);
         const old = this.entries.get(key);
-        wanted.set(key, old?.url === url ? old : { track, url: url ?? '', abort: new AbortController(), ...(!url ? { error: new Error('动作资源不存在') } : {}) });
+        wanted.set(key, old?.url === url ? old : { bodyPresets: new Set<SomaBodyPresetId>(), track, url: url ?? '', abort: new AbortController(), ...(!url ? { error: new Error('动作资源不存在') } : {}) });
+        if (track.targetBodyPreset) wanted.get(key)!.bodyPresets.add(track.targetBodyPreset);
       }
+    }
+    for (const entry of wanted.values()) if (entry.value) {
+      try { for (const id of entry.bodyPresets) validateSomaBodyAdaptation(entry.value, id); }
+      catch (error) { entry.error = error; entry.value = undefined; }
     }
     for (const [key, entry] of this.entries) if (wanted.get(key) !== entry) entry.abort.abort();
     this.entries = wanted;
@@ -55,7 +61,7 @@ export class DirectorSomaMotionCache {
     for (const [key, entry] of this.entries) {
       if (!entry.error || !entry.url) continue;
       entry.abort.abort();
-      this.entries.set(key, { track: entry.track, url: entry.url, abort: new AbortController() });
+      this.entries.set(key, { bodyPresets: entry.bodyPresets, track: entry.track, url: entry.url, abort: new AbortController() });
     }
     this.pump();
     this.publish();
@@ -71,7 +77,10 @@ export class DirectorSomaMotionCache {
         if (!entry.abort.signal.aborted && this.entries.get(keyFor(entry.track)) === entry) { const bytes = (motion: PreparedSomaMotion) => Object.values(motion).reduce<number>((sum, value) => sum + (ArrayBuffer.isView(value) ? value.byteLength : 0), 0);
           const used = [...this.entries.values()].reduce((sum, current) => sum + (current.value ? bytes(current.value) : 0), 0);
           if (used + bytes(value) > this.maxPreparedBytes) entry.error = new Error('当前导演动作超过内存预算（512 MB）');
-          else { entry.value = value; this.changed(); } }
+          else {
+            try { for (const id of entry.bodyPresets) validateSomaBodyAdaptation(value, id); entry.value = value; this.changed(); }
+            catch (error) { entry.error = error; }
+          } }
       }, error => { entry.error = error; }).finally(() => { this.active--; this.pump(); this.publish(); });
     }
   }

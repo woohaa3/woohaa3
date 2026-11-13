@@ -1,3 +1,5 @@
+import { resolveSomaBodyPreset, type SomaBodyPresetId } from '../soma-humanoid/body-presets.js';
+import { adaptSomaBodyPose, SOMA_BODY_ADAPTATION_VERSION } from './body-adaptation.js';
 import { validateSomaSceneLapRoute, type SomaSceneLapRoute } from './scene-lap.js';
 import type { PreparedSomaMotion } from './index.js';
 import { quatMul, quatRotate, type Quat, type Vec3 } from '../model-transform.js';
@@ -5,13 +7,16 @@ import type { WorldRotation, WorldPoint } from '../shared-world.js';
 
 /** Immutable asset identity and bounded playback metadata; never contains NPZ data. */
 export type WorldSomaClipTrack = {
+  targetBodyPreset?: SomaBodyPresetId; adaptationVersion?: typeof SOMA_BODY_ADAPTATION_VERSION;
   targetId: string; assetId: string; checksum: string; fps: number; frameCount: number;
   startTime: number; endTime: number; sourceStartTime?: number; blendInDuration?: number; jointPrefix: string; rootMotion?: 'in-place' | 'translate'; route?: SomaSceneLapRoute;
 };
 export function validateSomaClip(input: unknown, duration: number): WorldSomaClipTrack {
   const x = input as Record<string, unknown>;
   const fail = () => { throw new Error('Invalid SOMA clip metadata'); };
-  if (!x || typeof x !== 'object' || Array.isArray(x) || !Object.keys(x).every(k => ['targetId','assetId','checksum','fps','frameCount','startTime','endTime','jointPrefix','rootMotion','route','sourceStartTime','blendInDuration'].includes(k))) return fail();
+  if (!x || typeof x !== 'object' || Array.isArray(x) || !Object.keys(x).every(k => ['targetId','assetId','checksum','fps','frameCount','startTime','endTime','jointPrefix','rootMotion','route','sourceStartTime','blendInDuration','targetBodyPreset','adaptationVersion'].includes(k))) return fail();
+  if(x.targetBodyPreset!==undefined){resolveSomaBodyPreset(x.targetBodyPreset);if(x.adaptationVersion!==SOMA_BODY_ADAPTATION_VERSION)return fail();}
+  else if(x.adaptationVersion!==undefined)return fail();
   for (const k of ['targetId','assetId','checksum','jointPrefix']) if (typeof x[k] !== 'string' || !(x[k] as string).trim() || (x[k] as string).length > 200) return fail();
   if (!/^[a-f0-9]{64}$/i.test(x.checksum as string) || typeof x.fps !== 'number' || !Number.isFinite(x.fps) || x.fps <= 0 || x.fps > 240 || !Number.isInteger(x.frameCount) || (x.frameCount as number) < 1 || (x.frameCount as number) > 18000 || typeof x.startTime !== 'number' || !Number.isFinite(x.startTime) || x.startTime < 0) return fail();
   if (x.rootMotion !== undefined && x.rootMotion !== 'in-place' && x.rootMotion !== 'translate') return fail();
@@ -24,9 +29,9 @@ export function validateSomaClip(input: unknown, duration: number): WorldSomaCli
   if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime <= x.startTime || endTime > duration || endTime - x.startTime > sourceDuration - sourceStartTime + 1e-8 || blendInDuration > endTime - x.startTime + 1e-8) return fail();
   const route=x.route===undefined ? undefined : validateSomaSceneLapRoute(x.route,endTime-x.startTime);
   if(route && x.rootMotion!=='in-place')return fail();
-  return {...(x.sourceStartTime !== undefined ? {sourceStartTime} : {}), ...(x.blendInDuration !== undefined ? {blendInDuration} : {}), ...(route ? {route} : {}),targetId:x.targetId as string,assetId:x.assetId as string,checksum:x.checksum as string,fps:x.fps,frameCount:x.frameCount as number,startTime:x.startTime,endTime,jointPrefix:x.jointPrefix as string,...(x.rootMotion !== undefined ? {rootMotion:x.rootMotion as WorldSomaClipTrack['rootMotion']} : {})};
+  return {...(x.targetBodyPreset!==undefined?{targetBodyPreset:x.targetBodyPreset as SomaBodyPresetId,adaptationVersion:SOMA_BODY_ADAPTATION_VERSION}:{}),...(x.sourceStartTime !== undefined ? {sourceStartTime} : {}), ...(x.blendInDuration !== undefined ? {blendInDuration} : {}), ...(route ? {route} : {}),targetId:x.targetId as string,assetId:x.assetId as string,checksum:x.checksum as string,fps:x.fps,frameCount:x.frameCount as number,startTime:x.startTime,endTime,jointPrefix:x.jointPrefix as string,...(x.rootMotion !== undefined ? {rootMotion:x.rootMotion as WorldSomaClipTrack['rootMotion']} : {})};
 }
-function matrixQuaternion(m: number[]): Quat {
+export function matrixQuaternion(m: number[]): Quat {
   const trace = m[0]! + m[4]! + m[8]!;
   let q: Quat;
   if (trace > 0) { const s = Math.sqrt(trace + 1) * 2; q = [(m[7]!-m[5]!)/s,(m[2]!-m[6]!)/s,(m[3]!-m[1]!)/s,s/4]; }
@@ -67,15 +72,16 @@ export function sampleSomaClip(p:PreparedSomaMotion,jointPrefix:string,time:numb
 
 /** Seekable source-window sampling. Blend occupies timeline time; it does not delay source events. */
 export function sampleSomaClipTrack(p:PreparedSomaMotion, track:WorldSomaClipTrack, now:number) {
+  const sample=(time:number)=>sampleSomaClip(p,track.jointPrefix,time,track.rootMotion,!!track.route);
   const elapsed=Math.max(0,Math.min(now,track.endTime)-track.startTime);
   const sourceStart=track.sourceStartTime??0, blend=track.blendInDuration??0;
-  if(now<track.startTime && blend>0)return sampleSomaClip(p,track.jointPrefix,0,track.rootMotion,!!track.route);
-  const pose=sampleSomaClip(p,track.jointPrefix,sourceStart+elapsed,track.rootMotion,!!track.route);
-  if(blend>0 && elapsed<blend){
-    const initial=sampleSomaClip(p,track.jointPrefix,0,track.rootMotion,!!track.route);
+  const sourceTime=now<track.startTime&&blend>0?0:sourceStart+elapsed;
+  const pose=sample(sourceTime);
+  if(blend>0 && now>=track.startTime && elapsed<blend){
+    const initial=sample(0);
     const t=elapsed/blend, weight=t*t*(3-2*t);
     for(const key of Object.keys(pose.partRotations))pose.partRotations[key]=slerp(initial.partRotations[key]! as Quat,pose.partRotations[key]! as Quat,weight);
     for(const key of Object.keys(pose.partPositions))pose.partPositions[key]=pose.partPositions[key]!.map((v,i)=>initial.partPositions[key]![i]!*(1-weight)+v*weight) as Vec3;
   }
-  return pose;
+  return track.targetBodyPreset?adaptSomaBodyPose(p,track.targetBodyPreset,track.jointPrefix,sourceTime,pose):pose;
 }

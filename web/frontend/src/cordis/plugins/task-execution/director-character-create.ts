@@ -1,12 +1,12 @@
 import {
   createHighEntropyId, normalizeModelDefinition, humanoidRigForAuthoredScript, decodeSceneAreaData, decodeWorldInstanceData, executeModelScriptVersioned,
-  prepareModelResource, transformAabb, MODEL_SCRIPT_SCENE_IR_V2_VERSION, type Aabb, type GroundAabb, type ServerCanvas, type WorldTransform,
+  prepareModelResource, transformAabb, directorCharacterScript, somaBodyPresetName, type SomaBodyPresetId, type DirectorCapsulePreset, MODEL_SCRIPT_SCENE_IR_V2_VERSION, type Aabb, type GroundAabb, type ServerCanvas, type WorldTransform,
 } from "@woohaa3/contracts";
 import type { CanvasEditService } from "../../services/canvas-state/store/canvas-edit-service.js";
 import type { CanvasRemoteService } from "../../contract/remote.js";
 
 export { DIRECTOR_CHARACTER_SCRIPTS, type DirectorCharacterKind } from "@woohaa3/contracts";
-import { DIRECTOR_CHARACTER_SCRIPTS, type DirectorCharacterKind } from "@woohaa3/contracts";
+import { type DirectorCharacterKind } from "@woohaa3/contracts";
 const VERSION = "woohaa-model-js-v2";
 
 function localBounds(script: string, version: unknown): Aabb {
@@ -49,7 +49,7 @@ export function characterSpawn(bounds: GroundAabb, local: Aabb, occupied: readon
 
 /** Ordinary user edit: canonical write permission, spatial occupancy gate and shared undo history. */
 export async function createDirectorCharacter(input: {
-  canvasId: string; nodeId: string; areaId: string; kind: DirectorCharacterKind;
+  canvasId: string; nodeId: string; areaId: string; kind: DirectorCharacterKind; bodyPreset?: SomaBodyPresetId; capsulePreset?: DirectorCapsulePreset;
   writable(): boolean; getCanvas(): ServerCanvas | null;
   resources?: ReadonlyMap<string, { aabb: Aabb | null }>;
   remote: Pick<CanvasRemoteService, "prepareSceneArea">; edit: Pick<CanvasEditService, "record">;
@@ -62,7 +62,7 @@ export async function createDirectorCharacter(input: {
   if (!input.writable() || canvas?.id !== input.canvasId) throw new Error("画布当前不可写");
   const area = decodeSceneAreaData(canvas.nodeData[input.nodeId]?.sceneArea);
   if (!area.ok || area.value.areaId !== input.areaId || area.value.scopeVersion !== prepared.snapshot.scope.scopeVersion) throw new Error("导演区已改变，请重试");
-  const script = DIRECTOR_CHARACTER_SCRIPTS[input.kind];
+  const script = directorCharacterScript(input.kind, input.bodyPreset, input.capsulePreset);
   const resolvedRig = humanoidRigForAuthoredScript(script, undefined, undefined);
   if (!resolvedRig.ok) throw new Error(resolvedRig.message);
   const definition = normalizeModelDefinition({ modelScript: script, modelScriptLanguage: "javascript", modelScriptVersion: VERSION, rig: resolvedRig.rig });
@@ -83,8 +83,8 @@ export async function createDirectorCharacter(input: {
   const point = characterSpawn(area.value.bounds, local, occupied);
   const id = createHighEntropyId("character");
   const result = await input.edit.record([{ type: "node.add", node: { id, type: "model3d", position: { x: 0, y: 0 } }, nodeData: {
-    directorCharacterCreation: { areaId: input.areaId, scopeVersion: area.value.scopeVersion, kind: input.kind },
-    title: input.kind === "capsule" ? "胶囊人" : "骨架人", modelScript: definition.value.modelScript, modelScriptLanguage: definition.value.modelScriptLanguage,
+    directorCharacterCreation: { areaId: input.areaId, scopeVersion: area.value.scopeVersion, kind: input.kind, ...(input.bodyPreset ? { bodyPreset: input.bodyPreset } : {}), ...(input.capsulePreset ? { capsulePreset: input.capsulePreset } : {}) },
+    title: input.bodyPreset ? somaBodyPresetName(input.bodyPreset) : input.kind === "capsule" ? input.capsulePreset ? "胶囊人 · 2头身" : "胶囊人" : "骨架人", modelScript: definition.value.modelScript, modelScriptLanguage: definition.value.modelScriptLanguage,
     modelScriptVersion: definition.value.modelScriptVersion, modelContentVersion: definition.value.contentVersion,
     modelPlacement: definition.value.placement, ...(definition.value.rig ? { modelRig: definition.value.rig } : {}),
     sharedWorldInstance: { kind: "world-instance", version: "shared-world-v1", instanceId: id,

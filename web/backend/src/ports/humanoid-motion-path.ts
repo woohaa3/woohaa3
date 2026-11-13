@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { decodeSomaRootPositions, projectSomaRootTranslation, type StoredAsset, type WorldTransform, type WorldPoint } from '@woohaa3/contracts';
+import { decodeSomaRootPositions, somaBodyRootScale, type SomaBodyPresetId, projectSomaRootTranslation, type StoredAsset, type WorldTransform, type WorldPoint } from '@woohaa3/contracts';
 
 export type HumanoidMotionPathInput = {
+  bodyPreset?: SomaBodyPresetId;
   canvasId: string;
   asset: StoredAsset;
   transform: WorldTransform;
@@ -21,8 +22,9 @@ export async function validateHumanoidMotionPath(input:HumanoidMotionPathInput):
   const motion=metadata.motion as {frameCount?:unknown}|undefined;
   if(!motion||motion.frameCount!==frameCount)throw new Error('动作路径帧数与稳定资产不符');
   const path:WorldPoint[]=[];
+  const rootScale=input.bodyPreset?somaBodyRootScale(input.bodyPreset):1;
   for(let frame=0;frame<frameCount;frame++){
-    const point=projectSomaRootTranslation([roots[frame*3]!-roots[0]!,0,roots[frame*3+2]!-roots[2]!],transform.rotation,transform.scale,transform.position);
+    const point=projectSomaRootTranslation([(roots[frame*3]!-roots[0]!)*rootScale,0,(roots[frame*3+2]!-roots[2]!)*rootScale],transform.rotation,transform.scale,transform.position);
     const anchor=input.groundAnchorLocal??[0,0,0];
     const membership=projectSomaRootTranslation(anchor,transform.rotation,transform.scale,point);
     if(![membership.u,membership.v,membership.h].every(Number.isFinite)||membership.u<bounds.min.u||membership.u>bounds.max.u||membership.v<bounds.min.v||membership.v>bounds.max.v)throw new Error(`动作路径超出导演区范围（帧 ${frame}）`);

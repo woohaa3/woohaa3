@@ -20,7 +20,7 @@
  * MCP tool path with a grant that already carries the issued context.
  */
 import {
-  somaSkeletonPrefix,
+  somaSkeletonIdentity,
   projectSomaRootTranslation,
   isSomaMotionMetadata,
   DEFAULT_MODEL_PLACEMENT,
@@ -1484,14 +1484,15 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       const priorAnimation=findArea(canvas,areaId)?.area.animationScript;
       const priorCompiled=priorAnimation?executeWorldAnimationScript(priorAnimation.script,priorAnimation):null;
       for(const track of compiled.ir.somaTracks??[]) {
-        if((track.rootMotion==='translate'||track.route)&&operation.motionAsset?.id!==track.assetId){
+        if((track.targetBodyPreset||track.rootMotion==='translate'||track.route)&&operation.motionAsset?.id!==track.assetId){
           const persisted=priorCompiled?.ok&&priorCompiled.ir.somaTracks?.some(previous=>JSON.stringify(previous)===JSON.stringify(track));
-          if(!persisted)return {code:"invalid-data" as const,message:"新位移动作必须通过宿主校验稳定 NPZ 路径后应用"};
+          if(!persisted)return {code:"invalid-data" as const,message:"新体型或位移动作必须通过宿主校验稳定 NPZ 后应用"};
         }
         if(!writable(track.targetId))return {code:"outside-scope" as const,message:"SOMA模型不在本轮可写范围"};
         const model=findInstanceNode(canvas,track.targetId);
         const rig=model?await animationRigOf(model.fields):null;
-        if(!rig||somaSkeletonPrefix(rig.groups,track.jointPrefix)!==track.jointPrefix)return {code:"invalid-data" as const,message:"SOMA片段需要匹配真实77关节绑定骨架"};
+        const skeleton=rig?somaSkeletonIdentity(rig.groups,track.jointPrefix):null;
+        if(!rig||!skeleton||skeleton.bodyPreset!==track.targetBodyPreset)return {code:"invalid-data" as const,message:"SOMA片段需要匹配真实77关节绑定骨架"};
         if(track.route&&operation.motionTarget?.instanceId===track.targetId&&operation.motionAsset?.id===track.assetId){
           const instance=decodeWorldInstanceData(model?.fields.sharedWorldInstance),bounds=findArea(canvas,areaId)?.area.bounds,anchor=rig.spatial?.groundAnchorLocal;
           if(!instance.ok||!bounds||!anchor)return {code:"invalid-data" as const,message:"绕场缺少实际模型与范围"};

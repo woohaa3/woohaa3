@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     bridge,
     protocol::{
-        GraphNode, ModelAssetDescriptor, ModelOp, ModelPlacement, ModelReference, NodePosition,
+        GraphNode, ModelAssetDescriptor, ModelOp, ModelReference, NodePosition,
         Scene,
     },
 };
@@ -74,7 +74,6 @@ fn scene(swap: bool, parent_changed: bool) -> Scene {
             resource_key: asset.resource_key,
             scene_version: asset.scene_version,
             signature: asset.signature,
-            placement: ModelPlacement::default(),
         });
         scene.nodes.push(node);
     }

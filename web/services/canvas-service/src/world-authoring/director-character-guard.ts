@@ -1,4 +1,4 @@
-import { decodeSceneAreaData, decodeWorldInstanceData, executeModelScriptVersioned, DIRECTOR_CHARACTER_SCRIPTS, v2SceneAabb,
+import { decodeSceneAreaData, decodeWorldInstanceData, executeModelScriptVersioned, directorCharacterScript, type SomaBodyPresetId, type DirectorCapsulePreset, v2SceneAabb,
   type ServerCanvas, type WorldObjectIdentity } from "@woohaa3/contracts";
 import { instanceFootprint, worldObjectVersion, type AuthorityCache } from "./authority.js";
 import { SpatialLeaseError } from "./spatial-leases.js";
@@ -11,14 +11,17 @@ export function directorCharacterCommitTargets(before: ServerCanvas, after: Serv
   for (const node of after.document.nodes) {
     if (before.nodeData[node.id]) continue;
     const fields = after.nodeData[node.id];
-    const marker = fields?.directorCharacterCreation as { areaId?: unknown; scopeVersion?: unknown; kind?: unknown } | undefined;
+    const marker = fields?.directorCharacterCreation as { areaId?: unknown; scopeVersion?: unknown; kind?: unknown; bodyPreset?: unknown; capsulePreset?: unknown } | undefined;
     if (!marker) continue;
     if (typeof marker.areaId !== "string" || typeof marker.scopeVersion !== "string" || (marker.kind !== "capsule" && marker.kind !== "humanoid")) throw new SpatialLeaseError("invalid-data");
     const areaNode = before.document.nodes.find(n => { const a = decodeSceneAreaData(before.nodeData[n.id]?.sceneArea); return a.ok && a.value.areaId === marker.areaId; });
     const area = decodeSceneAreaData(areaNode && before.nodeData[areaNode.id]?.sceneArea);
     const afterArea = decodeSceneAreaData(areaNode && after.nodeData[areaNode.id]?.sceneArea);
     if (!area.ok || !afterArea.ok || area.value.scopeVersion !== marker.scopeVersion || JSON.stringify(area.value) !== JSON.stringify(afterArea.value)) throw new SpatialLeaseError("outside-scope");
-    if (fields.modelScriptLanguage !== "javascript" || fields.modelScript !== DIRECTOR_CHARACTER_SCRIPTS[marker.kind] || fields.modelScriptVersion !== "woohaa-model-js-v2") throw new SpatialLeaseError("invalid-data");
+    let expectedScript: string;
+    try { expectedScript = directorCharacterScript(marker.kind, marker.bodyPreset as SomaBodyPresetId | undefined, marker.capsulePreset as DirectorCapsulePreset | undefined); }
+    catch { throw new SpatialLeaseError("invalid-data"); }
+    if (fields.modelScriptLanguage !== "javascript" || fields.modelScript !== expectedScript || fields.modelScriptVersion !== "woohaa-model-js-v2") throw new SpatialLeaseError("invalid-data");
     const model = decodeWorldInstanceData(fields.sharedWorldInstance);
     if (!model.ok || model.value.transform.scale !== 1 || JSON.stringify(model.value.transform.rotation) !== "[0,0,0,1]" || model.value.transform.position.h !== 0) throw new SpatialLeaseError("invalid-data");
     const compiled = executeModelScriptVersioned(fields.modelScript as string, fields.modelScriptVersion);

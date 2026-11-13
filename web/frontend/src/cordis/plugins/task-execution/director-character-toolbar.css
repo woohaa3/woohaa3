@@ -1,0 +1,8 @@
+.director-character-toolbar { display: flex; align-items: center; gap: 6px; }
+.director-character-toolbar > button { white-space: nowrap; padding-inline: 12px; flex-shrink: 0; }
+.director-character-toolbar__label { color: var(--app-web-text-muted); font-size: 12px; white-space: nowrap; }
+.director-body-picker { width: 300px; padding: 12px; }
+.director-body-picker__row { display: grid; grid-template-columns: 48px 1fr; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 12px; }
+.director-body-picker__choices { display: flex; gap: 4px; }
+.director-body-picker__choices > button { flex: 1; padding-inline: 8px; white-space: nowrap; }
+.director-body-picker__footer { display: flex; justify-content: flex-end; margin-top: 14px; }

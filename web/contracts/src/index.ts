@@ -251,10 +251,11 @@ export {
 export * from "./canvas/world-resource-tools.js";
 export * from "./canvas/soma-motion/index.js";
 
+export * from "./canvas/soma-humanoid/body-presets.js";
 export { SOMA77_JOINTS } from "./canvas/soma-humanoid/skeleton.js";
 export { projectSomaRootTranslation, sampleSomaClip, type WorldSomaClipTrack } from "./canvas/soma-motion/clip.js";
 
-export { somaSkeletonPrefix, type SomaBindGroup } from "./canvas/soma-humanoid/validation.js";
+export { somaSkeletonIdentity, somaSkeletonPrefix, type SomaBindGroup } from "./canvas/soma-humanoid/validation.js";
 
 export * from "./canvas/director-character.js";
 
@@ -263,3 +264,4 @@ export * from "./canvas/soma-motion/scene-lap.js";
 export * from "./canvas/soma-motion/timing.js";
 
 export * from "./canvas/soma-motion/interaction.js";
+export { SOMA_BODY_ADAPTATION_VERSION, somaBodyRootScale, validateSomaBodyAdaptation } from "./canvas/soma-motion/body-adaptation.js";
