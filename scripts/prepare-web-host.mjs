@@ -143,7 +143,12 @@ export const INSTANCE_SPLIT_ALLOWED = [
   '@woohaa3/contracts',
   '@woohaa3/ui',
   '@woohaa3/frontend',
-  '@woohaa3/provider-sdk'
+  '@woohaa3/provider-sdk',
+  // `yjs` 的两份实例互不交换对象：宿主（canvas-service）持有权威 Y.Doc，
+  // `infinspire-migration` 只用它把旧格式 checkpoint/updates 解码成普通对象，
+  // 建的是自己的 `Y.Doc`，不把 Y 类型实例传回宿主。没有跨实例的 `instanceof` 或
+  // 结构校验，因此分裂无害 —— 与 pptask 的事件总线（必须共享同一 Set）性质不同。
+  'yjs'
 ];
 
 export async function bundleBackend({ entry, outfile, sourcemap = true, env = process.env }) {
