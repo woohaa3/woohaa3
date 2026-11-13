@@ -10,7 +10,7 @@ import { SDPPPX_PLUGIN_ID } from "../shared.js";
 
 export const SDPPPX_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: SDPPPX_PLUGIN_ID,
-  version: "0.1.0",
+  version: "0.1.1",
   label: "SDPPPX",
   description: "sdpppx 微信扫码登录与租户模板生成。登录后把当前租户的模板投影为生成模型。",
   icon: "identity",

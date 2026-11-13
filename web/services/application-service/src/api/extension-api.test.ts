@@ -78,7 +78,7 @@ function makeHarness(options: { serviceToken?: string; auth?: "authenticated" | 
       {
         extensionId: METADATA.extensionId,
         activate: (h) => {
-          h.registerCapability({ id: "sample.action", value: {} });
+          h.registerCapability({ id: "sample.action", version: 1, value: {} });
           if (options.withHandler) {
             h.registerHandler({ route: "sample/admin", auth: "authenticated", requiredActions: ["extensions.configure"], handle: ({ body }) => ({ body: { echo: body } }) });
             h.registerHandler({ route: "sample/public", auth: "public", handle: () => ({ body: { ok: true } }) });

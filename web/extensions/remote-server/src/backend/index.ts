@@ -27,6 +27,8 @@ import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type Exten
 import {
   agentConnectionProviderCapabilityId,
   agentConversationAdapterCapabilityId,
+  AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
+  AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
 } from "@woohaa3/contracts";
 import {
   CANVAS_SERVICE,
@@ -792,14 +794,16 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       });
       if (ctx.capabilities) {
         // 与 canvasUpstream 同一注册面：返回注销函数，交给 Cordis 托管。
-        const undoProvider = ctx.capabilities.register(
-          agentConnectionProviderCapabilityId(REMOTE_SERVER_EXTENSION_ID),
-          remoteAssistant.provider
-        );
-        const undoAdapter = ctx.capabilities.register(
-          agentConversationAdapterCapabilityId(REMOTE_ASSISTANT_ADAPTER_ID),
-          remoteAssistant.adapter
-        );
+        const undoProvider = ctx.capabilities.register({
+          id: agentConnectionProviderCapabilityId(REMOTE_SERVER_EXTENSION_ID),
+          version: AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
+          value: remoteAssistant.provider
+        });
+        const undoAdapter = ctx.capabilities.register({
+          id: agentConversationAdapterCapabilityId(REMOTE_ASSISTANT_ADAPTER_ID),
+          version: AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
+          value: remoteAssistant.adapter
+        });
         ctx.effect(() => () => {
           undoAdapter();
           undoProvider();

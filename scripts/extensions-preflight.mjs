@@ -32,7 +32,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { EXTENSION_PACKAGE_PREFIX, hasBrowserEntry, readExtensionDescriptor } from "./lib/extension-scan.mjs";
 import { syncExtensionIconAssets } from "./lib/extension-icon-assets.mjs";
-import { checkEnginesCompatible, contentDeclarationCollisions, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
+import { checkCapabilityDependencies, checkEnginesCompatible, contentDeclarationCollisions, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
 import {
   EXTENSION_VERSION_CODES,
   readVersionDeclarations,
@@ -338,7 +338,7 @@ export async function probeDeclaredExports(host) {
  * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 提交后生效。
  * `hotSwappable`：只有纯 `hostPlugin` 能在运行期换版；站点 `backend` 工厂与混合形态都需受控重启（D8）。
  */
-export async function preflightDirectory(dir, { managed = false, contracts = null } = {}) {
+export async function preflightDirectory(dir, { managed = false, contracts = null, runtimeCapabilities = new Map() } = {}) {
   const errors = [];
   const warnings = [];
   const fail = (code, message, field) => errors.push({ code, message, ...(field ? { field } : {}) });
@@ -412,6 +412,21 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
   if (descriptor.engines !== undefined) {
     const compatible = checkEnginesCompatible(descriptor.engines);
     if (!compatible.ok) for (const reason of compatible.reasons) fail("MARKETPLACE_ENGINES_INCOMPATIBLE", reason, "engines");
+    // 服务面与 capability 依赖（change: 2026-11-13-add-extension-capability-abi）：
+    // 用**当前宿主**的版本比对，防止发布一个本机装不上的包。宿主版本不写进包内。
+    if (descriptor.engines.host !== undefined || descriptor.engines.capabilities !== undefined) {
+      const resolvedContracts = contracts ?? (await loadExtensionContracts());
+      // 比对逻辑在脚本侧（`checkCapabilityDependencies`）；contracts 只提供 `HOST_SERVICE_ABI`
+      // 这个唯一版本来源。**不能**写 `resolvedContracts.checkCapabilityDependencies?.(...)` ——
+      // 它在 contracts 里不存在，可选链会静默跳过，让整道校验失效。
+      const dependencies = checkCapabilityDependencies(descriptor.engines, {
+        hostServices: resolvedContracts.HOST_SERVICE_ABI ?? {},
+        resolvableCapabilities: runtimeCapabilities
+      });
+      if (!dependencies.ok) {
+        for (const reason of dependencies.reasons) fail("MARKETPLACE_ENGINES_INCOMPATIBLE", reason, "engines");
+      }
+    }
   }
 
   // 模块路径与品牌图形：只解析，不 import（与装配期 probeDeclaredModules 同一函数）。

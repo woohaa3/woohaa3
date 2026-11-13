@@ -48,6 +48,13 @@ export function isAuthLevelAtLeast(
 /** 插件注册的 typed capability（供同宿主其它模块按 id 解析）。 */
 export type ApplicationBackendCapabilityRegistration = {
   id: string;
+  /**
+   * 能力对象的形状版本（change: 2026-11-13-add-extension-capability-abi）。
+   *
+   * 同 `id` 的不同 `version` 并存，互不覆盖；消费方按自己需要的版本解析。破坏性变更抬版本，
+   * 纯增量不抬（规则与 `HOST_SERVICE_ABI` 一致）。
+   */
+  version: number;
   /** capability 实现；具体形状由 capability owner 约定。 */
   value: unknown;
 };

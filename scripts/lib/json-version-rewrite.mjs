@@ -17,31 +17,63 @@
  * 返回值 `{ text, changed }`。定位失败时抛错——宁可失败，也不要静默写出一个语义错误的文件。
  */
 
-/** 在文本里找到「最后一个 key 出现位置」的值区间。`occurrence` 0 表示第一次。 */
-function valueSpan(text, key, occurrence = 0) {
-  const pattern = new RegExp(`"${key}"\\s*:\\s*`, "g");
-  let match;
-  let seen = 0;
-  let last = null;
-  while ((match = pattern.exec(text)) !== null) {
-    if (seen === occurrence) last = match;
-    seen += 1;
+/**
+ * 定位**顶层** `"version"` 值的区间 `[start, end)`（含两侧引号）。
+ *
+ * 必须按括号深度判定，不能用「最后一次出现」或 `indexOf`：
+ * - `site.version`、`engines.protocolVersion`、`engines.host.*` 都可能出现在顶层之后；
+ * - 「最后一次匹配」会命中最深层的某个 version，改错位置后自校验必然失败
+ *   （实施中真实发生过：带 `site` 段的扩展 bump 全部报「顶层 version 改写后校验失败」）。
+ *
+ * 实现：逐字符扫描，字符串字面量整体跳过；`{`/`[` 加深、`}`/`]` 变浅；只在深度回到 0
+ * 且当前字符串内容为 `version` 时才认为命中。
+ *
+ * 返回 null 表示顶层没有 `version` 键。
+ */
+function topLevelVersionSpan(text) {
+  // 先把「字符串字面量的位置区间」全部标出来：定位时只认不在字符串内部的括号。
+  const literals = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== '"') continue;
+    let end = i + 1;
+    while (end < text.length) {
+      if (text[end] === "\\") {
+        end += 2;
+        continue;
+      }
+      if (text[end] === '"') break;
+      end += 1;
+    }
+    literals.push({ start: i, end: end + 1, text: text.slice(i + 1, end) });
+    i = end;
   }
-  // 没有第 occurrence 次出现时，用最后一次（调用方通常只想改唯一那一处）。
-  const target = last ?? null;
-  if (!target) return null;
-  const start = target.index + target[0].length;
-  if (text[start] !== '"') return null;
-  let end = start + 1;
-  while (end < text.length) {
-    if (text[end] === "\\") {
-      end += 2;
+  const literalAt = new Map(literals.map((literal) => [literal.start, literal]));
+
+  let depth = 0;
+  let index = 0;
+  while (index < text.length) {
+    const literal = literalAt.get(index);
+    if (literal) {
+      // 顶层对象的键位于 depth 1（根 `{` 已经让它 +1）；depth 0 时还在根对象之外。
+      if (depth === 1 && literal.text === "version") {
+        let cursor = literal.end;
+        while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+        if (text[cursor] === ":") {
+          cursor += 1;
+          while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+          const valueLiteral = literalAt.get(cursor);
+          if (valueLiteral) return { start: cursor, end: valueLiteral.end };
+        }
+      }
+      index = literal.end;
       continue;
     }
-    if (text[end] === '"') break;
-    end += 1;
+    const character = text[index];
+    if (character === "{" || character === "[") depth += 1;
+    else if (character === "}" || character === "]") depth -= 1;
+    index += 1;
   }
-  return { start, end: end + 1 }; // [start, end) 含两侧引号
+  return null;
 }
 
 /** 把 `site` 对象内部的 `version` 值区间定位出来（只在 site 的 `{...}` 范围内找）。 */
@@ -75,7 +107,7 @@ function siteVersionSpan(text) {
   }
   if (closeBrace < 0) return null;
   const body = text.slice(openBrace, closeBrace + 1);
-  const span = valueSpan(body, "version");
+  const span = topLevelVersionSpan(body);
   if (!span) return null;
   return { start: openBrace + span.start, end: openBrace + span.end };
 }
@@ -87,7 +119,7 @@ export function rewriteJsonVersionLiterals(text, { top, site, insertTop } = {}) 
 
   const hasTopVersion = typeof parsed?.version === "string";
   if (hasTopVersion && typeof top === "string") {
-    const span = valueSpan(text, "version");
+    const span = topLevelVersionSpan(text);
     if (!span) throw new Error("无法在 extension.json 中定位顶层 version 的值");
     // 值已经相同就不动，保证 `changed` 如实反映「有没有产生 diff」。
     if (text.slice(span.start, span.end) !== `"${top}"`) {

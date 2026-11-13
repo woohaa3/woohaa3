@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-oauth-agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Woohaa3 OAuth Agent 来源扩展：前后端入口、共享 metadata 与 /api/oauth-agent/* 公开映射（change: 2026-10-10-unify-extension-frontend-entry）。",

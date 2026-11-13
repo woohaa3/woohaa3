@@ -57,15 +57,21 @@ export type ApplicationExtensionHost = {
   activateManifest: (
     definitions: readonly ApplicationBackendExtensionDefinition[]
   ) => Promise<Array<{ extensionId: string; result: ExtensionActivationResult }>>;
-  resolveCapability: (id: string) => unknown;
-  hasCapability: (id: string) => boolean;
+  /**
+   * 按 `id` + `version` 解析能力对象。
+   *
+   * 版本是能力身份的一部分（change: 2026-11-13-add-extension-capability-abi）：同一 id 的不同
+   * 版本并存，调用方拿自己需要的那个；拿不到返回 undefined，由调用方决定降级还是报错。
+   */
+  resolveCapability: (id: string, version: number) => unknown;
+  hasCapability: (id: string, version: number) => boolean;
   /**
    * 解析 capability 的当前 owner（extensionId/configVersion/mode）；不存在返回 null。
    *
    * 供受控来源注册表等宿主级调用方在每次调用时校验 owner 与配置版本，避免裸缓存
    * `resolveCapability()` 绕过停用/升级检查（change: 2026-10-12-add-extension-online-canvas-migration）。
    */
-  resolveCapabilityOwner: (id: string) => { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
+  resolveCapabilityOwner: (id: string, version: number) => { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
   dispatch: (
     route: string,
     input: { body: unknown; context: ExtensionDispatchContext; extensionId?: string }
@@ -105,6 +111,16 @@ export type ApplicationExtensionHost = {
 };
 
 export type { PluginRegistrationSurface } from "./host-types.js";
+
+/**
+ * 公开命名空间下的 capability 键：`id@version`。
+ *
+ * 解析侧（`resolveCapability` / `hasCapability` / `resolveCapabilityOwner`）只走公开键，
+ * recovery 实例贡献的能力不外泄（与 `activate()` 内 `capabilityKey` 的 public 分支一致）。
+ */
+function publicCapabilityKey(id: string, version: number): string {
+  return `${id}@${version}`;
+}
 
 export function createApplicationExtensionHost(options: ApplicationExtensionHostOptions = {}): ApplicationExtensionHost {
   const log = options.logger ?? (() => undefined);
@@ -222,12 +238,28 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     }
   };
 
+  /**
+   * `requiredDependencies` 是**准入**判定（change: 2026-10-12），声明的是「这个 capability id 必须
+   * 已被某个扩展提供」，不关心形状版本——版本相容性由 `engines.capabilities`
+   * （change: 2026-11-13-add-extension-capability-abi）在装载期判定。
+   *
+   * 因此这里按「去掉末尾 `@version` 后的 id」比对。不能按裸 id 精确查表——注册键自 capability
+   * 带版本后已变成 `id@version`（recovery 模式还带命名空间前缀）。
+   */
   const resolveDependencies = (
     definition: ApplicationBackendExtensionDefinition
   ): { ok: true } | { ok: false; missing: string[] } => {
     const missing: string[] = [];
+    const registeredIds = new Set<string>();
+    for (const key of globalCapabilities.keys()) {
+      const at = key.lastIndexOf("@");
+      // 只剥末尾版本段；recovery 键形如 `_recovery/<ext>/<ver>/<id>@<version>`，剥完仍是带前缀的 id，
+      // 而那些贡献本来就不该满足公开依赖，所以同时要求「剥完的 id 不以 `_recovery/` 开头」。
+      const id = at > 0 ? key.slice(0, at) : key;
+      if (!id.startsWith("_recovery/")) registeredIds.add(id);
+    }
     for (const dependency of definition.requiredDependencies ?? []) {
-      if (!globalCapabilities.has(dependency)) missing.push(dependency);
+      if (!registeredIds.has(dependency)) missing.push(dependency);
     }
     return missing.length === 0 ? { ok: true } : { ok: false, missing };
   };
@@ -361,7 +393,8 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     const handle = key;
 
     // recovery 实例贡献隔离到恢复命名空间：不能成为公共新工作入口（design D6）。
-    const capabilityKey = (id: string) => (mode === "public" ? id : `_recovery/${definition.extensionId}/${configVersion}/${id}`);
+    const capabilityKey = (id: string, version: number) =>
+      `${mode === "public" ? id : `_recovery/${definition.extensionId}/${configVersion}/${id}`}@${version}`;
     /**
      * 所有 handler 路由都按 extensionId 命名空间隔离（JSON / HTTP / raw HTTP 统一）。
      *
@@ -397,9 +430,13 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
         if (typeof registration.id !== "string" || registration.id === "") {
           throw new ExtensionHostError("duplicate-capability", "capability id 必须是非空字符串");
         }
-        const id = capabilityKey(registration.id);
+        if (!Number.isInteger(registration.version) || registration.version < 1) {
+          throw new ExtensionHostError("duplicate-capability", `capability version 必须是正整数：${String(registration.version)}`);
+        }
+        // 键含版本：同 id 的不同版本并存，提供一个新形状不会静默顶掉旧的。
+        const id = capabilityKey(registration.id, registration.version);
         if (globalCapabilities.has(id)) {
-          throw new ExtensionHostError("duplicate-capability", `capability 已注册：${registration.id}`);
+          throw new ExtensionHostError("duplicate-capability", `capability 已注册：${registration.id}@${registration.version}`);
         }
         globalCapabilities.set(id, handle);
         owner.capabilities.set(id, registration.value);
@@ -654,14 +691,21 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
       ...(mediaFormats ? { mediaFormats } : {}),
       ...(agentRoles ? { agentRoles } : {}),
       capabilities: {
-        register: (id: string, value: unknown) => {
-          const handle = found ? found[0] : extensionId;
-          if (globalCapabilities.has(id)) {
-            throw new ExtensionHostError("duplicate-capability", `capability 已注册：${id}`);
+        register: (registration: { id: string; version: number; value: unknown }) => {
+          if (typeof registration.id !== "string" || registration.id === "") {
+            throw new ExtensionHostError("duplicate-capability", "capability id 必须是非空字符串");
           }
-          globalCapabilities.set(id, handle);
-          found?.[1].capabilities.set(id, value);
-          return () => { if (globalCapabilities.get(id) === handle) globalCapabilities.delete(id); };
+          if (!Number.isInteger(registration.version) || registration.version < 1) {
+            throw new ExtensionHostError("duplicate-capability", `capability version 必须是正整数：${String(registration.version)}`);
+          }
+          const handle = found ? found[0] : extensionId;
+          const key = publicCapabilityKey(registration.id, registration.version);
+          if (globalCapabilities.has(key)) {
+            throw new ExtensionHostError("duplicate-capability", `capability 已注册：${registration.id}@${registration.version}`);
+          }
+          globalCapabilities.set(key, handle);
+          found?.[1].capabilities.set(key, registration.value);
+          return () => { if (globalCapabilities.get(key) === handle) globalCapabilities.delete(key); };
         }
       },
       ...(services ? { services } : {}),
@@ -714,10 +758,15 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
     declaredPublicRoutes: () => [...publicRouteDeclarations.values()].flat(),
     pluginContextFor,
     basePath: options.deployment?.basePath ?? "",
-    resolveCapability: (id) => globalCapabilities.get(id) !== undefined ? records.get(globalCapabilities.get(id)!)?.capabilities.get(id) : undefined,
-    hasCapability: (id) => globalCapabilities.has(id),
-    resolveCapabilityOwner: (id) => {
-      const handle = globalCapabilities.get(id);
+    // 解析只走公开命名空间：recovery 实例的能力不外泄（与 `capabilityKey` 的 mode 分支一致）。
+    resolveCapability: (id, version) => {
+      const key = publicCapabilityKey(id, version);
+      const handle = globalCapabilities.get(key);
+      return handle !== undefined ? records.get(handle)?.capabilities.get(key) : undefined;
+    },
+    hasCapability: (id, version) => globalCapabilities.has(publicCapabilityKey(id, version)),
+    resolveCapabilityOwner: (id, version) => {
+      const handle = globalCapabilities.get(publicCapabilityKey(id, version));
       if (handle === undefined) return null;
       const owner = records.get(handle);
       if (!owner) return null;

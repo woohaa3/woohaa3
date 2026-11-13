@@ -279,6 +279,37 @@ pnpm dev --dev-source web/extensions/<id>
 - 边界：不签名、不进 `installations.json`、不参与市场信任；同 id 时开发者目录优先于受管与内置版本，移除即回落。
 - 发布形态没有这个入口：它只在本机开发时由你显式开启。
 
+## 能力依赖声明（`engines.host` / `engines.capabilities`）
+
+change: 2026-11-13-add-extension-capability-abi。扩展在**编写阶段**就依赖宿主的能力面：
+后端插件 `inject: ["generation", "storage"]` 拿到的 `ctx.generation` / `ctx.storage` 是有形状的类型。
+这些面演化时，`engines.hostAbi` 感知不到——它描述的是 SDK 整体形状，不是逐个服务面。
+
+因此按面各声明一个版本：
+
+```json
+{
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1, "storage": 1 },
+    "capabilities": { "agent-conversation-adapter:foo": 1 }
+  }
+}
+```
+
+- `host`：服务面名 → 所需版本。版本表是 `@woohaa3/contracts` 的 `HOST_SERVICE_ABI`（唯一来源）。
+- `capabilities`：跨扩展 capability 的 id → 所需形状版本。注册与解析都按 `id@version` 记账，
+  同 id 不同版本**并存**，提供一个新形状不会静默顶掉旧的。
+- 两者**缺省都表示「不依赖」**（过渡期语义，见 `docs/security/COMPATIBILITY.md` 第 7 条）。
+
+**校验时机**：扩展层装配时（内置根 / 可写根不兼容 → fail-fast；受管根只拒绝该扩展并记
+`EXTENSION_CAPABILITY_INCOMPATIBLE`），以及受管包安装预检时（用当前宿主版本比对）。
+
+**版本推进规则**：破坏性变更（删除成员、改签名或语义）才抬版本，纯增量（新增可选成员）不抬。
+与 `protocolVersion` 同口径，用**精确相等**判定，不做兼容推断。
+
 ## 打包与分发（`.wxt`）
 
 change: 2026-10-21-add-extension-marketplace-point。仓库内的扩展（内置根）照旧随发布装配；要**单独分发**一个扩展，打成 `.wxt` 包，由本机宿主的 Extension Manager 安装到**受管根**（`WOOHAA3_EXTENSION_MANAGED_DIR`，开发缺省 `.woohaa3/extensions/`，生产 `shared/extensions-managed`）。

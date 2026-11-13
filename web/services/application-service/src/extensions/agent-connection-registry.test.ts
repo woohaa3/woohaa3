@@ -55,7 +55,7 @@ async function hostWith(definitions: Array<{ extensionId: string; register: (h: 
 describe("连接注册表 · owner 绑定与版本（任务 2.1）", () => {
   it("resolve 返回版本绑定 handle 并校验身份/形状", async () => {
     const connection = view({ connectionId: "c1", adapterId: "openai-responses", extensionId: "sdk-agent" });
-    const host = await hostWith([{ extensionId: "sdk-agent", register: (h) => h.registerCapability({ id: CAP("sdk-agent"), value: provider("sdk-agent", [connection]) }) }]);
+    const host = await hostWith([{ extensionId: "sdk-agent", register: (h) => h.registerCapability({ id: CAP("sdk-agent"), version: 1, value: provider("sdk-agent", [connection]) }) }]);
     const registry = createAgentConnectionRegistry(host);
     const resolved = registry.resolve("sdk-agent");
     expect(resolved.ok).toBe(true);
@@ -72,7 +72,7 @@ describe("连接注册表 · owner 绑定与版本（任务 2.1）", () => {
 
   it("capability 身份不一致或形状非法时拒绝（不冒用其它 provider）", async () => {
     const host = await hostWith([
-      { extensionId: "sdk-agent", register: (h) => h.registerCapability({ id: CAP("sdk-agent"), value: { id: "other", listConnections: async () => [] } }) }
+      { extensionId: "sdk-agent", register: (h) => h.registerCapability({ id: CAP("sdk-agent"), version: 1, value: { id: "other", listConnections: async () => [] } }) }
     ]);
     const registry = createAgentConnectionRegistry(host);
     expect(registry.resolve("sdk-agent")).toEqual({ ok: false, code: "adapter-unavailable", message: expect.any(String) });
@@ -81,7 +81,7 @@ describe("连接注册表 · owner 绑定与版本（任务 2.1）", () => {
   it("扩展停用后立即不可见（不裸缓存 capability）", async () => {
     const connection = view({ connectionId: "c1", adapterId: "openai-responses", extensionId: "sdk-agent" });
     const host = createApplicationExtensionHost();
-    const activation = await host.activate({ extensionId: "sdk-agent", activate: (h) => h.registerCapability({ id: CAP("sdk-agent"), value: provider("sdk-agent", [connection]) }) });
+    const activation = await host.activate({ extensionId: "sdk-agent", activate: (h) => h.registerCapability({ id: CAP("sdk-agent"), version: 1, value: provider("sdk-agent", [connection]) }) });
     if (!activation.ok) throw new Error("activate");
     const registry = createAgentConnectionRegistry(host);
     expect(registry.resolve("sdk-agent").ok).toBe(true);
@@ -93,7 +93,7 @@ describe("连接注册表 · owner 绑定与版本（任务 2.1）", () => {
   it("恢复模式 provider 不提供公共连接", async () => {
     const connection = view({ connectionId: "c1", adapterId: "openai-responses", extensionId: "sdk-agent" });
     const host = createApplicationExtensionHost();
-    await host.activateVersioned({ extensionId: "sdk-agent", activate: (h) => h.registerCapability({ id: CAP("sdk-agent"), value: provider("sdk-agent", [connection]) }) }, 1, "recovery");
+    await host.activateVersioned({ extensionId: "sdk-agent", activate: (h) => h.registerCapability({ id: CAP("sdk-agent"), version: 1, value: provider("sdk-agent", [connection]) }) }, 1, "recovery");
     const registry = createAgentConnectionRegistry(host);
     expect(registry.resolve("sdk-agent").ok).toBe(false);
     expect(registry.list()).toEqual([]);
@@ -103,8 +103,8 @@ describe("连接注册表 · owner 绑定与版本（任务 2.1）", () => {
 describe("连接注册表 · 聚合与隔离（任务 2.1）", () => {
   it("list 只枚举 public provider 并按 id 排序", async () => {
     const host = await hostWith([
-      { extensionId: "sdk-agent", register: (h) => h.registerCapability({ id: CAP("zeta"), value: provider("zeta", []) }) },
-      { extensionId: "local-agent", register: (h) => h.registerCapability({ id: CAP("alpha"), value: provider("alpha", []) }) }
+      { extensionId: "sdk-agent", register: (h) => h.registerCapability({ id: CAP("zeta"), version: 1, value: provider("zeta", []) }) },
+      { extensionId: "local-agent", register: (h) => h.registerCapability({ id: CAP("alpha"), version: 1, value: provider("alpha", []) }) }
     ]);
     const registry = createAgentConnectionRegistry(host);
     expect(registry.list().map((owner) => owner.providerId)).toEqual(["alpha", "zeta"]);
@@ -116,6 +116,7 @@ describe("连接注册表 · 聚合与隔离（任务 2.1）", () => {
         extensionId: "sdk-agent",
         register: (h) => h.registerCapability({
           id: CAP("sdk-agent"),
+          version: 1,
           value: provider("sdk-agent", [
             view({ connectionId: "c2", adapterId: "openai-responses", extensionId: "sdk-agent" }),
             view({ connectionId: "c1", adapterId: "openai-responses", extensionId: "sdk-agent" })
@@ -126,6 +127,7 @@ describe("连接注册表 · 聚合与隔离（任务 2.1）", () => {
         extensionId: "local-agent",
         register: (h) => h.registerCapability({
           id: CAP("local-agent"),
+          version: 1,
           value: provider("local-agent", [view({ connectionId: "c1", adapterId: "codex-appserver", extensionId: "local-agent", runCategory: "local-appserver", authMode: "local-login" })])
         })
       }
@@ -144,6 +146,7 @@ describe("连接注册表 · 聚合与隔离（任务 2.1）", () => {
         extensionId: "sdk-agent",
         register: (h) => h.registerCapability({
           id: CAP("sdk-agent"),
+          version: 1,
           value: provider("sdk-agent", [], {
             getConnection: async ({ owner, connectionId }) => {
               seen.push(owner);
@@ -164,11 +167,11 @@ describe("连接注册表 · 聚合与隔离（任务 2.1）", () => {
     const host = await hostWith([
       {
         extensionId: "sdk-agent",
-        register: (h) => h.registerCapability({ id: CAP("sdk-agent"), value: provider("sdk-agent", [], { listConnections: async () => { throw new Error("boom"); } }) })
+        register: (h) => h.registerCapability({ id: CAP("sdk-agent"), version: 1, value: provider("sdk-agent", [], { listConnections: async () => { throw new Error("boom"); } }) })
       },
       {
         extensionId: "local-agent",
-        register: (h) => h.registerCapability({ id: CAP("local-agent"), value: provider("local-agent", [view({ connectionId: "ok", adapterId: "codex-appserver", extensionId: "local-agent" })]) })
+        register: (h) => h.registerCapability({ id: CAP("local-agent"), version: 1, value: provider("local-agent", [view({ connectionId: "ok", adapterId: "codex-appserver", extensionId: "local-agent" })]) })
       }
     ]);
     const registry = createAgentConnectionRegistry(host);

@@ -11,6 +11,7 @@ import { mergeCanvasContentRuntimes } from "../../extensions/canvas-content.js";
  */
 import type { CanvasContentRuntime } from "@woohaa3/contracts";
 import {
+  CANVAS_UPSTREAM_CAPABILITY_VERSION,
   isCanvasUpstreamCapabilityId,
   isCanvasUpstreamProviderShape,
   type CanvasUpstreamProvider
@@ -62,7 +63,7 @@ function resolveUpstreamCredential(ctx: HostContext): import("@woohaa3/canvas-se
         capabilities += 1;
         if (seen.has(id)) continue;
         seen.add(id);
-        const value = host.resolveCapability(id);
+        const value = host.resolveCapability(id, CANVAS_UPSTREAM_CAPABILITY_VERSION);
         if (isCanvasUpstreamProviderShape(value)) return value as CanvasUpstreamProvider;
         log({ event: "canvas-upstream-provider-invalid", level: "warn", code: id });
       }
@@ -107,7 +108,7 @@ function resolveCatalogSources(
     for (const id of registration.capabilities) {
       if (!isCanvasUpstreamCapabilityId(id) || seen.has(id)) continue;
       seen.add(id);
-      const value = host.resolveCapability(id);
+      const value = host.resolveCapability(id, CANVAS_UPSTREAM_CAPABILITY_VERSION);
       if (!isCanvasUpstreamProviderShape(value)) continue;
       const provider = value as CanvasUpstreamProvider;
       if (typeof provider.listCanvases !== "function") continue;
@@ -150,7 +151,7 @@ function resolveRemoteDelete(
       for (const id of registration.capabilities) {
         if (!isCanvasUpstreamCapabilityId(id) || seen.has(id)) continue;
         seen.add(id);
-        const value = host.resolveCapability(id);
+        const value = host.resolveCapability(id, CANVAS_UPSTREAM_CAPABILITY_VERSION);
         if (!isCanvasUpstreamProviderShape(value)) continue;
         const provider = value as CanvasUpstreamProvider;
         if (typeof provider.deleteCanvas !== "function") continue;
