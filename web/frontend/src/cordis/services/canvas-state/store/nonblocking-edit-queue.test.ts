@@ -11,7 +11,7 @@ import { createCanvasEditService } from "./canvas-edit-service.js";
 const NOW = "2026-11-06T00:00:00.000Z";
 
 type Handle = {
-  resolve: (value: { state: "committed" | "rejected"; error: string | null }) => void;
+  resolve: (value: { state: "committed" | "rejected"; error: string | null; resultRevision?: number }) => void;
 };
 
 function readyStatus(phase: "synced" | "syncing" | "offline" = "synced"): CanvasSessionStatus {
@@ -59,7 +59,7 @@ function makeSession() {
       if (!appended.ok) return { ok: false as const, reason: appended.message, code: appended.code };
       submitted.push({ commandId, commands });
       let resolve!: Handle["resolve"];
-      const settled = new Promise<{ state: "committed" | "rejected"; error: string | null }>((done) => { resolve = done; });
+      const settled = new Promise<{ state: "committed" | "rejected"; error: string | null; resultRevision?: number }>((done) => { resolve = done; });
       handles.set(commandId, { resolve });
       return { ok: true as const, handle: { commandId, settled } };
     }
@@ -83,8 +83,8 @@ function makeSession() {
       canonical = applied.canvas;
       projection.applyCanonical(canonical);
     },
-    resolve: async (commandId: string, outcome: "committed" | "rejected", error: string | null = null) => {
-      handles.get(commandId)?.resolve({ state: outcome, error });
+    resolve: async (commandId: string, outcome: "committed" | "rejected", error: string | null = null, resultRevision?: number) => {
+      handles.get(commandId)?.resolve({ state: outcome, error, resultRevision });
       await new Promise<void>(resolve => setTimeout(resolve, 0));
     },
     rejectWorking: (commandId: string) => {
@@ -97,6 +97,14 @@ const CREATE: CanvasCommand[] = [{ type: "node.add", node: { id: "n1", type: "im
 const MOVE: CanvasCommand[] = [{ type: "node.update", nodeId: "n1", position: { x: 50, y: 20 } }];
 
 describe("非阻塞编辑队列与 working projection", () => {
+  it("uses the accepted revision to place a late-settling local edit before a newer external receipt", async () => {
+    const harness = makeSession();
+    const edit = createCanvasEditService({ session: harness.session, getCanvas: () => harness.canonical, getWorkingCanvas: () => harness.projection.workingCanvas });
+    expect((await edit.record(CREATE, 'local')).ok).toBe(true);
+    edit.recordExternal({ id: 'later', label: 'later', revision: 30, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    await harness.resolve(harness.submitted[0]!.commandId, 'committed', null, 20);
+    expect(edit.getSnapshot().undoLabel).toBe('later');
+  });
   it("创建节点后立即移动：基于 workingCanvas 规划并保持发送顺序", async () => {
     const harness = makeSession();
     const edit = createCanvasEditService({

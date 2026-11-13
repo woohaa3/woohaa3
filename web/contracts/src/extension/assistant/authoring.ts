@@ -110,6 +110,7 @@ export type ApplicationToolGrantRequest = {
   tools?: readonly string[];
   /** Trusted world scope selection for `mode: "world"`. */
   worldScope?: import("../../canvas/assistant-world-authority.js").AssistantWorldScopeSelection;
+  allowSceneAreaExpansion?: boolean;
   /** 绑定的连接代次（可选；变更后旧委托失效）。 */
   credentialEpoch?: number;
 };

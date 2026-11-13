@@ -32,6 +32,8 @@ export type BackendWorldAuthoringPort = {
   issueContext(input: import("../canvas/world-authoring.js").WorldToolContextRequest, options?: { signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldToolContextOutcome>;
   revokeContext(input: import("../canvas/world-authoring.js").WorldToolContextRevokeInput): Promise<void>;
   execute(input: import("../canvas/world-authoring.js").WorldAuthoringExecuteInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringExecuteOutcome>;
+  listResourceEdits(input: { canvasId: string; runId: string }): Promise<{ ok: true; commands: Array<{ commandId: string; revision: number }> } | import("../canvas/world-authoring.js").WorldAuthoringFailure>;
+  replayResourceEdit(input: { canvasId: string; sourceCommandId: string; previousCommandId: string; operationId: string; direction: "undo" | "redo" }, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<{ ok: true; commandId: string; revision: number; duplicate: boolean } | import("../canvas/world-authoring.js").WorldAuthoringFailure>;
   undo(input: import("../canvas/world-authoring.js").WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringHistoryOutcome>;
   redo(input: import("../canvas/world-authoring.js").WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<import("../canvas/world-authoring.js").WorldAuthoringHistoryOutcome>;
 };

@@ -45,6 +45,7 @@ import type { RoomCommandResult } from "../sync/room-types.js";
 import type { YjsCommandRecord } from "../sync/yjs-repository.js";
 import {
   sceneAreaScopeVersion,
+  resourceHistoryOtherHash,
   stableAuthorityVersion,
   worldObjectVersion,
   type WorldAuthoringAuthority
@@ -88,6 +89,8 @@ export type WorldAuthoringService = {
    */
   refreshContextScope(input: { canvasId: string; contextId: string; scope: WorldScopeVersion }): void;
   execute(input: WorldAuthoringExecuteInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringExecuteOutcome>;
+  listResourceEdits(input: { canvasId: string; runId: string }): Promise<{ ok: true; commands: Array<{ commandId: string; revision: number }> } | WorldAuthoringFailure>;
+  replayResourceEdit(input: { canvasId: string; sourceCommandId: string; previousCommandId: string; operationId: string; direction: "undo" | "redo" }, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<{ ok: true; commandId: string; revision: number; duplicate: boolean } | WorldAuthoringFailure>;
   undo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
   redo(input: WorldAuthoringHistoryInput, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<WorldAuthoringHistoryOutcome>;
   close(): void;
@@ -98,6 +101,7 @@ type IssuedContext = {
   capability: SpatialWriteContext;
   requestId: string;
   canvasId: string;
+  originalIntent: LeaseIntent;
 };
 
 const OBJECT_KEY = (target: WorldObjectIdentity): string =>
@@ -331,6 +335,16 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
       !nonEmpty(input.executionId) || !Number.isSafeInteger(input.epoch) || input.epoch < 0 || !input.scope) {
       return failure("invalid-data", "工具上下文身份无效");
     }
+    if (input.allowSceneAreaExpansion !== undefined && (typeof input.allowSceneAreaExpansion !== "boolean" || input.scope.kind !== "scene-area")) return failure("invalid-data", "自动扩区选项仅适用于导演区");
+    const existing = [...issued.values()].find(entry => entry.canvasId === input.canvasId && entry.requestId === input.requestId);
+    if (existing) {
+      if (stableStringify(existing.originalIntent.scope.scope) !== stableStringify(input.scope) || (existing.originalIntent.allowSceneAreaExpansion === true) !== (input.allowSceneAreaExpansion === true)) return failure("operation-conflict", "同一运行不能更改目标或自动扩区授权");
+      try {
+        const resumed = await deps.acquire(existing.originalIntent);
+        if (!resumed.capability) return failure("stale-epoch", "运行写能力已失效");
+        return { ok: true, context: existing.context, run: resumed.run, retry: true };
+      } catch (error) { return leaseFailure(error); }
+    }
     const snapshot = await roomSnapshot(input.canvasId);
     if (!("room" in snapshot)) return snapshot;
 
@@ -358,21 +372,16 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
       writable = [];
     }
 
+    const requestedContextId = stableAuthorityVersion("world-tool-context", { canvasId: input.canvasId, requestId: input.requestId, runId: input.runId, epoch: input.epoch, scope });
+    const originalIntent: LeaseIntent = {
+      contextId: requestedContextId,
+      requestId: input.requestId, canvasId: input.canvasId, runId: input.runId, epoch: input.epoch, executionId: input.executionId,
+      scope, ...(scope.scope.kind === "scene-area" ? { allowSceneAreaExpansion: input.allowSceneAreaExpansion === true } : {}),
+      writable: writable.map(entry => entry.target), readOnly
+    };
     let acquired: SpatialAcquireResult;
-    try {
-      acquired = await deps.acquire({
-        requestId: input.requestId,
-        canvasId: input.canvasId,
-        runId: input.runId,
-        epoch: input.epoch,
-        executionId: input.executionId,
-        scope,
-        writable: writable.map(entry => entry.target),
-        readOnly
-      });
-    } catch (error) {
-      return leaseFailure(error, snapshot.canvas);
-    }
+    try { acquired = await deps.acquire(originalIntent); }
+    catch (error) { return leaseFailure(error, snapshot.canvas); }
     if (!acquired.capability) {
       return failure(acquired.retry ? "stale-epoch" : "not-ready", "运行尚未取得写能力，需先核对执行");
     }
@@ -385,6 +394,7 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
     });
     const context: WorldToolContext = {
       contextId,
+      allowSceneAreaExpansion: input.allowSceneAreaExpansion === true,
       canvasId: input.canvasId,
       runId: acquired.run.runId,
       epoch: acquired.run.epoch,
@@ -402,9 +412,7 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
       })),
       readOnlyReferences: readOnly
     };
-    const existing = issued.get(contextId);
-    if (existing) return { ok: true, context: existing.context, run: acquired.run, retry: true };
-    issued.set(contextId, { context, capability: acquired.capability, requestId: input.requestId, canvasId: input.canvasId });
+    issued.set(contextId, { context, capability: acquired.capability, requestId: input.requestId, canvasId: input.canvasId, originalIntent });
     return { ok: true, context, run: acquired.run, retry: acquired.retry };
   }
 
@@ -628,8 +636,89 @@ export function createWorldAuthoringService(deps: WorldAuthoringServiceDeps): Wo
     };
   }
 
+  async function replayResourceEdit(input: { canvasId: string; sourceCommandId: string; previousCommandId: string; operationId: string; direction: "undo" | "redo" }, options?: { authorize?: () => Promise<boolean>; signal?: AbortSignal }): Promise<{ ok: true; commandId: string; revision: number; duplicate: boolean } | WorldAuthoringFailure> {
+    if (!input || ![input.canvasId, input.sourceCommandId, input.previousCommandId, input.operationId].every(nonEmpty) || (input.direction !== "undo" && input.direction !== "redo")) return failure("invalid-data", "资源撤销请求无效");
+    if (options?.signal?.aborted || (options?.authorize && !await options.authorize())) return failure("write-forbidden", "没有画布写入权限");
+    const room = await deps.resolveRoom(input.canvasId);
+    if (!room) return failure("not-found", "画布不存在");
+    const source = await room.lookupCommand(input.sourceCommandId);
+    const previous = await room.lookupCommand(input.previousCommandId);
+    const receipt = source?.resourceEdit;
+    if (!source || !source.actorId.startsWith("assistant-world:") || !receipt?.history || !previous) return failure("not-found", "资源编辑历史不存在");
+    const priorReplay = previous.resourceEdit?.historyReplay;
+    if (input.previousCommandId === input.sourceCommandId ? input.direction !== "undo" : !priorReplay || priorReplay.sourceCommandId !== input.sourceCommandId || priorReplay.direction === input.direction) return failure("version-conflict", "撤销历史状态已变化");
+    const commandId = `resource-history:${stableAuthorityVersion("resource-history", { source: input.sourceCommandId, operationId: input.operationId })}`;
+    const hash = stableAuthorityVersion("resource-history-intent", input);
+    const result = await room.submitDerived({ commandId, expectedResourceEditHash: hash, async derive(canvas) {
+      const latest = await room.findLatestResourceHistoryCommand(input.sourceCommandId);
+      if ((latest?.commandId ?? input.sourceCommandId) !== input.previousCommandId) return { ok: false as const, code: "version-conflict", message: "撤销历史已变化" };
+      const history = receipt.history!;
+      const from = input.direction === "undo" ? "after" : "before";
+      const to = input.direction === "undo" ? "before" : "after";
+      const ids = new Set(history.nodes.map(item => item.id));
+      const expectedOtherHash = input.direction === "undo" ? history.afterOtherHash : history.beforeOtherHash;
+      if (!expectedOtherHash || resourceHistoryOtherHash(canvas, ids) !== expectedOtherHash) return { ok: false as const, code: "version-conflict", message: "画布已发生后续修改，不能安全撤销" };
+      const latestCommand = await room.findLatestCommand();
+      const replay = latestCommand?.resourceEdit?.historyReplay;
+      const replayHistory = latestCommand?.resourceEdit?.history;
+      // Model content revisions advance on every restore. Accept that new version
+      // only when the immediately preceding authoritative history replay produced
+      // the same content; arbitrary edits that happen to restore the text still conflict.
+      const withoutModelRevision = (value: unknown) => {
+        const copy = structuredClone(value) as { data?: { modelContentVersion?: { revision?: number } } } | null;
+        if (copy?.data?.modelContentVersion) delete copy.data.modelContentVersion.revision;
+        return stableStringify(copy);
+      };
+      for (const item of history.nodes) {
+        const node = canvas.document.nodes.find(entry => entry.id === item.id);
+        const current = node ? { node, data: canvas.nodeData[item.id] ?? null } : null;
+        if (stableStringify(current) !== stableStringify(item[from])) {
+          const restored = replay && replayHistory && latestCommand?.revision === canvas.revision ? replayHistory.nodes.find(entry => entry.id === item.id)?.[replay.direction === "undo" ? "before" : "after"] : undefined;
+          if (!restored || withoutModelRevision(restored) !== withoutModelRevision(item[from]) || withoutModelRevision(current) !== withoutModelRevision(item[from])) return { ok: false as const, code: "version-conflict", message: "资源状态已变化，不能安全撤销" };
+        }
+      }
+      const currentEdges = canvas.document.edges.filter(edge => ids.has(edge.source) || ids.has(edge.target));
+      const expectedEdges = input.direction === "undo" ? history.afterEdges : history.beforeEdges;
+      if (stableStringify(currentEdges) !== stableStringify(expectedEdges)) return { ok: false as const, code: "version-conflict", message: "关联边已变化，不能安全撤销" };
+      const commands: import("@woohaa3/contracts").CanvasCommand[] = [];
+      const remove = history.nodes.filter(item => item[from] && !item[to]).map(item => item.id);
+      if (remove.length) commands.push({ type: "node.remove", nodeIds: remove });
+      for (const item of history.nodes) {
+        const destination = item[to];
+        if (!destination) continue;
+        if (!item[from]) commands.push({ type: "node.add", node: destination.node, ...(destination.data ? { nodeData: destination.data } : {}) });
+        else {
+          const sourceData = item[from]?.data;
+          const removedFields = sourceData ? Object.keys(sourceData).filter(key => !destination.data || !Object.prototype.hasOwnProperty.call(destination.data, key)) : [];
+          if (destination.data && removedFields.length && removedFields.every(key => key === "title")) {
+            // A title can be absent before a rename. Remove only that field so
+            // the reducer retains the model's current content revision and rig.
+            commands.push({ type: "edit.apply", preconditions: [], operations: [{ kind: "node-data-unset", nodeId: item.id, fields: ["title"] }] });
+          } else if (removedFields.length || !destination.data) {
+            commands.push({ type: "nodeData.patch", nodeId: item.id, value: null });
+          }
+          if (destination.data) commands.push({ type: "nodeData.patch", nodeId: item.id, value: destination.data });
+        }
+      }
+      const wantedEdges = input.direction === "undo" ? history.beforeEdges : history.afterEdges;
+      const keptEdges = new Set(currentEdges.filter(edge => !remove.includes(edge.source) && !remove.includes(edge.target)).map(edge => edge.id));
+      for (const edge of currentEdges) if (keptEdges.has(edge.id) && !wantedEdges.some(wanted => wanted.id === edge.id)) commands.push({ type: "edge.remove", edgeId: edge.id });
+      for (const edge of wantedEdges) if (!keptEdges.has(edge.id)) commands.push({ type: "edge.add", edge });
+      const resourceEdit = { ...receipt, intentHash: hash, historyReplay: { sourceCommandId: input.sourceCommandId, direction: input.direction } };
+      return { ok: true as const, resourceEdit, batch: { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: input.canvasId, commandId, actorId: "resource-history", baseRevision: canvas.revision, commands } };
+    } }, options);
+    if (!result.ok) return resultFailure(result);
+    return { ok: true, commandId, revision: result.revision, duplicate: result.duplicate === true };
+  }
+
   return {
     prepare,
+    async listResourceEdits(input) {
+      if (!input || !nonEmpty(input.canvasId) || !nonEmpty(input.runId)) return failure("invalid-data", "回合身份无效");
+      const room = await deps.resolveRoom(input.canvasId);
+      return room ? { ok: true, commands: await room.listResourceEditCommands(input.runId) } : failure("not-found", "画布不存在");
+    },
+    replayResourceEdit,
     issueContext,
     revokeContext,
     resolveCapability(canvasId: string, contextId: string) {

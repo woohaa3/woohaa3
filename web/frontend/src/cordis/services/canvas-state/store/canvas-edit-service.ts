@@ -69,6 +69,7 @@ export interface CanvasEditService {
   recordExternal(input: {
     id: string;
     label: string;
+    revision?: number;
     undo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
     redo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
   }): CanvasEditRecordResult;
@@ -134,6 +135,8 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       // handle 可能已被 prune；提交已 committed 才会到达这里，因此缺失视为已确认。
       return handle === undefined || handle.state === "committed";
     },
+    committedRevision: commandId => options.session.commandLifecycle()?.get(commandId)?.resultRevision ?? undefined,
+    currentRevision: () => options.getCanvas()?.revision,
     submitGuarded: (input) => {
       const result = options.session.submitCommands(
         [{ type: "edit.apply", preconditions: input.edit.preconditions, operations: input.edit.operations }],
@@ -143,9 +146,9 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       const handle = result.handle;
       return {
         ok: true,
-        settled: handle.settled.then((settled: { state: string; error: string | null }) =>
+        settled: handle.settled.then((settled: { state: string; error: string | null; resultRevision: number | null }) =>
           settled.state === "committed"
-            ? { ok: true as const, committed: true }
+            ? { ok: true as const, committed: true, ...(settled.resultRevision !== null ? { revision: settled.resultRevision } : {}) }
             : settled.state === "rejected"
               ? { ok: false as const, reason: settled.error ?? "操作被拒绝" }
               : { ok: true as const, committed: false }
@@ -290,12 +293,14 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     recordParameter(input) {
       // pending 结构动作未确认时不插入参数记录（避免撤销顺序倒置）。
       if (journal.snapshot().pending.length > 0) return;
+      const observed = options.getCanvas()?.revision;
       journal.recordParameter({
         label: input.label,
         nodeId: input.nodeId,
         modelKey: input.modelKey,
         before: input.before,
-        after: input.after
+        after: input.after,
+        ...(observed !== undefined ? { revision: observed + 0.5 } : {})
       });
       // 记录后把 applier 绑定到该条目 id（最近一条）。
       const entries = journal.snapshot().entries;

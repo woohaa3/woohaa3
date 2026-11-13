@@ -137,3 +137,16 @@ describe("reasoning 冻结与幂等指纹", () => {
     expect(toTurn(store, turn({ reasoningJson: JSON.stringify({ requested: "high", applied: true }) }))).toMatchObject({ reasoning: { requested: "high", applied: true } });
   });
 });
+
+it("treats omitted and false expansion alike but binds true to the request identity", () => {
+  const scene = { action: "modify" as const, canvasId: "canvas", mode: "world" as const, worldScope: { kind: "scene-area" as const, areaId: "area" }, prompt: "edit" };
+  expect(hashIntent(scene)).toBe(hashIntent({ ...scene, allowSceneAreaExpansion: false }));
+  expect(hashIntent(scene)).not.toBe(hashIntent({ ...scene, allowSceneAreaExpansion: true }));
+});
+
+it("normalizes an old director turn without an expansion field to false", () => {
+  const target = { mode: 'world', canvasId: 'canvas', nodeId: 'area-node', worldScope: { kind: 'scene-area', areaId: 'area' } };
+  expect(toTurn(store, turn({ targetJson: JSON.stringify(target) })).target).toMatchObject({ allowSceneAreaExpansion: false });
+  expect(toTurn(store, turn({ targetJson: JSON.stringify({ ...target, allowSceneAreaExpansion: true }) })).target).toMatchObject({ allowSceneAreaExpansion: true });
+  expect(toTurn(store, turn({ targetJson: JSON.stringify({ ...target, worldScope: { kind: 'world-camera', cameraId: 'camera' } }) })).target).not.toHaveProperty('allowSceneAreaExpansion');
+});

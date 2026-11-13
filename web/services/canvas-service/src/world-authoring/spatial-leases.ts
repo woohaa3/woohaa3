@@ -3,6 +3,8 @@ import type { ServerCanvas, WorldObjectIdentity, WorldObjectVersion, WorldScopeV
 export interface LeaseIntent {
   requestId: string; canvasId: string; runId: string; epoch: number;
   executionId: string; scope: WorldScopeVersion;
+  allowSceneAreaExpansion?: boolean;
+  contextId?: string;
   writable: WorldObjectVersion[]; readOnly: WorldObjectVersion[];
 }
 
@@ -14,7 +16,7 @@ export interface SpatialLeaseAuthority {
 
 /** Host resolver must derive versions and scope from the canonical projections. */
 export interface SpatialCommitAuthority extends SpatialLeaseAuthority {
-  userCreateTargets?(before: ServerCanvas, after: ServerCanvas): WorldObjectIdentity[];
+  expansionCandidates?(intent: LeaseIntent, before: ServerCanvas, after: ServerCanvas): WorldObjectIdentity[] | null;
   resolve(intent: LeaseIntent, before: ServerCanvas, after: ServerCanvas, targets: WorldObjectIdentity[]): {
     scope: WorldScopeVersion; previous: WorldObjectVersion[]; next: WorldObjectVersion[];
   } | null;

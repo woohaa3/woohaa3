@@ -24,6 +24,16 @@ registerYjsRepositoryContract(
 );
 
 describe("Mongo Yjs schema 与边界（任务 3.3）", () => {
+  it("lists all resource receipts across pages in revision order", async () => {
+    const deps = fakeMongoDeps();
+    const repository = new MongoYjsRepository({ ...deps, database: "woohaa3" });
+    const documents = deps.database.docs("canvas_yjs_commands");
+    for (let revision = 1001; revision >= 1; revision--) documents.push({ canvasId: "canvas", commandId: `cmd-${revision}`, actorId: "assistant-world:run", changed: true, revision, resourceEdit: { history: {} } });
+    const result = await repository.listResourceEditCommands("canvas", "run");
+    expect(result).toHaveLength(1001);
+    expect(result[0]).toEqual({ commandId: "cmd-1", revision: 1 });
+    expect(result.at(-1)).toEqual({ commandId: "cmd-1001", revision: 1001 });
+  });
   it("建立 canvasId+seq 与 canvasId+commandId 唯一索引", async () => {
     const deps = fakeMongoDeps();
     const repository = new MongoYjsRepository({ ...deps, database: "woohaa3" });

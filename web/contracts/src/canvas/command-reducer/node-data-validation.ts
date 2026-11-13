@@ -153,7 +153,7 @@ export function normalizeSelfContained3D(
 
 /** 读取本节点当前模型内容版本（用于 revision 推进判定）。 */
 export function readPreviousModelContentVersion(work: WorkingState, nodeId: string) {
-  const decoded = decodeModelContentVersion(work.nodeData[nodeId]?.modelContentVersion);
+  const decoded = decodeModelContentVersion(work.nodeData[nodeId]?.modelContentVersion ?? work.clearedModelContentVersions?.[nodeId]);
   return decoded.ok ? decoded.value : null;
 }
 

@@ -9,19 +9,12 @@
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { type HumanoidInteractionInput, type AssistantWorldCompletionOutcome, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteOutcome, PREFERRED_MODEL_SCRIPT_VERSION, type WorldRotation, type WorldTransform, executeWorldAnimationScript, analyzeWorldAnimationData, inspectWorldAnimationModelSample, worldAnimationSegmentSummary, sampleWorldAnimationInArea, somaSkeletonPrefix } from "@woohaa3/contracts";
+import { type AssistantWorldCompletionOutcome, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteOutcome, PREFERRED_MODEL_SCRIPT_VERSION, type WorldRotation, type WorldTransform, executeWorldAnimationScript, analyzeWorldAnimationData, inspectWorldAnimationModelSample, worldAnimationSegmentSummary, sampleWorldAnimationInArea } from "@woohaa3/contracts";
 import { auditWrap, structured, type AgentAuthoringToolDeps } from "./tool-policy.js";
 import { registerWorldResourceTools } from "./world-resource-tools.js";
 import { hashText } from "./planner-hash.js";
 
 export type AssistantWorldToolClient = {
-  humanoidMotion?: {
-    interact?(input:HumanoidInteractionInput):Promise<Record<string,unknown>&{ok:boolean}>;
-    animate(input:{canvasId:string;contextId:string;instanceId:string;prompt:string;duration:number;requestId:string;startTime?:number;rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean}):Promise<Record<string,unknown> & {ok:boolean}>;
-    generate(input: {canvasId:string;contextId:string;instanceId:string;expectedVersion:string;prompt:string;duration:number;requestId:string}):Promise<Record<string,unknown> & {ok:boolean}>;
-    get(input: {canvasId:string;contextId:string;instanceId:string;generationId?:string;assetId?:string;inspectTiming?:boolean}):Promise<Record<string,unknown> & {ok:boolean}>;
-    apply(input: {canvasId:string;contextId:string;instanceId:string;generationId?:string;assetId?:string;upperBodyGenerationId?:string;expectedVersion:string;startTime:number;sourceStartTime?:number;blendInDuration?:number;loop?:boolean;rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean}):Promise<Record<string,unknown> & {ok:boolean}>;
-  };
   read(input: { canvasId: string; contextId: string }): { ok: true; view: AssistantWorldContextView } | AssistantWorldFailure | Promise<{ ok: true; view: AssistantWorldContextView } | AssistantWorldFailure>;
   write(input: import("@woohaa3/contracts").AssistantWorldWriteInput): Promise<AssistantWorldWriteOutcome>;
   complete(input: import("@woohaa3/contracts").AssistantWorldCompletionInput): Promise<AssistantWorldCompletionOutcome>;
@@ -32,27 +25,7 @@ export { worldGrant, worldFailure, denied, animationBudget } from "./world-tool-
 
 export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
   registerWorldResourceTools(server, deps);
-  registerHumanoidMotionTools(server, deps);
   registerLegacyAssistantWorldTools(server, deps);
-}
-
-function registerHumanoidMotionTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
-  const motionBase = {instanceId:z.string().min(1)};
-  const registerMotion = (name:string, schema:any, method:'animate'|'generate'|'get'|'apply'|'interact', description:string) => {
-    server.registerTool(name,{description,inputSchema:schema,outputSchema:z.looseObject({ok:z.boolean()}),annotations:{readOnlyHint:method==='get',destructiveHint:false,openWorldHint:false}},async (args:any) => auditWrap(deps,name,{requestId:deps.grant?.workId},async()=>{
-      const bound=worldGrant(deps);
-      if(!bound?.client.humanoidMotion?.[method])return {result:denied('本轮没有人体动作生成权限')};
-      const outcome=await bound.client.humanoidMotion[method]({...args,canvasId:bound.canvasId,contextId:bound.world.contextId,...((method==='generate'||method==='animate'||method==='interact')?{requestId:deps.grant!.workId}:{})});
-      return {result:structured(outcome,outcome.ok?'人体动作任务状态':'人体动作操作被拒绝')};
-    }));
-  };
-  const interactionActor=z.strictObject({instanceId:z.string().min(1),expectedVersion:z.string().min(1),prompt:z.string().min(1).max(10000),duration:z.number().finite().min(1).max(10),rootMotion:z.enum(['in-place','translate']),allowInPlaceTravel:z.boolean().optional()});
-  registerMotion('animate_humanoid_interaction',z.strictObject({initiator:interactionActor,responder:interactionActor,initiatorEvent:z.enum(['leftHandForward','rightHandForward','handsForward','leftFootForward','rightFootForward'])}),'interact','双人推/击打/受击等配合必须使用此入口。选择双方真实instanceId与expectedVersion，分别写单人动作prompt，明确各自rootMotion，选择发力端伸展候选initiatorEvent（双手推用handsForward）。宿主固定生成双方素材、读取时序和根位移、校验translate路径、对齐并应用，不能跳过检查。被推开、后退、踉跄后退按translate处理；只有用户明确要求原地时才可allowInPlaceTravel:true。in-place素材根位移超过0.2米会返回movement-decision-required，必须处理不能直接报完成。原地反应可裁掉等待；translate保留完整源路径，通过双方非负起点对齐。返回kinematic-alignment-only不证明接触或自然度；失败返回phase/generationIds/appliedActors，不要重复生成满意素材、不要把部分完成说成整体完成。');
-  registerMotion('animate_humanoid',z.strictObject({...motionBase,prompt:z.string().min(1).max(10000),duration:z.number().finite().min(1).max(10),startTime:z.number().finite().min(0).max(3590).optional(),rootMotion:z.enum(['in-place','translate']).optional(),locomotion:z.literal('scene-lap').optional(),replaceExisting:z.boolean().optional()}),'animate','为导演区 SOMA 人物生成并应用动作。宿主负责骨架版本核验、等待 Kimodo 任务、校验稳定 NPZ、绑定时间轴。常规人物动作只调用此工具一次，无须手动查询轮询或采样修正。默认原子替换此角色旧动作并保留其他角色与镜头。duration最大10秒。绕场一周必须传locomotion:scene-lap，宿主规划闭合路线和朝向，不能只在prompt里描述绕圈；此时prompt只描述行走挥手等姿态。rootMotion 默认 in-place；translate 按 NPZ 根位移移动整个人物，单次播放并检查路径边界。 本工具仅用于单人或互不关联的动作；双人推/击打/受击配合必须使用animate_humanoid_interaction，由宿主检查时序和位移，不能用两次本工具跳过。只有fallback.allowed=true、mode=joint-animation且taskSubmitted=false时，自动用read_world_resource(resourceType=world_model_rig)读取真实骨架并通过edit_scene_animation_script编写关节动画；已有generationId时先恢复查询，不因超时重复生成或自动兜底。');
-  registerMotion('generate_humanoid_motion',z.strictObject({...motionBase,expectedVersion:z.string().min(1),prompt:z.string().min(1).max(10000),duration:z.number().finite().min(1).max(10)}),'generate','为当前导演区实际 SOMA77 角色生成动作。复用当前可用动作模型及持久化任务，不创建动作节点。返回 generationId，后续查询并应用。');
-  registerMotion('get_humanoid_motion',z.strictObject({...motionBase,generationId:z.string().min(1).optional(),assetId:z.string().min(1).optional(),inspectTiming:z.boolean().optional()}),'get','查询本导演区角色的持久化动作任务（generationId），或用assetId读取此角色当前已绑定的素材；二者只选一个，旧会话缺generationId时先read_world_resource(resourceType=scene_animation_script)读取当前脚本的assetId，不要拿assetId冒充generationId。成功返回 canonical 资产身份及帧率帧数。inspectTiming:true读取校验后的NPZ，返回片内秒制的躯干倾斜、头手位移及左右脚向前运动的onsetTime/peakTime和稀疏曲线候选；不能证明击中或接触，不返回二进制或临时地址。');
-  registerMotion('apply_humanoid_motion',z.strictObject({...motionBase,generationId:z.string().min(1).optional(),assetId:z.string().min(1).optional(),upperBodyGenerationId:z.string().min(1).optional(),expectedVersion:z.string().min(1),startTime:z.number().finite().min(0).max(3590),sourceStartTime:z.number().finite().min(0).max(10).optional(),blendInDuration:z.number().finite().min(0).max(1).optional(),loop:z.boolean().optional(),rootMotion:z.enum(['in-place','translate']).optional(),locomotion:z.literal('scene-lap').optional(),replaceExisting:z.boolean().optional()}),'apply','把已生成动作资产绑定到本导演区 SOMA77 角色。generationId或assetId二选一；assetId仅能重用此角色当前已绑定素材，适合旧会话缺任务ID的时序返修。保留现有动画源码，通过宿主租约与版本校验保存；默认原地播放保留根高度。replaceExisting:true原子替换此角色旧轨道并保留其他角色及镜头，不先清空。sourceStartTime为NPZ片内起点，默认0；事件的导演台时间=startTime+片内事件时间-sourceStartTime。裁切默认0.12秒入场过渡（blendInDuration可覆盖），过渡占用既有时间而不延后事件。仅原地动作支持裁切或过渡，位移/绕场仍用完整素材。不要使用负startTime。');
-
 }
 
 function registerLegacyAssistantWorldTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
@@ -61,7 +34,7 @@ function registerLegacyAssistantWorldTools(server: McpServer, deps: AgentAuthori
     {
       title: "读取世界助手上下文",
       description:
-        "读取宿主签发的范围、bounds、版本、可写模型/镜头和只读参考摘要；不返回脚本源码。sceneArea 提供 areaId、resourceVersion、animationOrigin、hasAnimation；原脚本和资源版本通过 read_world_resource 查询。场景模型的标准SOMA人物只返回骨架摘要，常规动作直接调用 animate_humanoid；仅编辑骨骼时通过 read_world_resource 读取 world_model_rig 详情。新导演区默认 4×4 米；大场景先用 edit_scene_area 的 update 与 patch.bounds 扩区，再重读上下文。读取不授予写权限。",
+        "读取宿主签发的范围、bounds、版本、可写模型/镜头和只读参考摘要；不返回脚本源码。sceneArea 提供 areaId、resourceVersion、animationOrigin、hasAnimation；原脚本和资源版本通过 read_world_resource 查询。新导演区默认 4×4 米；edit_scene_area 只允许改名。allowSceneAreaExpansion 为本轮用户冻结的策略，越界时关闭则拒绝，开启则随内容原子扩区并在回执中返回范围。读取不授予写权限。",
       inputSchema: z.strictObject({}),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
@@ -71,17 +44,11 @@ function registerLegacyAssistantWorldTools(server: McpServer, deps: AgentAuthori
       if (!bound) return denied("本轮没有宿主签发的世界创作上下文");
       const outcome = await bound.client.read({ canvasId: bound.canvasId, contextId: bound.world.contextId });
       if (!outcome.ok) return worldFailure(outcome);
-      const sceneModels = outcome.view.sceneModels?.map(model => {
-        const prefix = somaSkeletonPrefix(model.animationRig?.groups ?? []);
-        if (!prefix) return model;
-        const { animationRig, ...modelSummary } = model;
-        return { ...modelSummary, somaMotion: { skeletonId: "somaskel77", jointCount: 77, jointPrefix: prefix, tool: "animate_humanoid", interactionTool: "animate_humanoid_interaction" }, animationRig: { spatial: animationRig?.spatial, detailsTool: "read_world_resource", resourceType: "world_model_rig" } };
-      });
-      if (!deps.grant?.tools.includes("read_world_resource")) return structured({ ...outcome.view, ...(sceneModels ? { sceneModels } : {}), animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, "世界上下文（旧工具协议）");
+      if (!deps.grant?.tools.includes("read_world_resource")) return structured({ ...outcome.view, animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, "世界上下文（旧工具协议）");
       const { modelScripts, sceneCameras, resourceVersions, ...summary } = outcome.view;
       void modelScripts; void sceneCameras; void resourceVersions;
       const { animationScript, ...areaSummary } = summary.sceneArea ?? {};
-      return structured({ ...summary, ...(sceneModels ? { sceneModels: sceneModels.map(({ animationRig, ...model }) => { void animationRig; return model; }) } : {}), ...(summary.sceneArea ? { sceneArea: { ...areaSummary, hasAnimation: !!animationScript, animationVersion: outcome.view.resourceVersions?.[`scene_animation_script:${summary.sceneArea.areaId}`] } } : {}), animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, `世界范围：${outcome.view.scope.scope.kind}`);
+      return structured({ ...summary, sceneModels: summary.sceneModels?.map(({ animationRig, ...model }) => { void animationRig; return model; }), ...(summary.sceneArea ? { sceneArea: { ...areaSummary, hasAnimation: !!animationScript, animationVersion: outcome.view.resourceVersions?.[`scene_animation_script:${summary.sceneArea.areaId}`] } } : {}), animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, `世界范围：${outcome.view.scope.scope.kind}`);
     }
   );
 
@@ -452,7 +419,7 @@ function registerLegacyAssistantWorldTools(server: McpServer, deps: AgentAuthori
     {
       title: "调整导演区范围",
       description:
-        "显式扩大或缩小导演区的地面范围。bounds 使用世界 u/v 米，min 不能超过 max；只改范围，不移动、不缩放模型与镜头，缩小后落在范围外的对象会变成只读。expectedScopeVersion 必须来自 get_world_context.sceneArea.scopeVersion，写入成功后会推进，因此扩区后必须重新 get_world_context 才能继续写入。标准SOMA人物只返回骨架摘要，常规动作直接调用animate_humanoid；仅编辑骨骼时读取get_world_model_rig详情。新建导演区默认 4×4 米；大场景模型/镜头放不下时先用本工具（resize_scene_area）显式扩区，扩区后必须重新 get_world_context 取得新 bounds 与版本再写入，不要靠移动对象去绕过范围。范围调整必须对应用户的明确要求，不能作为取得对象写权限的隐含步骤。",
+        "旧协议兼容入口：不再接受新的导演区空间调整，仅允许查询已提交操作的原回执。",
       inputSchema: z.strictObject({
         expectedScopeVersion: z.string().min(1),
         bounds: groundAabb

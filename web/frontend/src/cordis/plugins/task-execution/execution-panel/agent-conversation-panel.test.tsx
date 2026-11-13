@@ -16,6 +16,7 @@ import type { AgentEntryIntent, ConversationSnapshot, ConversationTurn } from "@
 import { CanvasNavigationStore } from "../../../navigation/store.js";
 import type { CanvasPanelDefinition, CanvasPanelRoute } from "../../../navigation/contracts.js";
 import { createAgentConversationService } from "../../../services/agent-conversation-service.js";
+import { assistantInputController } from "../../../services/assistant-execution/controller.js";
 import type { AgentConversationRemote } from "../../../services/agent-conversation-remote.js";
 import { AgentConversationPanel } from "./agent-conversation-panel.js";
 
@@ -584,6 +585,8 @@ describe("AgentConversationPanel · 清空上下文（design D8）", () => {
     remote.clearContext = clearContext;
     const { navigation } = navStub(DETAIL);
     const service = createAgentConversationService({ remote, navigation });
+    const generation = assistantInputController(service, { dataScopeId: service.getDataScopeId?.() ?? 'page', canvasId: 'cv', nodeId: 'n1', purpose: 'world:area-1' });
+    generation.edit({ allowSceneAreaExpansion: true });
     const onClose = vi.fn();
     const { el, root, act } = await mount(
       <AgentConversationPanel conversationId="conv-1" requestId="req-1" nodeId="n1" service={service} onClose={onClose} />
@@ -605,6 +608,7 @@ describe("AgentConversationPanel · 清空上下文（design D8）", () => {
     });
     expect(clearContext).toHaveBeenCalledWith("cv", "n1");
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(generation.getSnapshot().draft.allowSceneAreaExpansion).toBe(false);
 
     await act(async () => {
       root.unmount();
@@ -667,13 +671,19 @@ describe("AgentConversationPanel · 续聊目标身份", () => {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "继续讨论这个场景");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
+      const option = el.querySelector<HTMLInputElement>('.assistant-expansion-option input');
+      if (worldScope.kind === "scene-area") {
+        expect(option?.checked).toBe(false);
+        await act(async () => option!.click());
+      } else expect(option).toBeNull();
       const form = el.querySelector<HTMLFormElement>(".agent-detail__reply")!;
       await act(async () => {
         form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       });
       await act(async () => undefined);
       expect(accept).toHaveBeenCalledTimes(1);
-      expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "world", worldScope });
+      expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "world", worldScope, ...(worldScope.kind === "scene-area" ? { allowSceneAreaExpansion: true } : {}) });
+      if (option) expect(option.checked).toBe(false);
       expect(el.querySelector(".agent-detail__reply-error")).toBeNull();
     } finally { await act(async () => { root.unmount(); }); el.remove(); }
   });

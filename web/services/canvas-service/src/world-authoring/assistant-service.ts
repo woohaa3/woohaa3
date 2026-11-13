@@ -20,11 +20,8 @@
  * MCP tool path with a grant that already carries the issued context.
  */
 import {
-  somaSkeletonIdentity,
-  projectSomaRootTranslation,
-  isSomaMotionMetadata,
   DEFAULT_MODEL_PLACEMENT,
-  planSceneAreaOperation, SCENE_AREA_PLAN_CONTRACT_VERSION,
+  applyCanvasCommands,
   describeWorldModelAnimationRig,
   findNonOverlappingNodePosition,
   initialCameraCardPosition,
@@ -36,6 +33,9 @@ import {
   normalizeModelDefinition,
   humanoidRigForAuthoredScript,
   sceneAreaAnimationOrigin,
+  rotateGroundQuarterTurns,
+  transformPoint,
+  transformOf,
   type AssistantWorldCancelInput,
   type AssistantWorldCompletionInput,
   type AssistantWorldCompletionOutcome,
@@ -74,11 +74,10 @@ import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash, stableStringify }
 import { executeSceneIr } from "../model-mcp/script-executor.js";
 import type { CanvasRoom } from "../sync/room.js";
 import type { RoomCommandResult, RoomSpatialDiagnostic } from "../sync/room-types.js";
-import { instanceFootprint, stableAuthorityVersion, worldObjectVersion, nextSceneAreaScopeVersion, type WorldAuthoringAuthority } from "./authority.js";
+import { instanceFootprint, nextSceneAreaScopeVersion, resourceHistoryOtherHash, stableAuthorityVersion, worldObjectVersion, type WorldAuthoringAuthority } from "./authority.js";
 import { findWorldCameraNodeId, planWorldCameraSettings, worldCameraSettingsOf, type WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldCameraCompletionVerification } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
-import { buildForwardCommands } from "./scene-area-command-mapping.js";
 import { objectKey, type LeaseRecord, type SpatialWriteContext } from "./spatial-leases.js";
 import {
   hostCompletionKey,
@@ -90,7 +89,7 @@ import {
 } from "./host-completions.js";
 
 export type AssistantWorldServiceDeps = {
-  authority: Pick<WorldAuthoringAuthority, "prepareContent" | "prepareCanvas"> & Partial<Pick<WorldAuthoringAuthority, "cacheFor" | "prepareCamera">>;
+  authority: Pick<WorldAuthoringAuthority, "prepareContent" | "prepareCanvas"> & Partial<Pick<WorldAuthoringAuthority, "cacheFor" | "prepareCamera" | "expansionCandidates">>;
   worldAuthoring: Pick<WorldAuthoringService, "issueContext" | "revokeContext" | "resolveCapability" | "refreshContextVersions" | "refreshContextScope">;
   cameraSettings: Pick<WorldCameraSettingsService, "save" | "complete">;
   resolveRoom(canvasId: string): Promise<CanvasRoom | null>;
@@ -262,6 +261,7 @@ function commandFailure(result: Extract<RoomCommandResult, { ok: false }>): Assi
     }
     case "lease-conflict": return { ...failure("lease-conflict", result.message), ...(result.conflict ? { conflicts: [{ target: result.conflict.target, version: null, runId: result.conflict.runId, epoch: result.conflict.epoch }] } : {}) };
     case "outside-scope": return failure("outside-scope", result.message, spatialDetail(result));
+    case "capability-unsupported": return failure("capability-unsupported", result.message);
     case "stale-epoch": return failure("stale-epoch", result.message);
     case "version-conflict":
     case "edit-precondition-failed": return failure("version-conflict", result.message);
@@ -441,6 +441,82 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
   rigCache.set(key, value);
   return value;
 }
+
+  /** Bound every pose without time sampling. Rotation preserves length; applying
+   * |translation| + max(|scale|)·radius at each group covers all joint angles. */
+  async function animationEnvelope(canvas: ServerCanvas, area: SceneAreaData, ir: import("@woohaa3/contracts").WorldAnimationIr, only?: WorldObjectIdentity | WorldObjectIdentity[]): Promise<GroundAabb | AssistantWorldFailure | null> {
+    let result: GroundAabb | null = null;
+    const add = (a: GroundAabb) => {
+      result = result ? { min: { u: Math.min(result.min.u, a.min.u), v: Math.min(result.min.v, a.min.v) }, max: { u: Math.max(result.max.u, a.max.u), v: Math.max(result.max.v, a.max.v) } } : a;
+    };
+    const origin = sceneAreaAnimationOrigin(area);
+    const point = (value: readonly number[]) => {
+      const rotated = rotateGroundQuarterTurns({ u: value[0]!, v: value[1]! }, { u: 0, v: 0 }, area.animationQuarterTurns ?? 0);
+      return { u: origin.u + rotated.u, v: origin.v + rotated.v };
+    };
+    const selected = only === undefined ? undefined : Array.isArray(only) ? only : [only];
+    const modelIds = new Set([...ir.instanceTracks, ...(ir.partTracks ?? []), ...(ir.walkTracks ?? [])].map(track => track.targetId));
+    for (const id of modelIds) {
+      if (selected && !selected.some(target => target.kind === "instance" && target.instanceId === id)) continue;
+      const model = findInstanceNode(canvas, id);
+      const instance = decodeWorldInstanceData(model?.fields.sharedWorldInstance);
+      if (!model || !instance.ok) return failure("not-ready", "动画模型或变换不可用");
+      const geometry = await deps.authority.prepareContent(model.fields, canvas);
+      if (!geometry) return failure("not-ready", "动画模型几何范围不可用");
+      const box = geometry.localAabb;
+      let radius = Math.hypot(...[0, 1, 2].map(axis => Math.max(Math.abs(box.min[axis]!), Math.abs(box.max[axis]!))));
+      const partMotion = (ir.partTracks ?? []).some(track => track.targetId === id) || (ir.walkTracks ?? []).some(track => track.targetId === id);
+      if (partMotion) {
+        const rig = await animationRigOf(model.fields);
+        if (!rig?.shapes?.length) return failure("capability-unsupported", "动画部件缺少可信几何层级");
+        const groups = new Map(rig.groups.map(group => [group.id, group]));
+        radius = 0;
+        for (const shape of rig.shapes) {
+          const transform = shape.localTransform ?? transformOf(shape);
+          let distance = 0;
+          for (let i = 0; i < 8; i++) {
+            const corner: [number, number, number] = [0, 1, 2].map(axis => (i & (1 << axis)) ? shape.localBounds.max[axis]! : shape.localBounds.min[axis]!) as [number, number, number];
+            distance = Math.max(distance, Math.hypot(...transformPoint(transform, corner)));
+          }
+          let parent = shape.parent;
+          const seen = new Set<string>();
+          while (parent !== null) {
+            const group = groups.get(parent);
+            if (!group || seen.has(parent)) return failure("not-ready", "动画部件层级无效");
+            seen.add(parent);
+            distance = Math.hypot(...group.position) + Math.max(...group.scale.map(Math.abs)) * distance;
+            parent = group.parent;
+          }
+          radius = Math.max(radius, distance);
+        }
+      }
+      const tracks = ir.instanceTracks.filter(track => track.targetId === id);
+      const positions = tracks.filter(track => track.property === "position").flatMap(track => [point(track.from), point(track.to)]);
+      if (!positions.length) positions.push({ u: instance.value.transform.position.u, v: instance.value.transform.position.v });
+      const scale = Math.max(instance.value.transform.scale, ...tracks.filter(track => track.property === "scale").flatMap(track => [Math.abs(track.from[0]!), Math.abs(track.to[0]!)]));
+      let extent = radius * scale;
+      for (const walk of (ir.walkTracks ?? []).filter(track => track.targetId === id)) {
+        // The rounded route stays within twice the corner radius of each path
+        // vertex. The walking root is offset by the rotated ground anchor.
+        const offset = 2 * walk.cornerRadius + walk.scale * Math.hypot(walk.profile.groundAnchorLocal[0], walk.profile.groundAnchorLocal[2]);
+        extent = Math.max(extent, radius * walk.scale + offset);
+        positions.push(...walk.path.map(pathPoint => point(pathPoint)));
+      }
+      if (!Number.isFinite(extent) || positions.some(p => !Number.isFinite(p.u) || !Number.isFinite(p.v))) return failure("not-ready", "动画范围不是有限值");
+      add({ min: { u: Math.min(...positions.map(p => p.u)) - extent, v: Math.min(...positions.map(p => p.v)) - extent }, max: { u: Math.max(...positions.map(p => p.u)) + extent, v: Math.max(...positions.map(p => p.v)) + extent } });
+    }
+    const cameraIds = new Set(ir.cameraTracks.filter(track => track.property === "position").map(track => track.targetId));
+    for (const id of cameraIds) {
+      if (selected && !selected.some(target => target.kind === "camera" && target.cameraId === id)) continue;
+      const nodeId = findWorldCameraNodeId(canvas, id);
+      const camera = decodeWorldCamera(nodeId ? canvas.nodeData[nodeId]?.worldCamera : null);
+      if (!camera.ok) return failure("not-ready", "动画镜头不可用");
+      const positions = ir.cameraTracks.filter(track => track.targetId === id && track.property === "position").flatMap(track => [point(track.from), point(track.to)]);
+      if (!positions.length) positions.push({ u: camera.value.position.u, v: camera.value.position.v });
+      add({ min: { u: Math.min(...positions.map(p => p.u)), v: Math.min(...positions.map(p => p.v)) }, max: { u: Math.max(...positions.map(p => p.u)), v: Math.max(...positions.map(p => p.v)) } });
+    }
+    return result;
+  }
 
   const ledgers = new Map<string, RunLedger>();
   const hostCompletions = new Map<string, HostCompletion>();
@@ -817,7 +893,8 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       epoch: input.epoch,
       executionId: input.executionId
     };
-    const issued = await deps.worldAuthoring.issueContext({ ...base, scope: input.scope });
+    if (input.allowSceneAreaExpansion !== undefined && (typeof input.allowSceneAreaExpansion !== "boolean" || input.scope.kind !== "scene-area")) return failure("invalid-data", "自动扩区选项仅适用于导演区");
+    const issued = await deps.worldAuthoring.issueContext({ ...base, scope: input.scope, ...(input.scope.kind === "scene-area" ? { allowSceneAreaExpansion: input.allowSceneAreaExpansion === true } : {}) });
     if (!issued.ok) return issued;
     const completionId = stableAuthorityVersion("assistant-world-completion", {
       canvasId: input.canvasId,
@@ -925,10 +1002,9 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           const existing = existingWorldTargets(inspected.canvas);
           const instanceTracks = compiled.ir.instanceTracks.filter(track => existing.instances.has(track.targetId));
           const partTracks = (compiled.ir.partTracks ?? []).filter(track => existing.instances.has(track.targetId));
-          const somaTracks = (compiled.ir.somaTracks ?? []).filter(track => existing.instances.has(track.targetId));
           const walkTracks = (compiled.ir.walkTracks ?? []).filter(track => existing.instances.has(track.targetId));
           const cameraTracks = compiled.ir.cameraTracks.filter(track => existing.cameras.has(track.targetId));
-          const outside = somaTracks.some(track => !writableInstances.has(track.targetId)) || walkTracks.some(track => !writableInstances.has(track.targetId)) || partTracks.some(track => !writableInstances.has(track.targetId))
+          const outside = walkTracks.some(track => !writableInstances.has(track.targetId)) || partTracks.some(track => !writableInstances.has(track.targetId))
             || instanceTracks.some(track => !writableInstances.has(track.targetId))
             || cameraTracks.some(track => !writableCameras.has(track.targetId));
           if (outside) {
@@ -936,15 +1012,14 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             // silently delete hidden tracks on a later local revision.
             return failure("outside-scope", "导演区动画包含本轮不可写的部件，无法安全读取并局部返修；原动画未修改");
           }
-          if (somaTracks.length !== (compiled.ir.somaTracks?.length ?? 0)
-            || walkTracks.length !== (compiled.ir.walkTracks?.length ?? 0)
+          if (walkTracks.length !== (compiled.ir.walkTracks?.length ?? 0)
             || instanceTracks.length !== compiled.ir.instanceTracks.length
             || cameraTracks.length !== compiled.ir.cameraTracks.length
             || partTracks.length !== (compiled.ir.partTracks ?? []).length) {
-            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0 && somaTracks.length === 0
+            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0
               ? null
               : createWorldAnimationScript({
-                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks, walkTracks, somaTracks }),
+                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks, walkTracks }),
                   duration: script.duration,
                   loop: script.loop,
                   revision: script.revision
@@ -1057,6 +1132,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           const decoded = decodeWorldCamera(nodeId ? inspected.canvas.nodeData[nodeId]?.worldCamera : null);
           return nodeId && decoded.ok ? [{ nodeId, title: String(inspected.canvas.nodeData[nodeId]?.title ?? ""), settings: decoded.value }] : [];
         }),
+        allowSceneAreaExpansion: context.allowSceneAreaExpansion === true,
         worldWritable: context.scope.scope.kind === "scene-area" || context.scope.scope.kind === "world-camera"
       }
     };
@@ -1064,9 +1140,41 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
 
   async function write(input: AssistantWorldWriteInput): Promise<AssistantWorldWriteOutcome> {
     const resolved = resolve(input.contextId);
-    if ("ok" in resolved) return resolved;
-    const { ledger, context, capability } = resolved;
     const operation = input.operation;
+    if (operation.kind === "edit-resource" && operation.operationId !== operation.edit.operationId) return failure("invalid-data", "操作身份不一致");
+    if ("ok" in resolved) {
+      // After a process restart no write capability is reissued. An active
+      // durable lease can nevertheless identify and replay an already committed
+      // resource receipt; it never authorizes a new edit.
+      if (operation.kind !== "edit-resource" && operation.kind !== "resize-scene-area") return resolved;
+      const pending = await deps.pending();
+      const record = pending.find(entry => entry.state === "active" && entry.intent.contextId === input.contextId);
+      if (!record) return resolved;
+      const intent = record.intent;
+      const inspected = await inspect(intent.canvasId);
+      if (!inspected.ok) return inspected;
+      if (operation.kind === "resize-scene-area") {
+        if (intent.scope.scope.kind !== "scene-area") return resolved;
+        const commandId = intentCommandId("assistant-world-resize-area", operation);
+        const saved = await inspected.room.lookupCommand(commandId);
+        if (!saved || saved.actorId !== `assistant-world:${intent.runId}`) return resolved;
+        const stillActive = (await deps.pending()).some(entry => entry.state === "active" && entry.intent.contextId === input.contextId && entry.intent.runId === intent.runId && entry.intent.epoch === intent.epoch && entry.intent.executionId === intent.executionId);
+        if (!stillActive) return failure("cancelled", "原运行授权已撤销");
+        return { ok: true, canvasId: intent.canvasId, commandId, revision: saved.revision, duplicate: true, noop: !saved.changed,
+          version: nextSceneAreaScopeVersion(intent.scope.scope.areaId, operation.bounds) };
+      }
+      const commandId = `assistant-resource:${stableAuthorityVersion("resource-operation", { runId: intent.runId, operationId: operation.edit.operationId })}`;
+      const saved = await inspected.room.lookupCommand(commandId);
+      const receipt = saved?.resourceEdit;
+      if (!saved || !receipt || saved.actorId !== `assistant-world:${intent.runId}`) return resolved;
+      const expected = stableAuthorityVersion("resource-intent", intent.allowSceneAreaExpansion === true ? { edit: operation.edit, allowSceneAreaExpansion: true } : operation.edit);
+      if (receipt.intentHash !== expected) return failure("operation-conflict", "相同 operationId 使用了不同资源意图");
+      const stillActive = (await deps.pending()).some(entry => entry.state === "active" && entry.intent.contextId === input.contextId && entry.intent.runId === intent.runId && entry.intent.epoch === intent.epoch && entry.intent.executionId === intent.executionId);
+      if (!stillActive) return failure("cancelled", "原运行授权已撤销");
+      return { ok: true, canvasId: intent.canvasId, commandId, revision: saved.revision, duplicate: true, noop: !saved.changed, target: receipt.target, version: receipt.version,
+        ...(receipt.sceneArea ? { sceneArea: receipt.sceneArea } : {}), ...(receipt.deleted ? { deleted: true } : {}), ...(receipt.camera ? { cameraId: receipt.camera.cameraId, settingsVersion: receipt.camera.settingsVersion, view: worldCameraView(receipt.camera) } : {}) };
+    }
+    const { ledger, context, capability } = resolved;
     if (operation.kind === "edit-resource") return editResource(ledger, context, capability, operation.edit);
     if (context.scope.scope.kind === "workflow-group-2d") {
       return failure("capability-unsupported", "2D 组成员不授予世界写资格");
@@ -1132,7 +1240,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     const inspected = await inspect(ledger.canvasId);
     if (!inspected.ok) return inspected;
     const commandId = `assistant-resource:${stableAuthorityVersion("resource-operation", { runId: ledger.runId, operationId: edit.operationId })}`;
-    const intentHash = stableAuthorityVersion("resource-intent", edit);
+    const intentHash = stableAuthorityVersion("resource-intent", context.allowSceneAreaExpansion === true ? { edit, allowSceneAreaExpansion: true } : edit);
     let rejected: AssistantWorldFailure | null = null;
     const reject = (value: AssistantWorldFailure) => { rejected = value; return value; };
     const result = await inspected.room.submitDerived({
@@ -1156,8 +1264,9 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           if (!prepared.ok) return reject(failure(prepared.code, prepared.message));
         }
         // No canvas lifecycle grant is minted by a director-area turn.
-        if (edit.resourceType === "scene_area" && edit.operation !== "update") {
-          return reject(failure("outside-scope", "创建或删除导演区需要画布生命周期授权"));
+        if (edit.resourceType === "scene_area") {
+          if ((edit.operation as string) !== "update") return reject(failure("outside-scope", "创建或删除导演区需要画布生命周期授权"));
+          if (Object.keys(edit).some(key => !["resourceType", "operation", "operationId", "target", "expectedVersion", "patch"].includes(key)) || !record(edit.target) || Object.keys(edit.target).length !== 1 || typeof (edit.target as Record<string, unknown>).areaId !== "string") return reject(failure("invalid-data", "导演区编辑包含未知字段"));
         }
         const areaId = isArea ? scope.areaId : "";
         const area = isArea ? findArea(canvas, areaId) : null;
@@ -1193,7 +1302,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           if (!expected || expected !== actual) return reject(failure("version-conflict", "资源版本已变化，请重新读取", actual ? { currentVersion: actual } : {}));
         }
         let fields: Record<string, unknown> = {};
-        let areaCommands: import("@woohaa3/contracts").CanvasCommand[] | null = null;
         let script = currentScript ?? "";
         if (isScript && edit.operation !== "delete") {
           if (edit.operation === "create" || edit.operation === "replace") script = edit.script ?? "";
@@ -1249,32 +1357,11 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             fields = { worldCamera: planned, ...((edit.title ?? edit.patch?.title) !== undefined ? { title: edit.title ?? edit.patch?.title } : {}) };
           }
         } else if (edit.resourceType === "scene_area") {
-          const changes = edit.patch ?? {};
-          if ([changes.bounds, changes.moveBy, changes.rotateClockwise].filter(Boolean).length > 1) return reject(failure("invalid-data", "bounds/moveBy/rotateClockwise 只能选择一种空间操作"));
-          if (changes.moveBy || changes.rotateClockwise) {
-            const prepared = await deps.authority.prepareCanvas(canvas, { kind: "scene-area", areaId });
-            if (!prepared.ok) return reject(failure(prepared.code, prepared.message));
-            for (const member of prepared.snapshot.writable) if (!findWritable(currentContext, member)) return reject(failure("outside-scope", "区域包含本轮未授权对象，不能整体变换"));
-            if (area!.area.animationScript) {
-              const animation = area!.area.animationScript;
-              const compiled = executeWorldAnimationScript(animation.script, animation);
-              if (!compiled.ok) return reject(failure("invalid-data", "原动画无法编译，不能整体变换"));
-              if ([...compiled.ir.instanceTracks, ...(compiled.ir.partTracks ?? []), ...(compiled.ir.walkTracks ?? [])].some(track => !findWritable(currentContext, { kind: "instance", instanceId: track.targetId })) || compiled.ir.cameraTracks.some(track => !findWritable(currentContext, { kind: "camera", cameraId: track.targetId }))) return reject(failure("outside-scope", "动画包含本轮不可写对象，不能整体变换"));
-            }
-            const base = { contractVersion: SCENE_AREA_PLAN_CONTRACT_VERSION, canvasId: ledger.canvasId, operationId: edit.operationId, area: prepared.snapshot.area, members: prepared.snapshot.members };
-            const planned = planSceneAreaOperation(changes.moveBy ? { ...base, intent: "move", delta: changes.moveBy } : { ...base, intent: "rotate" });
-            if (!planned.ok) return reject(failure("invalid-data", planned.code));
-            const mapped = buildForwardCommands(canvas, planned.plan);
-            if (!mapped.ok) return reject(failure("invalid-data", mapped.message));
-            areaCommands = mapped.commands;
-            const areaPatch = areaCommands.find(command => command.type === "nodeData.patch" && command.nodeId === nodeId);
-            fields = areaPatch?.type === "nodeData.patch" ? areaPatch.value as unknown as Record<string, unknown> : {};
-            if (changes.title !== undefined) fields.title = changes.title;
-            if (areaPatch?.type === "nodeData.patch") areaPatch.value = fields as CanvasNodeData;
-          } else {
-            const bounds = changes.bounds ?? area!.area.bounds;
-            fields = { sceneArea: { ...area!.area, bounds, animationOrigin: sceneAreaAnimationOrigin(area!.area), scopeVersion: nextSceneAreaScopeVersion(areaId, bounds) }, ...(changes.title !== undefined ? { title: changes.title } : {}) };
+          const changes = edit.patch;
+          if (!changes || Object.keys(changes).some(key => key !== "title") || typeof changes.title !== "string" || !changes.title.trim() || changes.title.length > 200) {
+            return reject(failure("invalid-data", "导演区只允许修改非空名称"));
           }
+          fields = { title: changes.title };
         } else if (edit.resourceType === "scene_animation_script") {
           const old = area!.area.animationScript;
           if (old) {
@@ -1335,21 +1422,102 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         if (!removeNode && identity?.kind === "instance" && String(preview.nodeData[nodeId]?.modelScript ?? "") !== "") {
           if (!await deps.authority.prepareContent(preview.nodeData[nodeId] as unknown as Record<string, unknown>, preview)) return reject(failure("invalid-data", "模型无法编译或占地未知"));
         }
-        if (areaCommands) for (const command of areaCommands) {
-          if (command.type === "nodeData.patch") preview.nodeData[command.nodeId] = { ...preview.nodeData[command.nodeId], ...command.value } as CanvasNodeData;
+        // Derive spatial needs from the full post-edit model, never from a script
+        // fragment or the model's anchor. Deletes and name-only edits do not add
+        // space; deleting a script leaves a skeleton at its canonical anchor.
+        const spatialModel = isArea && !removeNode && identity?.kind === "instance" &&
+          (edit.resourceType === "world_model_script" || creatingObject || (edit.resourceType === "world_model" && edit.patch?.transform !== undefined));
+        const spatialCamera = isArea && !removeNode && identity?.kind === "camera" &&
+          (creatingObject || edit.patch?.settings?.position !== undefined);
+        let required: GroundAabb | undefined;
+        if (spatialModel) {
+          const state = preview.nodeData[nodeId] as unknown as Record<string, unknown>;
+          const instance = decodeWorldInstanceData(state.sharedWorldInstance);
+          if (!instance.ok) return reject(failure("not-ready", "模型变换不可用"));
+          const position = instance.value.transform.position;
+          if (state.modelSourceKind !== "glb" && !String(state.modelScript ?? "").trim()) {
+            required = { min: { u: position.u, v: position.v }, max: { u: position.u, v: position.v } };
+          } else {
+            const geometry = await deps.authority.prepareContent(state, preview);
+            if (!geometry) return reject(failure("not-ready", "模型几何范围不可用"));
+            required = geometry.footprint?.(instance.value.transform) ?? undefined;
+            if (!required) return reject(failure("not-ready", "模型世界占地无法可靠计算"));
+          }
+        } else if (spatialCamera) {
+          const camera = decodeWorldCamera(preview.nodeData[nodeId]?.worldCamera);
+          if (!camera.ok) return reject(failure("not-ready", "镜头机位不可用"));
+          const { u, v } = camera.value.position;
+          required = { min: { u, v }, max: { u, v } };
+        }
+        if (isArea && ((edit.resourceType === "scene_animation_script" && edit.operation !== "delete") || spatialModel || spatialCamera)) {
+          const postArea = decodeSceneAreaData(preview.nodeData[area!.node.id]?.sceneArea);
+          const animation = postArea.ok ? postArea.value.animationScript : undefined;
+          if (postArea.ok && animation) {
+            const compiled = executeWorldAnimationScript(animation.script, animation);
+            if (!compiled.ok) return reject(failure("not-ready", "无法核对受影响动画的范围"));
+            let affected: WorldObjectIdentity | WorldObjectIdentity[] | undefined = identity ?? undefined;
+            if (edit.resourceType === "scene_animation_script") {
+              const previous = area!.area.animationScript;
+              const prior = previous ? executeWorldAnimationScript(previous.script, previous) : null;
+              if (prior && !prior.ok) return reject(failure("not-ready", "原动画无法编译"));
+              const signatures = (ir: typeof compiled.ir, target: WorldObjectIdentity) => target.kind === "instance"
+                ? stableStringify([ir.instanceTracks.filter(t => t.targetId === target.instanceId), (ir.partTracks ?? []).filter(t => t.targetId === target.instanceId), (ir.walkTracks ?? []).filter(t => t.targetId === target.instanceId)])
+                : stableStringify(ir.cameraTracks.filter(t => t.targetId === target.cameraId && t.property === "position"));
+              const modelIds = new Set([...compiled.ir.instanceTracks, ...(compiled.ir.partTracks ?? []), ...(compiled.ir.walkTracks ?? [])].map(t => t.targetId));
+              const cameraIds = new Set(compiled.ir.cameraTracks.filter(t => t.property === "position").map(t => t.targetId));
+              const targets: WorldObjectIdentity[] = [...[...modelIds].map(instanceId => ({ kind: "instance" as const, instanceId })), ...[...cameraIds].map(cameraId => ({ kind: "camera" as const, cameraId }))];
+              affected = targets.filter(target => !prior?.ok || previous?.duration !== animation.duration || signatures(prior.ir, target) !== signatures(compiled.ir, target));
+            }
+            const envelope = await animationEnvelope(preview, postArea.value, compiled.ir, affected);
+            if (envelope && "ok" in envelope) return reject(envelope);
+            if (envelope) required = required ? {
+              min: { u: Math.min(required.min.u, envelope.min.u), v: Math.min(required.min.v, envelope.min.v) },
+              max: { u: Math.max(required.max.u, envelope.max.u), v: Math.max(required.max.v, envelope.max.v) }
+            } : envelope;
+          }
+        }
+        let expandedArea: SceneAreaData | undefined;
+        if (required) {
+          const axes = outsideGroundAxes(required, area!.area.bounds);
+          if (axes.length) {
+            if (!currentContext.allowSceneAreaExpansion) return reject(failure("outside-scope", "内容超出导演区范围", { spatialDiagnostic: { areaId, actual: required, bounds: area!.area.bounds, outsideAxes: axes } }));
+            const old = area!.area.bounds;
+            const bounds = { min: { u: Math.min(old.min.u, required.min.u), v: Math.min(old.min.v, required.min.v) }, max: { u: Math.max(old.max.u, required.max.u), v: Math.max(old.max.v, required.max.v) } };
+            const currentArea = decodeSceneAreaData(preview.nodeData[area!.node.id]?.sceneArea);
+            if (!currentArea.ok) return reject(failure("not-ready", "导演区数据无效"));
+            expandedArea = { ...currentArea.value, bounds, scopeVersion: nextSceneAreaScopeVersion(areaId, bounds), animationOrigin: sceneAreaAnimationOrigin(area!.area) };
+            preview.nodeData[area!.node.id] = { ...preview.nodeData[area!.node.id], sceneArea: expandedArea } as unknown as CanvasNodeData;
+            if (nodeId === area!.node.id) fields.sceneArea = expandedArea;
+          }
+        }
+        if (expandedArea) {
+          const probe = deps.authority.expansionCandidates?.({ requestId: ledger.requestId, canvasId: ledger.canvasId, runId: ledger.runId, epoch: ledger.epoch, executionId: ledger.executionId, scope: currentContext.scope, allowSceneAreaExpansion: true, writable: currentContext.writableTargets.map(item => item.target), readOnly: currentContext.readOnlyReferences }, canvas, preview);
+          if (!probe) return reject(failure("not-ready", "无法可靠核对新增范围内的对象几何"));
         }
         const version = edit.operation === "delete" ? `absent-${intentHash}` : resourceVersion(preview, edit.resourceType, target);
         if (!version) return reject(failure("invalid-data", "无法计算资源版本"));
         const camera = isCamera && !removeNode ? fields.worldCamera as WorldCameraData : undefined;
-        const movedCameras = (areaCommands ?? []).flatMap(command => {
-          const decoded = command.type === "nodeData.patch" ? decodeWorldCamera(command.value?.worldCamera) : null;
-          return decoded?.ok ? [decoded.value] : [];
-        });
-        const resourceEdit = { intentHash, target, version, ...(movedCameras.length ? { cameras: movedCameras } : {}), ...(edit.operation === "delete" ? { deleted: true } : {}), ...(camera ? { camera } : {}) };
-        const commands: import("@woohaa3/contracts").CanvasCommand[] = areaCommands ?? (removeNode ? [{ type: "node.remove", nodeIds: [nodeId] }]
+        const sceneArea = isArea ? (() => {
+          const current = findArea(preview, areaId);
+          const areaVersion = resourceVersion(preview, "scene_area", { areaId });
+          return current && areaVersion ? { areaId, bounds: current.area.bounds, scopeVersion: current.area.scopeVersion, resourceVersion: areaVersion, expanded: !!expandedArea } : undefined;
+        })() : undefined;
+        const resourceEdit = { intentHash, target, version, ...(sceneArea ? { sceneArea } : {}), ...(edit.operation === "delete" ? { deleted: true } : {}), ...(camera ? { camera } : {}) };
+        const commands: import("@woohaa3/contracts").CanvasCommand[] = removeNode ? [{ type: "node.remove", nodeIds: [nodeId] }]
           : creatingObject ? [{ type: "node.add", node: { id: nodeId, type: isCamera ? "world-camera" : "model3d", ...(isCamera ? { position: initialCameraCardPosition(camera!), width: WORLD_CAMERA_CARD_SIZE.width, height: WORLD_CAMERA_CARD_SIZE.height } : {}) }, nodeData: fields as CanvasNodeData }]
-          : [{ type: "nodeData.patch", nodeId, value: fields as CanvasNodeData }]);
-        for (const camera of [...(resourceEdit.cameras ?? []), ...(resourceEdit.camera ? [resourceEdit.camera] : [])]) {
+          : [{ type: "nodeData.patch", nodeId, value: fields as CanvasNodeData }];
+        if (expandedArea && nodeId !== area!.node.id) commands.push({ type: "nodeData.patch", nodeId: area!.node.id, value: { sceneArea: expandedArea } as unknown as CanvasNodeData });
+        const projected = applyCanvasCommands(canvas, commands);
+        if (!projected.ok) return reject(failure("invalid-data", projected.rejection.message));
+        const historyIds = new Set([nodeId, ...(expandedArea ? [area!.node.id] : [])]);
+        const snapshot = (state: ServerCanvas, id: string) => {
+          const node = state.document.nodes.find(entry => entry.id === id);
+          return node ? { node: structuredClone(node), data: structuredClone(state.nodeData[id] ?? null) } : null;
+        };
+        const edges = (state: ServerCanvas) => state.document.edges.filter(edge => historyIds.has(edge.source) || historyIds.has(edge.target)).map(edge => structuredClone(edge));
+        const history = { nodes: [...historyIds].map(id => ({ id, before: snapshot(canvas, id), after: snapshot(projected.canvas, id) })), beforeEdges: edges(canvas), afterEdges: edges(projected.canvas), beforeOtherHash: resourceHistoryOtherHash(canvas, historyIds), afterOtherHash: resourceHistoryOtherHash(projected.canvas, historyIds) };
+        Object.assign(resourceEdit, { history });
+        for (const camera of resourceEdit.camera ? [resourceEdit.camera] : []) {
           // Persist before canonical commit so restart recovery can verify the exact receipt.
           await persistWriteIntent({ canvasId: ledger.canvasId, requestId: ledger.requestId, runId: ledger.runId, epoch: ledger.epoch, executionId: ledger.executionId, contextId: ledger.contextId, completionId: ledger.completionId,
             cameraId: camera.cameraId, commandId: `${commandId}:camera:${camera.cameraId}`, receiptCommandId: commandId, expectedSettingsVersion: edit.expectedVersion ?? "absent", nodeId: findWorldCameraNodeId(preview, camera.cameraId) ?? nodeId,
@@ -1396,7 +1564,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         cameraId: camera.cameraId, settingsVersion: camera.settingsVersion, snapshot: camera });
     }
     return { ok: true, canvasId: ledger.canvasId, commandId, revision: result.revision, duplicate: result.duplicate === true, noop: result.noop === true, target, version: receipt.version,
-      ...(receipt.deleted ? { deleted: true } : {}), ...(receipt.camera ? { cameraId: receipt.camera.cameraId, settingsVersion: receipt.camera.settingsVersion, view: worldCameraView(receipt.camera) } : {}) };
+      ...(receipt.sceneArea ? { sceneArea: receipt.sceneArea } : {}), ...(receipt.deleted ? { deleted: true } : {}), ...(receipt.camera ? { cameraId: receipt.camera.cameraId, settingsVersion: receipt.camera.settingsVersion, view: worldCameraView(receipt.camera) } : {}) };
   }
 
   async function resourceReferences(before: ServerCanvas, after: ServerCanvas, identity: WorldObjectIdentity): Promise<Array<{ nodeId: string; kind: string }>> {
@@ -1433,7 +1601,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     const areaId = context.scope.scope.areaId;
     const located = findArea(inspected.canvas, areaId);
     if (!located) return failure("outside-scope", "导演区不存在");
-    if(operation.motionAsset && (located.area.animationScript?.revision??0)!==operation.motionBaseRevision)return failure("version-conflict","导演区动画已变化，请重新读取后应用动作");
     // 脚本必须先编译成功，且目标只允许本轮可写的导演区内部部件（实例与镜头）。
     const compiled = executeWorldAnimationScript(operation.script, { duration: operation.duration, loop: operation.loop });
     if (!compiled.ok) return failure("invalid-data", `动画脚本编译失败：${compiled.message}`);
@@ -1472,46 +1639,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       }
       return null;
     };
-    const validateSomaTargets = async (canvas: ServerCanvas, writable: (id:string)=>boolean) => {
-      if (operation.motionTarget) {
-        const target=operation.motionTarget;
-        if(target.canvasRevision!==undefined&&canvas.revision!==target.canvasRevision)return {code:"version-conflict" as const,message:"场景在绕场校验后发生变化，请重新规划"};
-        if(target.scopeVersion!==undefined&&findArea(canvas,areaId)?.area.scopeVersion!==target.scopeVersion)return {code:"version-conflict" as const,message:"导演区范围已变化，请重新校验动作路径"};
-        if (!writable(target.instanceId)) return {code:"outside-scope" as const,message:"动作模型不在本轮可写范围"};
-        if (worldObjectVersion(canvas,{kind:"instance",instanceId:target.instanceId})!==target.expectedVersion) return {code:"version-conflict" as const,message:"动作模型内容或变换已变化，请重新读取版本"};
-      }
-      if(operation.motionAsset && !(compiled.ir.somaTracks??[]).some(track=>track.assetId===operation.motionAsset!.id)) return {code:"invalid-data" as const,message:"动作资产必须被本次片段引用"};
-      const priorAnimation=findArea(canvas,areaId)?.area.animationScript;
-      const priorCompiled=priorAnimation?executeWorldAnimationScript(priorAnimation.script,priorAnimation):null;
-      for(const track of compiled.ir.somaTracks??[]) {
-        if((track.targetBodyPreset||track.rootMotion==='translate'||track.route)&&operation.motionAsset?.id!==track.assetId){
-          const persisted=priorCompiled?.ok&&priorCompiled.ir.somaTracks?.some(previous=>JSON.stringify(previous)===JSON.stringify(track));
-          if(!persisted)return {code:"invalid-data" as const,message:"新体型或位移动作必须通过宿主校验稳定 NPZ 后应用"};
-        }
-        if(!writable(track.targetId))return {code:"outside-scope" as const,message:"SOMA模型不在本轮可写范围"};
-        const model=findInstanceNode(canvas,track.targetId);
-        const rig=model?await animationRigOf(model.fields):null;
-        const skeleton=rig?somaSkeletonIdentity(rig.groups,track.jointPrefix):null;
-        if(!rig||!skeleton||skeleton.bodyPreset!==track.targetBodyPreset)return {code:"invalid-data" as const,message:"SOMA片段需要匹配真实77关节绑定骨架"};
-        if(track.route&&operation.motionTarget?.instanceId===track.targetId&&operation.motionAsset?.id===track.assetId){
-          const instance=decodeWorldInstanceData(model?.fields.sharedWorldInstance),bounds=findArea(canvas,areaId)?.area.bounds,anchor=rig.spatial?.groundAnchorLocal;
-          if(!instance.ok||!bounds||!anchor)return {code:"invalid-data" as const,message:"绕场缺少实际模型与范围"};
-          const transform=instance.value.transform,route=track.route,area=findArea(canvas,areaId)!.area;
-          if(route.referenceFrame&&(stableStringify(route.referenceFrame.origin)!==stableStringify(sceneAreaAnimationOrigin(area))||route.referenceFrame.quarterTurns!==(area.animationQuarterTurns??0)))return {code:"version-conflict" as const,message:"绕场参考坐标已变化"};
-          const start=projectSomaRootTranslation(anchor,transform.rotation,transform.scale,transform.position);
-          if(Math.abs(route.scale-transform.scale)>1e-6||Math.abs(route.rootHeight-transform.position.h)>1e-6||stableStringify(route.groundAnchorLocal)!==stableStringify(anchor)||stableStringify(route.baseRotation)!==stableStringify(transform.rotation)||Math.hypot(route.startAnchor.u-start.u,route.startAnchor.v-start.v)>1e-5)return {code:"version-conflict" as const,message:"绕场路线与当前模型变换不一致"};
-          if([...route.path,route.startAnchor].some(p=>p.u<bounds.min.u||p.u>bounds.max.u||p.v<bounds.min.v||p.v>bounds.max.v))return {code:"outside-scope" as const,message:"绕场路线超出导演区范围"};
-        }
-        const added=operation.motionAsset?.id===track.assetId?operation.motionAsset:undefined;
-        const existing=canvas.assets.find(asset=>asset.id===track.assetId);
-        if(added&&existing&&existing.metadata?.checksum!==added.metadata?.checksum)return {code:"invalid-data" as const,message:"动作资产身份冲突"};
-        const asset=added??existing,meta=asset?.metadata?.motion;
-        if(!asset||asset.mediaKind!=="motion"||asset.status!=="ready"||!asset.metadata?.storageKey||asset.metadata.checksum!==track.checksum||!isSomaMotionMetadata(meta)||meta.fps!==track.fps||meta.frameCount!==track.frameCount)return {code:"invalid-data" as const,message:"SOMA动作资产的身份或采样信息不匹配"};
-      }
-      return null;
-    };
-    const somaFailure=await validateSomaTargets(inspected.canvas,id=>writableInstances.has(id));
-    if(somaFailure)return failure(somaFailure.code,somaFailure.message);
     const walkFailure=await validateWalkTargets(inspected.canvas,id=>writableInstances.has(id));
     if(walkFailure)return failure(walkFailure.code,walkFailure.message);
     const animationScript = createWorldAnimationScript({
@@ -1528,9 +1655,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
         const stillIssued = resolve(context.contextId);
         if ("ok" in stillIssued) return { ok: false as const, code: "outside-scope", message: stillIssued.message };
-        if(operation.motionAsset && (current.area.animationScript?.revision??0)!==operation.motionBaseRevision)return {ok:false as const,code:"version-conflict" as const,message:"导演区动画已变化，请重新读取后应用动作"};
-        const somaFailure=await validateSomaTargets(canvas,id=>!!findWritable(stillIssued.context,{kind:"instance",instanceId:id}));
-        if(somaFailure)return {ok:false as const,...somaFailure};
         const walkFailure=await validateWalkTargets(canvas,id=>!!findWritable(stillIssued.context,{kind:"instance",instanceId:id}));
         if(walkFailure)return {ok:false as const,...walkFailure};
         for (const track of compiled.ir.partTracks ?? []) {
@@ -1547,7 +1671,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             commandId,
             actorId: `assistant-world:${context.runId}`,
             baseRevision: canvas.revision,
-            commands: [...(operation.motionAsset ? [{type:"asset.upsert" as const,asset:operation.motionAsset}] : []), {
+            commands: [{
               type: "nodeData.patch" as const,
               nodeId: current.node.id,
               value: {
@@ -1587,70 +1711,18 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     operation: Extract<AssistantWorldWriteOperation, { kind: "resize-scene-area" }>,
     inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
   ): Promise<AssistantWorldWriteOutcome> {
-    if (context.scope.scope.kind !== "scene-area") {
-      return failure("capability-unsupported", "2D 组没有导演区范围能力");
-    }
-    const areaId = context.scope.scope.areaId;
-    const located = findArea(inspected.canvas, areaId);
-    if (!located) return failure("outside-scope", "导演区不存在");
-    if (located.area.scopeVersion !== operation.expectedScopeVersion) {
-      return failure("version-conflict", `导演区范围已变化（当前 ${located.area.scopeVersion}），请使用该版本重试`);
-    }
-    const bounds = {
-      min: { u: operation.bounds.min.u, v: operation.bounds.min.v },
-      max: { u: operation.bounds.max.u, v: operation.bounds.max.v }
-    };
-    const scopeVersion = nextSceneAreaScopeVersion(areaId, bounds);
+    // submitDerived first checks the durable command receipt, so already committed
+    // legacy operations can still be replayed without allowing a new resize.
     const commandId = intentCommandId("assistant-world-resize-area", operation);
     const result = await inspected.room.submitDerived({
       commandId,
-      async derive(canvas) {
-        const current = findArea(canvas, areaId);
-        if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
-        if (current.area.scopeVersion !== operation.expectedScopeVersion) {
-          return { ok: false as const, code: "version-conflict", message: "导演区范围已变化" };
-        }
-        return {
-          ok: true as const,
-          batch: {
-            protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
-            canvasId: ledger.canvasId,
-            commandId,
-            actorId: `assistant-world:${context.runId}`,
-            baseRevision: canvas.revision,
-            commands: [{
-              type: "nodeData.patch" as const,
-              nodeId: current.node.id,
-              value: {
-                sceneArea: {
-                  ...current.area,
-                  bounds,
-                  scopeVersion,
-                  animationOrigin: sceneAreaAnimationOrigin(current.area)
-                }
-              } as unknown as CanvasNodeData
-            }]
-          }
-        };
+      async derive() {
+        return { ok: false as const, code: "capability-unsupported", message: "助手不能直接调整导演区范围" };
       }
     }, { spatialContext: capability });
     if (!result.ok) return commandFailure(result);
-    // The run's context and durable lease advanced to the new scope version inside
-    // the commit; mirror it in-process so later writes in this run keep working.
-    deps.worldAuthoring.refreshContextScope({
-      canvasId: ledger.canvasId,
-      contextId: ledger.contextId,
-      scope: { scope: { kind: "scene-area", areaId }, scopeVersion }
-    });
-    return {
-      ok: true,
-      canvasId: ledger.canvasId,
-      commandId,
-      revision: result.revision,
-      duplicate: result.duplicate === true,
-      noop: result.noop === true,
-      version: scopeVersion
-    };
+    return { ok: true, canvasId: ledger.canvasId, commandId, revision: result.revision,
+      duplicate: result.duplicate === true, noop: result.noop === true, version: context.scope.scope.kind === "scene-area" ? nextSceneAreaScopeVersion(context.scope.scope.areaId, operation.bounds) : operation.expectedScopeVersion };
   }
 
   async function createModel(

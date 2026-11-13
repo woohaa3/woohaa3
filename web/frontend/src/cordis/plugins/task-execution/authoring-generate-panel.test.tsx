@@ -619,6 +619,9 @@ describe("统一 Agent 创作入口", () => {
       mode: "world",
       worldScope: { kind: "scene-area", areaId: "area-1" },
     });
+    const expansion = el.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(expansion.checked).toBe(false);
+    await act(async () => expansion.click());
     await input("textarea", "把桌子移到左边");
     const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
       (entry) => entry.textContent === "生成",
@@ -630,8 +633,10 @@ describe("统一 Agent 创作入口", () => {
       mode: "world",
       nodeId: "area-node",
       worldScope: { kind: "scene-area", areaId: "area-1" },
+      allowSceneAreaExpansion: true,
       prompt: "把桌子移到左边",
     });
+    expect(expansion.checked).toBe(false);
   });
 
   it("镜头生成面板提交所选镜头，保持调整用途和用户输入", async () => {

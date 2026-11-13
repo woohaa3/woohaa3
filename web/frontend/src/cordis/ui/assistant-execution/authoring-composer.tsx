@@ -69,7 +69,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       dataScopeId: service?.getDataScopeId?.() ?? "page",
       canvasId: props.canvasId,
       nodeId: props.nodeId,
-      purpose: props.mode,
+      purpose: props.worldScope?.kind === "scene-area" ? `${props.mode}:${props.worldScope.areaId}` : props.worldScope?.kind === "world-camera" ? `${props.mode}:${props.worldScope.cameraId}` : props.mode,
     },
     { prompt: props.mode === "text" ? "" : (props.initialPrompt ?? "") },
   );
@@ -340,6 +340,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       nodeId: props.nodeId,
       mode: props.mode,
       ...(props.worldScope ? { worldScope: props.worldScope } : {}),
+      ...(props.mode === "world" && props.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.draft.allowSceneAreaExpansion === true } : {}),
       roleId: roleIdForTarget({ ...(props.mode ? { mode: props.mode } : {}), ...(props.worldScope ? { worldScope: props.worldScope } : {}) }),
       connectionId,
       ...(selectedConnection?.binding
@@ -454,6 +455,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 onSubmit={() => void submit()}
               />
             )}
+            {props.mode === "world" && props.worldScope?.kind === "scene-area" ? <label className="assistant-expansion-option"><input type="checkbox" checked={input.draft.allowSceneAreaExpansion === true} disabled={locked || !props.writable || Boolean(input.pending)} onChange={event => controller.edit({ allowSceneAreaExpansion: event.target.checked })} />允许自动扩大导演区</label> : null}
           </div>
         }
         assistant={service ? <AssistantConfiguration service={service} connectionId={connectionId ?? ""} model={model} purpose={props.mode ?? "world"}

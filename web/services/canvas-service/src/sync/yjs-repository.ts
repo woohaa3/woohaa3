@@ -100,6 +100,10 @@ export interface YjsDocumentRepository {
   /** 查询命令幂等结果。 */
   getCommandRecord(canvasId: string, commandId: string): Promise<YjsCommandRecord | null>;
 
+  findLatestCommand?(canvasId: string): Promise<YjsCommandRecord | null>;
+  findLatestResourceHistoryCommand?(canvasId: string, sourceCommandId: string): Promise<YjsCommandRecord | null>;
+  listResourceEditCommands?(canvasId: string, runId: string): Promise<Array<{ commandId: string; revision: number }>>;
+
   /**
    * Latest scene-area authority command for one operation (T06).
    *

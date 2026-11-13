@@ -193,6 +193,7 @@ export interface WorldToolWritableTarget { target: WorldObjectVersion; lease: Sp
  * locks remain until execution is confirmed stopped, even if a target leaves the scope.
  */
 export interface WorldToolContext {
+  allowSceneAreaExpansion?: boolean;
   contextId: WorldId;
   canvasId: WorldId;
   runId: WorldId;

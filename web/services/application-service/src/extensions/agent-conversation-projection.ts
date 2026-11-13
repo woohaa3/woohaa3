@@ -73,6 +73,7 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
   const normalized = normalizeConversationTurnStatus(record.status);
   const status: ConversationTurnStatus = normalized ?? "failed";
   const legacyUnconfirmed = status === "failed" && record.errorCode === null && record.status !== "failed";
+  const target = JSON.parse(record.targetJson) as AgentTargetSnapshot;
   return {
     turnId: record.turnId,
     conversationId: record.conversationId,
@@ -80,7 +81,9 @@ export function toTurn(store: AgentConversationStore, record: ConversationTurnRe
     action: record.action as ConversationTurn["action"],
     status,
     stage: record.stage === "unknown" ? "failed" : record.stage,
-    target: JSON.parse(record.targetJson) as AgentTargetSnapshot,
+    target: target.mode === "world" && target.worldScope?.kind === "scene-area"
+      ? { ...target, allowSceneAreaExpansion: target.allowSceneAreaExpansion === true }
+      : target,
     ...(record.assistantText !== null ? { assistantText: record.assistantText } : {}),
     tools: tools.map((tool): ConversationToolActivity => ({
       tool: tool.tool,
@@ -299,6 +302,7 @@ export function hashIntent(entry: AgentEntryIntent, connection?: AgentConnection
     cameraId: entry.cameraId ?? null,
     clipId: entry.clipId ?? null,
     itemId: entry.itemId ?? null,
+    ...(entry.worldScope ? { worldScope: entry.worldScope.kind === "scene-area" ? { kind: "scene-area", areaId: entry.worldScope.areaId } : { kind: "world-camera", cameraId: entry.worldScope.cameraId } } : {}),
     model: entry.model ?? null,
     reasoningEffort: entry.reasoningEffort ?? null,
     connectionId: typeof binding === "string" ? binding : binding?.connectionId ?? null,
@@ -308,6 +312,7 @@ export function hashIntent(entry: AgentEntryIntent, connection?: AgentConnection
     connectionCapabilityRevision: typeof binding === "string" ? null : binding?.capabilityRevision ?? null,
     roleId: entry.roleId ?? null,
     expectedContentHash: entry.expectedContentHash ?? null,
+    ...(entry.allowSceneAreaExpansion === true ? { allowSceneAreaExpansion: true } : {}),
     prompt: entry.prompt,
     references: (entry.references ?? []).map((reference) => ({ kind: reference.kind, storageKey: reference.storageKey ?? null, nodeId: reference.nodeId ?? null, role: reference.role ?? null }))
   };
@@ -326,6 +331,8 @@ export function entryFromTurn(record: ConversationTurnRecord): AgentEntryIntent 
     canvasId: record.canvasId,
     ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
     ...(target.mode !== undefined ? { mode: target.mode } : {}),
+    ...(target.worldScope ? { worldScope: target.worldScope } : {}),
+    ...(target.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: target.allowSceneAreaExpansion === true } : {}),
     ...(target.cameraId !== undefined ? { cameraId: target.cameraId } : {}),
     ...(target.clipId !== undefined ? { clipId: target.clipId } : {}),
     ...(target.itemId !== undefined ? { itemId: target.itemId } : {}),

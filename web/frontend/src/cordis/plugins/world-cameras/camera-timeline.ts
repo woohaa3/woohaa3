@@ -16,12 +16,13 @@ export function adoptCameraTimeline(input: {
   after: WorldCameraData;
   label: string;
   operationId: string;
+  revision?: number;
   version: { current: string };
 }): { ok: boolean; reason?: string } {
   const { ctx, canvasId, cameraId, before, after, label, operationId, version } = input;
   const beforeSettings = worldCameraUiSettingsOf(before);
   const afterSettings = worldCameraUiSettingsOf(after);
-  const apply = async (settings: WorldCameraUiSettings): Promise<{ ok: true } | { ok: false; reason: string }> => {
+  const apply = async (settings: WorldCameraUiSettings): Promise<{ ok: true; revision?: number } | { ok: false; reason: string }> => {
     const result = await submitWorldCameraSave(ctx.canvasRemote, {
       canvasId,
       cameraId,
@@ -34,11 +35,12 @@ export function adoptCameraTimeline(input: {
       return { ok: false, reason: "镜头回执与请求的配置不一致" };
     }
     version.current = result.settingsVersion;
-    return { ok: true };
+    return { ok: true, revision: result.revision };
   };
   return ctx.canvasEdit.recordExternal({
     id: `world-camera:${operationId}`,
     label,
+    revision: input.revision,
     undo: () => apply(beforeSettings),
     redo: () => apply(afterSettings)
   }).ok ? { ok: true } : { ok: false, reason: "无法加入撤销历史" };

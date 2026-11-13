@@ -269,6 +269,28 @@ export class MongoYjsRepository implements YjsDocumentRepository {
     };
   }
 
+  async findLatestCommand(canvasId: string): Promise<YjsCommandRecord | null> {
+    const rows = await this.commands().find({ canvasId, changed: true }).sort({ revision: -1, _id: -1 }).skip(0).limit(1).toArray();
+    const row = rows[0];
+    return row ? { commandId: row.commandId, payloadHash: row.payloadHash, revision: row.revision, changed: row.changed, actorId: row.actorId, createdAt: row.createdAt, ...(row.resourceEdit ? { resourceEdit: row.resourceEdit } : {}) } : null;
+  }
+
+  async findLatestResourceHistoryCommand(canvasId: string, sourceCommandId: string): Promise<YjsCommandRecord | null> {
+    const rows = await this.commands().find({ canvasId, "resourceEdit.historyReplay.sourceCommandId": sourceCommandId }).sort({ revision: -1, _id: -1 }).skip(0).limit(1).toArray();
+    const row = rows[0];
+    return row ? { commandId: row.commandId, payloadHash: row.payloadHash, revision: row.revision, changed: row.changed, actorId: row.actorId, createdAt: row.createdAt, ...(row.resourceEdit ? { resourceEdit: row.resourceEdit } : {}) } : null;
+  }
+
+  async listResourceEditCommands(canvasId: string, runId: string): Promise<Array<{ commandId: string; revision: number }>> {
+    const rows: YjsCommandDoc[] = [];
+    for (;;) {
+      const page = await this.commands().find({ canvasId, actorId: `assistant-world:${runId}`, changed: true }).sort({ revision: 1, commandId: 1 }).skip(rows.length).limit(1000).toArray();
+      rows.push(...page);
+      if (page.length < 1000) break;
+    }
+    return rows.filter(row => row.resourceEdit?.history && !row.resourceEdit.historyReplay).map(row => ({ commandId: row.commandId, revision: row.revision }));
+  }
+
   async replaceCheckpoint(input: {
     canvasId: string;
     cutoffSeq: number;

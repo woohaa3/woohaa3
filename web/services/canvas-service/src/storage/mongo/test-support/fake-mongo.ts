@@ -311,7 +311,9 @@ function compareBy(a: AnyDoc, b: AnyDoc, spec: Record<string, 1 | -1>): number {
     if (left === right) continue;
     if (left === undefined || left === null) return 1;
     if (right === undefined || right === null) return -1;
-    const comparison = String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0;
+    const comparison = typeof left === "number" && typeof right === "number"
+      ? Math.sign(left - right)
+      : String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0;
     return comparison * direction;
   }
   return 0;

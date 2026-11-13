@@ -33,6 +33,11 @@ describe("导演区资源工具协议", () => {
     expect(text).toContain("由宿主核实并自动留档");
   });
 
+  it("遵守用户冻结的扩区策略并检查回执", () => {
+    expect(text).toContain("allowSceneAreaExpansion");
+    expect(text).toContain("检查回执 sceneArea");
+    expect(text).not.toContain("先用 edit_scene_area（operation=update） 显式扩区");
+  });
   it("单镜头流程查询资源版本，并使用 target 与 patch.settings", () => {
     const camera = CAMERA_COMPOSER_FLOW.join("\n");
     for (const rule of ["read_world_resource", "target.cameraId", "patch.settings", "不能创建或修改模型", "不调用完成工具"]) expect(camera).toContain(rule);

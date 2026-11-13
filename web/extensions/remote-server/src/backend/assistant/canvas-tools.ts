@@ -50,6 +50,7 @@ export async function createCanvasToolChannel(
     nodeId,
     ...(input.intent.mode ? { mode: input.intent.mode } : {}),
     ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+    ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
     tools: prepared.tools,
     ...(input.connection ? { credentialEpoch: input.connection.credentialEpoch } : {}),
   });

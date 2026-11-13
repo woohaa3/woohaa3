@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { WORLD_RESOURCE_TOOLS, SHARED_WORLD_VERSION, type WorldResourceEdit } from '@woohaa3/contracts';
 import { structured, auditWrap, type AgentAuthoringToolDeps } from './tool-policy.js';
-import { worldGrant, worldFailure, denied, point, groundAabb, rotation, projection, captureMode, aspect, animationBudget, motionConventions } from './world-tool-shared.js';
+import { worldGrant, worldFailure, denied, point, rotation, projection, captureMode, aspect, animationBudget, motionConventions } from './world-tool-shared.js';
 
 const id = z.string().min(1).max(512);
 const title = z.string().max(200);
@@ -121,7 +121,7 @@ export function registerWorldResourceTools(server: McpServer, deps: AgentAuthori
   const update = (target: typeof areaTarget | typeof modelTarget | typeof cameraTarget, patch: z.ZodType) => z.strictObject({ ...mutation, operation: z.literal('update'), target, expectedVersion: id, patch });
   const remove = (target: typeof areaTarget | typeof modelTarget | typeof cameraTarget) => z.strictObject({ ...mutation, operation: z.literal('delete'), target, expectedVersion: id });
   // A director-area grant has no canvas lifecycle authority: do not advertise root create/delete.
-  register(WORLD_RESOURCE_TOOLS.area, 'scene_area', update(areaTarget, z.strictObject({ title: title.optional(), bounds: groundAabb.optional(), moveBy: z.strictObject({ u: z.number().finite(), v: z.number().finite() }).optional(), rotateClockwise: z.literal(true).optional() })), '修改导演区名称或 patch.bounds；只改 bounds 不移动内容。patch.moveBy 整体平移，patch.rotateClockwise 整体顺时针旋转90度；三种空间操作互斥。当前授权不包含导演区创建/删除。成功后重读上下文。');
+  register(WORLD_RESOURCE_TOOLS.area, 'scene_area', update(areaTarget, z.strictObject({ title: title.trim().min(1) })), '修改导演区名称。当前授权不包含导演区创建、删除或空间调整。');
   register(WORLD_RESOURCE_TOOLS.model, 'world_model', objectInput(z.discriminatedUnion('operation', [
     z.strictObject({ ...mutation, operation: z.literal('create'), areaId: id, title: title.optional(), transform, initialScript: z.string().optional() }),
     update(modelTarget, z.strictObject({ title: title.optional(), transform: z.strictObject({ position: point.optional(), rotation: rotation.optional(), scale: z.number().finite().positive().optional() }).optional() })), remove(modelTarget)

@@ -212,6 +212,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
           const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
             workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
             ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+    ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
             ...(expectedScopeEpoch !== undefined ? { expectedScopeEpoch } : {}),
             tools: toolNames });
           gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,

@@ -159,10 +159,10 @@ describe("world camera UI transport service", () => {
       version
     }).ok).toBe(true);
     expect(entries[0]!.id).toBe("world-camera:camera-op");
-    expect(await entries[0]!.undo()).toEqual({ ok: true });
+    expect(await entries[0]!.undo()).toEqual({ ok: true, revision: 3 });
     expect(saveWorldCamera).toHaveBeenLastCalledWith(expect.objectContaining({ expectedSettingsVersion: "settings-2" }), undefined);
     expect(version.current).toBe("settings-3");
-    expect(await entries[0]!.redo()).toEqual({ ok: true });
+    expect(await entries[0]!.redo()).toEqual({ ok: true, revision: 3 });
     expect(saveWorldCamera).toHaveBeenLastCalledWith(expect.objectContaining({ expectedSettingsVersion: "settings-3" }), undefined);
     expect(version.current).toBe("settings-4");
 

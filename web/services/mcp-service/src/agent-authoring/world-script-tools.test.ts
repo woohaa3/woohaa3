@@ -8,7 +8,7 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { ASSISTANT_WORLD_TOOL, ASSISTANT_WORLD_TOOLS, assistantWorldSourceCapability, assistantWorldToolsForScope } from "@woohaa3/contracts";
-import type { ApplicationToolGrant, AssistantWorldContextView, AssistantWorldWriteInput } from "@woohaa3/contracts";
+import type { ApplicationToolGrant, AssistantWorldContextView } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH, listModelMcpToolNames } from "../model-mcp/mcp-http.js";
 import type { AgentCanvasClient } from "../downstream/agent-canvas-client.js";
 import type { AssistantWorldToolClient } from "./world-tools.js";
@@ -174,38 +174,11 @@ describe("分段脚本写入：目录与能力声明", () => {
 });
 
 describe("分段脚本写入：骨架与回读", () => {
-  it("省略 modelScript 创建空骨架并回读空脚本与版本", async () => {
-    const writes: AssistantWorldWriteInput[] = [];
+  it("旧脚本读取仍可区分空骨架与只读引用", async () => {
     const issued = scopeGrant();
-    const base = await start({
-      read: () => ({
-        ok: true,
-        view: contextView({ modelScripts: { "instance-1": "", "reference-1": "scene.box({});" } })
-      }),
-      async write(input) {
-        writes.push(input);
-        return { ok: true, canvasId: "canvas-1", commandId: "cmd-create", revision: 2, duplicate: false, noop: false,
-          instanceId: "instance-skeleton", nodeId: "asset-model3d-x", version: "iv-1" };
-      },
-      async complete() { throw new Error("unused"); }
-    }, issued);
-    const transform = { version: "shared-world-v1", position: { u: 1, v: 1, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 };
-    const created = await callTool(base, "create_world_model", { transform }, issued.token);
-    expect(created.result?.isError).toBeFalsy();
-    expect(created.result?.structuredContent).toMatchObject({ ok: true, instanceId: "instance-skeleton", version: "iv-1", modelScriptLength: 0 });
-    const operation = writes[0]!.operation;
-    if (operation.kind !== "create-model") throw new Error("missing create operation");
-    expect(operation.content.modelScript).toBe("");
-    expect(created.result?.content?.[0]?.text).toContain("骨架");
-
+    const base = await start({ read: () => ({ ok: true, view: contextView({ modelScripts: { "instance-1": "", "reference-1": "scene.box({});" } }) }), async write() { throw new Error("read must not write"); }, async complete() { throw new Error("unused"); } }, issued);
     const meta = await callTool(base, ASSISTANT_WORLD_TOOL.readModelScript, { instanceId: "instance-1", includeSource: false }, issued.token);
-    expect(meta.result?.structuredContent).toMatchObject({ ok: true, instanceId: "instance-1", modelContentVersion: "iv-1", scriptLength: 0, writable: true, includeSource: false });
-    expect(meta.result?.structuredContent).not.toHaveProperty("modelScript");
-
-    const full = await callTool(base, ASSISTANT_WORLD_TOOL.readModelScript, { instanceId: "instance-1", includeSource: true }, issued.token);
-    expect(full.result?.structuredContent).toMatchObject({ ok: true, modelScript: "", scriptLength: 0, includeSource: true });
-
-    // 只读引用可读（只读语义），但读取不改变可写性。
+    expect(meta.result?.structuredContent).toMatchObject({ ok: true, instanceId: "instance-1", scriptLength: 0, writable: true });
     const reference = await callTool(base, ASSISTANT_WORLD_TOOL.readModelScript, { instanceId: "reference-1", includeSource: true }, issued.token);
     expect(reference.result?.structuredContent).toMatchObject({ ok: true, modelScript: "scene.box({});", writable: false });
   });
@@ -220,69 +193,6 @@ describe("分段脚本写入：骨架与回读", () => {
     const result = await callTool(base, ASSISTANT_WORLD_TOOL.readModelScript, { instanceId: "foreign" }, issued.token);
     expect(result.result?.isError).toBe(true);
     expect(result.result?.structuredContent).toMatchObject({ ok: false, code: "outside-scope" });
-  });
-});
-
-describe("分段脚本写入：追加与修补转发", () => {
-  it("追加与修补携带版本与片段，并回传新版本与长度", async () => {
-    const writes: AssistantWorldWriteInput[] = [];
-    const issued = scopeGrant();
-    const base = await start({
-      read: () => ({ ok: false, code: "not-issued", message: "not used" }),
-      async write(input) {
-        writes.push(input);
-        return { ok: true, canvasId: "canvas-1", commandId: "cmd", revision: 3, duplicate: false, noop: false,
-          instanceId: "instance-1", nodeId: "node-1", version: "iv-2", scriptLength: 42, replaced: 1 };
-      },
-      async complete() { throw new Error("unused"); }
-    }, issued);
-    const appended = await callTool(base, ASSISTANT_WORLD_TOOL.appendModelScript, { instanceId: "instance-1", expectedVersion: "iv-1", chunk: "scene.box({});" }, issued.token);
-    expect(appended.result?.isError).toBeFalsy();
-    expect(appended.result?.structuredContent).toMatchObject({ ok: true, version: "iv-2", scriptLength: 42 });
-    expect(writes[0]!.operation).toMatchObject({ kind: "append-model-script", instanceId: "instance-1", expectedVersion: "iv-1", chunk: "scene.box({});" });
-
-    const patched = await callTool(base, ASSISTANT_WORLD_TOOL.patchModelScript, { instanceId: "instance-1", expectedVersion: "iv-2", oldString: "red", newString: "blue" }, issued.token);
-    expect(patched.result?.isError).toBeFalsy();
-    expect(patched.result?.structuredContent).toMatchObject({ ok: true, replaced: 1 });
-    expect(writes[1]!.operation).toMatchObject({ kind: "patch-model-script", oldString: "red", newString: "blue" });
-
-    // 相同参数重试必须产生相同 operationId（宿主据此冻结回执、不重复拼接）。
-    await callTool(base, ASSISTANT_WORLD_TOOL.appendModelScript, { instanceId: "instance-1", expectedVersion: "iv-1", chunk: "scene.box({});" }, issued.token);
-    expect((writes[2]!.operation as { operationId: string }).operationId).toBe((writes[0]!.operation as { operationId: string }).operationId);
-    // 不同片段绝不是同一身份。
-    await callTool(base, ASSISTANT_WORLD_TOOL.appendModelScript, { instanceId: "instance-1", expectedVersion: "iv-1", chunk: "scene.sphere({});" }, issued.token);
-    expect((writes[3]!.operation as { operationId: string }).operationId).not.toBe((writes[0]!.operation as { operationId: string }).operationId);
-  });
-
-  it.each([
-    ["patch-not-found", { occurrences: 0, scriptLength: 12, closest: { line: 1, column: 1, excerpt: "scene.box({…" } }, ["read_world_resource", "更长的上下文"]],
-    ["patch-ambiguous", { occurrences: 2, scriptLength: 40, matches: [{ line: 1, column: 1, excerpt: "a" }, { line: 2, column: 1, excerpt: "a" }] }, ["命中多处", "行号", "唯一"]],
-    ["patch-noop", { occurrences: 1, scriptLength: 40 }, ["内容与版本都没变化", "不要重复提交"]]
-  ] as const)("把宿主 %s 回执原样带给调用方", async (code, diagnostic, hints) => {
-    const issued = scopeGrant();
-    const base = await start({
-      read: () => ({ ok: false, code: "not-issued", message: "not used" }),
-      async write() { return { ok: false, code, message: `${code} failure`, patchDiagnostic: diagnostic } as never; },
-      async complete() { throw new Error("unused"); }
-    }, issued);
-    const result = await callTool(base, ASSISTANT_WORLD_TOOL.patchModelScript, { instanceId: "instance-1", expectedVersion: "iv-1", oldString: "a", newString: "b" }, issued.token);
-    expect(result.result?.isError).toBe(true);
-    expect(result.result?.structuredContent).toMatchObject({ ok: false, code, patchDiagnostic: diagnostic });
-    const text = result.result?.content?.[0]?.text ?? "";
-    expect(text).toContain(`[${code}]`);
-    for (const hint of hints) expect(text, hint).toContain(hint);
-  });
-
-  it("版本冲突回执附带当前真实版本", async () => {
-    const issued = scopeGrant();
-    const base = await start({
-      read: () => ({ ok: false, code: "not-issued", message: "not used" }),
-      async write() { return { ok: false, code: "version-conflict", message: "版本已变化", currentVersion: "iv-9" } as never; },
-      async complete() { throw new Error("unused"); }
-    }, issued);
-    const result = await callTool(base, ASSISTANT_WORLD_TOOL.appendModelScript, { instanceId: "instance-1", expectedVersion: "iv-1", chunk: "scene.box({});" }, issued.token);
-    expect(result.result?.structuredContent).toMatchObject({ ok: false, code: "version-conflict", failureKind: "version-conflict", currentVersion: "iv-9" });
-    expect(result.result?.content?.[0]?.text).toContain("当前真实版本：iv-9");
   });
 });
 
@@ -326,17 +236,4 @@ describe("分段脚本写入：越权路径", () => {
     expect(reads).toBe(0);
   });
 
-  it("目标不在可写集合时返回 outside-scope", async () => {
-    const issued = scopeGrant();
-    let writes = 0;
-    const base = await start({
-      read: () => ({ ok: false, code: "not-issued", message: "not used" }),
-      async write() { writes += 1; return { ok: false, code: "outside-scope", message: "模型不在本次可写集合" }; },
-      async complete() { throw new Error("unused"); }
-    }, issued);
-    const result = await callTool(base, ASSISTANT_WORLD_TOOL.appendModelScript, { instanceId: "reference-1", expectedVersion: "rv-1", chunk: "scene.box({});" }, issued.token);
-    expect(result.result?.isError).toBe(true);
-    expect(result.result?.structuredContent).toMatchObject({ ok: false, code: "outside-scope", failureKind: "outside-scope" });
-    expect(writes).toBe(1);
-  });
 });

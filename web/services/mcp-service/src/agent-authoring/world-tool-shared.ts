@@ -149,7 +149,19 @@ export function cameraViewSuffix(view: WorldCameraView | undefined): string {
 export function worldGrant(deps: AgentAuthoringToolDeps) {
   const grant = deps.grant;
   if (!grant?.world || !deps.world) return null;
-  return { world: grant.world, client: deps.world, canvasId: grant.canvasIds[0] ?? "" };
+  const original = deps.world;
+  const client: AssistantWorldToolClient = {
+    read: input => original.read(input),
+    complete: input => original.complete(input),
+    write: input => {
+      // Legacy director-area writers cannot enforce the grouped edit's full
+      // geometry/lease transaction. Keep the old resize receipt path, but do not
+      // let an old persisted grant bypass the new content boundary.
+      if (grant.world?.scope.scope.kind === "scene-area" && input.operation.kind !== "edit-resource" && input.operation.kind !== "resize-scene-area") return Promise.resolve({ ok: false, code: "capability-unsupported", message: "旧世界写工具已停用，请重新提交命令使用资源编辑工具" });
+      return original.write(input);
+    }
+  };
+  return { world: grant.world, client, canvasId: grant.canvasIds[0] ?? "" };
 }
 
 export function denied(message: string) {
@@ -186,7 +198,7 @@ export function failureKind(failure: HostFailure): "outside-scope" | "version-co
 }
 
 export const kindRemedies: Record<string, string> = {
-  "outside-scope": "目标不在本轮宿主签发范围内：不要填写其他范围，也不要猜测版本；改动范围须用户明确要求后再用 resize_scene_area 并重新 get_world_context。",
+  "outside-scope": "目标不在本轮授权或内容超出导演区：核对 get_world_context 的冻结策略；关闭时调整内容，或请用户重新提交并允许自动扩大导演区。不要换工具或对象绕过授权。",
   "version-conflict": "目标的版本已变化：重新 get_world_context（或使用上一条写入回执的 version）取得真实版本后重试，不要复用旧版本或换对象绕过。",
   "version-unknown": "宿主无法确认目标的当前版本（通常是旧宿主或模型资源未就绪）：不要伪造版本、不要换对象绕过；如实说明无法验证该项，必要时重新 get_world_context 后再尝试。",
   "invalid-data": "内容被拒绝：编译、引用或占地校验没有通过，既有内容未被修改。修正脚本或参数后重试，不要原样重发；追加失败的段可在后续重试同一段。",
@@ -229,7 +241,7 @@ export function worldFailure(failure: HostFailure) {
 }
 
 export const defaultAreaSideMeters = 4;
-export const defaultAreaNote = `新建导演区默认 ${defaultAreaSideMeters}×${defaultAreaSideMeters} 米（以地面中心为原点，u/v 各 ±${defaultAreaSideMeters / 2} 米）；大场景须先用 resize_scene_area 显式扩区，扩区后重新 get_world_context 取得新的 bounds 与 scopeVersion 再写入。`;
+export const defaultAreaNote = `新建导演区默认 ${defaultAreaSideMeters}×${defaultAreaSideMeters} 米（以地面中心为原点，u/v 各 ±${defaultAreaSideMeters / 2} 米）；范围不足时依据 get_world_context 的用户授权决定是否自动扩大；未授权时调整内容或请用户重新提交。`;
 
 export const motionConventions = {
   walking: "Prefer motion.instance.walk with animationRig.walkProfile for supported upright humanoids: distance-driven strides, rounded constant-speed closed route, tangent heading and fixed stance sole targets with two-bone IK. Other profiles use explicit part animation; no guessed IK.",
@@ -250,4 +262,3 @@ export function animationBudget(script?: { script: string; duration: number; loo
     ...(compiled?.ok ? worldAnimationSegmentSummary(compiled.ir) : {})
   };
 }
-

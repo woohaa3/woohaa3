@@ -2079,3 +2079,14 @@
 }
 
 .mc-panel__model-section { padding: 6px 8px; color: var(--app-web-text-muted); font-size: 12px; }
+
+.assistant-expansion-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text-secondary, inherit);
+  cursor: pointer;
+}
+.assistant-expansion-option input { margin: 0; accent-color: var(--accent, currentColor); }

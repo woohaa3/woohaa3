@@ -124,6 +124,11 @@ function createServicesFactory(
         }
       },
       toolGrantRegistry: toolGrants,
+      expansionPolicy: (owner, requestId, canvasId, scope) => {
+        const turn = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId });
+        if (!turn?.ok || turn.turn.target.canvasId !== canvasId || turn.turn.target.mode !== "world" || JSON.stringify(turn.turn.target.worldScope) !== JSON.stringify(scope)) return undefined;
+        return turn.turn.target.allowSceneAreaExpansion === true;
+      },
       logger: (event) => ctx.log.scope("authoring")({ extensionId, ...event })
     }),
     ...(secrets ? { secrets: secrets.forExtension(extensionId) } : {})
@@ -190,6 +195,11 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         }
       },
       toolGrantRegistry: ctx.toolGrants,
+      expansionPolicy: (owner, requestId, canvasId, scope) => {
+        const turn = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId });
+        if (!turn?.ok || turn.turn.target.canvasId !== canvasId || turn.turn.target.mode !== "world" || JSON.stringify(turn.turn.target.worldScope) !== JSON.stringify(scope)) return undefined;
+        return turn.turn.target.allowSceneAreaExpansion === true;
+      },
       logger: (event) => ctx.log.scope("agent-role-context")(event)
     });
     const roleContextFor = async (input: { owner: string; canvasId: string; nodeId?: string; action: string; mode?: string }) => {

@@ -76,6 +76,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
             return options.tools.issue({ delegation: { subject: input.owner, authLevel: "authenticated" }, workId: input.requestId,
               canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode, tools: [...input.prepared!.tools],
               cameraId: input.intent.cameraId, worldScope: input.intent.worldScope,
+              ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
               ...(input.intent.mode === "canvas-group" && input.intent.expectedContentHash?.startsWith("group-epoch:") ? { expectedScopeEpoch: Number(input.intent.expectedContentHash.slice("group-epoch:".length)) } : {}) });
           }
           case "tools.revoke": options.tools?.revoke(input.requestId, { subject: input.owner, authLevel: "authenticated" }); return null;

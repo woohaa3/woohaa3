@@ -280,6 +280,12 @@ export function patchNodeData(
     return reject("content-owner-unavailable", "content-owner-unavailable");
   }
   if (value === null) {
+    // A later patch in the same atomic batch may restore this model. Retain its
+    // content version for normalization so restoring fields cannot reuse an old
+    // revision merely because nodeData was temporarily absent.
+    if (node?.type === "model3d" && work.nodeData[nodeId]?.modelContentVersion !== undefined) {
+      (work.clearedModelContentVersions ??= {})[nodeId] = work.nodeData[nodeId]!.modelContentVersion;
+    }
     delete work.nodeData[nodeId];
     return OK;
   }

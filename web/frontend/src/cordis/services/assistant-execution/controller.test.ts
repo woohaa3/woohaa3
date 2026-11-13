@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { assistantInputController, createAssistantInputController, type AssistantSubmissionPort } from "./controller.js";
+import { assistantInputController, clearAssistantExpansionDrafts, createAssistantInputController, type AssistantSubmissionPort } from "./controller.js";
 
 describe("assistant input controller", () => {
   it("isolates scopes and restores the same target across layouts", () => {
@@ -40,6 +40,38 @@ describe("assistant input controller", () => {
     expect(port.query).toHaveBeenCalledWith({ prompt: "first" }, id);
     expect(port.submit).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().draft.prompt).toBe("next");
+  });
+  it("resets the next expansion choice while retrying the original frozen choice", async () => {
+    const page = {};
+    const scope = { dataScopeId: 'owner', canvasId: 'canvas', purpose: 'world', nodeId: 'area-a' };
+    const controller = assistantInputController<{ allowSceneAreaExpansion: boolean }, string>(page, scope);
+    controller.edit({ allowSceneAreaExpansion: true });
+    const submit = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ kind: 'accepted', value: 'done' });
+    const port = { submit, query: submit };
+    await controller.submit({ allowSceneAreaExpansion: true }, port);
+    expect(controller.getSnapshot().draft.allowSceneAreaExpansion).toBe(false);
+    expect(assistantInputController(page, { ...scope, nodeId: 'area-b' }).getSnapshot().draft.allowSceneAreaExpansion).not.toBe(true);
+    await controller.submit({ allowSceneAreaExpansion: false }, port);
+    expect(submit.mock.calls[1]).toEqual(submit.mock.calls[0]);
+    expect(submit.mock.calls[1]![0]).toEqual({ allowSceneAreaExpansion: true });
+  });
+  it("clears the target's expansion drafts without changing other targets or pending input", async () => {
+    const page = {};
+    const scope = { dataScopeId: 'owner', canvasId: 'canvas', nodeId: 'area-a' };
+    const generate = assistantInputController<{ allowSceneAreaExpansion: boolean }, string>(page, { ...scope, purpose: 'world:area-a' });
+    const reply = assistantInputController(page, { ...scope, purpose: 'reply:conversation' });
+    const other = assistantInputController(page, { ...scope, nodeId: 'area-b', purpose: 'world:area-b' });
+    const port = { submit: vi.fn(async () => { throw new Error('lost'); }), query: vi.fn(async () => ({ kind: 'accepted' as const, value: 'ok' })) };
+    await generate.submit({ allowSceneAreaExpansion: true }, port);
+    generate.edit({ allowSceneAreaExpansion: true });
+    reply.edit({ allowSceneAreaExpansion: true });
+    other.edit({ allowSceneAreaExpansion: true });
+    const pending = generate.getSnapshot().pending;
+    clearAssistantExpansionDrafts(page, scope);
+    expect(generate.getSnapshot().draft.allowSceneAreaExpansion).toBe(false);
+    expect(reply.getSnapshot().draft.allowSceneAreaExpansion).toBe(false);
+    expect(other.getSnapshot().draft.allowSceneAreaExpansion).toBe(true);
+    expect(generate.getSnapshot().pending).toEqual(pending);
   });
 });
 

@@ -108,6 +108,8 @@ export interface CanvasRemoteService {
   listWorldCameraHistory(input: import("@woohaa3/contracts").WorldCameraHistoryListInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldCameraHistoryListOutcome>>;
   prepareSceneArea(input: { canvasId: string; areaId: string }, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringPrepareOutcome>>;
   executeSceneArea(input: import("@woohaa3/contracts").WorldAuthoringExecuteInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>>;
+  listResourceEdits?(input: { canvasId: string; runId: string }, signal?: AbortSignal): Promise<{ ok: true; commands: Array<{ commandId: string; revision: number }> } | { ok: false; message: string }>;
+  replayResourceEdit?(input: { canvasId: string; sourceCommandId: string; previousCommandId: string; operationId: string; direction: "undo" | "redo" }, signal?: AbortSignal): Promise<{ ok: true; commandId: string; revision: number; duplicate: boolean } | { ok: false; message: string }>;
   historySceneArea(direction: "undo" | "redo", input: import("@woohaa3/contracts").WorldAuthoringHistoryInput, signal?: AbortSignal): Promise<WorldRemoteOutcome<import("@woohaa3/contracts").WorldAuthoringHistoryOutcome>>;
   /**
    * 打开当前 Canvas page 的 `canvas-yjs` 逻辑通道

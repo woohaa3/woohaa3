@@ -121,7 +121,7 @@ function contextView(overrides: Partial<AssistantWorldContextView> = {}): Assist
 }
 
 
-it('advertises the current tool catalog, excludes legacy names, validates operation branches before dispatch', async () => {
+it('advertises exactly nine current tools, excludes legacy names, validates operation branches before dispatch', async () => {
   const issued = scopeGrant();
   const writes: unknown[] = [];
   const base = await start({ read: async () => ({ ok: true, view: contextView() }), write: async input => {
@@ -138,6 +138,9 @@ it('advertises the current tool catalog, excludes legacy names, validates operat
   expect(writes[0]).toMatchObject({ contextId: 'ctx-1', operation: { kind: 'edit-resource', edit: { resourceType: 'world_model_script', operation: 'patch' } } });
   await callTool(base, WORLD_RESOURCE_TOOLS.modelScript, { operation: 'patch', operationId: 'bad', target: { instanceId: 'instance-1' }, expectedVersion: 'v1', chunk: 'wrong field' }, issued.token);
   await callTool(base, WORLD_RESOURCE_TOOLS.model, { operation: 'delete', operationId: 'bad-delete', target: { instanceId: 'instance-1' }, expectedVersion: 'v1', patch: { title: 'not allowed' } }, issued.token);
+  for (const patch of [{ bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } }, { moveBy: { u: 1, v: 0 } }, { rotateClockwise: true }, { title: '' }, { title: 'ok', unknown: true }]) {
+    await callTool(base, WORLD_RESOURCE_TOOLS.area, { operation: 'update', operationId: 'invalid-area', target: { areaId: 'area-1' }, expectedVersion: 'v1', patch }, issued.token);
+  }
   expect(writes).toHaveLength(1);
 });
 
@@ -163,4 +166,25 @@ it('narrows camera-only schema and denies lifecycle/root writes', async () => {
   expect(catalog.map(tool => tool.name).sort()).toEqual(['get_world_context','read_world_resource','edit_world_camera'].sort());
   await callTool(base, WORLD_RESOURCE_TOOLS.camera, { operation: 'delete', operationId: 'delete', target: { cameraId: 'camera-1' }, expectedVersion: 'v1' }, issued.token);
   expect(writes).toBe(0);
+});
+
+it('does not allow an old director-area grant to bypass the resource edit policy', async () => {
+  const issued = scopeGrant([...assistantWorldToolsForScope({ kind: 'scene-area', areaId: 'area-1' }), 'set_scene_animation_script']);
+  let writes = 0;
+  const base = await start({ read: async () => ({ ok: true, view: contextView() }), write: async () => { writes++; return { ok: false, code: 'not-ready', message: 'not used' }; }, complete: async () => ({ ok: false, code: 'not-ready', message: 'not used' }) }, issued);
+  const result = await callTool(base, 'set_scene_animation_script', { script: 'motion.instance.tween("a", { property: "scale", startTime: 0, endTime: 1, from: [1], to: [2] });', duration: 1, loop: false }, issued.token);
+  expect(result.result?.structuredContent).toMatchObject({ ok: false, code: 'capability-unsupported' });
+  expect(writes).toBe(0);
+});
+
+it.each([
+  ['outside-scope', { areaId: 'area-1', actual: { min: { u: 0, v: 0 }, max: { u: 12, v: 1 } }, bounds: { min: { u: -10, v: -10 }, max: { u: 10, v: 10 } }, outsideAxes: ['u'] }],
+  ['version-conflict', undefined],
+  ['patch-not-found', undefined]
+] as const)('preserves actionable %s diagnostics for grouped resource edits', async (code, spatialDiagnostic) => {
+  const issued = scopeGrant();
+  const base = await start({ read: async () => ({ ok: true, view: contextView() }), write: async () => ({ ok: false, code, message: '拒绝', ...(spatialDiagnostic ? { spatialDiagnostic: { ...spatialDiagnostic, outsideAxes: [...spatialDiagnostic.outsideAxes] } } : {}), ...(code === 'patch-not-found' ? { patchDiagnostic: { occurrences: 0, scriptLength: 3 } } : {}) }), complete: async () => ({ ok: false, code: 'not-ready', message: 'unused' }) }, issued);
+  const result = await callTool(base, WORLD_RESOURCE_TOOLS.modelScript, { operation: 'patch', operationId: 'patch-failure', target: { instanceId: 'instance-1' }, expectedVersion: 'v1', edits: [{ oldString: 'old', newString: 'new' }] }, issued.token);
+  expect(result.result?.structuredContent).toMatchObject({ ok: false, code, ...(spatialDiagnostic ? { spatialDiagnostic } : {}) });
+  if (code === 'outside-scope') expect(result.result?.content?.[0]?.text).not.toContain('resize_scene_area');
 });

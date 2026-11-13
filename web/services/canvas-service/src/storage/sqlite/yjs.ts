@@ -1,3 +1,4 @@
+import { decodeSceneAreaData, sceneAreaAnimationOrigin } from "@woohaa3/contracts";
 /**
  * SQLite Yjs 持久化（任务 3.2 / design D7；
  *  change: 2026-10-09-refactor-large-source-files-and-remove-compatibility R22 —— 抽出迁移、
@@ -206,7 +207,9 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
 
     if (commit.signal?.aborted) throw new DOMException("Commit cancelled", "AbortError");
 
-    try { return inImmediateTransaction(this.db, () => {
+    let advancedIntent: LeaseIntent | undefined;
+    let advancedScope: LeaseIntent["scope"] | undefined;
+    try { const outcome = inImmediateTransaction(this.db, () => {
       const duplicate = this.db.prepare("SELECT * FROM canvas_yjs_commands WHERE canvas_id = ? AND command_id = ?").get(commit.canvasId, commit.command.commandId) as CommandRow | undefined;
       if (duplicate) {
         const prior = decodeCommandRow(duplicate);
@@ -231,12 +234,55 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       if (commit.spatialContext !== undefined) {
         const intent = this.contexts.get(commit.spatialContext);
         if (!intent || intent.canvasId !== commit.canvasId || !this.spatialAuthority) throw new SpatialLeaseError("unavailable");
+        const current = this.spatialLeases.lookup(intent.canvasId, intent.requestId);
+        if (!current) throw new SpatialLeaseError("stale-epoch");
+        const expansion = commit.command.resourceEdit?.sceneArea;
+        if (expansion) {
+          const areaOf = (canvas: ServerCanvas) => {
+            for (const node of canvas.document.nodes) {
+              const decoded = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
+              if (decoded.ok && decoded.value.areaId === expansion.areaId) return decoded.value;
+            }
+            return null;
+          };
+          const priorArea = areaOf(before), nextArea = areaOf(commit.projection);
+          if (!priorArea || !nextArea || intent.scope.scope.kind !== "scene-area" || intent.scope.scope.areaId !== expansion.areaId || JSON.stringify(expansion.bounds) !== JSON.stringify(nextArea.bounds) || expansion.scopeVersion !== nextArea.scopeVersion) throw new SpatialLeaseError("outside-scope");
+          const changed = JSON.stringify(priorArea.bounds) !== JSON.stringify(nextArea.bounds);
+          if (changed !== expansion.expanded || (!changed && priorArea.scopeVersion !== nextArea.scopeVersion) || JSON.stringify(sceneAreaAnimationOrigin(priorArea)) !== JSON.stringify(sceneAreaAnimationOrigin(nextArea))) throw new SpatialLeaseError("outside-scope");
+        }
+        if (expansion?.expanded) {
+          if (intent.allowSceneAreaExpansion !== true || intent.scope.scope.kind !== "scene-area" || intent.scope.scope.areaId !== expansion.areaId) throw new SpatialLeaseError("outside-scope");
+          // The durable lease gains newly created targets after each commit. The
+          // capability's original intent predates those additions, so use the
+          // current locked set when classifying an authorized empty skeleton.
+          const candidates = this.spatialAuthority.expansionCandidates?.({ ...intent, writable: current.intent.writable }, before, commit.projection);
+          if (!candidates) throw new SpatialLeaseError("outside-scope");
+          for (const lock of this.spatialLeases.readOccupancy(intent.canvasId, candidates)) {
+            if (lock.runId !== intent.runId || lock.epoch !== intent.epoch) throw new SpatialLeaseError("lease-conflict", { target: lock.target, runId: lock.runId, epoch: lock.epoch });
+          }
+          const findBounds = (areaId: string) => {
+            for (const node of before.document.nodes) {
+              const decoded = decodeSceneAreaData(before.nodeData[node.id]?.sceneArea);
+              if (decoded.ok && decoded.value.areaId === areaId) return decoded.value.bounds;
+            }
+            return null;
+          };
+          const original = findBounds(expansion.areaId);
+          if (!original) throw new SpatialLeaseError("outside-scope");
+          for (const record of this.spatialLeases.listPending()) {
+            const other = record.intent;
+            if (other.canvasId !== intent.canvasId || other.requestId === intent.requestId || other.scope.scope.kind !== "scene-area") continue;
+            if (other.scope.scope.areaId === expansion.areaId) throw new SpatialLeaseError("lease-conflict");
+            const occupied = findBounds(other.scope.scope.areaId);
+            if (!occupied) throw new SpatialLeaseError("outside-scope");
+            const intersection = { min: { u: Math.max(occupied.min.u, expansion.bounds.min.u), v: Math.max(occupied.min.v, expansion.bounds.min.v) }, max: { u: Math.min(occupied.max.u, expansion.bounds.max.u), v: Math.min(occupied.max.v, expansion.bounds.max.v) } };
+            if (intersection.min.u <= intersection.max.u && intersection.min.v <= intersection.max.v && (intersection.min.u < original.min.u || intersection.min.v < original.min.v || intersection.max.u > original.max.u || intersection.max.v > original.max.v)) throw new SpatialLeaseError("lease-conflict");
+          }
+        }
         const resolved = this.spatialAuthority.resolve(intent, before, commit.projection, targets);
         if (!resolved) throw new SpatialLeaseError("outside-scope");
         const keys = targets.map(objectKey).sort();
         if (JSON.stringify(resolved.previous.map(objectKey).sort()) !== JSON.stringify(keys) || JSON.stringify(resolved.next.map(objectKey).sort()) !== JSON.stringify(keys)) throw new SpatialLeaseError("invalid-data");
-        const current = this.spatialLeases.lookup(intent.canvasId, intent.requestId);
-        if (!current) throw new SpatialLeaseError("stale-epoch");
         const granted = new Set(current.intent.writable.map(objectKey));
         const nextByKey = new Map(resolved.next.map(target => [objectKey(target), target]));
         // A target that did not exist in the source is a new object: its grant is
@@ -253,22 +299,14 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
         this.spatialLeases.validateForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected);
         advance = () => {
           this.spatialLeases.advanceVersionsForCommit(intent.canvasId, intent.requestId, intent.runId, intent.epoch, intent.executionId, resolved.scope, expected, resolved.next);
-          // An explicit range edit advances the scope; keep the process-local intent
-          // in sync so the next commit resolves against the new area scope.
-          intent.scope = resolved.scope;
+          // Publish the in-memory scope only after SQLite commits successfully.
+          advancedIntent = intent;
+          advancedScope = resolved.scope;
         };
       } else {
-        if (!this.spatialAuthority?.userCreateTargets && Object.entries(commit.projection.nodeData).some(([id, fields]) => !before.nodeData[id] && fields.directorCharacterCreation)) throw new SpatialLeaseError("unavailable");
-        const userCreateTargets = this.spatialAuthority?.userCreateTargets?.(before, commit.projection) ?? [];
-        // A director run with no current members still owns its scope. Read the
-        // durable run rows here, in the same transaction as the user creation.
-        for (const [id, fields] of Object.entries(commit.projection.nodeData)) {
-          if (before.nodeData[id] || !fields.directorCharacterCreation) continue;
-          const marker = fields.directorCharacterCreation as { areaId: string };
-          const run = this.spatialLeases.listPending().find(record => record.intent.canvasId === commit.canvasId && record.intent.scope.scope.kind === "scene-area" && record.intent.scope.scope.areaId === marker.areaId);
-          if (run) throw new SpatialLeaseError("lease-conflict", { target: { kind: "instance", instanceId: id }, runId: run.intent.runId, epoch: run.intent.epoch });
-        }
-        this.spatialLeases.validateUnoccupied(commit.canvasId, [...targets, ...userCreateTargets]);
+        const historyArea = commit.command.resourceEdit?.historyReplay ? commit.command.resourceEdit.sceneArea?.areaId : undefined;
+        if (historyArea && this.spatialLeases.listPending().some(record => record.intent.canvasId === commit.canvasId && record.intent.scope.scope.kind === "scene-area" && record.intent.scope.scope.areaId === historyArea)) throw new SpatialLeaseError("lease-conflict");
+        this.spatialLeases.validateUnoccupied(commit.canvasId, targets);
       }
 
       if (this.failWrites()) {
@@ -308,7 +346,10 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
         );
 
       return { ok: true, storageSeq: nextSeq, revision: commit.revision, duplicate: false } satisfies YjsCommitResult;
-    }); } catch (error) {
+    });
+      if (outcome.ok && advancedIntent && advancedScope) (advancedIntent as LeaseIntent).scope = advancedScope;
+      return outcome;
+    } catch (error) {
       if (error instanceof SpatialLeaseError) {
         if (error.code === "lease-conflict") return { ok: false, code: "lease-conflict", conflict: error.conflict };
         return { ok: false, code: "spatial-rejected", reason: error.code, conflict: error.conflict };
@@ -323,6 +364,21 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       .get(canvasId, commandId) as CommandRow | undefined;
     if (!row) return null;
     return decodeCommandRow(row);
+  }
+
+  async findLatestCommand(canvasId: string): Promise<YjsCommandRecord | null> {
+    const row = this.db.prepare("SELECT * FROM canvas_yjs_commands WHERE canvas_id = ? AND changed = 1 ORDER BY rowid DESC LIMIT 1").get(canvasId) as CommandRow | undefined;
+    return row ? decodeCommandRow(row) : null;
+  }
+
+  async findLatestResourceHistoryCommand(canvasId: string, sourceCommandId: string): Promise<YjsCommandRecord | null> {
+    const row = this.db.prepare("SELECT * FROM canvas_yjs_commands WHERE canvas_id = ? AND actor_id = 'resource-history' AND json_extract(resource_edit_json, '$.historyReplay.sourceCommandId') = ? ORDER BY rowid DESC LIMIT 1").get(canvasId, sourceCommandId) as CommandRow | undefined;
+    return row ? decodeCommandRow(row) : null;
+  }
+
+  async listResourceEditCommands(canvasId: string, runId: string): Promise<Array<{ commandId: string; revision: number }>> {
+    const rows = this.db.prepare("SELECT * FROM canvas_yjs_commands WHERE canvas_id = ? AND actor_id = ? AND resource_edit_json IS NOT NULL AND changed = 1 ORDER BY rowid ASC").all(canvasId, `assistant-world:${runId}`) as CommandRow[];
+    return rows.map(decodeCommandRow).filter(row => !!row.resourceEdit?.history && !row.resourceEdit.historyReplay).map(row => ({ commandId: row.commandId, revision: row.revision }));
   }
 
   async findLatestWorldAuthoringCommand(canvasId: string, operationId: string): Promise<YjsCommandRecord | null> {

@@ -174,6 +174,8 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         || segments[1] === "scene-area-commit"
         || segments[1] === "scene-area-undo"
         || segments[1] === "scene-area-redo"
+        || segments[1] === "resource-edit-history"
+        || segments[1] === "resource-edit-list"
         || segments[1] === "world-tool-context"
         || segments[1] === "world-tool-context-revoke")) {
         if (req.method !== "POST") { sendError(res, 405, "INVALID_COMMAND_BATCH", "方法不允许"); return true; }
@@ -183,14 +185,14 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
           sendError(res, gate.kind === "deleted" ? 410 : 409, gate.kind === "deleted" ? "DELETED" : "PREPARATION_REQUIRED", "画布不可用");
           return true;
         }
-        const write = segments[1] !== "scene-area-prepare";
+        const write = segments[1] !== "scene-area-prepare" && segments[1] !== "resource-edit-list";
         const permission = write ? "write" : "read";
         if (await authorizeImported(canvasId, permission) === "deny") return denyImported(permission);
         const access = await requireCanvasAccess({ req, res, canvasId, permission, options, log });
         if (!access.ok) return true;
         if (!options.worldAuthoring) { sendError(res, 503, "NOT_READY", "导演区权威服务不可用"); return true; }
         const body = await readJsonBody(req, options.maxBodyBytes ?? DEFAULT_CANVAS_MAX_BODY_BYTES);
-        if ("canvasId" in body) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
+        if ("canvasId" in body || (segments[1] === "world-tool-context" && "allowSceneAreaExpansion" in body)) { sendError(res, 400, "INVALID_COMMAND_BATCH", "请求包含非法字段"); return true; }
         const authorize = async () => (await authorizeImported(canvasId, "write")) !== "deny" &&
           (!options.authenticate || !!access.principal && !!options.access &&
             (await options.access.authorize({ principal: access.principal, canvasId, permission: "write" })).allowed);
@@ -200,7 +202,9 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
         if (res.destroyed) controller.abort();
         try {
           const route = segments[1];
-          const outcome = route === "scene-area-prepare"
+          const outcome = route === "resource-edit-list"
+            ? await options.worldAuthoring.listResourceEdits({ canvasId, runId: String(body.runId ?? "") })
+            : route === "scene-area-prepare"
             ? await options.worldAuthoring.prepare({ canvasId, areaId: String(body.areaId ?? "") }, { signal: controller.signal })
             : route === "scene-area-commit"
               ? await options.worldAuthoring.execute({ ...body, canvasId } as never, { authorize, signal: controller.signal })
@@ -208,6 +212,8 @@ export function createCanvasRequestHandler(options: CanvasRequestHandlerOptions)
                 ? await options.worldAuthoring.undo({ ...body, canvasId } as never, { authorize, signal: controller.signal })
                 : route === "scene-area-redo"
                   ? await options.worldAuthoring.redo({ ...body, canvasId } as never, { authorize, signal: controller.signal })
+                  : route === "resource-edit-history"
+                    ? await options.worldAuthoring.replayResourceEdit({ ...body, canvasId } as never, { authorize, signal: controller.signal })
                   : route === "world-tool-context"
                     ? await options.worldAuthoring.issueContext({ ...body, canvasId } as never)
                     : (await options.worldAuthoring.revokeContext({ ...body, canvasId } as never),

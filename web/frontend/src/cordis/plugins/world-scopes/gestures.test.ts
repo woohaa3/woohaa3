@@ -546,7 +546,7 @@ describe("scene-area gesture runtime", () => {
       redo: () => Promise<{ ok: boolean }>;
     };
     expect(adopted.operationId).toBe("scene-area-op");
-    expect(await adopted.undo()).toEqual({ ok: true });
+    expect(await adopted.undo()).toEqual({ ok: true, revision: 5 });
     expect(history).toHaveBeenCalledWith("undo", { canvasId: "c1", operationId: "scene-area-op" });
     // A receipt for a different operation/direction must not move the shared history.
     history.mockResolvedValueOnce({

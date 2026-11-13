@@ -269,3 +269,12 @@ it("目录与回合绑定接受 capabilityRevision 但拒绝非法值", () => {
   expect(decodeAcceptTurnRequest({ requestId: "r", entry })).toMatchObject({ ok: true });
   expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, connection: { ...entry.connection, capabilityRevision: "" } } })).toMatchObject({ ok: false });
 });
+
+it("accepts the per-turn expansion option only for a scene area and normalizes the default", () => {
+  const entry = { action: "modify", canvasId: "canvas", nodeId: "node", mode: "world", worldScope: { kind: "scene-area", areaId: "area" }, roleId: "role", prompt: "edit" };
+  expect(decodeAcceptTurnRequest({ requestId: "r", entry })).toMatchObject({ ok: true, value: { entry: { allowSceneAreaExpansion: false } } });
+  expect(decodeAcceptTurnRequest({ requestId: "r", entry: { ...entry, allowSceneAreaExpansion: true } })).toMatchObject({ ok: true, value: { entry: { allowSceneAreaExpansion: true } } });
+  for (const invalid of [{ ...entry, allowSceneAreaExpansion: "true" }, { ...entry, mode: "text", worldScope: undefined, allowSceneAreaExpansion: false }, { ...entry, worldScope: { kind: "world-camera", cameraId: "camera" }, allowSceneAreaExpansion: true }]) {
+    expect(decodeAcceptTurnRequest({ requestId: "r", entry: invalid })).toMatchObject({ ok: false, code: "malformed-request" });
+  }
+});

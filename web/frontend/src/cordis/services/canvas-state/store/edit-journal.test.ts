@@ -380,6 +380,166 @@ describe("Edit Journal 会话清理", () => {
 });
 
 describe("Edit Journal 外部权威动作", () => {
+  it("orders delayed external receipts around local commits by revision without losing redo", async () => {
+    const harness = makeJournal();
+    const calls: string[] = [];
+    const external = (id: string, revision: number) => ({ id, label: id, revision, undo: async () => { calls.push(id); return { ok: true as const, revision: 40 }; }, redo: async () => ({ ok: true as const }) });
+    harness.journal.recordExternal(external('later', 30));
+    await harness.journal.recordAndSubmit({ label: 'local', forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await harness.settle(0, { ok: true, committed: true, revision: 20 });
+    harness.journal.recordExternal(external('earlier', 10));
+    expect(harness.journal.snapshot().entries.map(entry => entry.label)).toEqual(['earlier', 'local', 'later']);
+    const handlers = { apply: async (entry: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => entry.kind === 'external' ? (direction === -1 ? entry.undo() : entry.redo()) : { ok: false as const, reason: 'unexpected' } };
+    expect((await harness.journal.undo(handlers)).ok).toBe(true);
+    harness.journal.recordExternal(external('oldest', 5));
+    expect(harness.journal.snapshot().entries.map(entry => entry.label)).toEqual(['oldest', 'earlier', 'local', 'later']);
+    expect(harness.journal.snapshot()).toMatchObject({ canRedo: true, redoLabel: 'later', undoLabel: 'local' });
+    expect((await harness.journal.redo(handlers)).ok).toBe(true);
+    expect(calls).toEqual(['later']);
+  });
+
+  it("keeps redo when an unobserved commit preceded the undo, and clears it for a later commit", async () => {
+    const harness = makeJournal();
+    const entry = (id: string, revision: number) => ({ id, label: id, revision, undo: async () => ({ ok: true as const, revision: 11 }), redo: async () => ({ ok: true as const, revision: 13 }) });
+    const handlers = { apply: async (item: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => item.kind === 'external' ? (direction === -1 ? item.undo() : item.redo()) : { ok: false as const, reason: 'unexpected' } };
+    harness.journal.recordExternal(entry('local', 5));
+    expect((await harness.journal.undo(handlers)).ok).toBe(true);
+    harness.journal.recordExternal(entry('late-before-undo', 10));
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['late-before-undo', 'local']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'late-before-undo', redoLabel: 'local' });
+    harness.journal.recordExternal(entry('new-after-undo', 12));
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['late-before-undo', 'new-after-undo']);
+    expect(harness.journal.snapshot().canRedo).toBe(false);
+  });
+
+  it("keeps only redo operations whose undo followed a late commit", async () => {
+    const harness = makeJournal();
+    let nextUndoRevision = 10;
+    const entry = (id: string, revision: number) => ({ id, label: id, revision, undo: async () => ({ ok: true as const, revision: nextUndoRevision++ }), redo: async () => ({ ok: true as const }) });
+    const handlers = { apply: async (item: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => item.kind === 'external' ? (direction === -1 ? item.undo() : item.redo()) : { ok: false as const, reason: 'unexpected' } };
+    harness.journal.recordExternal(entry('first', 1));
+    harness.journal.recordExternal(entry('second', 2));
+    await harness.journal.undo(handlers); // second at 10
+    nextUndoRevision = 20;
+    await harness.journal.undo(handlers); // first at 20
+    harness.journal.recordExternal(entry('between-undos', 15));
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['between-undos', 'first']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'between-undos', redoLabel: 'first' });
+  });
+
+  it("uses the confirmed revision of an enqueued canvas undo as the redo boundary", async () => {
+    const harness = makeJournal();
+    await harness.journal.recordAndSubmit({ label: 'local', forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await harness.settle(0, { ok: true, committed: true, revision: 5 });
+    await harness.journal.undo(handlers);
+    await harness.settle(1, { ok: true, committed: true, revision: 11 });
+    harness.journal.recordExternal({ id: 'late', label: 'late', revision: 10, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['late', 'local']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'late', redoLabel: 'local' });
+  });
+
+  it("keeps a receipt arriving during an asynchronous undo applied", async () => {
+    const harness = makeJournal();
+    let finish!: (value: { ok: true; revision: number }) => void;
+    const undo = () => new Promise<{ ok: true; revision: number }>(resolve => { finish = resolve; });
+    harness.journal.recordExternal({ id: 'first', label: 'first', revision: 5, undo, redo: async () => ({ ok: true }) });
+    const handlers = { apply: async (item: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => item.kind === 'external' ? (direction === -1 ? item.undo() : item.redo()) : { ok: false as const, reason: 'unexpected' } };
+    const pending = harness.journal.undo(handlers);
+    harness.journal.recordExternal({ id: 'late', label: 'late', revision: 10, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    finish({ ok: true, revision: 11 });
+    expect((await pending).ok).toBe(true);
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['late', 'first']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'late', redoLabel: 'first' });
+  });
+
+  it("does not replay the same external action twice while its undo is in flight", async () => {
+    const harness = makeJournal();
+    let finish!: (value: { ok: true; revision: number }) => void;
+    const undo = vi.fn(() => new Promise<{ ok: true; revision: number }>(resolve => { finish = resolve; }));
+    harness.journal.recordExternal({ id: 'first', label: 'first', revision: 5, undo, redo: async () => ({ ok: true }) });
+    const replay = { apply: async (item: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => item.kind === 'external' ? (direction === -1 ? item.undo() : item.redo()) : { ok: false as const, reason: 'unexpected' } };
+    const pending = harness.journal.undo(replay);
+    expect((await harness.journal.undo(replay)).ok).toBe(false);
+    expect((await harness.journal.redo(replay)).ok).toBe(false);
+    expect(undo).toHaveBeenCalledTimes(1);
+    finish({ ok: true, revision: 6 });
+    expect((await pending).ok).toBe(true);
+    expect(harness.journal.snapshot()).toMatchObject({ canUndo: false, redoLabel: 'first' });
+  });
+
+  it("keeps a receipt arriving while a canvas undo is awaiting confirmation", async () => {
+    const harness = makeJournal();
+    await harness.journal.recordAndSubmit({ label: 'local', forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await harness.settle(0, { ok: true, committed: true, revision: 5 });
+    await harness.journal.undo(handlers);
+    harness.journal.recordExternal({ id: 'late', label: 'late', revision: 10, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    await harness.settle(1, { ok: true, committed: true, revision: 11 });
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['late', 'local']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'late', redoLabel: 'local' });
+  });
+
+  it("discards redo when a newer commit arrives before an asynchronous undo response", async () => {
+    const harness = makeJournal();
+    let finish!: (value: { ok: true; revision: number }) => void;
+    const undo = () => new Promise<{ ok: true; revision: number }>(resolve => { finish = resolve; });
+    harness.journal.recordExternal({ id: 'first', label: 'first', revision: 5, undo, redo: async () => ({ ok: true }) });
+    const replay = { apply: async (item: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => item.kind === 'external' ? (direction === -1 ? item.undo() : item.redo()) : { ok: false as const, reason: 'unexpected' } };
+    const pending = harness.journal.undo(replay);
+    harness.journal.recordExternal({ id: 'new', label: 'new', revision: 12, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    finish({ ok: true, revision: 11 });
+    await pending;
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['new']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'new', canRedo: false });
+  });
+
+  it("discards redo when a newer commit arrives before a queued undo response", async () => {
+    const harness = makeJournal();
+    await harness.journal.recordAndSubmit({ label: 'local', forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await harness.settle(0, { ok: true, committed: true, revision: 5 });
+    await harness.journal.undo(handlers);
+    harness.journal.recordExternal({ id: 'new', label: 'new', revision: 12, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    await harness.settle(1, { ok: true, committed: true, revision: 11 });
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['new']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'new', canRedo: false });
+  });
+
+  it("records a successful asynchronous redo even if a new commit discarded its redo entry", async () => {
+    const harness = makeJournal();
+    let finish!: (value: { ok: true; revision: number }) => void;
+    const redo = () => new Promise<{ ok: true; revision: number }>(resolve => { finish = resolve; });
+    const callbacks = { undo: async () => ({ ok: true as const, revision: 6 }), redo };
+    harness.journal.recordExternal({ id: 'first', label: 'first', revision: 5, ...callbacks });
+    const replay = { apply: async (item: ReturnType<typeof harness.journal.snapshot>["entries"][number], direction: -1 | 1) => item.kind === 'external' ? (direction === -1 ? item.undo() : item.redo()) : { ok: false as const, reason: 'unexpected' } };
+    await harness.journal.undo(replay);
+    const pending = harness.journal.redo(replay);
+    harness.journal.recordExternal({ id: 'new', label: 'new', revision: 7, undo: callbacks.undo, redo: async () => ({ ok: true }) });
+    finish({ ok: true, revision: 8 });
+    await pending;
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['new', 'first']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'first', canRedo: false });
+  });
+
+  it("records a successful queued redo after a concurrent commit", async () => {
+    const harness = makeJournal();
+    await harness.journal.recordAndSubmit({ label: 'local', forward: NOOP_EDIT, inverse: NOOP_EDIT });
+    await harness.settle(0, { ok: true, committed: true, revision: 5 });
+    await harness.journal.undo(handlers);
+    await harness.settle(1, { ok: true, committed: true, revision: 6 });
+    await harness.journal.redo(handlers);
+    harness.journal.recordExternal({ id: 'new', label: 'new', revision: 7, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    await harness.settle(2, { ok: true, committed: true, revision: 8 });
+    expect(harness.journal.snapshot().entries.map(item => item.label)).toEqual(['new', 'local']);
+    expect(harness.journal.snapshot()).toMatchObject({ undoLabel: 'local', canRedo: false });
+  });
+
+  it("does not merge parameter drafts across an unseen committed edit", () => {
+    const harness = makeJournal();
+    const base = { label: 'parameters', nodeId: 'n', modelKey: 'm' };
+    harness.journal.recordParameter({ ...base, before: { value: 0 }, after: { value: 1 }, revision: 10.5 });
+    harness.journal.recordParameter({ ...base, before: { value: 1 }, after: { value: 2 }, revision: 20.5 });
+    harness.journal.recordExternal({ id: 'resource', label: 'resource', revision: 20, undo: async () => ({ ok: true }), redo: async () => ({ ok: true }) });
+    expect(harness.journal.snapshot().entries.map(entry => entry.label)).toEqual(['parameters', 'resource', 'parameters']);
+  });
   it("verified external entries share the same cursor and move only after confirmed replay", async () => {
     const harness = makeJournal();
     const undo = vi.fn(async () => ({ ok: true as const }));

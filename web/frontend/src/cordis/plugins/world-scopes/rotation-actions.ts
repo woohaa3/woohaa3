@@ -117,9 +117,9 @@ export function createWorldRotationActions(ctx: Context, canvasId: string | unde
         const outcome = await ctx.canvasRemote.historySceneArea(direction, { canvasId: canvas.id, operationId });
         if (!outcome.ok) return { ok: false as const, reason: outcome.message };
         await waitRevision(outcome.revision);
-        return { ok: true as const };
+        return { ok: true as const, revision: outcome.revision };
       };
-      const recorded = ctx.canvasEdit.recordExternal({ id: `scene-area:${operationId}`, label: "旋转片场 90°",
+      const recorded = ctx.canvasEdit.recordExternal({ id: `scene-area:${operationId}`, label: "旋转片场 90°", revision: result.revision,
         undo: () => history("undo"), redo: () => history("redo") });
       if (!recorded.ok) throw new Error(`旋转已保存，但无法登记撤销：${recorded.reason}`);
       await waitRevision(result.revision);
@@ -194,7 +194,7 @@ export function createWorldRotationActions(ctx: Context, canvasId: string | unde
     const settled = await submitted.handle.settled;
     if (settled.state !== "committed") throw new Error(settled.error ?? "旋转未保存");
     if (disposed || !read()) return;
-    const recorded = ctx.canvasEdit.recordExternal({ id: operationId, label: "旋转模型 90°",
+    const recorded = ctx.canvasEdit.recordExternal({ id: operationId, label: "旋转模型 90°", ...(settled.resultRevision !== null ? { revision: settled.resultRevision } : {}),
       undo: () => replay(inverse), redo: () => replay(forward) });
     if (!recorded.ok) throw new Error(`旋转已保存，但无法登记撤销：${recorded.reason}`);
   };

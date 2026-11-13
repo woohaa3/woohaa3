@@ -250,6 +250,8 @@ export type AgentTargetSnapshot = {
    * canonical scope/version and leases; the assistant never supplies them.
    */
   worldScope?: AssistantWorldScopeSelection;
+  /** Explicit per-turn permission; omitted on older turns means false. */
+  allowSceneAreaExpansion?: boolean;
   /**
    * 冻结的账户模型 id（来自真实目录）。
    *
@@ -287,6 +289,8 @@ export type AgentEntryIntent = {
   itemId?: string;
   /** Trusted world scope selection for `mode: "world"` (see AgentTargetSnapshot). */
   worldScope?: AssistantWorldScopeSelection;
+  /** Explicit per-turn permission; omitted on older turns means false. */
+  allowSceneAreaExpansion?: boolean;
   /** 冻结的账户模型 id（来自真实目录）；缺失时由 adapter 按当前目录处理或拒绝。 */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;

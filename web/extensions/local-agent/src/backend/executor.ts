@@ -242,6 +242,7 @@ export function createLocalAgentExecutor(options: LocalAgentExecutorOptions = {}
             mode: payload.intent.mode,
             ...(payload.intent.cameraId ? { cameraId: payload.intent.cameraId } : {}),
             ...(payload.intent.worldScope ? { worldScope: payload.intent.worldScope } : {}),
+            ...(payload.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: payload.intent.allowSceneAreaExpansion === true } : {}),
             tools: toolNames
           });
           toolToken = grant.token;

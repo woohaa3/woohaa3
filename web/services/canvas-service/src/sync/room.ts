@@ -247,6 +247,18 @@ export class CanvasRoom {
    * Agent authoring 服务用它区分「重试已成功请求」与「新的相同意图」：
    * identity 相同 + payload 相同 → 直接返回首次回执；payload 不同 → request-id-reused。
    */
+  async findLatestCommand(): Promise<YjsCommandRecord | null> {
+    return this.repository.findLatestCommand?.(this.canvasId) ?? null;
+  }
+
+  async findLatestResourceHistoryCommand(sourceCommandId: string): Promise<YjsCommandRecord | null> {
+    return this.repository.findLatestResourceHistoryCommand?.(this.canvasId, sourceCommandId) ?? null;
+  }
+
+  async listResourceEditCommands(runId: string): Promise<Array<{ commandId: string; revision: number }>> {
+    return this.repository.listResourceEditCommands?.(this.canvasId, runId) ?? [];
+  }
+
   async lookupCommand(commandId: string): Promise<YjsCommandRecord | null> {
     if (commandId.trim() === "") return null;
     return this.repository.getCommandRecord(this.canvasId, commandId);

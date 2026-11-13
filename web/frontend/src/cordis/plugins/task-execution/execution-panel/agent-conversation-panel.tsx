@@ -26,7 +26,7 @@ import {
   type ConversationToolActivity,
 } from "@woohaa3/contracts";
 import type { AgentConversationServiceHandle } from "../../../services/agent-conversation-service.js";
-import { assistantInputController } from "../../../services/assistant-execution/controller.js";
+import { assistantInputController, clearAssistantExpansionDrafts } from "../../../services/assistant-execution/controller.js";
 import { assistantConversationPort } from "../../../services/assistant-execution/conversation-port.js";
 import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from "../../../contract/agent-conversation.js";
 import { AssistantComposer } from "@woohaa3/ui/assistant";
@@ -286,6 +286,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ...(continuationWorldScope ? { worldScope: continuationWorldScope } : {}),
         ...(continuationTarget?.cameraId ? { cameraId: continuationTarget.cameraId } : {}),
         ...(execution ? { ...execution, action: "modify", prompt } : {}),
+        ...(continuationMode === "world" && continuationWorldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.draft.allowSceneAreaExpansion === true } : {}),
         // 用户在侧栏显式选择的模型优先于旧目标携带的模型。
         model: replyModel || undefined,
         reasoningEffort: replyEffort || undefined,
@@ -302,6 +303,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const clearContext = useCallback(() => {
     const canvasId = service.getDetail()?.conversation.canvasId;
     if (!props.nodeId || !canvasId) return;
+    const dataScopeId = service.getDataScopeId?.() ?? "page";
     setContextError(null);
     void service
       .clearContext({ canvasId, nodeId: props.nodeId })
@@ -310,6 +312,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
           setContextError(result.error);
           return;
         }
+        clearAssistantExpansionDrafts(service, { dataScopeId, canvasId, nodeId: props.nodeId });
         setConfirmClear(false);
         props.onClose();
       });
@@ -515,6 +518,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         <AssistantComposer className="agent-detail__reply-input" rows={2}
           placeholder={modifying || turn?.target.mode === "text" ? "描述要继续修改的内容" : "该会话没有可修改的目标"}
           value={draft} onChange={setDraft} disabled={!detail || input.busy || turnActive || switchingConnection} onSubmit={() => submitReply()} />
+        {continuationMode === "world" && continuationWorldScope?.kind === "scene-area" ? <label className="assistant-expansion-option"><input type="checkbox" checked={input.draft.allowSceneAreaExpansion === true} disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)} onChange={event => controller.edit({ allowSceneAreaExpansion: event.target.checked })} />允许自动扩大导演区</label> : null}
         <AssistantToolbar disabled={input.busy || switchingConnection || turnActive} refreshing={Boolean(directoryView.loadingMessage)}
           onRefresh={() => void directory.load(true)} onManage={props.onManageAssistant}
           assistant={<AssistantConfiguration service={service} connectionId={replyConnectionId ?? ""} model={replyModel} purpose={turn?.target.mode ?? "reply"}

@@ -388,6 +388,7 @@ export function decodePreparedAgentRoleTurn(value: unknown): AgentRoleFailure | 
       ...(typeof value.target.mode === "string" ? { mode: value.target.mode as PreparedAgentRoleTurn["target"]["mode"] } : {}),
       ...(isBoundedId(value.target.cameraId) ? { cameraId: value.target.cameraId } : {}),
       ...(typeof value.target.expectedContentHash === "string" ? { expectedContentHash: value.target.expectedContentHash } : {}),
+      ...(typeof value.target.allowSceneAreaExpansion === "boolean" ? { allowSceneAreaExpansion: value.target.allowSceneAreaExpansion } : {}),
       // worldScope 参与 preparedHash：恢复时必须保留，否则重算摘要会与原文不一致。
       ...(isJsonObject(value.target.worldScope) ? { worldScope: value.target.worldScope as never } : {})
     },

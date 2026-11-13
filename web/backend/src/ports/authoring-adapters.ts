@@ -37,6 +37,8 @@ export type AuthoringAdapterDeps = {
   /** 共享工具 grant registry（任务 3.6）：与 MCP 工具入口同一实例，使签名与校验闭环。 */
   toolGrantRegistry?: ToolGrantRegistry;
   logger?: (event: Record<string, unknown>) => void;
+  /** Read the accepted turn from the host ledger; extensions cannot elevate it. */
+  expansionPolicy?: (owner: string, requestId: string, canvasId: string, scope: AssistantWorldScopeSelection) => boolean | undefined;
 };
 
 /** 稳定工具 grant 的内存注册表（签发/校验/回收）；工具入口据此限制范围与撤销状态。 */
@@ -220,9 +222,14 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
         grants.issue(grant, request.delegation.subject);
         return grant;
       }
+      if (request.allowSceneAreaExpansion !== undefined && (typeof request.allowSceneAreaExpansion !== "boolean" || request.mode !== "world" || request.worldScope?.kind !== "scene-area")) throw Object.assign(new Error("自动扩区选项仅适用于导演区目标"), { code: "malformed-request" });
       if (request.mode === "world") {
         const scope: AssistantWorldScopeSelection | undefined = request.worldScope;
         if (!scope) throw Object.assign(new Error("世界目标缺少可信范围选择"), { code: "malformed-request" });
+        if (scope.kind === "scene-area") {
+          const frozen = deps.expansionPolicy?.(request.delegation.subject, request.workId, request.canvasId, scope);
+          if ((request.allowSceneAreaExpansion === true && frozen !== true) || (frozen !== undefined && frozen !== (request.allowSceneAreaExpansion === true))) throw Object.assign(new Error("扩区权限与已受理回合不一致"), { code: "outside-scope" });
+        }
         const assistantWorld = deps.canvas.assistantWorld;
         if (!assistantWorld) throw Object.assign(new Error("宿主未装配世界助手权威"), { code: "capability-unsupported" });
         const allowedTools: readonly string[] = [...(scope.kind === "scene-area" ? ["get_model_api"] : []), ...assistantWorldToolsForScope(scope)];
@@ -236,7 +243,8 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
           runId: request.workId,
           epoch: 0,
           executionId: request.workId,
-          scope
+          scope,
+          ...(scope.kind === "scene-area" ? { allowSceneAreaExpansion: request.allowSceneAreaExpansion === true } : {})
         });
         if (!issued.ok) throw Object.assign(new Error(issued.message), { code: issued.code });
 

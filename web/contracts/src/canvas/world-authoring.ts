@@ -121,6 +121,7 @@ export type WorldToolContextRequest = {
   epoch: number;
   executionId: string;
   scope: WorldScopeVersion["scope"];
+  allowSceneAreaExpansion?: boolean;
 };
 
 export interface WorldToolContextRun {
@@ -167,6 +168,7 @@ export interface WorldAuthoringFailure {
    * present when the authority could read the offending geometry.
    */
   spatialDiagnostic?: {
+    areaId?: string;
     actual?: GroundAabb;
     bounds?: GroundAabb;
     anchor?: { u: number; v: number };

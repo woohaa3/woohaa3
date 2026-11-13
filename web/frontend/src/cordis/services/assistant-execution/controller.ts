@@ -4,6 +4,7 @@ import { randomId } from "@woohaa3/contracts";
 export type AssistantDraftValue = {
   connection?: import("@woohaa3/contracts").AgentConnectionBinding;
   prompt: string;
+  allowSceneAreaExpansion?: boolean;
   promptScope?: string;
   prompts?: Record<string, string>;
   models: Record<string, string>;
@@ -91,7 +92,7 @@ export function createAssistantInputController<Input, Accepted>(initial: Partial
       // Even if the user edited the draft, retry means the original frozen intent.
       if (!state.pending && !state.busy) update({ pending: {
         requestId: `assistant:${randomId()}`, input: structuredClone(input), revision: state.revision,
-      } });
+      }, draft: { ...state.draft, allowSceneAreaExpansion: false } });
       return run(port, false);
     },
     submitIndependent(input: Input, port: AssistantSubmissionPort<Input, Accepted>) {
@@ -111,4 +112,16 @@ export function assistantInputController<Input, Accepted>(page: object, scope: A
   const key = assistantInputKey(scope);
   if (!inputs.has(key)) inputs.set(key, createAssistantInputController<Input, Accepted>(initial));
   return inputs.get(key) as ReturnType<typeof createAssistantInputController<Input, Accepted>>;
+}
+
+/** Clearing a target starts a new context; pending submissions remain frozen. */
+export function clearAssistantExpansionDrafts(page: object, target: Pick<AssistantInputScope, "dataScopeId" | "canvasId" | "nodeId">): void {
+  const inputs = pages.get(page);
+  if (!inputs) return;
+  for (const [key, value] of inputs) {
+    const [dataScopeId, canvasId, , nodeId] = JSON.parse(key) as [string, string, string, string | null];
+    if (dataScopeId !== target.dataScopeId || canvasId !== target.canvasId || nodeId !== (target.nodeId ?? null)) continue;
+    const controller = value as ReturnType<typeof createAssistantInputController>;
+    if (controller.getSnapshot().draft.allowSceneAreaExpansion === true) controller.edit({ allowSceneAreaExpansion: false });
+  }
 }

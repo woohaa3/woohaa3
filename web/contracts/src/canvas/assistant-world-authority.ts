@@ -111,7 +111,6 @@ export const ASSISTANT_WORLD_TOOLS = [
   ASSISTANT_WORLD_TOOL.sampleAnimation, ASSISTANT_WORLD_TOOL.getHumanoidMotion,
   ...ASSISTANT_WORLD_WRITE_TOOLS
 ] as const satisfies readonly AssistantWorldToolName[];
-
 export const ASSISTANT_WORLD_CAMERA_TOOLS = [
   ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read, WORLD_RESOURCE_TOOLS.camera
 ] as const;
@@ -153,6 +152,7 @@ export interface AssistantWorldRunRequest {
   epoch: number;
   executionId: WorldId;
   scope: AssistantWorldScopeSelection;
+  allowSceneAreaExpansion?: boolean;
 }
 
 /** Public run information; it carries no process-local write capability. */
@@ -365,6 +365,7 @@ export type AssistantWorldWriteOutcome =
        */
       view?: WorldCameraView;
       target?: import("./world-resource-tools.js").WorldResourceTarget;
+      sceneArea?: import("./world-resource-tools.js").WorldResourceReceipt["sceneArea"];
       deleted?: boolean;
     }
   | AssistantWorldFailure;
@@ -981,6 +982,8 @@ export type AssistantWorldContextView = {
   writable: WorldObjectVersion[];
   readOnly: WorldObjectVersion[];
   objects: AssistantWorldObjectSummary[];
+  /** Frozen per-turn policy; older contexts default to false. */
+  allowSceneAreaExpansion?: boolean;
   /** 导演区地面范围；模型创建/移动必须落在该范围内。2D 组没有世界范围。 */
   bounds?: { min: { u: number; v: number }; max: { u: number; v: number } };
   /** Current published animation for this director area. Omitted by older hosts and for 2D groups. */

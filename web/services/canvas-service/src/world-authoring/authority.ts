@@ -30,7 +30,11 @@ import {
   parseGlbModel,
   quatRotate,
   stableStringify,
-  v2SceneAabb,
+  v2ShapeLocalBounds,
+  v2ShapeLocalTransform,
+  transformPoint,
+  type SceneV2Op,
+  type SceneV2ShapeOp,
   modelGroundAnchorLocal,
   worldModelGroundAnchor,
   storedHumanoidRig,
@@ -81,6 +85,7 @@ type InstanceRecord = {
   /** Asset-local AABB; `null` means the content could not be prepared. */
   localAabb: Aabb | null;
   localGroundAnchor: Vec3 | null;
+  footprint: GroundAabb | null;
 };
 
 type CameraRecord = {
@@ -222,6 +227,17 @@ export function nextCameraSettingsVersion(camera: WorldCameraData): string {
   });
 }
 
+/** Freeze everything outside the affected nodes so history cannot truncate later work. */
+export function resourceHistoryOtherHash(canvas: ServerCanvas, ids: ReadonlySet<string>): string {
+  return stableAuthorityVersion("resource-history-other", {
+    title: canvas.title,
+    nodes: canvas.document.nodes.filter(node => !ids.has(node.id)),
+    edges: canvas.document.edges.filter(edge => !ids.has(edge.source) && !ids.has(edge.target)),
+    nodeData: Object.fromEntries(Object.entries(canvas.nodeData).filter(([id]) => !ids.has(id))),
+    assets: canvas.assets, jobs: canvas.jobs
+  });
+}
+
 /** Deterministic scene-area scope identity; bounds/identity changes advance it. */
 export function nextSceneAreaScopeVersion(areaId: string, bounds: GroundAabb): string {
   return stableAuthorityVersion("scene-area-scope", { areaId, bounds });
@@ -259,7 +275,8 @@ function instanceRecord(
   data: WorldInstanceData,
   contentVersion: string,
   localAabb: Aabb | null,
-  localGroundAnchor: Vec3 | null
+  localGroundAnchor: Vec3 | null,
+  footprint: GroundAabb | null
 ): InstanceRecord {
   const transformVersion = stableAuthorityVersion("world-pose", data.transform);
   return {
@@ -270,7 +287,8 @@ function instanceRecord(
     transformVersion,
     version: instanceVersion(data.instanceId, contentVersion, transformVersion),
     localAabb,
-    localGroundAnchor
+    localGroundAnchor,
+    footprint
   };
 }
 
@@ -292,6 +310,105 @@ function cameraRecord(nodeId: string, data: WorldCameraData): CameraRecord {
       rotation: data.rotation
     })
   };
+}
+
+/** Transform every primitive corner through its complete hierarchy. Composing
+ * non-uniform scales and rotations as a single TRS can lose shear and underbound. */
+function authoritativeSceneBounds(ops: readonly SceneV2Op[]): Aabb | null {
+  const shapes = ops.filter((op): op is SceneV2ShapeOp => ["group", "box", "cylinder", "mesh", "sphere", "capsule", "segment"].includes(op.t));
+  const byId = new Map(shapes.map(shape => [shape.id, shape]));
+  const min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  let count = 0;
+  for (const shape of shapes) {
+    if (shape.t === "group") continue;
+    const bounds = v2ShapeLocalBounds(shape);
+    if (!bounds) return null;
+    for (let i = 0; i < 8; i++) {
+      let point: Vec3 = [0, 1, 2].map(axis => i & (1 << axis) ? bounds.max[axis]! : bounds.min[axis]!) as Vec3;
+      let current: SceneV2ShapeOp | undefined = shape;
+      const seen = new Set<string>();
+      while (current) {
+        if (seen.has(current.id)) return null;
+        seen.add(current.id);
+        point = transformPoint(v2ShapeLocalTransform(current), point);
+        if (current.parent !== null && !byId.has(current.parent)) return null;
+        current = current.parent === null ? undefined : byId.get(current.parent);
+      }
+      if (!point.every(Number.isFinite)) return null;
+      for (let axis = 0; axis < 3; axis++) { min[axis] = Math.min(min[axis]!, point[axis]!); max[axis] = Math.max(max[axis]!, point[axis]!); }
+      count++;
+    }
+  }
+  return count ? { min, max } : null;
+}
+
+/** Exact ground extrema of each static primitive after the full affine hierarchy.
+ * Support functions avoid projecting a merged AABB through a second rotation;
+ * mesh extrema come from the actual vertices. */
+function sceneGroundFootprint(ops: readonly SceneV2Op[], root: WorldTransform): GroundAabb | null {
+  const shapes = ops.filter((op): op is SceneV2ShapeOp => ["group", "box", "cylinder", "mesh", "sphere", "capsule", "segment"].includes(op.t));
+  const byId = new Map(shapes.map(shape => [shape.id, shape]));
+  const min = [Infinity, Infinity], max = [-Infinity, -Infinity];
+  let count = 0;
+  for (const shape of shapes) {
+    if (shape.t === "group") continue;
+    const chain: SceneV2ShapeOp[] = [];
+    const seen = new Set<string>();
+    let current: SceneV2ShapeOp | undefined = shape;
+    while (current) {
+      if (seen.has(current.id)) return null;
+      seen.add(current.id);
+      chain.push(current);
+      if (current.parent !== null && !byId.has(current.parent)) return null;
+      current = current.parent === null ? undefined : byId.get(current.parent);
+    }
+    const project = (input: Vec3): [number, number] => {
+      let point = input;
+      for (const node of chain) point = transformPoint(v2ShapeLocalTransform(node), point);
+      const rotated = quatRotate([...root.rotation], [point[0], -point[2], point[1]]);
+      return [root.position.u + root.scale * rotated[0], root.position.v + root.scale * rotated[1]];
+    };
+    if (shape.t === "mesh") {
+      // Unreferenced vertices are not rendered and must not enlarge the area.
+      for (const index of new Set(shape.faces.flat())) {
+        const vertex = shape.vertices[index];
+        if (!vertex) return null;
+        const p = project(vertex);
+        if (!p.every(Number.isFinite)) return null;
+        for (let axis = 0; axis < 2; axis++) { min[axis] = Math.min(min[axis]!, p[axis]!); max[axis] = Math.max(max[axis]!, p[axis]!); }
+        count++;
+      }
+      continue;
+    }
+    const bounds = v2ShapeLocalBounds(shape);
+    if (!bounds) return null;
+    const origin = project([0, 0, 0]);
+    const basis = ([0, 1, 2] as const).map(axis => {
+      let vector: Vec3 = [0, 0, 0]; vector[axis] = 1;
+      for (const node of chain) {
+        const local = v2ShapeLocalTransform(node);
+        vector = quatRotate(local.rotation, [vector[0] * local.scale[0], vector[1] * local.scale[1], vector[2] * local.scale[2]]);
+      }
+      const rotated = quatRotate([...root.rotation], [vector[0], -vector[2], vector[1]]);
+      return [root.scale * rotated[0], root.scale * rotated[1]];
+    });
+    const half = [0, 1, 2].map(axis => (bounds.max[axis]! - bounds.min[axis]!) / 2);
+    const center = [0, 1, 2].map(axis => (bounds.max[axis]! + bounds.min[axis]!) / 2);
+    for (let axis = 0; axis < 2; axis++) {
+      const row = basis.map(column => column[axis]!);
+      const middle = origin[axis]! + row.reduce((sum, value, i) => sum + value * center[i]!, 0);
+      const radius = shape.t === "sphere" ? shape.radius * Math.hypot(...row)
+        : shape.t === "cylinder" ? shape.radius * Math.hypot(row[0]!, row[2]!) + shape.height / 2 * Math.abs(row[1]!)
+        : shape.t === "capsule" || (shape.t === "segment" && shape.shape === "capsule")
+          ? half[0]! * Math.hypot(...row) + Math.max(0, half[1]! - half[0]!) * Math.abs(row[1]!)
+          : row.reduce((sum, value, i) => sum + Math.abs(value) * half[i]!, 0);
+      if (!Number.isFinite(middle) || !Number.isFinite(radius)) return null;
+      min[axis] = Math.min(min[axis]!, middle - radius);
+      max[axis] = Math.max(max[axis]!, middle + radius);
+    }
+    count++;
+  }
+  return count ? { min: { u: min[0]!, v: min[1]! }, max: { u: max[0]!, v: max[1]! } } : null;
 }
 
 /** Asset-local AABB → conservative ground AABB in world meters. */
@@ -339,17 +456,17 @@ function objectEntry(
 }
 
 function instanceContainment(record: InstanceRecord, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
-  return containmentOfGeometry(record.localAabb, record.localGroundAnchor, record.data.transform, area);
+  return containmentOfGeometry(record.footprint, record.localGroundAnchor, record.data.transform, area);
 }
 
-function containmentOfGeometry(localAabb: Aabb | null, localGroundAnchor: Vec3 | null, transform: WorldTransform, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
-  if (!localAabb || !localGroundAnchor) return "unknown";
+function containmentOfGeometry(footprint: GroundAabb | null, localGroundAnchor: Vec3 | null, transform: WorldTransform, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
+  if (!footprint || !localGroundAnchor) return "unknown";
   const anchor = worldModelGroundAnchor(localGroundAnchor, transform);
   const point = classifyCameraPoint({ area, position: { ...anchor, h: 0 } });
   if (point === "unknown") return "unknown";
   if (point === "complete") return "writable";
   const overlap = classifyFootprint({ area, footprint: {
-    status: "ready", bounds: instanceFootprint(localAabb, transform), contentVersion: "prepared", transformVersion: "current"
+    status: "ready", bounds: footprint, contentVersion: "prepared", transformVersion: "current"
   }, contentVersion: "prepared", transformVersion: "current" });
   return overlap === "unknown" ? "unknown" : overlap === "outside" ? "outside" : "read-only";
 }
@@ -382,7 +499,7 @@ function membersFor(instances: InstanceRecord[], cameras: CameraRecord[]): Scene
 type ObjectState = {
   identity: WorldObjectIdentity;
   version: string;
-  instance?: { contentVersion: string; transformVersion: string; transform: WorldTransform; localAabb: Aabb | null; localGroundAnchor: Vec3 | null };
+  instance?: { contentVersion: string; transformVersion: string; transform: WorldTransform; localAabb: Aabb | null; localGroundAnchor: Vec3 | null; footprint: GroundAabb | null };
   camera?: WorldCameraData;
 };
 
@@ -407,7 +524,7 @@ export type WorldAuthoringAuthority = SpatialCommitAuthority & {
    * the caller must prepare it before committing so containment is decided from
    * the exact post-state content. Returns `null` when bounds remain unknown.
    */
-  prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas): Promise<{ contentVersion: string; localAabb: Aabb; localGroundAnchor?: Vec3 } | null>;
+  prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas): Promise<{ contentVersion: string; localAabb: Aabb; localGroundAnchor?: Vec3; footprint?: (transform: WorldTransform) => GroundAabb | null } | null>;
   /** Drop cached projections for one canvas. */
   invalidate(canvasId: string): void;
 };
@@ -432,7 +549,7 @@ export function createWorldAuthoringAuthority(
    * the same authority can retry and recover while every retry still starts
    * from `unknown` (fail closed) until real bounds exist.
    */
-  const localAabbCache = new Map<string, { localAabb: Aabb; localGroundAnchor: Vec3 }>();
+  const localAabbCache = new Map<string, { localAabb: Aabb; localGroundAnchor: Vec3; ops: readonly SceneV2Op[] }>();
   /** Versions validated as the post-state of an in-flight atomic resolve. */
   const postEligible = new Set<string>();
   const postKey = (canvasId: string, scopeVersion: string, target: WorldObjectIdentity, version: string): string =>
@@ -446,7 +563,7 @@ export function createWorldAuthoringAuthority(
   const scopeRefOf = (scope: WorldScopeVersion): AuthorityScopeRef => ({ ...scope.scope });
 
   async function prepareGeometry(fields: Record<string, unknown>, canvas?: ServerCanvas): Promise<
-    | { ok: true; contentVersion: string; localAabb: Aabb; localGroundAnchor: Vec3 }
+    | { ok: true; contentVersion: string; localAabb: Aabb; localGroundAnchor: Vec3; ops: readonly SceneV2Op[] }
     | { ok: false; reason: string }
   > {
     const failure = (reason: string) => ({ ok: false as const, reason });
@@ -473,12 +590,12 @@ export function createWorldAuthoringAuthority(
         if (!parsed.ok) return failure("GLB 文件无法解析，请检查文件格式后重新导入");
         // GLB hierarchy/TRS is already in the parsed ops. Shared-world rendering
         // applies only the instance root, never the legacy card modelPlacement.
-        const localAabb = v2SceneAabb(parsed.ops);
+        const localAabb = authoritativeSceneBounds(parsed.ops);
         if (!localAabb) return failure("GLB 没有可计算位置的几何内容");
         const localGroundAnchor = modelGroundAnchorLocal(parsed.ops, null);
         if (!localGroundAnchor) return failure("GLB 几何无法计算落地位置");
-        localAabbCache.set(contentVersion, { localAabb, localGroundAnchor });
-        return { ok: true, contentVersion, localAabb, localGroundAnchor };
+        localAabbCache.set(contentVersion, { localAabb, localGroundAnchor, ops: parsed.ops });
+        return { ok: true, contentVersion, localAabb, localGroundAnchor, ops: parsed.ops };
       } catch (error) {
         if (isMediaObjectNotFoundError(error) || (error as { status?: unknown } | null)?.status === 404) {
           return failure("GLB 文件在当前存储中不存在，请恢复原文件或重新导入模型");
@@ -496,12 +613,12 @@ export function createWorldAuthoringAuthority(
       const rig = stored?.ok ? stored.value : null;
       const execution = await (options.executeScene ?? executeSceneIr)(fields.modelScript, fields.modelScriptVersion, rig ? { rig: rig.parameters } : {});
       if (!execution.ok) return failure(`模型脚本执行失败：${execution.message}`);
-      const localAabb = v2SceneAabb(execution.ops);
+      const localAabb = authoritativeSceneBounds(execution.ops);
       if (!localAabb) return failure("模型脚本没有生成可计算位置的几何内容");
       const localGroundAnchor = modelGroundAnchorLocal(execution.ops, rig);
       if (!localGroundAnchor) return failure("模型几何无法计算落地位置");
-      localAabbCache.set(contentVersion, { localAabb, localGroundAnchor });
-      return { ok: true, contentVersion, localAabb, localGroundAnchor };
+      localAabbCache.set(contentVersion, { localAabb, localGroundAnchor, ops: execution.ops });
+      return { ok: true, contentVersion, localAabb, localGroundAnchor, ops: execution.ops };
     } catch {
       return failure("模型脚本执行异常，请重试或检查模型内容");
     }
@@ -510,8 +627,8 @@ export function createWorldAuthoringAuthority(
   async function prepareContent(fields: Record<string, unknown>, canvas?: ServerCanvas) {
     const prepared = await prepareGeometry(fields, canvas);
     if (!prepared.ok) return null;
-    const { ok: _, ...content } = prepared;
-    return content;
+    const { ok: _, ops, ...content } = prepared;
+    return { ...content, footprint: (transform: WorldTransform) => sceneGroundFootprint(ops, transform) };
   }
 
   async function collectInstances(canvas: ServerCanvas) {
@@ -534,7 +651,8 @@ export function createWorldAuthoringAuthority(
       const localAabb = prepared.ok ? prepared.localAabb : null;
       const localGroundAnchor = prepared.ok ? prepared.localGroundAnchor : null;
       if (!prepared.ok) describeFailure(prepared.reason);
-      records.set(data.instanceId, instanceRecord(node.id, data, contentVersion, localAabb, localGroundAnchor));
+      const footprint = prepared.ok ? sceneGroundFootprint(prepared.ops, data.transform) : null;
+      records.set(data.instanceId, instanceRecord(node.id, data, contentVersion, localAabb, localGroundAnchor, footprint));
     }
     const failureMessage = failures.length
       ? `无法准备场景模型。${failures.slice(0, 3).join("；")}${failures.length > 3 ? `；另有 ${failures.length - 3} 个模型需要修复` : ""}`
@@ -749,10 +867,12 @@ export function createWorldAuthoringAuthority(
         const localGroundAnchor = cached && cached.contentVersion === contentVersion
           ? cached.localGroundAnchor
           : localAabbCache.get(contentVersion)?.localGroundAnchor ?? null;
+        const ops = localAabbCache.get(contentVersion)?.ops;
+        const footprint = ops ? sceneGroundFootprint(ops, decoded.value.transform) : null;
         return {
           identity: target,
           version: instanceVersion(target.instanceId, contentVersion, transformVersion),
-          instance: { contentVersion, transformVersion, transform: decoded.value.transform, localAabb, localGroundAnchor }
+          instance: { contentVersion, transformVersion, transform: decoded.value.transform, localAabb, localGroundAnchor, footprint }
         };
       }
       const decoded = decodeWorldCamera(fields.worldCamera);
@@ -768,7 +888,7 @@ export function createWorldAuthoringAuthority(
 
   function containmentOf(state: ObjectState, area: GroundAabb): WorldObjectAuthorityEntry["containment"] {
     if (state.instance) {
-      return containmentOfGeometry(state.instance.localAabb, state.instance.localGroundAnchor, state.instance.transform, area);
+      return containmentOfGeometry(state.instance.footprint, state.instance.localGroundAnchor, state.instance.transform, area);
     }
     if (!state.camera) return "unknown";
     const result = classifyCameraPoint({ area, position: state.camera.position });
@@ -804,6 +924,43 @@ export function createWorldAuthoringAuthority(
     },
     stopped(identity, evidence) {
       return options.verifyStopped?.(identity, evidence) === true;
+    },
+    expansionCandidates(intent, before, after) {
+      if (intent.scope.scope.kind !== "scene-area") return null;
+      const cache = cacheFor(intent.canvasId, intent.scope);
+      const previous = findArea(before, intent.scope.scope.areaId)?.data;
+      const next = findArea(after, intent.scope.scope.areaId)?.data;
+      if (!cache || cache.kind !== "scene-area" || cache.revision !== before.revision || !previous || !next) return null;
+      const old = previous.bounds, bounds = next.bounds;
+      if (bounds.min.u > old.min.u || bounds.min.v > old.min.v || bounds.max.u < old.max.u || bounds.max.v < old.max.v) return null;
+      const intersects = (a: GroundAabb, b: GroundAabb) => a.max.u >= b.min.u && a.min.u <= b.max.u && a.max.v >= b.min.v && a.min.v <= b.max.v;
+      const inside = (a: GroundAabb, b: GroundAabb) => a.min.u >= b.min.u && a.min.v >= b.min.v && a.max.u <= b.max.u && a.max.v <= b.max.v;
+      const candidates: WorldObjectIdentity[] = [];
+      for (const record of cache.instances.values()) {
+        let footprint: GroundAabb;
+        if (!record.localAabb) {
+          // An authorized empty skeleton can acquire geometry in this same edit.
+          if (!intent.writable.some(target => target.kind === "instance" && target.instanceId === record.data.instanceId)) return null;
+          const post = stateAgainst(after, record.identity, cache);
+          if (!post?.instance?.localAabb) return null;
+          const ops = localAabbCache.get(post.instance.contentVersion)?.ops;
+          const calculated = ops && sceneGroundFootprint(ops, post.instance.transform);
+          if (!calculated) return null;
+          footprint = calculated;
+        } else {
+          const ops = localAabbCache.get(record.contentVersion)?.ops;
+          const calculated = ops && sceneGroundFootprint(ops, record.data.transform);
+          if (!calculated) return null;
+          footprint = calculated;
+        }
+        if (intersects(footprint, bounds) && !inside(footprint, old)) candidates.push(record.identity);
+      }
+      for (const record of cache.cameras.values()) {
+        const { u, v } = record.data.position;
+        const footprint = { min: { u, v }, max: { u, v } };
+        if (intersects(footprint, bounds) && !inside(footprint, old)) candidates.push(record.identity);
+      }
+      return candidates;
     },
     resolve(intent, before, after, targets) {
       const scope = intent.scope;

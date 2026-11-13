@@ -101,6 +101,7 @@ async function issueToolGrant(
       mode: input.intent.mode,
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
       ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+            ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
       ...(input.intent.mode === "canvas-group" && input.intent.expectedContentHash?.startsWith("group-epoch:")
         ? { expectedScopeEpoch: Number(input.intent.expectedContentHash.slice("group-epoch:".length)) }
         : {}),

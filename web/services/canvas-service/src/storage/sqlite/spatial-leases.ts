@@ -21,13 +21,15 @@ function normalize(input: LeaseIntent): LeaseIntent {
   const s = input.scope;
   if (![input.requestId, input.canvasId, input.runId, input.executionId, s?.scopeVersion].every(nonempty) || !Number.isSafeInteger(input.epoch) || input.epoch < 0 || !s?.scope || !((s.scope.kind === "scene-area" && nonempty(s.scope.areaId)) || (s.scope.kind === "workflow-group-2d" && nonempty(s.scope.groupId)) || (s.scope.kind === "world-camera" && nonempty(s.scope.cameraId)))) throw new SpatialLeaseError("invalid-data");
   const scope: WorldScopeVersion = { scope: s.scope.kind === "scene-area" ? { kind: s.scope.kind, areaId: s.scope.areaId } : s.scope.kind === "world-camera" ? { kind: s.scope.kind, cameraId: s.scope.cameraId } : { kind: s.scope.kind, groupId: s.scope.groupId }, scopeVersion: s.scopeVersion };
+  if (input.contextId !== undefined && !nonempty(input.contextId)) throw new SpatialLeaseError("invalid-data");
+  if (input.allowSceneAreaExpansion !== undefined && (typeof input.allowSceneAreaExpansion !== "boolean" || scope.scope.kind !== "scene-area")) throw new SpatialLeaseError("invalid-data");
   const writable = normalizeTargets(input.writable), readOnly = normalizeTargets(input.readOnly);
   const keys = new Set(readOnly.map(objectKey));
   if (writable.some(t => keys.has(objectKey(t)))) throw new SpatialLeaseError("outside-scope");
-  return { requestId: input.requestId, canvasId: input.canvasId, runId: input.runId, epoch: input.epoch, executionId: input.executionId, scope, writable, readOnly };
+  return { requestId: input.requestId, canvasId: input.canvasId, runId: input.runId, epoch: input.epoch, executionId: input.executionId, scope, writable, readOnly, ...(input.contextId ? { contextId: input.contextId } : {}), ...(scope.scope.kind === "scene-area" ? { allowSceneAreaExpansion: input.allowSceneAreaExpansion === true } : {}) };
 }
 function requestIntent(intent: LeaseIntent): string {
-  return JSON.stringify({ canvasId: intent.canvasId, requestId: intent.requestId, scope: intent.scope, writable: intent.writable, readOnly: intent.readOnly });
+  return JSON.stringify({ canvasId: intent.canvasId, requestId: intent.requestId, scope: intent.scope, writable: intent.writable, readOnly: intent.readOnly, allowSceneAreaExpansion: intent.allowSceneAreaExpansion === true });
 }
 
 /** The authority must be installed by the host. No expiry or startup reconciliation releases locks. */

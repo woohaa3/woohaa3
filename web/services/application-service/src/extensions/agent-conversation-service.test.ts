@@ -177,6 +177,7 @@ describe("agent conversation service", () => {
         mode: "world",
         nodeId: "area-node",
         worldScope: { kind: "scene-area", areaId: "area-1" },
+        allowSceneAreaExpansion: true,
         prompt: "搭场景"
       })
     });
@@ -187,6 +188,28 @@ describe("agent conversation service", () => {
     expect(reread.ok).toBe(true);
     if (!reread.ok) return;
     expect(reread.turn.target.worldScope).toEqual({ kind: "scene-area", areaId: "area-1" });
+    expect(reread.turn.target.allowSceneAreaExpansion).toBe(true);
+    const changed = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "req-world", entry: entry({ mode: "world", nodeId: "area-node", worldScope: { kind: "scene-area", areaId: "area-1" }, prompt: "搭场景" }) });
+    expect(changed).toMatchObject({ ok: false, error: { code: "request-id-reused" } });
+  });
+
+  it("keeps the frozen expansion choice and retry identity after reopening SQLite", () => {
+    const dbPath = path.join(tempDir(), 'expansion.sqlite');
+    const controls: FakeAdapterControls = { seen: [], outcomes: [], queries: [], pending: [] };
+    const registry = fakeRegistry(fakeAdapter(controls));
+    const firstStore = createSqliteAgentConversationStore({ path: dbPath });
+    const first = createAgentConversationService({ store: firstStore, registry, agentRoles: testRoleRegistry() });
+    const created = first.createConversation({ owner: 'user-a', canvasId: 'canvas-1' });
+    if (!created.ok) throw Error('create failed');
+    const request = { owner: 'user-a', conversationId: created.conversation.conversationId, requestId: 'expansion-restart',
+      entry: entry({ mode: 'world', nodeId: 'area-node', worldScope: { kind: 'scene-area', areaId: 'area-1' }, allowSceneAreaExpansion: true }) };
+    expect(first.acceptTurn(request)).toMatchObject({ ok: true, reused: false, turn: { target: { allowSceneAreaExpansion: true } } });
+    firstStore.close();
+    const secondStore = createSqliteAgentConversationStore({ path: dbPath });
+    const second = createAgentConversationService({ store: secondStore, registry, agentRoles: testRoleRegistry() });
+    expect(second.queryTurn({ owner: 'user-a', requestId: request.requestId })).toMatchObject({ ok: true, turn: { target: { allowSceneAreaExpansion: true } } });
+    expect(second.acceptTurn(request)).toMatchObject({ ok: true, reused: true, turn: { target: { allowSceneAreaExpansion: true } } });
+    expect(second.acceptTurn({ ...request, entry: { ...request.entry, allowSceneAreaExpansion: false } })).toMatchObject({ ok: false, error: { code: 'request-id-reused' } });
   });
 
   it("保存消息与工具的混合顺序，完成时保留回合汇总且不重复追加消息", async () => {
