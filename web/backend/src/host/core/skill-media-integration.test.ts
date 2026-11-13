@@ -54,6 +54,9 @@ afterEach(() => {
 });
 
 function catalog(): CanvasTaskCatalog {
+  // 视频模型必须声明参数 schema：`resolveModelParameters` 对 `modelType: "video"` 且 schema 为空
+  // 的情况报 `missing-schema`（change: 2026-11-06-guard-video-generation-inputs）。本 fixture 的
+  // 目标是验证「媒体续接」，不是参数门禁，因此给一个最小的合法 schema。
   const model = (modelType: CanvasTaskModelType, key: string, bindings: CanvasTaskInputBinding[]) => ({
     providerId: "provider",
     providerModelId: key,
@@ -61,7 +64,9 @@ function catalog(): CanvasTaskCatalog {
     modelType,
     title: key,
     interaction: { id: "generic-model", version: 1 },
-    inputSchema: {},
+    inputSchema: modelType === "video"
+      ? { type: "object", properties: { prompt: { type: "string", title: "提示词" } }, required: ["prompt"] }
+      : {},
     defaultInput: {},
     taskTimeoutMs: 1_000,
     bindings

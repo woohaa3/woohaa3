@@ -12,9 +12,12 @@ export async function collectDevelopmentConfig({root,env=loadServiceEnv(root,pro
  const {createSettingsService,resolveSettingsFiles}=await import(pathToFileURL(path.join(root,'web/backend/dist/index.js')).href);
  const settings=await createSettingsService({...resolveSettingsFiles(env,root),env,watch:false});
  const host=await loadExtensionHost({repoRoot:root,env,logger:()=>{}});
- const plugins=await host.createHostPlugins();
+ // `createHostPlugins` 返回 `{ plugins, storage }`（一条扁平列表 + 存储子集）：
+ // 角色由 `plugin.roles` 标注，不再按 provider / storage 分桶（df0d50d7 起）。
+ // 这里只关心「哪些插件声明了 Config.fields」，因此遍历扁平列表，storage 已在其中，不重复合并。
+ const {plugins}=await host.createHostPlugins();
  try{
-  for(const plugin of [...plugins.provider,...plugins.storage])if(plugin.Config?.fields)settings.register(plugin.configPrefix,plugin.Config.fields,plugin.label??plugin.name,plugin.name);
+  for(const plugin of plugins)if(plugin.Config?.fields)settings.register(plugin.configPrefix,plugin.Config.fields,plugin.label??plugin.name,plugin.name);
   const payload={settings:{},secrets:{},extensionConfigs:[]};
   const omitted=[];
   for(const definition of settings.describe()){

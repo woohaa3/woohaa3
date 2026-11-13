@@ -3,5 +3,6 @@
   "extensionId": "ark-provider",
   "metadata": { "module": "./shared", "export": "ARK_PLUGIN_METADATA", "order": 40 },
   "hostPlugin": { "module": "./backend", "factory": "createArkProviderPlugin", "features": ["provider"], "order": 30 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "1.0.0"
 }

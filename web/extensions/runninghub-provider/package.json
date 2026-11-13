@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-runninghub-provider",
-  "version": "0.1.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "RunningHub 生成 Provider 与 App 专用交互插件（change: 2026-10-04-add-runninghub-and-extensionize-litellm）：后端经 ctx.generation 注册 API/App 模型；前端经 server-active 入口注册 App 专用交互面板。",

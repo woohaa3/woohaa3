@@ -3,5 +3,6 @@
   "extensionId": "deepseek-provider",
   "metadata": { "module": "./shared", "export": "DEEPSEEK_PLUGIN_METADATA", "order": 23 },
   "hostPlugin": { "module": "./backend", "factory": "createDeepSeekProviderPlugin", "features": ["provider"], "order": 13 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "1.0.0"
 }

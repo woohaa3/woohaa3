@@ -44,6 +44,7 @@ import {
   scanExtensions
 } from "../../scripts/lib/extension-scan.mjs";
 import { validateExtensionDescriptor } from "../../scripts/lib/extension-descriptor.mjs";
+import { EXTENSION_VERSION_CODES, versionProblems } from "../../scripts/lib/extension-version.mjs";
 import { extensionIconPublicPath } from "../../scripts/lib/extension-icon-assets.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -328,6 +329,8 @@ export async function buildExtensionBrowser(options = {}) {
   // 声明与实现的身份交叉校验：extension.json 是宿主注册表的事实来源，metadata 是浏览器侧唯一身份；
   // 两者不一致时构建失败并指出目录，避免「登记了 A、浏览器实现为 B」的静默错位（任务 2.3）。
   assertDescriptorMetadataIdentity(dir, metadataValue.extensionId);
+  // 版本一致性：预检只静态读字面量，间接写法（`version: CONSTANT.version`）在这里求值后核对。
+  assertDescriptorMetadataVersion(dir, metadataValue.version);
   // 品牌图形：扩展包内资产 → 约定逻辑路径，注入 metadata（浏览器侧扩展行也用它，扩展源码不写死路径）。
   const declaredIcon = extensionIconPublicPath(readExtensionDescriptor(dir).descriptor ?? {}, metadataValue.extensionId);
   if (declaredIcon) metadataValue.icon = declaredIcon;
@@ -769,6 +772,38 @@ function assertDescriptorMetadataIdentity(dir, metadataExtensionId) {
       `扩展声明与浏览器 metadata 身份不一致：${path.basename(dir)} 声明 extensionId=${validated.value.extensionId}，` +
         `metadata 为 ${metadataExtensionId}（${descriptorPath}）`
     );
+  }
+}
+
+/**
+ * 声明版本与浏览器 metadata 版本交叉校验（change: 2026-11-13-add-extension-version-governance）。
+ *
+ * 预检只能静态读 `version:` 字面量；`version: SOME_CONSTANT.version` 这类间接写法要到求值
+ * 才知道。构建期 metadata 已被求值，因此在这里补上最后一道：两者不一致就不产出 artifact，
+ * 避免设置面同时存在两个版本号。
+ */
+function assertDescriptorMetadataVersion(dir, metadataVersion) {
+  const { descriptor } = readExtensionDescriptor(dir);
+  if (!descriptor) return;
+  const problems = versionProblems({
+    extensionId: descriptor.extensionId,
+    descriptor,
+    packageVersion: readPackageVersion(dir),
+    metadataVersion
+  });
+  if (problems.length === 0) return;
+  throw new ExtensionScanError(
+    EXTENSION_VERSION_CODES.mismatch,
+    `扩展版本声明不一致（${dir}）：\n  ${problems.map((problem) => `[${problem.code}] ${problem.message}`).join("\n  ")}`
+  );
+}
+
+function readPackageVersion(dir) {
+  try {
+    const value = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"))?.version;
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
   }
 }
 

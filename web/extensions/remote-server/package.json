@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-remote-server",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "服务端接入扩展（change: 2026-10-19-add-remote-server-extension）：用扩展提供远端 woohaa-server 的登录、连接状态与断开，并提供可选的画布同步上游交接；未配置时保持纯本地。",

@@ -39,5 +39,6 @@
       "methods": ["GET"]
     }
   ],
-  "metadata": { "module": "./shared", "export": "REMOTE_SERVER_METADATA", "order": 80 }
+  "metadata": { "module": "./shared", "export": "REMOTE_SERVER_METADATA", "order": 80 },
+  "version": "1.0.0"
 }

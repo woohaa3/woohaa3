@@ -24,5 +24,6 @@
     "factory": "createStandardAgentRolesExtension",
     "optionsType": "StandardAgentRolesExtensionOptions",
     "order": 55
-  }
+  },
+  "version": "0.1.0"
 }
