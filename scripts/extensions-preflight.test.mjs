@@ -180,6 +180,48 @@ test("preflightDirectory：站点 backend 工厂 requiresRestart=true 但 hotSwa
   assert.equal(result.hotSwappable, false);
 });
 
+test("preflightDirectory：站点 backend 工厂（带 site 段）仍 hotSwappable=false", async () => {
+  // 回归：判定曾写成 `Boolean(descriptor.backend && descriptor.site)`，把「带 site 的 backend」
+  // 判成可热换，于是受管包装上去会走 runtime.swap 而失败，且不提示重启。
+  const dir = managedTree({
+    pkg: { exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" } },
+    descriptor: {
+      backend: { module: "./backend-dist/entry", factory: "createDefinition" },
+      site: {
+        name: "demo",
+        description: "demo",
+        version: "1.0.0",
+        configSchema: { schemaId: "demo-config", schemaVersion: 1 },
+        capabilities: [{ id: "demo.probe", kind: "handler", description: "probe" }],
+        defaultEnabled: true
+      }
+    },
+    files: {
+      "backend-dist/entry.mjs": "export function createDefinition() { return { extensionId: \"demo\", activate: () => ({ dispose() {} }) }; }\n"
+    }
+  });
+  const result = await preflightDirectory(dir, { managed: true });
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.requiresRestart, true);
+  assert.equal(result.hotSwappable, false);
+});
+
+test("preflightDirectory：hostPlugin 与 backend 混用 → hotSwappable=false", async () => {
+  const dir = managedTree({
+    pkg: { exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" } },
+    descriptor: {
+      backend: { module: "./backend-dist/entry", factory: "createDefinition" },
+      hostPlugin: { module: "./backend-dist/entry", factory: "createPlugin", features: ["provider"] }
+    },
+    files: {
+      "backend-dist/entry.mjs": "export function createDefinition() { return { extensionId: \"demo\", activate: () => ({ dispose() {} }) }; }\nexport function createPlugin() { return {}; }\n"
+    }
+  });
+  const result = await preflightDirectory(dir, { managed: true });
+  assert.equal(result.requiresRestart, true);
+  assert.equal(result.hotSwappable, false);
+});
+
 test("preflightDirectory：受管禁止项 bootstrap / canvasContent / 市场来源 / migrate / required / always", async () => {
   const cases = [
     [{ descriptor: { bootstrap: { module: "./bootstrap", export: "b" } } }, "MARKETPLACE_FORBIDDEN_DECLARATION:bootstrap"],

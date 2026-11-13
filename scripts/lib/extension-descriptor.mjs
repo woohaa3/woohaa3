@@ -307,6 +307,8 @@ export function validateExtensionDescriptor(value) {
       }
       if (typeof site.defaultEnabled !== "boolean") errors.push("site.defaultEnabled 必须是布尔值");
       if (site.order !== undefined && !Number.isFinite(site.order)) errors.push("site.order 必须是数字");
+      // 扩展间依赖（extensionId 列表）：服务端市场把它转成 `ReleaseRef.dependencies`（range 固定 "*"），
+      // 客户端安装时由 `checkDependencies` 校验已装版本。内置根与 GitHub / 本地文件来源不经这条路。
       if (site.dependencies !== undefined && (!Array.isArray(site.dependencies) || !site.dependencies.every(isNonEmptyString))) {
         errors.push("site.dependencies 必须是字符串数组");
       }

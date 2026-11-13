@@ -247,7 +247,7 @@ export async function probeDeclaredExports(host) {
  * 返回 `{ ok, errors, warnings, extensionId, version, descriptor, packageJson, engines,
  * activation, requiresRestart, hotSwappable }`；errors/warnings 是 `{ code, field?, message }`。
  * `requiresRestart`：声明了后端代码（backend / hostPlugin / metadata / publicRoutes）→ 提交后生效。
- * `hotSwappable`：独立 hostPlugin 或有站点元数据的 backend；混合形态需重启。
+ * `hotSwappable`：只有纯 `hostPlugin` 能在运行期换版；站点 `backend` 工厂与混合形态都需受控重启（D8）。
  */
 export async function preflightDirectory(dir, { managed = false, contracts = null } = {}) {
   const errors = [];
@@ -348,8 +348,10 @@ export async function preflightDirectory(dir, { managed = false, contracts = nul
   }
 
   const requiresRestart = Boolean(descriptor.backend || descriptor.hostPlugin || descriptor.metadata || (descriptor.publicRoutes?.length ?? 0) > 0);
-  // Both activation owners have runtime mount/unmount support. Mixed owners remain invalid for hot swap.
-  const hotSwappable = descriptor.hostPlugin ? !descriptor.backend : Boolean(descriptor.backend && descriptor.site);
+  // 站点 backend 工厂没有运行期换版入口；只有纯 hostPlugin 才能走扩展层的 add/swap。
+  // 混用两者（hostPlugin + backend）同样不可热换：扩展层会把同一个插件 add 两次。
+  // spec: 站点后端的安装记录保存 hotSwappable=false，下一次启动由受管根扫描装配。
+  const hotSwappable = descriptor.hostPlugin !== undefined && descriptor.backend === undefined;
   return result({
     extensionId,
     version,
