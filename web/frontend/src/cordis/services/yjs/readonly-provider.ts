@@ -16,7 +16,10 @@ import { MESSAGE_TYPE,
   SYNC_MESSAGE_TYPE,
   decodeMessage,
   encodeCommandMessage,
+  encodeSessionFrame,
   encodeSyncMessage,
+  SESSION_CHANNEL,
+  SESSION_LIMITS,
   isForbiddenClientSyncType,
   ProtocolError,
   YJS_CANVAS_FORMAT_VERSION,
@@ -199,7 +202,7 @@ export class ReadonlyCanvasProvider {
    *
    * 未 `ready` 时拒绝（写入门禁）；这是结构性的：持久化只能经此路径。
    */
-  submitCommand(batch: CanvasCommandBatch): { ok: true } | { ok: false; reason: string } {
+  submitCommand(batch: CanvasCommandBatch): { ok: true } | { ok: false; reason: string; code?: string } {
     if (this.state.phase !== "ready") {
       return { ok: false, reason: `画布尚未完成同步（当前 ${this.state.phase}），暂不可写` };
     }
@@ -208,7 +211,17 @@ export class ReadonlyCanvasProvider {
       canvasId: this.canvasId,
       protocolVersion: this.protocolVersion
     });
-    this.socket.send(encoded);
+    // Check the actual UTF-8 wire bytes, including the multiplexed envelope.
+    // The host otherwise closes the entire session before it can reject this command.
+    if (encoded.byteLength > SESSION_LIMITS.maxChannelPayloadBytes
+      || encodeSessionFrame(SESSION_CHANNEL.CANVAS_YJS, encoded).byteLength > SESSION_LIMITS.maxFrameBytes) {
+      return { ok: false, code: "message-too-large", reason: "本次修改数据超过同步上限，请分批提交" };
+    }
+    try {
+      this.socket.send(encoded);
+    } catch {
+      return { ok: false, code: "send-failed", reason: "画布命令发送失败，请稍后重试" };
+    }
     return { ok: true };
   }
 

@@ -12,6 +12,10 @@ import { MESSAGE_TYPE,
   YJS_SYNC_PROTOCOL_VERSION,
   decodeMessage,
   encodeCommandResultMessage,
+  encodeCommandMessage,
+  encodeSessionFrame,
+  SESSION_CHANNEL,
+  SESSION_LIMITS,
   encodeStatusMessage,
   encodeSyncMessage,
   serverCanvasToYDoc } from "@woohaa3/contracts/canvas-yjs";
@@ -200,6 +204,28 @@ describe("只读性：本地 transaction 不出站（任务 6.1）", () => {
 });
 
 describe("状态机与写入门禁（任务 6.2）", () => {
+  it("rejects oversized UTF-8 commands including envelope overhead without disconnecting or replaying them", () => {
+    const fake = fakeSocket();
+    const provider = new ReadonlyCanvasProvider({ socket: fake.socket, doc: serverDoc(), canvasId: CANVAS });
+    provider.start();
+    const ready = () => fake.receive(encodeStatusMessage({ status: "synced", revision: 0 }));
+    ready();
+    const batch = (text: string) => commandBatch({ commands: [{ type: "nodeData.patch", nodeId: "n1", value: { title: text } }] });
+    expect(provider.submitCommand(batch("深".repeat(SESSION_LIMITS.maxFrameBytes / 2)))).toMatchObject({ ok: false, code: "message-too-large" });
+    // The payload fits by itself, but its session envelope crosses the frame limit.
+    const boundary = batch("x".repeat(SESSION_LIMITS.maxFrameBytes));
+    const payload = encodeCommandMessage(boundary);
+    expect(payload.byteLength).toBeGreaterThan(SESSION_LIMITS.maxFrameBytes);
+    expect(encodeSessionFrame(SESSION_CHANNEL.CANVAS_YJS, payload).byteLength).toBeGreaterThan(SESSION_LIMITS.maxFrameBytes);
+    expect(provider.submitCommand(boundary)).toMatchObject({ ok: false, code: "message-too-large" });
+    expect(fake.outbound.filter(e => e.kind === "command")).toHaveLength(0);
+    expect(provider.providerState.phase).toBe("ready");
+    expect(provider.submitCommand(commandBatch())).toEqual({ ok: true });
+    fake.disconnect(); fake.reopen(); ready();
+    expect(fake.outbound.filter(e => e.kind === "command")).toHaveLength(1);
+    expect(provider.submitCommand(commandBatch({ commandId: "next" }))).toEqual({ ok: true });
+  });
+
   it("syncing 阶段拒绝命令", () => {
     const fake = fakeSocket();
     const provider = new ReadonlyCanvasProvider({ socket: fake.socket, doc: serverDoc(), canvasId: CANVAS });

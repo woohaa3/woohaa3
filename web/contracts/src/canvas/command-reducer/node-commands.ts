@@ -258,6 +258,9 @@ export function patchNodeData(
   nodeId: string,
   value: CanvasNodeData | null
 ): CommandApplyResult {
+  // Normalizers may fill derived fields. Never change the caller's command payload:
+  // the same command is journaled, hashed, replayed and eventually sent on the wire.
+  if (value !== null) value = structuredClone(value);
   const node = work.nodes.find((entry) => entry.id === nodeId);
   const worldRejection = validateWorldInstance(node?.type, value);
   if (worldRejection) return worldRejection;

@@ -550,6 +550,25 @@ describe("确认回流只发布一次规范/working 快照", () => {
     return { session, socket: entry.socket, doc, synced, events };
   }
 
+  it("oversized commands roll back working state and settle lifecycle while the next edit remains writable", async () => {
+    const { session, events } = await fixture();
+    const store = (await import("./canvas-state/index.js")).woohaa3CanvasStore;
+    try {
+      const result = session.submitCommands([{ type: "nodeData.patch", nodeId: "n1", value: { title: "深".repeat(400000) } }], "oversized");
+      expect(result).toMatchObject({ ok: false, code: "message-too-large" });
+      expect(session.commandLifecycle()!.pendingCount).toBe(0);
+      expect(await session.commandLifecycle()!.get("oversized")!.settled).toMatchObject({ state: "rejected" });
+      expect(store.getState().working!.nodeData.n1?.title).toBeUndefined();
+      expect(session.getStatus().remote.pendingCount).toBe(0);
+      expect(session.isWritable()).toBe(true);
+      expect(events.filter(event => event.name === "canvas.save")).toMatchObject([{ result: "failure", errorCode: "message-too-large" }]);
+      const next = session.submitCommands([{ type: "node.update", nodeId: "n1", position: { x: 10, y: 0 } }], "after-oversized");
+      expect(next.ok).toBe(true);
+      expect(session.commandLifecycle()!.pendingCount).toBe(1);
+      expect(store.getState().working!.document.nodes[0]!.position!.x).toBe(10);
+    } finally { session.shutdown(); }
+  });
+
   it("重复 synced 和提交不重新导出规范画布；新文档事务才替换快照", async () => {
     const { session, doc, synced, socket } = await fixture();
     const store = (await import("./canvas-state/index.js")).woohaa3CanvasStore;

@@ -825,19 +825,22 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         commands: [...commands]
       });
       if (!sent.ok) {
-        settleSave(commandId, "failure", "send-failed");
+        const code = sent.code ?? "send-failed";
+        settleSave(commandId, "failure", code);
         // 发送失败：立即移除 pending、重放剩余批次，返回结构化失败。
         projection.rejectBatch(commandId, sent.reason);
+        yjsLifecycle!.applyResult({ commandId, status: "rejected", error: sent.reason });
         woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
+        publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
         recordTelemetry({
           name: "canvas.edit",
           result: "failure",
           origin: "browser",
           surface: "editor",
           durationMs: elapsedMs(submitStartedAt),
-          errorCode: "send-failed"
+          errorCode: code
         });
-        return { ok: false, reason: sent.reason, code: "send-failed" };
+        return { ok: false, reason: sent.reason, code };
       }
       woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
       publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });

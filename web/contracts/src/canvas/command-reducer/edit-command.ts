@@ -11,6 +11,7 @@
  */
 import type { EditApplyCommand, EditOperation, EditPrecondition, EditNodeDataGuardField } from "../edit-command.js";
 import { decodeEditApplyCommand } from "../edit-command.js";
+import { equalEditJson } from "../edit-json.js";
 import { collectWoohaa3CanvasRemovalIds, type CanvasNodeData, type Woohaa3CanvasNode } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 import { findActiveRunNode } from "./working-state.js";
@@ -203,13 +204,6 @@ export function matchNodeDataField(
   if (!present) return false;
   if (field !== "sharedWorldInstance" && field !== "modelPlacement") return raw === snapshot.value;
   return equalEditJson(raw, snapshot.value);
-}
-
-function equalEditJson(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
-  const ak = Object.keys(a), bk = Object.keys(b);
-  return ak.length === bk.length && ak.every(key => Object.prototype.hasOwnProperty.call(b, key) && equalEditJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 }
 
 /**

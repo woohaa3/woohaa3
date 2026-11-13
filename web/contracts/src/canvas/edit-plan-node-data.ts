@@ -1,13 +1,14 @@
 /** Protected history for names and stable project associations. */
 import type { EditNodeDataField, EditNodeDataFieldSnapshot, EditOperation, EditPrecondition } from "./edit-command.js";
 import type { CanvasNodeData, ServerCanvas, Woohaa3CanvasSerializedNode } from "./domain/index.js";
+import { equalEditJson } from "./edit-json.js";
 
 export function planNodeDataFieldDiffs(before: ServerCanvas, after: ServerCanvas, nodes: readonly Woohaa3CanvasSerializedNode[], fields: readonly EditNodeDataField[]) {
   const forwardOps: EditOperation[] = [], inverseOps: EditOperation[] = [];
   const forwardPre: EditPrecondition[] = [], inversePre: EditPrecondition[] = [];
   for (const node of nodes) {
     const previous = before.nodeData[node.id] ?? {}, next = after.nodeData[node.id] ?? {};
-    const changed = fields.filter(field => previous[field] !== next[field]);
+    const changed = fields.filter(field => !equalEditJson(previous[field], next[field]));
     if (!changed.length) continue;
     const snapshots = (data: CanvasNodeData): EditNodeDataFieldSnapshot[] => changed.map(field =>
       data[field] === undefined ? { field, present: false } : { field, present: true, value: data[field] });
