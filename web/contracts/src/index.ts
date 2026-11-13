@@ -261,3 +261,5 @@ export * from "./canvas/director-character.js";
 export * from "./canvas/soma-motion/scene-lap.js";
 
 export * from "./canvas/soma-motion/timing.js";
+
+export * from "./canvas/soma-motion/interaction.js";

@@ -36,3 +36,12 @@ it('keeps motion guidance compatible with resource-only world authoring',()=>{
  expect(text).toContain('read_world_resource');expect(text).toContain('resourceType=scene_animation_script');
  expect(text).toContain('edit_scene_animation_script');expect(text).toContain('expectedParentVersion');
 });
+
+it('routes new interactions through mandatory host timing and movement checks',()=>{
+ const text=sceneDirectorRole.definition.instructions;
+ expect(text).toContain('必须调用animate_humanoid_interaction');
+ expect(text).toContain('禁止用两次animate_humanoid');
+ expect(text).toContain('movement-decision-required');
+ expect(text).toContain('不以用户没说translate为理由');
+ expect(text).toContain('allowInPlaceTravel:true只用于用户明确要求原地');
+});

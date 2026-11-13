@@ -3,16 +3,24 @@ import {describe,it,expect,vi} from 'vitest';
 import {executeWorldAnimationScript,SOMA77_JOINTS} from '@woohaa3/contracts';
 import {somaJointPrefix,createHumanoidMotionTools} from './humanoid-motion.js';
 function archive(values:Float64Array,frames:number){
- const header=`{'descr': '<f4', 'fortran_order': False, 'shape': (${frames},77,3), }\n`;
- const npy=new Uint8Array(10+header.length+values.length*4),nv=new DataView(npy.buffer);
- npy.set([147,78,85,77,80,89,1,0]);nv.setUint16(8,header.length,true);npy.set(new TextEncoder().encode(header),10);
- values.forEach((value,i)=>nv.setFloat32(10+header.length+i*4,value,true));
- let crc=0xffffffff;for(const byte of npy){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^(crc&1?0xedb88320:0);}crc=(crc^0xffffffff)>>>0;
- const name=new TextEncoder().encode('posed_joints.npy'),centralAt=30+name.length+npy.length,endAt=centralAt+46+name.length;
- const zip=new Uint8Array(endAt+22),v=new DataView(zip.buffer);
- v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,crc,true);v.setUint32(18,npy.length,true);v.setUint32(22,npy.length,true);v.setUint16(26,name.length,true);zip.set(name,30);zip.set(npy,30+name.length);
- v.setUint32(centralAt,0x02014b50,true);v.setUint16(centralAt+6,20,true);v.setUint32(centralAt+16,crc,true);v.setUint32(centralAt+20,npy.length,true);v.setUint32(centralAt+24,npy.length,true);v.setUint16(centralAt+28,name.length,true);zip.set(name,centralAt+46);
- v.setUint32(endAt,0x06054b50,true);v.setUint16(endAt+8,1,true);v.setUint16(endAt+10,1,true);v.setUint32(endAt+12,46+name.length,true);v.setUint32(endAt+16,centralAt,true);return zip;
+ const npy=(data:Float64Array,shape:string)=>{
+  const header=`{'descr': '<f4', 'fortran_order': False, 'shape': (${shape}), }\n`;
+  const bytes=new Uint8Array(10+header.length+data.length*4),v=new DataView(bytes.buffer);
+  bytes.set([147,78,85,77,80,89,1,0]);v.setUint16(8,header.length,true);bytes.set(new TextEncoder().encode(header),10);
+  data.forEach((n,i)=>v.setFloat32(10+header.length+i*4,n,true));return bytes;
+ };
+ const roots=Float64Array.from({length:frames*3},(_,i)=>values[Math.floor(i/3)*77*3+i%3]!);
+ const entries=[['posed_joints.npy',npy(values,`${frames},77,3`)],['root_positions.npy',npy(roots,`${frames},3`)]] as const;
+ const locals:Uint8Array[]=[],centrals:Uint8Array[]=[];let offset=0;
+ for(const [filename,raw]of entries){
+  const name=new TextEncoder().encode(filename);let crc=0xffffffff;for(const byte of raw){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^(crc&1?0xedb88320:0);}crc=(crc^0xffffffff)>>>0;
+  const local=new Uint8Array(30+name.length+raw.length),v=new DataView(local.buffer);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,crc,true);v.setUint32(18,raw.length,true);v.setUint32(22,raw.length,true);v.setUint16(26,name.length,true);local.set(name,30);local.set(raw,30+name.length);
+  const central=new Uint8Array(46+name.length),c=new DataView(central.buffer);c.setUint32(0,0x02014b50,true);c.setUint16(6,20,true);c.setUint32(16,crc,true);c.setUint32(20,raw.length,true);c.setUint32(24,raw.length,true);c.setUint16(28,name.length,true);c.setUint32(42,offset,true);central.set(name,46);
+  locals.push(local);centrals.push(central);offset+=local.length;
+ }
+ const size=centrals.reduce((n,c)=>n+c.length,0),zip=new Uint8Array(offset+size+22);let cursor=0;
+ for(const chunk of [...locals,...centrals]){zip.set(chunk,cursor);cursor+=chunk.length;}
+ const end=new DataView(zip.buffer,cursor);end.setUint32(0,0x06054b50,true);end.setUint16(8,2,true);end.setUint16(10,2,true);end.setUint32(12,size,true);end.setUint32(16,offset,true);return zip;
 }
 
 const groups=():Array<{id:string;parent?:string;position?:number[];rotation?:number[];scale?:number[]}>=>[{id:'robot'},...SOMA77_JOINTS.map(j=>({id:`robot.${j.name}`,parent:j.parent<0?'robot':`robot.${SOMA77_JOINTS[j.parent]!.name}`,position:[...j.position],rotation:[...j.rotation],scale:[1,1,1]}))];

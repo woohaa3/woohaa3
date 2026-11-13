@@ -1,8 +1,9 @@
+import {runHumanoidInteraction} from './humanoid-motion-interaction.js';
 import {validateRaisedWavePrerequisite} from '../../ports/humanoid-motion-gesture.js';
 import {createHumanoidSceneLap} from '../../ports/humanoid-scene-lap.js';
 import { validateHumanoidMotionPath, type HumanoidMotionPathInput } from '../../ports/humanoid-motion-path.js';
 import { createHash } from 'node:crypto';
-import { isSomaMotionMetadata, decodeSomaPosedJoints, inspectSomaMotionTiming, executeWorldAnimationScript, removeWorldAnimationInstanceTracks, serializeWorldAnimationScript, somaSkeletonPrefix, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteInput, type AssistantWorldWriteOutcome, type BackendTaskPort, type CanvasTaskCatalog, type TaskResultSummary, type StoredAsset } from '@woohaa3/contracts';
+import { type HumanoidInteractionInput, inspectSomaRootTravel, decodeSomaRootPositions, isSomaMotionMetadata, decodeSomaPosedJoints, inspectSomaMotionTiming, executeWorldAnimationScript, removeWorldAnimationInstanceTracks, serializeWorldAnimationScript, somaSkeletonPrefix, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteInput, type AssistantWorldWriteOutcome, type BackendTaskPort, type CanvasTaskCatalog, type TaskResultSummary, type StoredAsset } from '@woohaa3/contracts';
 
 type Binding = { canvasId:string; contextId:string; instanceId:string };
 type Generate = Binding & { expectedVersion:string; prompt:string; duration:number; requestId:string; steps?:number };
@@ -10,7 +11,7 @@ type Lookup = Binding & { generationId?:string; assetId?:string; inspectTiming?:
 type Apply = Lookup & { upperBodyGenerationId?:string; expectedVersion:string; startTime:number; sourceStartTime?:number; blendInDuration?:number; loop?:boolean; rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean;requiresRaisedWave?:boolean };
 type Animate = Binding & {prompt:string;duration:number;requestId:string;startTime?:number;rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean};
 type Outcome = Record<string,unknown> & {ok:boolean};
-export type HumanoidMotionTools = {animate(input:Animate):Promise<Outcome>;generate(input:Generate):Promise<Outcome>;get(input:Lookup):Promise<Outcome>;apply(input:Apply):Promise<Outcome>};
+export type HumanoidMotionTools = {interact(input:HumanoidInteractionInput):Promise<Outcome>;animate(input:Animate):Promise<Outcome>;generate(input:Generate):Promise<Outcome>;get(input:Lookup):Promise<Outcome>;apply(input:Apply):Promise<Outcome>};
 type World = {
  read(input:{canvasId:string;contextId:string}):Promise<{ok:true;view:AssistantWorldContextView}|AssistantWorldFailure>|{ok:true;view:AssistantWorldContextView}|AssistantWorldFailure;
  write(input:AssistantWorldWriteInput):Promise<AssistantWorldWriteOutcome>;
@@ -61,7 +62,7 @@ export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,ass
    asset=await deps.materialize(input.canvasId,r,task.createdAt);fps=m.fps;frameCount=m.frameCount;
    requestedRaisedWave=task.request?.prompt?.includes('Keep the right hand raised at head height')??false;
   }
-  let timing:ReturnType<typeof inspectSomaMotionTiming>|undefined;
+  let timing:ReturnType<typeof inspectSomaMotionTiming>|undefined,rootTravel:ReturnType<typeof inspectSomaRootTravel>|undefined;
   if(input.inspectTiming){
    if(!deps.readBytes)return fail('capability-unsupported','当前宿主无法读取动作时序');
    try{
@@ -70,11 +71,23 @@ export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,ass
     const bytes=await deps.readBytes({canvasId:input.canvasId,storageKey:metadata.storageKey,maxBytes:128*1024*1024});
     if(bytes.byteLength!==metadata.size||createHash('sha256').update(bytes).digest('hex')!==asset.checksum)throw Error('动作字节校验失败');
     timing=inspectSomaMotionTiming(await decodeSomaPosedJoints(bytes),fps,frameCount);
+    rootTravel=inspectSomaRootTravel(await decodeSomaRootPositions(bytes),fps,frameCount);
    }catch(error){return fail('invalid-data',error instanceof Error?error.message:'动作时序读取失败');}
   }
-  return {ok:true,generationId:input.generationId,state:'succeeded',...asset,...(timing?{timing}:{}),fps,frameCount,requestedRaisedWave};
+  return {ok:true,generationId:input.generationId,state:'succeeded',...asset,...(timing?{timing,rootTravel}:{}),fps,frameCount,requestedRaisedWave};
  }
  const api:HumanoidMotionTools = {
+  async interact(input){
+   return runHumanoidInteraction(input,{
+    validate:async actor=>{const t=await target(actor,actor.expectedVersion);return t.ok?{ok:true}:t;},
+    generate:actor=>api.generate(actor),get:lookup=>api.get(lookup),apply:actor=>api.apply(actor),
+    checkPath:async(actor,asset)=>{
+     const t=await target(actor,actor.expectedVersion);if(!t.ok)throw Error(t.message);
+     if(!deps.readBytes||!t.view.bounds||!t.model.animationRig?.spatial?.groundAnchorLocal)throw Error('当前宿主无法验证互动位移路径');
+     await validateHumanoidMotionPath({canvasId:input.canvasId,asset,transform:t.model.transform,bounds:t.view.bounds,groundAnchorLocal:t.model.animationRig.spatial.groundAnchorLocal,readBytes:deps.readBytes});
+    }
+   });
+  },
   async animate(input){
    const t=await target(input);if(!t.ok)return t;
    let generationPrompt=input.prompt;

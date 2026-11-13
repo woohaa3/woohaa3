@@ -347,7 +347,13 @@ describe("站点扩展装配（激活时注册存储后端）", () => {
       extensionId: "remote-server",
       host: "application",
       log: { scope: () => (event: Record<string, unknown>) => logs.push(event) },
-      capabilities: { register: () => () => undefined },
+      capabilities: { register: (registration:{id:string;version:number;value:unknown}) => {
+        expect(typeof registration).toBe('object');
+        expect(registration.id).toEqual(expect.any(String));
+        expect(registration.version).toBeGreaterThanOrEqual(1);
+        expect(registration.value).toBeDefined();
+        return () => undefined;
+      } },
       services: {},
       effect: () => undefined,
       generation: {

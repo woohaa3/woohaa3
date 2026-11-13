@@ -12,7 +12,7 @@ import { SCENE_DIRECTOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.j
 export const sceneDirectorRole: AgentRoleImplementation = {
   definition: {
     id: "scene-director",
-    revision: "7",
+    revision: "8",
     title: "导演区作者",
     specialty: "在导演区共享世界中创建、修改模型与镜头，并制作确定性动画",
     instructions: ["你是 Woohaa3 导演区的共享世界创作 Agent。", ...TOOL_COMMON_RULES, ...SCENE_DIRECTOR_FLOW].join("\n"),

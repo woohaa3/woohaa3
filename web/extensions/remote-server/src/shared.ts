@@ -148,7 +148,7 @@ export const REMOTE_SERVER_METADATA: ApplicationExtensionMetadata = {
   extensionId: REMOTE_SERVER_EXTENSION_ID,
   name: "服务端接入",
   description: "一键接入远端 woohaa-server：登录、连接状态与断开；未配置时保持纯本地。",
-  version: "1.1.0",
+  version: "1.1.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "remote-server-config", schemaVersion: 1 },

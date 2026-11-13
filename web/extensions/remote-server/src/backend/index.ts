@@ -23,7 +23,7 @@ import type {
   CanvasUpstreamLink,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
+import { CANVAS_UPSTREAM_CAPABILITY_VERSION, canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
   agentConnectionProviderCapabilityId,
   agentConversationAdapterCapabilityId,
@@ -1263,7 +1263,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
           return deleteRemoteCanvas(canvasId);
         }
       };
-      { const undo = ctx.capabilities!.register(canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID), upstreamProvider); ctx.effect(() => undo); }
+      { const undo = ctx.capabilities!.register({id:canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID),version:CANVAS_UPSTREAM_CAPABILITY_VERSION,value:upstreamProvider}); ctx.effect(() => undo); }
 
       /**
        * 把「本部署市场」作为一个市场来源交给宿主（`ctx.marketplace` 扩展点）。

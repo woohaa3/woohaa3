@@ -173,8 +173,12 @@ export async function createMcpTurnGateway(options: {
             const evidence = outcome.result?.structuredContent;
             const ok = outcome.result?.isError !== true && evidence?.ok !== false;
             settle(call, ok, ok ? undefined : resultFailureDetail(outcome.result) ?? "工具执行失败，宿主没有返回原因");
-            if (write && ok && evidence?.ok === true && typeof evidence.commandId === "string" && evidence.canvasId === options.input.canvasId && !receipts.some((receipt) => receipt.commandId === evidence.commandId)) {
-              receipts.push({ canvasId: evidence.canvasId, ...(typeof evidence.nodeId === "string" ? { nodeId: evidence.nodeId } : {}), commandId: evidence.commandId, ...(typeof evidence.revision === "number" ? { revision: evidence.revision } : {}) });
+            if (write && ok && evidence?.ok === true) {
+              const listed = Array.isArray(evidence.commandReceipts) ? evidence.commandReceipts : [];
+              for (const item of [...listed, evidence]) {
+                if (!item || typeof item.commandId !== "string" || item.canvasId !== options.input.canvasId || receipts.some((receipt) => receipt.commandId === item.commandId)) continue;
+                receipts.push({ canvasId: item.canvasId, ...(typeof item.nodeId === "string" ? { nodeId: item.nodeId } : {}), commandId: item.commandId, ...(typeof item.revision === "number" ? { revision: item.revision } : {}) });
+              }
             }
             return outcome;
           });

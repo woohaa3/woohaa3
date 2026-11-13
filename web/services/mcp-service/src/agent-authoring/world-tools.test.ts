@@ -524,3 +524,16 @@ it('forwards inspection and source-window inputs under the current world grant',
  const bad=await callTool(base,'apply_humanoid_motion',{instanceId:'actor',generationId:'known',expectedVersion:'v1',startTime:-.1},grant().token);
  expect(bad.error??bad.result?.isError).toBeTruthy();
 });
+
+it('binds interaction actor choices to host identity and requires explicit movement modes',async()=>{
+ let request:any;
+ const world:AssistantWorldToolClient={async read(){throw Error('unused');},async write(){throw Error('unused');},async complete(){throw Error('unused');},humanoidMotion:{async animate(){throw Error('unused');},async generate(){throw Error('unused');},async get(){throw Error('unused');},async apply(){throw Error('unused');},async interact(input){request=input;return {ok:true,verification:'kinematic-alignment-only'};}}};
+ const base=await start(world,grant());
+ const a={instanceId:'a',expectedVersion:'v1',prompt:'push',duration:3,rootMotion:'in-place'},b={...a,instanceId:'b',prompt:'stumble backwards',rootMotion:'translate'};
+ const result=await callTool(base,'animate_humanoid_interaction',{initiator:a,responder:b,initiatorEvent:'handsForward'},grant().token);
+ expect(result.result?.structuredContent).toMatchObject({ok:true});
+ expect(request).toMatchObject({canvasId:'canvas-1',contextId:'ctx-1',requestId:'req-1',responder:{rootMotion:'translate'}});
+ const {rootMotion,...missing}=b;
+ const bad=await callTool(base,'animate_humanoid_interaction',{initiator:a,responder:missing,initiatorEvent:'handsForward'},grant().token);
+ expect(bad.error??bad.result?.isError).toBeTruthy();
+});

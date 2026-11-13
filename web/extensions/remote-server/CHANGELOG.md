@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 — 2026-11-13
+
+- 画布上游能力按版本化注册契约提交，恢复新版宿主下的远端服务扩展激活。
+
 ## 1.1.0 — 2026-11-13
 
 - Add Kimodo motion catalog and NPZ result metadata support.

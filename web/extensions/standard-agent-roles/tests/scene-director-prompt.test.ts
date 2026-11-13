@@ -10,7 +10,7 @@ describe("导演区资源工具协议", () => {
     expect(sceneDirectorRole.definition.tools.required).toEqual(["get_world_context"]);
     expect([...sceneDirectorRole.definition.tools.required, ...sceneDirectorRole.definition.tools.optional].sort()).toEqual([...ASSISTANT_WORLD_TOOLS, "get_model_api"].sort());
     for (const tool of Object.values(ASSISTANT_WORLD_TOOL)) {
-      if (["get_world_context", "sample_scene_animation", "animate_humanoid", "get_humanoid_motion", "generate_humanoid_motion", "apply_humanoid_motion"].includes(tool)) continue;
+      if (["get_world_context", "sample_scene_animation", "animate_humanoid", "animate_humanoid_interaction", "get_humanoid_motion", "generate_humanoid_motion", "apply_humanoid_motion"].includes(tool)) continue;
       expect(text).not.toContain(tool);
     }
     const prepared = sceneDirectorRole.prepare({ input: { prompt: "生成一座大型宫殿", action: "generate" }, context: {},

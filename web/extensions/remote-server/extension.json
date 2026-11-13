@@ -4,7 +4,7 @@
   "site": {
     "name": "服务端接入",
     "description": "一键接入远端 woohaa-server：登录、连接状态与断开。未配置时保持纯本地运行。",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "configSchema": { "schemaId": "remote-server-config", "schemaVersion": 1 },
     "capabilities": [
       { "id": "remote-server.session", "kind": "handler", "description": "连接状态与会话读模型", "auth": "authenticated" },
@@ -40,7 +40,7 @@
     }
   ],
   "metadata": { "module": "./shared", "export": "REMOTE_SERVER_METADATA", "order": 80 },
-  "version": "1.1.0",
+  "version": "1.1.1",
   "engines": {
     "hostAbi": "^1.0.0",
     "sdkAbi": "^1.0.0",

@@ -53,6 +53,7 @@ export function assistantWorldScopeIdentity(scope: AssistantWorldScopeSelection)
 export const ASSISTANT_WORLD_TOOL = {
   readContext: "get_world_context",
   animateHumanoid: "animate_humanoid",
+  animateHumanoidInteraction: "animate_humanoid_interaction",
   generateHumanoidMotion: "generate_humanoid_motion",
   getHumanoidMotion: "get_humanoid_motion",
   applyHumanoidMotion: "apply_humanoid_motion",
@@ -82,6 +83,7 @@ export const ASSISTANT_WORLD_READ_TOOLS = [ASSISTANT_WORLD_TOOL.readContext] as 
 /** Scene-area write tools. Membership in a 2D group never grants these. */
 export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.animateHumanoid,
+  ASSISTANT_WORLD_TOOL.animateHumanoidInteraction,
   ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
   ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
   ASSISTANT_WORLD_TOOL.createModel,
@@ -98,6 +100,7 @@ export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
 
 export const ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.animateHumanoid,
+  ASSISTANT_WORLD_TOOL.animateHumanoidInteraction,
   ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
   ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
   WORLD_RESOURCE_TOOLS.area, WORLD_RESOURCE_TOOLS.model, WORLD_RESOURCE_TOOLS.camera,
