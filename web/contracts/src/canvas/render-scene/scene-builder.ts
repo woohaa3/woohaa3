@@ -5,6 +5,7 @@ import { builtinNodeCapabilityResolver } from "../builtin-node-capabilities.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import { decodeWorldCamera } from "../world-camera-codec.js";
 import { cameraShotPresentation, worldCameraShotContext } from "../world-camera-shot.js";
+import { projectSomaRootTranslation } from "../soma-motion/clip.js";
 import { quatMul } from "../model-transform.js";
 import { sceneAreaAnimationOrigin, type GroundAabb, type GroundPoint, type SceneAreaData, type WorldPoint, type WorldRotation } from "../shared-world.js";
 import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
@@ -104,6 +105,7 @@ export type CanvasRenderSceneInput = {
    */
   sceneAreaPreviews?: ReadonlyMap<string, import("../shared-world.js").GroundAabb>;
   /** 导演区整体动画播放头（秒）；缺省不采样。 */
+  sceneAnimationContext?: import("../world-animation-script.js").WorldAnimationSamplingContext;
   sceneAnimationTimes?: ReadonlyMap<string, number>;
   sceneAnimationPlayheads?: ReadonlyMap<string, number>;
   sceneAnimationPlayer?: { nodeId: string | null; playing: boolean };
@@ -205,7 +207,8 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         ir,
         input.sceneAnimationTimes.get(node.id) ?? 0,
         animationOriginForPreview(area.value, input.sceneAreaPreviews?.get(node.id)),
-        area.value.animationQuarterTurns
+        area.value.animationQuarterTurns,
+        input.sceneAnimationContext
       );
       for (const [instanceId, transform] of sample.instances) {
         const current = animationSamples.get(instanceId) ?? {};
@@ -271,9 +274,12 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const baseTransform = world?.ok && animated ? {
       ...world.value.transform,
       ...(animated.position ? { position: animated.position } : {}),
-      ...(animated.rotation ? { rotation: quatMul(world.value.transform.rotation as unknown as import("../model-transform.js").Quat, animated.rotation as unknown as import("../model-transform.js").Quat) as WorldRotation } : {}),
+      ...(animated.rotation ? { rotation: animated.absoluteTransform ? animated.rotation : quatMul(world.value.transform.rotation as unknown as import("../model-transform.js").Quat, animated.rotation as unknown as import("../model-transform.js").Quat) as WorldRotation } : {}),
       ...(animated.scale !== undefined ? { scale: animated.scale } : {})
     } : world?.ok ? world.value.transform : undefined;
+    if (baseTransform && animated?.rootTranslation) {
+      baseTransform.position = projectSomaRootTranslation(animated.rootTranslation, baseTransform.rotation, baseTransform.scale, baseTransform.position);
+    }
     const projectedWorld = world?.ok && baseTransform && (groundPreview || animated) ? {
       ...world.value,
       transform: { ...baseTransform, ...(groundPreview ? { position: {
@@ -351,6 +357,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         sceneVersion: resource.sceneVersion,
         resourceKey: resource.resourceKey,
         signature: resource.signature,
+        ...(animated?.partPositions ? { partPositions: animated.partPositions } : {}),
         ...(animated?.partRotations ? { partRotations: animated.partRotations } : {})
       };
     }

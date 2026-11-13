@@ -153,6 +153,7 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         const fps = item.fps ?? key.fps;
         let renderFailure: string | undefined;
         try {
+          await runtime.prepareWorldAnimation?.(item.animationNodeId ?? null);
           const frames = async function* (): AsyncGenerator<Uint8Array> {
             const total = worldCaptureDynamicFrameCount(key);
             for (let index = 0; index < total; index += 1) {

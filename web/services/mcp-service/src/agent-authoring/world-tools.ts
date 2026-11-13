@@ -23,6 +23,7 @@ import {
   type WorldPoint,
   type WorldRotation,
   type WorldTransform,
+  somaSkeletonPrefix,
   executeWorldAnimationScript,
   analyzeWorldAnimationData,
   inspectWorldAnimationModelSample,
@@ -35,6 +36,12 @@ import { auditWrap, structured, type AgentAuthoringToolDeps } from "./tool-polic
 import { hashText } from "./planner-hash.js";
 
 export type AssistantWorldToolClient = {
+  humanoidMotion?: {
+    animate(input:{canvasId:string;contextId:string;instanceId:string;prompt:string;duration:number;requestId:string;startTime?:number;rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean}):Promise<Record<string,unknown> & {ok:boolean}>;
+    generate(input: {canvasId:string;contextId:string;instanceId:string;expectedVersion:string;prompt:string;duration:number;requestId:string}):Promise<Record<string,unknown> & {ok:boolean}>;
+    get(input: {canvasId:string;contextId:string;instanceId:string;generationId:string}):Promise<Record<string,unknown> & {ok:boolean}>;
+    apply(input: {canvasId:string;contextId:string;instanceId:string;generationId:string;upperBodyGenerationId?:string;expectedVersion:string;startTime:number;loop?:boolean;rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean}):Promise<Record<string,unknown> & {ok:boolean}>;
+  };
   read(input: { canvasId: string; contextId: string }): { ok: true; view: AssistantWorldContextView } | AssistantWorldFailure | Promise<{ ok: true; view: AssistantWorldContextView } | AssistantWorldFailure>;
   write(input: import("@woohaa3/contracts").AssistantWorldWriteInput): Promise<AssistantWorldWriteOutcome>;
   complete(input: import("@woohaa3/contracts").AssistantWorldCompletionInput): Promise<AssistantWorldCompletionOutcome>;
@@ -264,12 +271,26 @@ function animationBudget(script?: { script: string; duration: number; loop: bool
 }
 
 export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
+  const motionBase = {instanceId:z.string().min(1)};
+  const registerMotion = (name:string, schema:any, method:'animate'|'generate'|'get'|'apply', description:string) => {
+    server.registerTool(name,{description,inputSchema:schema,outputSchema:z.looseObject({ok:z.boolean()}),annotations:{readOnlyHint:method==='get',destructiveHint:false,openWorldHint:false}},async (args:any) => auditWrap(deps,name,{requestId:deps.grant?.workId},async()=>{
+      const bound=worldGrant(deps);
+      if(!bound?.client.humanoidMotion)return {result:denied('本轮没有人体动作生成权限')};
+      const outcome=await bound.client.humanoidMotion[method]({...args,canvasId:bound.canvasId,contextId:bound.world.contextId,...((method==='generate'||method==='animate')?{requestId:deps.grant!.workId}:{})});
+      return {result:structured(outcome,outcome.ok?'人体动作任务状态':'人体动作操作被拒绝')};
+    }));
+  };
+  registerMotion('animate_humanoid',z.strictObject({...motionBase,prompt:z.string().min(1).max(10000),duration:z.number().finite().min(1).max(10),startTime:z.number().finite().min(0).max(3590).optional(),rootMotion:z.enum(['in-place','translate']).optional(),locomotion:z.literal('scene-lap').optional(),replaceExisting:z.boolean().optional()}),'animate','为导演区 SOMA 人物生成并应用动作。宿主负责骨架版本核验、等待 Kimodo 任务、校验稳定 NPZ、绑定时间轴。常规人物动作只调用此工具一次，无须手动查询轮询或采样修正。默认原子替换此角色旧动作并保留其他角色与镜头。duration最大10秒。绕场一周必须传locomotion:scene-lap，宿主规划闭合路线和朝向，不能只在prompt里描述绕圈；此时prompt只描述行走挥手等姿态。rootMotion 默认 in-place；translate 按 NPZ 根位移移动整个人物，单次播放并检查路径边界。');
+  registerMotion('generate_humanoid_motion',z.strictObject({...motionBase,expectedVersion:z.string().min(1),prompt:z.string().min(1).max(10000),duration:z.number().finite().min(1).max(10)}),'generate','为当前导演区实际 SOMA77 角色生成动作。复用当前可用动作模型及持久化任务，不创建动作节点。返回 generationId，后续查询并应用。');
+  registerMotion('get_humanoid_motion',z.strictObject({...motionBase,generationId:z.string().min(1)}),'get','查询本导演区角色的持久化动作任务；成功返回 canonical 资产身份及帧率帧数，不返回二进制或临时地址。');
+  registerMotion('apply_humanoid_motion',z.strictObject({...motionBase,generationId:z.string().min(1),upperBodyGenerationId:z.string().min(1).optional(),expectedVersion:z.string().min(1),startTime:z.number().finite().min(0).max(3590),loop:z.boolean().optional(),rootMotion:z.enum(['in-place','translate']).optional(),locomotion:z.literal('scene-lap').optional(),replaceExisting:z.boolean().optional()}),'apply','把已生成动作资产绑定到本导演区 SOMA77 角色。保留现有动画源码，通过宿主租约与版本校验保存；默认原地播放保留根高度。存在相同角色 part/walk 或 clip 轨道时先显式清理冲突轨道。');
+
   server.registerTool(
     "get_world_context",
     {
       title: "读取世界助手上下文",
       description:
-        "读取宿主为本轮签发的导演区/2D 组/所选镜头范围、版本、可写模型/镜头和只读参考；镜头范围返回 camera.settings 完整配置与 sceneModels 只读空间信息，只能调整该镜头；导演区 sceneArea 返回当前发布 revision、animationOrigin 与完整 animationScript（null 表示没有动画），sceneModels 返回导演区内可写/只读模型的世界变换（含朝向）与本地包围盒、真实 rig 空间描述，animationBudget 返回逻辑通道预算与已编写插值段、关键帧和循环的分项计数，motionConventions 区分模型 +Z 与镜头 -Z，用于推导动画支点、尺寸和镜头取景，bounds 是导演区地面范围。新建导演区默认 4×4 米；大场景须先用 resize_scene_area 显式扩区，扩区后重新 get_world_context 取得新 bounds 与 scopeVersion 再写入。返修前先读取原脚本，保留未要求修改的轨道和参数。目标与版本来自宿主任命，不接受模型自报；2D 组只返回只读参考。",
+        "读取宿主为本轮签发的导演区/2D 组/所选镜头范围、版本、可写模型/镜头和只读参考；镜头范围返回 camera.settings 完整配置与 sceneModels 只读空间信息，只能调整该镜头；导演区 sceneArea 返回当前发布 revision、animationOrigin 与完整 animationScript（null 表示没有动画），sceneModels 返回导演区内可写/只读模型的世界变换（含朝向）与本地包围盒、真实 rig 空间描述，animationBudget 返回逻辑通道预算与已编写插值段、关键帧和循环的分项计数，motionConventions 区分模型 +Z 与镜头 -Z，用于推导动画支点、尺寸和镜头取景，bounds 是导演区地面范围。标准SOMA人物只返回骨架摘要，常规动作直接调用animate_humanoid；仅编辑骨骼时读取get_world_model_rig详情。新建导演区默认 4×4 米；大场景须先用 resize_scene_area 显式扩区，扩区后重新 get_world_context 取得新 bounds 与 scopeVersion 再写入。返修前先读取原脚本，保留未要求修改的轨道和参数。目标与版本来自宿主任命，不接受模型自报；2D 组只返回只读参考。",
       inputSchema: z.strictObject({}),
       outputSchema: z.looseObject({ ok: z.boolean() }),
       annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }
@@ -279,7 +300,13 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
       if (!bound) return denied("本轮没有宿主签发的世界创作上下文");
       const outcome = await bound.client.read({ canvasId: bound.canvasId, contextId: bound.world.contextId });
       if (!outcome.ok) return worldFailure(outcome);
-      return structured({ ...outcome.view, animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, `世界范围：${outcome.view.scope.scope.kind}`);
+      const sceneModels=outcome.view.sceneModels?.map(model=>{
+        const prefix=somaSkeletonPrefix(model.animationRig?.groups??[]);
+        if(!prefix)return model;
+        const {animationRig,...summary}=model;
+        return {...summary,somaMotion:{skeletonId:'somaskel77',jointCount:77,jointPrefix:prefix,tool:'animate_humanoid'},animationRig:{spatial:animationRig?.spatial,detailsTool:'get_world_model_rig'}};
+      });
+      return structured({ ...outcome.view,...(sceneModels?{sceneModels}:{}), animationBudget: animationBudget(outcome.view.sceneArea?.animationScript), motionConventions, ok: true }, `世界范围：${outcome.view.scope.scope.kind}`);
     }
   );
 
@@ -650,7 +677,7 @@ export function registerAssistantWorldTools(server: McpServer, deps: AgentAuthor
     {
       title: "调整导演区范围",
       description:
-        "显式扩大或缩小导演区的地面范围。bounds 使用世界 u/v 米，min 不能超过 max；只改范围，不移动、不缩放模型与镜头，缩小后落在范围外的对象会变成只读。expectedScopeVersion 必须来自 get_world_context.sceneArea.scopeVersion，写入成功后会推进，因此扩区后必须重新 get_world_context 才能继续写入。新建导演区默认 4×4 米；大场景模型/镜头放不下时先用本工具（resize_scene_area）显式扩区，扩区后必须重新 get_world_context 取得新 bounds 与版本再写入，不要靠移动对象去绕过范围。范围调整必须对应用户的明确要求，不能作为取得对象写权限的隐含步骤。",
+        "显式扩大或缩小导演区的地面范围。bounds 使用世界 u/v 米，min 不能超过 max；只改范围，不移动、不缩放模型与镜头，缩小后落在范围外的对象会变成只读。expectedScopeVersion 必须来自 get_world_context.sceneArea.scopeVersion，写入成功后会推进，因此扩区后必须重新 get_world_context 才能继续写入。标准SOMA人物只返回骨架摘要，常规动作直接调用animate_humanoid；仅编辑骨骼时读取get_world_model_rig详情。新建导演区默认 4×4 米；大场景模型/镜头放不下时先用本工具（resize_scene_area）显式扩区，扩区后必须重新 get_world_context 取得新 bounds 与版本再写入，不要靠移动对象去绕过范围。范围调整必须对应用户的明确要求，不能作为取得对象写权限的隐含步骤。",
       inputSchema: z.strictObject({
         expectedScopeVersion: z.string().min(1),
         bounds: groundAabb

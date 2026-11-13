@@ -1,3 +1,4 @@
+import {createSomaHumanoid, type SomaHumanoidHandle} from "./soma-humanoid/template.js";
 /**
  * `woohaa-model-js-v2` SceneBuilder recorder 与版本化 executor dispatch
  * （change: enhance-model-scene-authoring-api，任务 1.1 / 1.3 / 2.4）。
@@ -81,6 +82,10 @@ export class SceneBuilderV2 {
     const { id: _ignored, ...rest } = options;
     this.ops.push({ ...rest, t: "material", id });
     return id;
+  }
+
+  somaHumanoid(options: Record<string, unknown> = {}): SomaHumanoidHandle {
+    return createSomaHumanoid(this, options);
   }
 
   group(options: Record<string, unknown> = {}): string {

@@ -7,7 +7,8 @@ import { AudioPlayer } from "@woohaa3/ui/media";
  * 成功优先产物、失败优先错误、运行中优先进度；请求/技术默认折叠；媒体受控同源读取，
  * 不自动播放，失败有局部反馈且不改变任务终态。Escape 只在详情内处理一次并恢复触发元素焦点。
  */
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+const SomaMotionPlayer = lazy(() => import("../../shared/soma-motion/player.js").then(module => ({ default: module.SomaMotionPlayer })));
 import { isTerminalTaskState, type TaskExecutionDetail, type TaskExecutionState } from "@woohaa3/contracts";
 import { Button, IconButton } from "@woohaa3/ui/primitives";
 import { Collapsible } from "@woohaa3/ui/primitives";
@@ -272,6 +273,12 @@ function MediaResultPreview({
 }) {
   const [failed, setFailed] = useState(false);
   const [zoom, setZoom] = useState(false);
+  if (result.mediaKind === "motion") {
+    if (!result.storageKey) return <p className="task-history__muted">动作（无稳定对象）</p>;
+    const fps = result.motion?.fps;
+    if (!fps || !Number.isFinite(fps) || fps <= 0 || fps > 240) return <p className="task-history__muted">动作采样信息不可用</p>;
+    return <Suspense fallback={<p>正在载入播放器…</p>}><SomaMotionPlayer url={resolveMediaUrl(result.storageKey)} fps={fps} expectedFrameCount={result.motion?.frameCount} /></Suspense>;
+  }
   if (result.mediaKind === "image") {
     if (!result.storageKey) return <p className="task-history__muted">图片（无稳定对象）</p>;
     const url = resolveMediaUrl(result.storageKey);

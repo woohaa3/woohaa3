@@ -23,6 +23,7 @@ import { isMediaLocator,
 import { createPptaskProvider } from "@sdppp/pptask";
 import type {
   PptaskAudioModelImplementation,
+  PptaskMotionModelImplementation,
   PptaskImageModelImplementation,
   PptaskLanguageModelImplementation,
   PptaskOperationStartResult,
@@ -411,12 +412,15 @@ export function createRemoteGenerationProvider(options: RemoteGenerationProvider
     doCancel: ((args: { operation: unknown }) => cancelFor(args.operation)) as unknown as PptaskAudioModelImplementation["doCancel"]
   });
 
+  const motionModel = (): PptaskMotionModelImplementation => ({doStart:startFor("motion"),doStatus:({operation})=>statusFor("motion",operation) as never,doCancel:({operation})=>cancelFor(operation)});
+
   return createPptaskProvider({
     providerId,
     languageModel,
     imageModel,
     videoModel,
     audioModel,
+    motionModel,
     ...(options.pollIntervalMs !== undefined ? { pollIntervalMs: options.pollIntervalMs } : {})
   });
 }

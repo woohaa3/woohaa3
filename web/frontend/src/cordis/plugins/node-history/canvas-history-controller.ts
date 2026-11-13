@@ -45,7 +45,7 @@ export type CanvasHistoryState = {
 
 const PAGE_SIZE = 20;
 
-const EMPTY_COUNTS: NodeHistoryKindCounts = { text: 0, image: 0, video: 0, audio: 0, model: 0 };
+const EMPTY_COUNTS: NodeHistoryKindCounts = { text: 0, image: 0, video: 0, audio: 0, motion: 0, model: 0 };
 
 export class CanvasHistoryController {
   private listeners = new Set<() => void>();

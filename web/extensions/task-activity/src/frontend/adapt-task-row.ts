@@ -18,7 +18,8 @@ const MODEL_TYPE_LABELS: Record<NonNullable<CanvasTaskActivity["modelType"]>, st
   language: "文本",
   image: "图片",
   video: "视频",
-  audio: "音频"
+  audio: "音频",
+  motion: "动作"
 };
 
 /** 缺省主行文案：优先 modelKey，其次模型类型，最后通用「任务」。 */

@@ -10,7 +10,7 @@ import { createElement } from "react";
 import { AudioNodeHost } from "./audio-node-host.js";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
-import { MEDIA_PREVIEW_DIALOG_ID, mediaPreviewDefinition } from "./media-preview.js";
+import { MEDIA_PREVIEW_DIALOG_ID, mediaPreviewDefinition, resolveMotionPreview } from "./media-preview.js";
 import { TEXT_PREVIEW_DIALOG_ID, textPreviewDefinition } from "./text-preview.js";
 import { ALERT_DIALOG_ID, alertDefinition } from "../../services/dialogs/alert-dialog.js";
 import { createMediaPreviewRenderer, createTextPreviewRenderer, createAlertRenderer } from "./builtin-renderers.js";
@@ -45,6 +45,20 @@ export const mediaPreviewExtension: Plugin.Function<void> = definePlugin(
       renderer: createTextPreviewRenderer()
     });
 
+    const disposeMotionAction = ctx.slots.register("canvas.node-action", {
+      id: "motion-preview", owner: MEDIA_PREVIEW_PLUGIN_ID, order: -1, available: () => true,
+      describe: ({ nodeId, nodeType }) => nodeType !== "motion" ? null : {
+        label: "播放动作", tone: "neutral", enabled: resolveMotionPreview(woohaa3CanvasStore.getState().canvas, nodeId) !== null,
+        reason: "动作尚未就绪或缺少可读取的输出"
+      },
+      activate: ({ nodeId, menu }) => {
+        if (menu) return;
+        const canvas = woohaa3CanvasStore.getState().canvas;
+        const motion = resolveMotionPreview(canvas, nodeId);
+        if (motion) dialogs.open({ dialogId: MEDIA_PREVIEW_DIALOG_ID, payload: { nodeId, assetId: motion.assetId, title: motion.title, kind: "motion", canvasId: canvas!.id } });
+      }
+    });
+
     // 双击图片节点 → 打开 singleton 媒体预览（只带资产身份；payload 校验在 Service）。
     const offPreview = ctx.on("ui.media-preview.open-requested", (payload) => {
       dialogs.open({ dialogId: MEDIA_PREVIEW_DIALOG_ID, payload });
@@ -55,6 +69,7 @@ export const mediaPreviewExtension: Plugin.Function<void> = definePlugin(
 
     return () => {
       disposeAudioNodes();
+      disposeMotionAction();
       offPreview();
       offTextPreview();
       disposeText();

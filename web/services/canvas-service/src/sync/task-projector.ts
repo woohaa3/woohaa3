@@ -40,7 +40,7 @@ export type PptaskExecutionRecord = {
   error?: string;
   /** 成功时的输出。 */
   output?: {
-    mediaKind: "text" | "image" | "video" | "audio";
+    mediaKind: "text" | "image" | "video" | "audio" | "motion";
     text?: string;
     asset?: StoredAsset;
     /** 视频海报资产（稳定引用）。 */
@@ -174,7 +174,8 @@ export function buildProjectionCommands(input: {
     // 缺产物时写成**可见的失败**，见下方分支的说明。
     const binaryOutput = record.output?.mediaKind === "image"
       || record.output?.mediaKind === "video"
-      || record.output?.mediaKind === "audio";
+      || record.output?.mediaKind === "audio"
+      || record.output?.mediaKind === "motion";
     const mediaAsset = record.output?.asset;
     if (binaryOutput && !mediaAsset) {
       commands.push(emptySuccessFailurePatch(record, `${record.output?.mediaKind} 结果缺少资产`));

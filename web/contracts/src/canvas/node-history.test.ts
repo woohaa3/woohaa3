@@ -119,7 +119,7 @@ describe("节点历史契约", () => {
     expect(normalizeCanvasHistoryQuery({ kind: 42 }).kind).toBeUndefined();
     expect(normalizeCanvasHistoryQuery({ cursor: "abc" }).cursor).toBe("abc");
     expect(normalizeCanvasHistoryQuery({ cursor: "" }).cursor).toBeUndefined();
-    expect(emptyNodeHistoryKindCounts()).toEqual({ text: 0, image: 0, video: 0, audio: 0, model: 0 });
+    expect(emptyNodeHistoryKindCounts()).toEqual({ text: 0, image: 0, video: 0, audio: 0, motion: 0, model: 0 });
   });
 
   it("列表项不泄露完整正文、storageKey 或完整脚本", () => {

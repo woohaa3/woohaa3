@@ -7,7 +7,7 @@ import "./canvas-creation-popover.css";
 
 const materialIcons = {
   "insert:text": TypeIcon, "insert:image": ImageIcon, "insert:video": FilmIcon,
-  "insert:audio": MusicIcon, "insert:model3d": BoxIcon, "insert-scope:group": AdaptiveRatioIcon,
+  "insert:motion": BoxIcon, "insert:audio": MusicIcon, "insert:model3d": BoxIcon, "insert-scope:group": AdaptiveRatioIcon,
   "insert-scope:area": LayersIcon, "insert-scope:camera": VideoIcon, upload: UploadIcon
 };
 const sectionLabels: Record<string, string> = { "creation-tools": "创作工具" };
@@ -17,7 +17,7 @@ const agentCapabilities: Readonly<Record<string, string>> = {
   "insert-scope:area": "Agent 编排",
   "insert:model3d": "Agent 生成"
 };
-const materialOrder: readonly string[] = ["insert:text", "insert:image", "insert:video", "insert:audio", "insert-scope:group", "insert:model3d", "insert-scope:area"];
+const materialOrder: readonly string[] = ["insert:text", "insert:image", "insert:video", "insert:audio", "insert:motion", "insert-scope:group", "insert:model3d", "insert-scope:area"];
 const actionLabel = (item: CanvasContextMenuItem) => {
   if (item.id === "upload") return "上传素材…";
   const creates = item.id.startsWith("insert:") || item.id.startsWith("insert-scope:") || item.id.startsWith("insert-template:");

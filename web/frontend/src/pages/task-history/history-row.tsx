@@ -17,7 +17,8 @@ const MODEL_TYPE_ICON: Record<TaskModelType, ComponentType<{ className?: string 
   language: FileTextIcon,
   image: ImageIcon,
   video: FilmIcon,
-  audio: MusicIcon
+  audio: MusicIcon,
+  motion: FilmIcon
 };
 
 export function HistoryRowView({
@@ -130,6 +131,9 @@ function ResultSummaryCell({ row, resolveMediaUrl }: { row: HistoryRow; resolveM
         <img src={resolveMediaUrl(row.result.storageKey, row.canvasId)} alt="结果缩略图" loading="lazy" />
       </span>
     );
+  }
+  if (row.result.mediaKind === "motion") {
+    return <span className="task-history__muted"><FilmIcon className="task-history__result-icon" /> 动作{row.result.durationSeconds !== undefined ? ` · ${row.result.durationSeconds}s` : ""}</span>;
   }
   if (row.result.mediaKind === "video") {
     return (

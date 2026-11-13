@@ -73,6 +73,7 @@ const V2 = MODEL_SCRIPT_V2_VERSION;
 
 /** V2 场景方法集合。 */
 export const MODEL_API_METHODS: readonly ModelApiMethod[] = [
+  { name: "somaHumanoid", signature: "scene.somaHumanoid({ id?, style?: 'mecha'|'humanoid', armorColor?, jointColor?, accentColor?, lightColor? }) => { root, joint(officialSomaName) }; fixed SOMA77 skeleton, colors #rrggbb", versions: [V2] },
   { name: "material", signature: "scene.material({ id?, baseColor?, roughness?, metallic?, emissive?, emissiveStrength?, alphaMode?: 'opaque'|'blend', doubleSided?, unlit?: boolean, opacity?: 0..1 }) => materialId", versions: [V2] },
   { name: "group", signature: "scene.group({ id?, parent?, position?, rotation?, scale? }) => id", versions: [V2] },
   { name: "box", signature: "scene.box({ id?, parent?, size: [x,y,z], position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },

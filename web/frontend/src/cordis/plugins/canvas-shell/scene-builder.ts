@@ -44,6 +44,7 @@ export type SceneBuildInput = {
   /** 导演区地面范围瞬时预览（搬动/调范围）；只影响呈现，不写规范 nodeData。 */
   sceneAreaPreviews?: ReadonlyMap<string, import("@woohaa3/contracts").GroundAabb>;
   /** 导演区整体动画播放头（秒）；只影响呈现，不写规范数据。 */
+  sceneAnimationContext?: import("@woohaa3/contracts").WorldAnimationSamplingContext;
   sceneAnimationTimes?: ReadonlyMap<string, number>;
   viewportPreview: Viewport | null;
   fallbackViewport: Viewport;
@@ -128,6 +129,7 @@ export function buildSceneWithResources(
     worldCameraShotPhases: shotPhasesByNode(canvasState),
     sceneAreaPreviews: input.sceneAreaPreviews,
     sceneAnimationTimes: input.sceneAnimationTimes,
+    sceneAnimationContext: input.sceneAnimationContext,
     sceneAnimationPlayheads: options.getWorldAnimationPlayheads?.(),
     sceneAnimationPlayer: options.getWorldAnimationPlayer?.(),
     sceneAnimationLoop: options.getWorldAnimationLoop,

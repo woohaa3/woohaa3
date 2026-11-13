@@ -67,6 +67,7 @@ pub(crate) fn sync_quality_with_demand(
         let Some(root) = roots.get_mut(&node.id) else {
             continue;
         };
+        if root.resource.ops.iter().any(|op|matches!(op,crate::protocol::ModelOp::Mesh{skin:Some(_),..})){continue;}
         let purpose =
             super::super::quality::purpose(node, scene, focus, high_demand.contains(&node.id));
         let high_owner = purpose.requires_high();

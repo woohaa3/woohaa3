@@ -63,7 +63,7 @@ pub(super) fn scene_with(node: &GraphNode, model: Option<ModelReference>) -> Sce
 /// `modelPlacement` 已不再进入场景 wire；参数只为兼容既有夹具签名。
 pub(super) fn reference_for(snapshot: &ModelSnapshot, _placement: ModelPlacement) -> ModelReference {
     let scene_version = snapshot.scene_version.clone();
-    ModelReference { ground_anchor_local: None, part_rotations: None,
+    ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
         resource_key: format!(
             "{}:{}",
             scene_version.clone().unwrap_or_default(),

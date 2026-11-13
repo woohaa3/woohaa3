@@ -54,6 +54,7 @@ mod diagnostics;
 #[cfg(feature = "explicit-instancing")]
 pub(crate) mod instancing;
 mod mesh;
+mod normals;
 pub(crate) mod model_textures;
 mod motion_plan;
 mod motion_reset;
@@ -167,3 +168,5 @@ pub(crate) fn set_bound_instance_layer(
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod skin;

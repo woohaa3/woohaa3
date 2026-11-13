@@ -247,7 +247,7 @@ export function planWorldGroundMoveWithAnimationParts(
     const script = area.value.animationScript;
     const executed = executeWorldAnimationScript(script.script, { duration: script.duration, loop: script.loop });
     if (!executed.ok) continue;
-    if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
+    if (![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? []), ...(executed.ir.somaTracks ?? [])].some(track => instanceIds.has(track.targetId))) continue;
     const unbind = unbindAreaIds?.has(node.id) === true;
     const localDelta = rotateGroundQuarterTurns(delta, { u: 0, v: 0 }, -(area.value.animationQuarterTurns ?? 0));
     let changed = false;
@@ -273,6 +273,8 @@ export function planWorldGroundMoveWithAnimationParts(
       changed=true;
       return unbind ? [] : [{...track,path:track.path.map(([u,v])=>[u+localDelta.u,v+localDelta.v] as [number,number])}];
     });
+    const somaTracks = (executed.ir.somaTracks ?? []).filter(track => !unbind || !instanceIds.has(track.targetId));
+    if (somaTracks.length !== (executed.ir.somaTracks?.length ?? 0)) changed = true;
     const partTracks = (executed.ir.partTracks ?? []).filter(track => !unbind || !instanceIds.has(track.targetId));
     if (partTracks.length !== (executed.ir.partTracks?.length ?? 0)) changed = true;
     const sampled = sampleWorldAnimationInArea(
@@ -298,7 +300,7 @@ export function planWorldGroundMoveWithAnimationParts(
       }
       if (!unbind && !unbindAreaIds) {
         const target = start.targets.find(entry => entry.instance.instanceId === instanceId);
-        if (!target || ![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? [])].some(track => track.targetId === instanceId)) continue;
+        if (!target || ![...executed.ir.instanceTracks, ...(executed.ir.partTracks ?? []),...(executed.ir.walkTracks ?? []), ...(executed.ir.somaTracks ?? [])].some(track => track.targetId === instanceId)) continue;
         // Missing prepared geometry cannot authorize a destructive unlink.
         if (!target.localAnchor) return null;
         const base = target.instance.transform;
@@ -321,7 +323,7 @@ export function planWorldGroundMoveWithAnimationParts(
     }
     if (!changed && unbindCandidates.length === 0) continue;
     const nextScript = createWorldAnimationScript({
-      script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks, partTracks,walkTracks }),
+      script: serializeWorldAnimationScript({ ...executed.ir, instanceTracks, partTracks,walkTracks,somaTracks }),
       duration: script.duration,
       loop: script.loop,
       revision: script.revision + 1

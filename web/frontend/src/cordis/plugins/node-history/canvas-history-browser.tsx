@@ -22,6 +22,7 @@ const FILTERS: Array<{ id: CanvasHistoryFilter; label: string }> = [
   { id: "image", label: "图片" },
   { id: "video", label: "视频" },
   { id: "audio", label: "音频" },
+  { id: "motion", label: "动作" },
   { id: "model", label: "模型" }
 ];
 
@@ -30,6 +31,7 @@ const KIND_LABELS: Record<NodeGenerationKind, string> = {
   image: "图片",
   video: "视频",
   audio: "音频",
+  motion: "动作",
   model: "模型"
 };
 

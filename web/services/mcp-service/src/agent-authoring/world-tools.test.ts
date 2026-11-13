@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { executeModelWithStoredRig, describeWorldModelAnimationRig, HUMANOID_REFERENCE_PARAMETERS, assistantWorldToolsForScope } from "@woohaa3/contracts";
+import { SOMA77_JOINTS, executeModelWithStoredRig, describeWorldModelAnimationRig, HUMANOID_REFERENCE_PARAMETERS, assistantWorldToolsForScope } from "@woohaa3/contracts";
 import type { ApplicationToolGrant, WorldAnimationScript } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "../model-mcp/mcp-http.js";
 import type { AgentCanvasClient } from "../downstream/agent-canvas-client.js";
@@ -492,3 +492,21 @@ it("returns axial joint warnings after a successful save in a fresh director are
  expect(result.result?.isError).not.toBe(true);
  expect(result.result?.structuredContent).toMatchObject({ok:true,motionVerification:{status:"warnings",issues:expect.arrayContaining([expect.objectContaining({code:"joint-twist-without-swing",detail:expect.objectContaining({jointId:"LeftUpperArm",rotationRadians:expect.any(Number),endpointDisplacementMeters:expect.any(Number)})})])}});
 });
+
+ it('binds one-call animation to the host grant and keeps SOMA context compact',async()=>{
+  let request:unknown;
+  const groups=[{id:'soma'},...SOMA77_JOINTS.map(j=>({id:`soma.${j.name}`,parent:j.parent<0?'soma':`soma.${SOMA77_JOINTS[j.parent]!.name}`,position:[...j.position],rotation:[...j.rotation],scale:[1,1,1]}))];
+  const world:AssistantWorldToolClient={
+   async read(){return {ok:true,view:{scope:grant().world!.scope,sceneModels:[{instanceId:'actor',animationRig:{groups}}]} as any};},
+   async write(){throw Error('not used');},async complete(){throw Error('not used');},
+   humanoidMotion:{async animate(input){request=input;return {ok:true};},async generate(){throw Error('not used');},async get(){throw Error('not used');},async apply(){throw Error('not used');}}
+  };
+  const base=await start(world,grant());
+  const result=await callTool(base,'animate_humanoid',{instanceId:'actor',prompt:'walk',duration:1,rootMotion:'translate'},grant().token);
+  expect(result.result?.structuredContent).toMatchObject({ok:true});
+  expect(request).toMatchObject({canvasId:'canvas-1',contextId:'ctx-1',requestId:'req-1',instanceId:'actor',rootMotion:'translate'});
+  const context=await callTool(base,'get_world_context',{},grant().token);
+  const model=(context.result?.structuredContent?.sceneModels as any[])[0];
+  expect(model.somaMotion).toMatchObject({skeletonId:'somaskel77',jointCount:77,tool:'animate_humanoid'});
+  expect(model.animationRig.groups).toBeUndefined();
+ });

@@ -258,7 +258,17 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
           intent.scope = resolved.scope;
         };
       } else {
-        this.spatialLeases.validateUnoccupied(commit.canvasId, targets);
+        if (!this.spatialAuthority?.userCreateTargets && Object.entries(commit.projection.nodeData).some(([id, fields]) => !before.nodeData[id] && fields.directorCharacterCreation)) throw new SpatialLeaseError("unavailable");
+        const userCreateTargets = this.spatialAuthority?.userCreateTargets?.(before, commit.projection) ?? [];
+        // A director run with no current members still owns its scope. Read the
+        // durable run rows here, in the same transaction as the user creation.
+        for (const [id, fields] of Object.entries(commit.projection.nodeData)) {
+          if (before.nodeData[id] || !fields.directorCharacterCreation) continue;
+          const marker = fields.directorCharacterCreation as { areaId: string };
+          const run = this.spatialLeases.listPending().find(record => record.intent.canvasId === commit.canvasId && record.intent.scope.scope.kind === "scene-area" && record.intent.scope.scope.areaId === marker.areaId);
+          if (run) throw new SpatialLeaseError("lease-conflict", { target: { kind: "instance", instanceId: id }, runId: run.intent.runId, epoch: run.intent.epoch });
+        }
+        this.spatialLeases.validateUnoccupied(commit.canvasId, [...targets, ...userCreateTargets]);
       }
 
       if (this.failWrites()) {

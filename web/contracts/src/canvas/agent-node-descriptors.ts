@@ -19,14 +19,15 @@ import { COMPOSITE_ASSET_NODE_TYPE } from "./domain/core/composite-asset-identit
 import { newWorldInstance } from "./creation-scopes-ui.js";
 
 /** 对外暴露的语义节点种类。`model` 是自包含的 3D 内容节点。 */
-export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "model";
+export type AgentSemanticKind = "text" | "image" | "video" | "audio" | "motion" | "model";
 
 export const AGENT_SEMANTIC_KINDS: readonly AgentSemanticKind[] = [
   "text",
   "image",
   "model",
   "video",
-  "audio"
+  "audio",
+  "motion"
 ];
 
 export type AgentNodeDescriptor = {
@@ -60,7 +61,8 @@ export const AGENT_NODE_DESCRIPTORS: readonly AgentNodeDescriptor[] = [
   descriptor("image", "image", "图片", { task: true, prompt: true, executable: true, sourceLabel: "图片" }),
   descriptor("model", "model3d", "模型", { prompt: true, executable: false, sourceLabel: "模型" }),
   descriptor("video", "video", "视频", { task: true, prompt: true, executable: true, sourceLabel: "" }),
-  descriptor("audio", "audio", "音频", { task: true, prompt: true, executable: true, sourceLabel: "" })
+  descriptor("audio", "audio", "音频", { task: true, prompt: true, executable: true, sourceLabel: "" }),
+  descriptor("motion", "motion", "动作", { task: true, prompt: true, executable: true, sourceLabel: "动作" })
 ];
 
 function descriptor(

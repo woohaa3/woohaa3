@@ -12,7 +12,7 @@ export const NODE_GENERATION_HISTORY_VERSION = "woohaa-node-generation-history-v
 export type NodeGenerationHistoryVersion = typeof NODE_GENERATION_HISTORY_VERSION;
 
 /** 五类可承载生成历史的节点种类。 */
-export const NODE_GENERATION_KINDS = ["text", "image", "video", "audio", "model"] as const;
+export const NODE_GENERATION_KINDS = ["text", "image", "video", "audio", "motion", "model"] as const;
 export type NodeGenerationKind = (typeof NODE_GENERATION_KINDS)[number];
 
 export function isNodeGenerationKind(value: unknown): value is NodeGenerationKind {
@@ -60,12 +60,14 @@ export type NodeHistoryTextPayload = { kind: "text"; text: string };
 
 /** 图片/视频/音频版本 payload：只保存稳定 Media metadata（bytes 仍归 Media Service）。 */
 export type NodeHistoryMediaPayload = {
-  kind: "image" | "video" | "audio";
+  kind: "image" | "video" | "audio" | "motion";
   storageKey: string;
   checksum: string;
   contentType: string;
   size: number;
   durationSeconds?: number;
+  fps?: number;
+  motion?: import("../../task/history/types.js").SomaMotionMetadata;
   /** 视频海报的稳定 metadata。 */
   poster?: { storageKey: string; checksum: string; contentType: string; size: number };
   /** 图片版本的稳定原图 metadata（仅图片编辑版本携带）。 */
@@ -185,6 +187,7 @@ export type NodeHistoryPreview =
   | { kind: "image"; href: string }
   | { kind: "video"; href: string; posterHref: string | null; durationSeconds: number | null }
   | { kind: "audio"; href: string; durationSeconds: number | null }
+  | { kind: "motion"; href: string; durationSeconds: number | null; fps: number; motion: import("../../task/history/types.js").SomaMotionMetadata }
   | { kind: "model"; entry: NodeHistoryPreviewEntry }
   | { kind: "failure"; outcome: Exclude<NodeHistoryOutcome, "succeeded">; message: string };
 
@@ -246,12 +249,14 @@ export type NodeGenerationHistoryDetail =
   | { entryId: string; kind: "text"; text: string }
   | {
       entryId: string;
-      kind: "image" | "video" | "audio";
+      kind: "image" | "video" | "audio" | "motion";
       storageKey: string;
       checksum: string;
       contentType: string;
       size: number;
       durationSeconds?: number;
+      fps?: number;
+      motion?: import("../../task/history/types.js").SomaMotionMetadata;
       poster?: { storageKey: string; checksum: string; contentType: string; size: number };
       base?: NodeHistoryImageEditBaseMetadata;
       imageEdit?: ImageEditDocument;

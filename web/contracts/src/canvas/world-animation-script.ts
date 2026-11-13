@@ -1,3 +1,4 @@
+import { sampleSomaSceneLapRoute, transformSomaSceneLapPoint } from './soma-motion/scene-lap.js';
 /**
  * 导演区统一动画脚本（`woohaa-world-animation-js-v2`）。
  *
@@ -10,6 +11,8 @@
  *
  * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
+import { sampleSomaClip, validateSomaClip, type WorldSomaClipTrack } from "./soma-motion/clip.js";
+import type { PreparedSomaMotion } from "./soma-motion/index.js";
 import {validateHumanoidWalk,sampleHumanoidWalk,HUMANOID_WALK_PART_IDS,type HumanoidWalkTrack} from "./world-walk.js";
 import { rotateGroundQuarterTurns, rotateWorldQuarterTurn } from "./world-quarter-turn.js";
 import { fnv1a64Hex } from "./content-hash.js";
@@ -83,6 +86,7 @@ export type WorldAnimationIr = {
   cameraTracks: WorldCameraTrack[];
   partTracks?: WorldPartTrack[];
   walkTracks?: HumanoidWalkTrack[];
+  somaTracks?: WorldSomaClipTrack[];
 };
 
 export type WorldAnimationScriptFailure = {
@@ -175,6 +179,8 @@ class WorldAnimationRecorder {
   private readonly cameraTracks: RawTrack[] = [];
   private readonly partTracks: RawPartTrack[] = [];
   private readonly walkTracks: unknown[] = [];
+  private readonly somaTracks: unknown[] = [];
+  readonly soma = { clip: (targetId: unknown, options: unknown): void => { this.somaTracks.push({ ...(isRecord(options) ? options : {}), targetId }); } };
 
   readonly instance = {
     walk: (targetId: unknown, options: unknown): void => {
@@ -205,8 +211,8 @@ class WorldAnimationRecorder {
     }
   };
 
-  raw(): { instanceTracks: RawTrack[]; cameraTracks: RawTrack[]; partTracks: RawPartTrack[]; walkTracks:unknown[] } {
-    return { instanceTracks: [...this.instanceTracks], cameraTracks: [...this.cameraTracks], partTracks: [...this.partTracks],walkTracks:[...this.walkTracks] };
+  raw(): { instanceTracks: RawTrack[]; cameraTracks: RawTrack[]; partTracks: RawPartTrack[]; walkTracks:unknown[]; somaTracks:unknown[] } {
+    return { instanceTracks: [...this.instanceTracks], cameraTracks: [...this.cameraTracks], partTracks: [...this.partTracks],walkTracks:[...this.walkTracks], somaTracks:[...this.somaTracks] };
   }
 }
 
@@ -237,8 +243,9 @@ function readRotationCycle(options: unknown): WorldRotationCycle | null {
 }
 
 /** Each target/property is one logical track even with many tween segments. */
-export function countWorldAnimationChannels(ir: Pick<WorldAnimationIr,"instanceTracks"|"cameraTracks"|"partTracks"|"walkTracks">): number {
+export function countWorldAnimationChannels(ir: Pick<WorldAnimationIr,"instanceTracks"|"cameraTracks"|"partTracks"|"walkTracks"|"somaTracks">): number {
   return new Set([
+    ...(ir.somaTracks ?? []).map(track => JSON.stringify(["soma",track.targetId])),
     ...ir.instanceTracks.map(track => JSON.stringify(["instance",track.targetId,track.property])),
     ...ir.cameraTracks.map(track => JSON.stringify(["camera",track.targetId,track.property])),
     ...(ir.partTracks ?? []).map(track => JSON.stringify(["part",track.targetId,track.partId,track.property])),
@@ -326,7 +333,16 @@ function runWorldAnimationOnce(
       return {ok:false,stage:"invalid",code:"conflicting-walk",message:"行走生成已拥有该模型的位置、朝向和关节通道，不能混合独立轨道"};
     walkTargets.add(track.targetId);
   }
-  const channelCount = countWorldAnimationChannels({ instanceTracks,cameraTracks,partTracks,walkTracks });
+  const somaTracks: WorldSomaClipTrack[] = [];
+  try { for (const track of raw.somaTracks) somaTracks.push(validateSomaClip(track,input.duration)); }
+  catch(error) { return {ok:false,stage:"invalid",code:"invalid-soma-clip",message:String(error)}; }
+  const somaTargets=new Set<string>();
+  for(const track of somaTracks) {
+    if(somaTargets.has(track.targetId) || [...partTracks,...walkTracks].some(other=>other.targetId===track.targetId)) return {ok:false,stage:"invalid",code:"conflicting-soma-clip",message:"SOMA clip owns this instance's joint channels"};
+    if((track.rootMotion === "translate" || track.route) && (input.loop || instanceTracks.some(other=>other.targetId===track.targetId))) return {ok:false,stage:"invalid",code:"conflicting-soma-root-motion",message:"Moving SOMA clips cannot loop or share independent instance transform tracks"};
+    somaTargets.add(track.targetId);
+  }
+  const channelCount = countWorldAnimationChannels({ instanceTracks,cameraTracks,partTracks,walkTracks,somaTracks });
   if (channelCount > WORLD_ANIMATION_MAX_CHANNELS) {
     return { ok:false,stage:"invalid",code:"too-many-tracks",message:`逻辑动画轨道 ${channelCount} 超过 ${WORLD_ANIMATION_MAX_CHANNELS} 上限；按目标及属性计数，关键帧/分段/循环次数不增加轨道数。` };
   }
@@ -337,7 +353,8 @@ function runWorldAnimationOnce(
     instanceTracks,
     cameraTracks,
     ...(partTracks.length ? { partTracks } : {}),
-    ...(walkTracks.length ? { walkTracks } : {})
+    ...(walkTracks.length ? { walkTracks } : {}),
+    ...(somaTracks.length ? { somaTracks } : {})
   };
   return { ok: true, ir, json: JSON.stringify(ir) };
 }
@@ -381,8 +398,11 @@ function validateTrack(
 
 export type SampledInstanceMotion = {
   /** Trusted generator stance labels, not measured collision/contact. */
+  absoluteTransform?: true;
   footContacts?: Record<string,{stance:boolean;plant:number}>;
   partRotations?: Record<string, WorldRotation>;
+  partPositions?: Record<string, [number,number,number]>;
+  rootTranslation?: [number,number,number];
   position?: WorldPoint;
   rotation?: WorldRotation;
   scale?: number;
@@ -400,9 +420,12 @@ export type SampledCameraMotion = {
  * Position 值是脚本里的相对 u/v 偏移（h 为绝对高度），需要世界位置时用
  * `sampleWorldAnimationInArea` 加上导演区 origin。
  */
+export type WorldAnimationSamplingContext = { resolveSomaMotion: (track: WorldSomaClipTrack) => PreparedSomaMotion | undefined };
+
 export function sampleWorldAnimation(
   ir: WorldAnimationIr,
-  time: number
+  time: number,
+  context?: WorldAnimationSamplingContext
 ): { instances: Map<string, SampledInstanceMotion>; cameras: Map<string, SampledCameraMotion> } {
   const now = Number.isFinite(time) ? Math.max(0, Math.min(time, ir.duration)) : 0;
   const instances = new Map<string, SampledInstanceMotion>();
@@ -438,6 +461,13 @@ export function sampleWorldAnimation(
     const motion=sampleHumanoidWalk(track,now);
     if(motion)instances.set(track.targetId,motion);
   }
+  for(const track of ir.somaTracks ?? []) {
+    const prepared=context?.resolveSomaMotion(track);
+    if(!prepared || prepared.fps!==track.fps || prepared.frameCount!==track.frameCount)continue;
+    const pose=sampleSomaClip(prepared,track.jointPrefix,Math.max(0,Math.min(now,track.endTime)-track.startTime),track.rootMotion,!!track.route);
+    const route=track.route ? {...sampleSomaSceneLapRoute(track.route,(now-track.startTime)/(track.endTime-track.startTime)),absoluteTransform:true as const,scale:track.route.scale} : {};
+    instances.set(track.targetId,{...instances.get(track.targetId),...pose,...route});
+  }
   return { instances, cameras };
 }
 
@@ -449,17 +479,27 @@ export function sampleWorldAnimationInArea(
   ir: WorldAnimationIr,
   time: number,
   origin: GroundPoint,
-  quarterTurns = 0
+  quarterTurns = 0,
+  context?: WorldAnimationSamplingContext
 ): { instances: Map<string, SampledInstanceMotion>; cameras: Map<string, SampledCameraMotion> } {
-  const sample = sampleWorldAnimation(ir, time);
+  const sample = sampleWorldAnimation(ir, time, context);
   const shift = <T extends { position?: WorldPoint }>(motions: Map<string, T>) => {
     for (const motion of motions.values()) {
-      if (motion.position) {
+      if (motion.position && !("absoluteTransform" in motion && motion.absoluteTransform)) {
         const point = rotateGroundQuarterTurns(motion.position, { u: 0, v: 0 }, quarterTurns);
         motion.position = { u: point.u + origin.u, v: point.v + origin.v, h: motion.position.h };
       }
     }
   };
+  for(const track of ir.somaTracks??[]){
+    if(!track.route)continue;
+    const motion=sample.instances.get(track.targetId);
+    if(!motion?.position||!motion.absoluteTransform)continue;
+    const ground=transformSomaSceneLapPoint(motion.position,track.route,origin,quarterTurns);
+    motion.position={...motion.position,...ground};
+    const turns=quarterTurns-(track.route.referenceFrame?.quarterTurns??0);
+    if(motion.rotation)for(let i=0;i<(turns%4+4)%4;i++)motion.rotation=rotateWorldQuarterTurn(motion.rotation);
+  }
   shift(sample.instances);
   shift(sample.cameras);
   // Camera tracks contain absolute world orientations; instance tracks are
@@ -547,5 +587,15 @@ export function serializeWorldAnimationScript(ir: WorldAnimationIr): string {
     const {targetId,...options}=track;
     lines.push(`motion.instance.walk(${JSON.stringify(targetId)}, ${JSON.stringify(options)});`);
   }
+  for(const track of ir.somaTracks ?? []) { const {targetId,...options}=track; lines.push(`motion.soma.clip(${JSON.stringify(targetId)}, ${JSON.stringify(options)});`); }
   return lines.join("\n");
+}
+
+/** Remove every animation channel owned by the selected instances; cameras remain independent. */
+export function removeWorldAnimationInstanceTracks(ir: WorldAnimationIr, targetIds: ReadonlySet<string>): WorldAnimationIr {
+  const keep = (track: {targetId:string}) => !targetIds.has(track.targetId);
+  return {...ir,instanceTracks:ir.instanceTracks.filter(keep),
+    ...(ir.partTracks ? {partTracks:ir.partTracks.filter(keep)} : {}),
+    ...(ir.walkTracks ? {walkTracks:ir.walkTracks.filter(keep)} : {}),
+    ...(ir.somaTracks ? {somaTracks:ir.somaTracks.filter(keep)} : {})};
 }

@@ -64,6 +64,8 @@ export function validateModelSceneIrV2(input: unknown): SceneIrV2Validation {
     ops.push(op);
   }
 
+  for(const op of ops){if(op.t==="mesh"&&op.skin?.jointIds.some(id=>!shapeIds.has(id)))return fail("invalid-mesh",`mesh ${op.id} 引用未知 joint`);}
+
   // 父引用环检测（readShape 已保证 parent 先出现，这里再防御 future 变更）。
   for (const id of shapeIds) {
     const seen = new Set<string>([id]);

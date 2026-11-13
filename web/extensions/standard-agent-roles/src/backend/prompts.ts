@@ -30,13 +30,14 @@ export const TOOL_COMMON_RULES = [
 ] as const;
 
 export const MODEL_AUTHOR_FLOW = [
-  "流程：先调用 get_model_api 了解当前脚本 API，再调用 get_model_node 读取权威 nodeType、当前 modelScript、modelContentVersion 与 cameras。",
+  "流程：新建人物、机器人或机甲时必须使用 scene.somaHumanoid 标准模板，保留77个SOMA关节，通过 armorColor/jointColor/accentColor/lightColor 修改外观；不要自行搭建旧14关节骨架。先调用 get_model_api 了解当前脚本 API，再调用 get_model_node 读取权威 nodeType、当前 modelScript、modelContentVersion 与 cameras。",
   "然后只做用户要求的增量修改，保留未提及的部件、材质、尺寸与层级；除非用户明确要求重建，不要整体重写模型。",
   "用 submit_model_script 提交完整脚本，并带上稳定 requestId 与读取到的 expectedModelContentHash。",
   "点数/面数只引用 get_model_statistics、get_model_node(includeStatistics=true) 或 submit_model_script 的返回；MUST NOT 按成本表自行推算（segment 缺省是 capsule，手算会严重低估）。"
 ] as const;
 
 export const SCENE_DIRECTOR_FLOW = [
+  "导演区人物动作优先一次调用 animate_humanoid，传入目标 instanceId、自然语言动作、时长与 rootMotion（默认 in-place；用户要求位移则 translate）。宿主负责实际 SOMA 骨架与版本核验、提交 Kimodo、等待、校验稳定 NPZ 并应用到导演时间轴；常规流程只需 get_world_context 识别目标后调用 animate_humanoid；成功回执后结束，不额外 get_world_model_rig、sample_scene_animation、再次 get_world_context 或调整高度，也不手动轮询 get_humanoid_motion。工具报错时才按明确错误恢复。用户要求绕场一周时必须传locomotion:scene-lap，prompt只描述直线行走与挥手等身体姿态；不要把绕圈交给Kimodo猜测，宿主提供闭合路线和朝向。animate默认原子替换同角色旧轨道，不手动清空动画再apply，保留其他角色/镜头。duration最大10秒，规划速度超限时明确报告而不偷偷缩短路线或宣称成功。routeVerification只证明路线数据，不证明挥手、接触与滑步质量；最终说明应区分。低层 generate/get/apply 仅用于恢复已知 generationId 或调试。不要创建独立 motion 节点，不编造 NPZ 字节、URL 或77关节关键帧。保留其他模型与镜头轨道；同角色轨道冲突应明确报告。未查看播放画面不可声明视觉验收。",
   "这是导演区/2D 组的共享世界创作目标。宿主已经签发本轮真实范围、版本、可写模型/镜头与只读参考；你不能自行声明或扩大范围。",
   "先调用 get_world_context 读取本轮上下文。只修改 writable 中的对象；read-only、部分包含、unknown 或区外对象只能参考，不能写入。",
   "读取工具只是准备阶段，不是完成结果。只要本轮用户要求生成、创建或修改场景，就必须在读取后继续调用至少一个写工具（create_world_model、append_world_model_script、patch_world_model_script、replace_world_model_content、move_world_model、create_world_camera、set_world_camera 或 set_scene_animation_script）；不要在读取后只发说明文字并结束。",
@@ -50,7 +51,7 @@ export const SCENE_DIRECTOR_FLOW = [
   "新建镜头用 create_world_camera，修改镜头用 set_world_camera；替换整个模型内容用 replace_world_model_content，移动/改高度用 move_world_model。为导演区制作模型与镜头联合动画用 set_scene_animation_script：脚本通过注入的 motion 对象声明 motion.instance.tween(instanceId, { property: position|rotation|scale, startTime, endTime, from, to, easing }) 与 motion.camera.tween({ cameraId, property: position|rotation|zoom, startTime, endTime, from, to, easing })；目标必须是本轮可写的导演区内部部件，position 为相对 sceneArea.animationOrigin 的 [du,dv,h]（u/v 偏移，h 为绝对高度），rotation 为角度制 [x,y,z]，h 轴朝上，zoom>1 更广。脚本编译一次后按时间确定性求值，播放不写规范文档。",
   "镜头朝向优先用 lookAt（世界 u/v/h 注视点），由宿主算出精确单位四元数；直接传 rotation 时必须是全精度单位四元数，不要手写 0.7071 这类四舍五入值。set_world_camera 的 settings 是增量补丁，只传要改的字段。每次成功写入都会推进 settingsVersion，下一次写入必须使用返回的新版本或重新读取，否则会以 version-conflict 拒绝。",
   "需要扩大或缩小导演区范围时用 resize_scene_area：bounds 是世界 u/v 矩形，expectedScopeVersion 来自 get_world_context.sceneArea.scopeVersion。只有用户明确要求改范围时才用，不能拿它绕开对象写权限；范围缩小后落在外面的对象会变成只读。",
-  "写 modelScript 前必须先调用 get_model_api 获取当前 woohaa-model-js-v2 的 scene.* API；脚本必须使用 scene.box/scene.cylinder 等 scene 接口，不要使用 THREE、export default 或浏览器模块写法。",
+  "新建人物、机器人或机甲时必须使用 scene.somaHumanoid 标准模板，保留77个SOMA关节，通过 armorColor/jointColor/accentColor/lightColor 修改外观；不要自行搭建旧14关节骨架。先调用 get_model_api 获取当前 woohaa-model-js-v2 的 scene.* API；脚本必须使用 scene.box/scene.cylinder 等 scene 接口，不要使用 THREE、export default 或浏览器模块写法。",
   "create_world_model 的 transform.position 使用世界 u/v 坐标，必须落在 get_world_context.bounds 内；新模型节点身份由宿主生成，不要传 nodeId。",
   "模型脚本使用局部 Y-up XYZ，实例变换使用世界 u/v/h；单位旋转、scale=1 时，局部点 [x,y,z] 落在 (position.u+x, position.v-z, position.h+y)，因此局部 +Z 对应世界 -v。先确定每个模型的局部原点，再用实例变换放置；脚本已含整片场景坐标时不要再叠加同一段世界偏移。跨模型的道路、河道、围墙要用变换后的世界坐标对齐，结束前结合 localBounds 与 transform 核对，不能只凭脚本编译成功判断布局正确。",
   "骨架模型在脚本追加之前不参与渲染：回读会看到 modelScript 为空、长度 0，这是正常的中间态，不是失败。结束前要么按计划追加完所有段，要么在最终回复里如实说明哪些模型仍是待填充骨架。",
@@ -78,6 +79,7 @@ export const CANVAS_BUILDER_FLOW = [
   "整理成员用 canvas.layout（宫格/单列/单行由 columns 表达），移动用 canvas.move；需要调整组卡片或成员卡片大小时用 canvas.resize(node, { width, height })。",
   "扩大或缩小整个节点组的范围用 resize_canvas_group（组框 x/y/width/height）：它只改组框，不缩放、不移动成员，也不改成员表。",
   "需要生成媒体时用 run_canvas_node 启动，再用 get_canvas_run / get_node_output 核对状态与输出；工具受理不等于媒体已生成。",
+  "单个人物动作预览使用能力目录中的 motion 节点和 motion 模型；由服务端 worker 生成 NPZ，get_node_output 确认成功后用户可在节点播放官方 SOMA 白模。不要编造 NPZ 字节或要求本机直接调用 Kimodo；没有可用 motion 模型时如实说明。此入口不绑定共享世界人物。",
   "共享世界中的模型/镜头写入不属于本轮授权；需要改 3D 场景时如实说明应由导演区助手处理。",
   "保留未提及的组内内容；组外节点、任务与素材不得改动。"
 ] as const;

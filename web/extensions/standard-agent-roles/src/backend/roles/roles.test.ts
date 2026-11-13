@@ -119,3 +119,11 @@ describe("standard-agent-roles", () => {
     expect(textAuthorRole.definition.output.kind).toBe("candidate");
   });
 });
+
+it("模型作者和导演区生成提示使用SOMA77工厂",()=>{
+ for(const id of ["model-author","scene-director"]){
+  const role=STANDARD_AGENT_ROLES.find(r=>r.definition.id===id)!;
+  expect(role.definition.instructions).toContain("scene.somaHumanoid");
+  expect(role.definition.instructions).toContain("77个SOMA关节");
+ }
+});

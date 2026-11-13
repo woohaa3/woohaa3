@@ -127,6 +127,7 @@ function createFiles(
 }
 
 function modelModality(modelId: string, modelType: PptaskModelType): 'image' | 'video' | 'music' {
+  if (modelType === 'motion') throw new Error('Apiframe does not support motion');
   const prefix = modelId.split('/')[0];
   if (prefix === 'image' || prefix === 'video' || prefix === 'music') return prefix;
   // Apiframe has no audio modality; its audio-ish catalog entries are music,

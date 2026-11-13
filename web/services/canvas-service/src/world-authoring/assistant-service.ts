@@ -20,6 +20,9 @@
  * MCP tool path with a grant that already carries the issued context.
  */
 import {
+  somaSkeletonPrefix,
+  projectSomaRootTranslation,
+  isSomaMotionMetadata,
   DEFAULT_MODEL_PLACEMENT,
   describeWorldModelAnimationRig,
   findNonOverlappingNodePosition,
@@ -893,9 +896,10 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
           const existing = existingWorldTargets(inspected.canvas);
           const instanceTracks = compiled.ir.instanceTracks.filter(track => existing.instances.has(track.targetId));
           const partTracks = (compiled.ir.partTracks ?? []).filter(track => existing.instances.has(track.targetId));
+          const somaTracks = (compiled.ir.somaTracks ?? []).filter(track => existing.instances.has(track.targetId));
           const walkTracks = (compiled.ir.walkTracks ?? []).filter(track => existing.instances.has(track.targetId));
           const cameraTracks = compiled.ir.cameraTracks.filter(track => existing.cameras.has(track.targetId));
-          const outside = walkTracks.some(track => !writableInstances.has(track.targetId)) || partTracks.some(track => !writableInstances.has(track.targetId))
+          const outside = somaTracks.some(track => !writableInstances.has(track.targetId)) || walkTracks.some(track => !writableInstances.has(track.targetId)) || partTracks.some(track => !writableInstances.has(track.targetId))
             || instanceTracks.some(track => !writableInstances.has(track.targetId))
             || cameraTracks.some(track => !writableCameras.has(track.targetId));
           if (outside) {
@@ -903,14 +907,15 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             // silently delete hidden tracks on a later local revision.
             return failure("outside-scope", "导演区动画包含本轮不可写的部件，无法安全读取并局部返修；原动画未修改");
           }
-          if (walkTracks.length !== (compiled.ir.walkTracks?.length ?? 0)
+          if (somaTracks.length !== (compiled.ir.somaTracks?.length ?? 0)
+            || walkTracks.length !== (compiled.ir.walkTracks?.length ?? 0)
             || instanceTracks.length !== compiled.ir.instanceTracks.length
             || cameraTracks.length !== compiled.ir.cameraTracks.length
             || partTracks.length !== (compiled.ir.partTracks ?? []).length) {
-            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0
+            animationScript = instanceTracks.length === 0 && cameraTracks.length === 0 && partTracks.length === 0 && walkTracks.length === 0 && somaTracks.length === 0
               ? null
               : createWorldAnimationScript({
-                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks, walkTracks }),
+                  script: serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, partTracks, walkTracks, somaTracks }),
                   duration: script.duration,
                   loop: script.loop,
                   revision: script.revision
@@ -1089,6 +1094,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     const areaId = context.scope.scope.areaId;
     const located = findArea(inspected.canvas, areaId);
     if (!located) return failure("outside-scope", "导演区不存在");
+    if(operation.motionAsset && (located.area.animationScript?.revision??0)!==operation.motionBaseRevision)return failure("version-conflict","导演区动画已变化，请重新读取后应用动作");
     // 脚本必须先编译成功，且目标只允许本轮可写的导演区内部部件（实例与镜头）。
     const compiled = executeWorldAnimationScript(operation.script, { duration: operation.duration, loop: operation.loop });
     if (!compiled.ok) return failure("invalid-data", `动画脚本编译失败：${compiled.message}`);
@@ -1127,6 +1133,45 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       }
       return null;
     };
+    const validateSomaTargets = async (canvas: ServerCanvas, writable: (id:string)=>boolean) => {
+      if (operation.motionTarget) {
+        const target=operation.motionTarget;
+        if(target.canvasRevision!==undefined&&canvas.revision!==target.canvasRevision)return {code:"version-conflict" as const,message:"场景在绕场校验后发生变化，请重新规划"};
+        if(target.scopeVersion!==undefined&&findArea(canvas,areaId)?.area.scopeVersion!==target.scopeVersion)return {code:"version-conflict" as const,message:"导演区范围已变化，请重新校验动作路径"};
+        if (!writable(target.instanceId)) return {code:"outside-scope" as const,message:"动作模型不在本轮可写范围"};
+        if (worldObjectVersion(canvas,{kind:"instance",instanceId:target.instanceId})!==target.expectedVersion) return {code:"version-conflict" as const,message:"动作模型内容或变换已变化，请重新读取版本"};
+      }
+      if(operation.motionAsset && !(compiled.ir.somaTracks??[]).some(track=>track.assetId===operation.motionAsset!.id)) return {code:"invalid-data" as const,message:"动作资产必须被本次片段引用"};
+      const priorAnimation=findArea(canvas,areaId)?.area.animationScript;
+      const priorCompiled=priorAnimation?executeWorldAnimationScript(priorAnimation.script,priorAnimation):null;
+      for(const track of compiled.ir.somaTracks??[]) {
+        if((track.rootMotion==='translate'||track.route)&&operation.motionAsset?.id!==track.assetId){
+          const persisted=priorCompiled?.ok&&priorCompiled.ir.somaTracks?.some(previous=>JSON.stringify(previous)===JSON.stringify(track));
+          if(!persisted)return {code:"invalid-data" as const,message:"新位移动作必须通过宿主校验稳定 NPZ 路径后应用"};
+        }
+        if(!writable(track.targetId))return {code:"outside-scope" as const,message:"SOMA模型不在本轮可写范围"};
+        const model=findInstanceNode(canvas,track.targetId);
+        const rig=model?await animationRigOf(model.fields):null;
+        if(!rig||somaSkeletonPrefix(rig.groups,track.jointPrefix)!==track.jointPrefix)return {code:"invalid-data" as const,message:"SOMA片段需要匹配真实77关节绑定骨架"};
+        if(track.route&&operation.motionTarget?.instanceId===track.targetId&&operation.motionAsset?.id===track.assetId){
+          const instance=decodeWorldInstanceData(model?.fields.sharedWorldInstance),bounds=findArea(canvas,areaId)?.area.bounds,anchor=rig.spatial?.groundAnchorLocal;
+          if(!instance.ok||!bounds||!anchor)return {code:"invalid-data" as const,message:"绕场缺少实际模型与范围"};
+          const transform=instance.value.transform,route=track.route,area=findArea(canvas,areaId)!.area;
+          if(route.referenceFrame&&(stableStringify(route.referenceFrame.origin)!==stableStringify(sceneAreaAnimationOrigin(area))||route.referenceFrame.quarterTurns!==(area.animationQuarterTurns??0)))return {code:"version-conflict" as const,message:"绕场参考坐标已变化"};
+          const start=projectSomaRootTranslation(anchor,transform.rotation,transform.scale,transform.position);
+          if(Math.abs(route.scale-transform.scale)>1e-6||Math.abs(route.rootHeight-transform.position.h)>1e-6||stableStringify(route.groundAnchorLocal)!==stableStringify(anchor)||stableStringify(route.baseRotation)!==stableStringify(transform.rotation)||Math.hypot(route.startAnchor.u-start.u,route.startAnchor.v-start.v)>1e-5)return {code:"version-conflict" as const,message:"绕场路线与当前模型变换不一致"};
+          if([...route.path,route.startAnchor].some(p=>p.u<bounds.min.u||p.u>bounds.max.u||p.v<bounds.min.v||p.v>bounds.max.v))return {code:"outside-scope" as const,message:"绕场路线超出导演区范围"};
+        }
+        const added=operation.motionAsset?.id===track.assetId?operation.motionAsset:undefined;
+        const existing=canvas.assets.find(asset=>asset.id===track.assetId);
+        if(added&&existing&&existing.metadata?.checksum!==added.metadata?.checksum)return {code:"invalid-data" as const,message:"动作资产身份冲突"};
+        const asset=added??existing,meta=asset?.metadata?.motion;
+        if(!asset||asset.mediaKind!=="motion"||asset.status!=="ready"||!asset.metadata?.storageKey||asset.metadata.checksum!==track.checksum||!isSomaMotionMetadata(meta)||meta.fps!==track.fps||meta.frameCount!==track.frameCount)return {code:"invalid-data" as const,message:"SOMA动作资产的身份或采样信息不匹配"};
+      }
+      return null;
+    };
+    const somaFailure=await validateSomaTargets(inspected.canvas,id=>writableInstances.has(id));
+    if(somaFailure)return failure(somaFailure.code,somaFailure.message);
     const walkFailure=await validateWalkTargets(inspected.canvas,id=>writableInstances.has(id));
     if(walkFailure)return failure(walkFailure.code,walkFailure.message);
     const animationScript = createWorldAnimationScript({
@@ -1143,6 +1188,9 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         if (!current) return { ok: false as const, code: "outside-scope", message: "导演区不存在" };
         const stillIssued = resolve(context.contextId);
         if ("ok" in stillIssued) return { ok: false as const, code: "outside-scope", message: stillIssued.message };
+        if(operation.motionAsset && (current.area.animationScript?.revision??0)!==operation.motionBaseRevision)return {ok:false as const,code:"version-conflict" as const,message:"导演区动画已变化，请重新读取后应用动作"};
+        const somaFailure=await validateSomaTargets(canvas,id=>!!findWritable(stillIssued.context,{kind:"instance",instanceId:id}));
+        if(somaFailure)return {ok:false as const,...somaFailure};
         const walkFailure=await validateWalkTargets(canvas,id=>!!findWritable(stillIssued.context,{kind:"instance",instanceId:id}));
         if(walkFailure)return {ok:false as const,...walkFailure};
         for (const track of compiled.ir.partTracks ?? []) {
@@ -1159,7 +1207,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             commandId,
             actorId: `assistant-world:${context.runId}`,
             baseRevision: canvas.revision,
-            commands: [{
+            commands: [...(operation.motionAsset ? [{type:"asset.upsert" as const,asset:operation.motionAsset}] : []), {
               type: "nodeData.patch" as const,
               nodeId: current.node.id,
               value: {

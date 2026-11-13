@@ -72,6 +72,7 @@ export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabiliti
     ...(type !== "text" ? { actions: nodeActionContributions } : {}), connections: { endpoints: () => 'ordinary' },
     ...((type === 'image' || type === 'video') ? { resources: { channel: type, contentKey: context => context.assetContentKey } } satisfies Pick<NodeCapabilities, 'resources'> : {})
   });
+  entries.set('motion', { appearance: { palette: 'model', defaultSize: rich }, resize: rectangularNodeResize, actions: nodeActionContributions, connections: { endpoints: () => 'ordinary' } });
   entries.set('model3d', worldModelCapabilities);
   entries.set('composite-asset', {
     appearance: { palette: 'model', defaultSize: { width: 260, height: 195 } },

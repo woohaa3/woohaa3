@@ -229,9 +229,10 @@ fn approx_bytes(snapshot: &ModelSnapshot) -> usize {
         total += 64;
         match op {
             ModelOp::Mesh {
-                vertices, faces, ..
+                vertices, faces, skin, ..
             } => {
                 total += vertices.len() * 12 + faces.len() * 12;
+                if let Some(skin)=skin {total += skin.indices.len()*8*std::mem::size_of::<usize>()+skin.weights.len()*32+skin.inverse_bind_matrices.len()*64+skin.joint_ids.iter().map(String::len).sum::<usize>();}
             }
             ModelOp::Material {
                 id,

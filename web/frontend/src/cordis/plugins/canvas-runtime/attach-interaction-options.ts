@@ -38,6 +38,7 @@ export type AttachAssemblyDeps = {
   modelEditor: () => import("@woohaa3/contracts").BevyModelEditor | null;
   onGizmoFeedback?: InteractionControllerOptions["onGizmoFeedback"];
   animationPlayback: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
+  worldAnimationContext?: InteractionControllerOptions["getWorldAnimationContext"];
   worldAnimationTimes: () => ReadonlyMap<string, number>;
   worldAnimationPlayheads?: () => ReadonlyMap<string, number>;
   worldAnimationPlayer?: () => { nodeId: string | null; playing: boolean };
@@ -104,6 +105,7 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     onGizmoFeedback: deps.onGizmoFeedback,
     getAnimationPlayback: deps.animationPlayback,
     getWorldAnimationTimes: deps.worldAnimationTimes,
+    getWorldAnimationContext: deps.worldAnimationContext,
     getWorldAnimationPlayheads: deps.worldAnimationPlayheads,
     getWorldAnimationPlayer: deps.worldAnimationPlayer,
     getWorldAnimationLoop: deps.worldAnimationLoop,

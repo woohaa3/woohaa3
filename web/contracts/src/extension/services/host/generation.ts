@@ -1,3 +1,4 @@
+import { isSomaMotionMetadata } from "../../../task/history/guards.js";
 /**
  * `ctx.generation` 与生成能力扩展点契约
  * （change: 2026-10-04-add-runninghub-and-extensionize-litellm，任务 1.2 / design D1/D2/D4）。
@@ -149,7 +150,7 @@ export type GenerationProvider = {
    * runninghub 的 params 都在此）；缺省时 catalog 只用注册时声明的静态 `inputSchema`。
    * 返回的 providerId/modelId MUST NOT 覆盖注册表身份（生成模块只取描述字段）。
    */
-  describeModel?: (input: { providerModelId: string; modelType: "language" | "image" | "video" | "audio" }) =>
+  describeModel?: (input: { providerModelId: string; modelType: "language" | "image" | "video" | "audio" | "motion" }) =>
     Promise<GenerationModelDescription | undefined> | GenerationModelDescription | undefined;
   /**
    * 逻辑模型 → 具体执行 endpoint 的路由（change: 2026-10-06-add-runninghub-api-models-and-provider-credentials，
@@ -247,7 +248,7 @@ export type GenerationReferenceUpload = (
 /** 生成模块交给插件 `prepareInput` 的规范输入。 */
 export type GenerationPrepareInput = {
   providerModelId: string;
-  modelType: "language" | "image" | "video" | "audio";
+  modelType: "language" | "image" | "video" | "audio" | "motion";
   prompt: string;
   parameters: Record<string, unknown>;
   /** 稳定参考输入（顺序与提交一致）。 */
@@ -264,7 +265,7 @@ export type GenerationPrepareInput = {
 /** 生成模块交给插件 `resolveProviderModel` 的规范输入。 */
 export type GenerationResolveModelInput = {
   providerModelId: string;
-  modelType: "language" | "image" | "video" | "audio";
+  modelType: "language" | "image" | "video" | "audio" | "motion";
   prompt: string;
   parameters: Record<string, unknown>;
   references: ReadonlyArray<GenerationTaskReference>;
@@ -294,6 +295,8 @@ export type GenerationStableMediaResult = {
     size: number;
     checksum?: string;
     durationSeconds?: number;
+    fps?: number;
+    motion?: import("../../../task/history/types.js").SomaMotionMetadata;
     // 海报的主键同样可能是 locator（主体命名空间没有画布逻辑键）。
     poster?: { storageKey?: string; locator?: MediaLocator; contentType: string; size: number; checksum?: string };
   };
@@ -313,6 +316,9 @@ export function isGenerationStableMediaResult(value: unknown): value is Generati
   if (typeof entry.size !== "number" || !Number.isFinite(entry.size) || entry.size < 0) return false;
   if (entry.checksum !== undefined && typeof entry.checksum !== "string") return false;
   if (entry.durationSeconds !== undefined && (typeof entry.durationSeconds !== "number" || !Number.isFinite(entry.durationSeconds) || entry.durationSeconds < 0)) return false;
+  if (entry.fps !== undefined && (typeof entry.fps !== "number" || !Number.isFinite(entry.fps) || entry.fps <= 0 || entry.fps > 240)) return false;
+  if (entry.contentType === "application/x-npz" && !isSomaMotionMetadata(entry.motion)) return false;
+  if (entry.motion !== undefined && entry.contentType !== "application/x-npz") return false;
   if (entry.poster !== undefined) {
     if (typeof entry.poster !== "object" || entry.poster === null || Array.isArray(entry.poster)) return false;
     const poster = entry.poster as Record<string, unknown>;
