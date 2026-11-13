@@ -34,14 +34,15 @@ it("does not autoplay; exposes timing, play rejection, pause, retry and releases
     expect(play).not.toHaveBeenCalled();expect(audio.autoplay).toBe(false);
     Object.defineProperty(audio,"duration",{value:4});audio.currentTime=2;
     await act(async () => {audio.dispatchEvent(new Event("loadedmetadata"));audio.dispatchEvent(new Event("timeupdate"));});
-    expect(el.textContent).toContain("0:02 / 0:04");
+    expect(el.querySelector(".ui-audio-player__elapsed")?.textContent).toBe("0:02");
+    expect(el.querySelector(".ui-audio-player__duration")?.textContent).toBe("0:04");
     await act(async () => el.querySelector("button")!.click());
     expect(el.textContent).toContain("声音权限");
     await act(async () => el.querySelector("button")!.click());
     expect(play).toHaveBeenCalledTimes(2);
     Object.defineProperty(audio,"paused",{value:false});
     await act(async () => {audio.dispatchEvent(new Event("play"));});
-    expect(el.querySelector("button")!.textContent).toBe("暂停");
+    expect(el.querySelector("button")!.title).toBe("暂停");
     await act(async () => el.querySelector("button")!.click());expect(pause).toHaveBeenCalled();
     await act(async () => audio.dispatchEvent(new Event("error")));
     expect(el.textContent).toContain("无法读取或解码");
@@ -49,6 +50,7 @@ it("does not autoplay; exposes timing, play rejection, pause, retry and releases
     expect(el.querySelector("audio")).not.toBe(audio);
     await act(async () => root.render(<AudioPlayer url="/api/media/b.wav" />));
     await act(async () => audio.dispatchEvent(new Event("timeupdate")));
-    expect(el.textContent).toContain("0:00 / 0:00");
+    expect(el.querySelector(".ui-audio-player__elapsed")?.textContent).toBe("0:00");
+    expect(el.querySelector(".ui-audio-player__duration")?.textContent).toBe("0:00");
   } finally { await act(async () => root.unmount()); }
 });
