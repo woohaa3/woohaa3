@@ -1,3 +1,5 @@
+import { isDesktopHost } from "../../../../extension-api/host-platform.js";
+import { CanvasWorkspaceSection } from "../canvas-workspace-section.js";
 /**
  * 设置工作区：画布内的唯一设置弹窗内容。
  *
@@ -45,13 +47,14 @@ import { SettingsBreadcrumb } from "./settings-breadcrumb.js";
 import { PluginListRail, PluginPageRail, SectionRailNav } from "./rail-navigation.js";
 import { SettingsDialogChrome } from "./settings-dialog-chrome.js";
 
-export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications" | "runtimes" | "about";
+export type SettingsSectionId = "backend" | "plugins" | "appearance" | "notifications" | "runtimes" | "assistant" | "about";
 
 const SECTION_LABEL: Record<SettingsSectionId, string> = {
   backend: "核心服务",
   plugins: "插件配置",
   appearance: "外观",
   runtimes: "运行时组件",
+  assistant: "助手",
   notifications: "通知",
   about: "关于"
 };
@@ -61,6 +64,7 @@ const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: "plugins", label: SECTION_LABEL.plugins },
   { id: "appearance", label: SECTION_LABEL.appearance },
   { id: "runtimes", label: SECTION_LABEL.runtimes },
+  { id: "assistant", label: SECTION_LABEL.assistant },
   { id: "notifications", label: SECTION_LABEL.notifications },
   { id: "about", label: SECTION_LABEL.about }
 ];
@@ -70,6 +74,7 @@ const SECTION_ICONS: Record<SettingsSectionId, ReactNode> = {
   plugins: <PluginIcon size={16} />,
   appearance: <SunIcon size={16} />,
   runtimes: <ActivityIcon size={16} />,
+  assistant: <ChatIcon size={16} />,
   notifications: <ChatIcon size={16} />,
   about: <SparklesIcon size={16} />
 };
@@ -108,6 +113,7 @@ export type SettingsNavRequest =
 
 export type SettingsWorkspaceProps = {
   backend: BackendSettingsStore;
+  canvasId?: string;
   theme: ThemeService;
   extensions: ExtensionManagerFacade;
   /** 扩展自带设置面板（`settings.plugin-config` slot）；有面板的插件卡片也可打开详情。 */
@@ -148,6 +154,7 @@ export type SettingsWorkspaceProps = {
 
 export function SettingsWorkspace({
   backend,
+  canvasId,
   theme,
   extensions,
   settingsPanels,
@@ -310,7 +317,7 @@ export function SettingsWorkspace({
   const rail =
     view.kind === "section" ? (
       <SectionRailNav
-        entries={SECTIONS.map((entry) => ({ id: entry.id, label: entry.label, icon: SECTION_ICONS[entry.id] }))}
+        entries={SECTIONS.filter(entry => entry.id !== "assistant" || isDesktopHost()).map((entry) => ({ id: entry.id, label: entry.label, icon: SECTION_ICONS[entry.id] }))}
         activeId={view.section}
         pluginCount={pluginCount}
         onSelect={(id) => changeSection(id as SettingsSectionId)}
@@ -444,6 +451,8 @@ export function SettingsWorkspace({
             {...(settingsPanels ? { settingsPanels } : {})}
             {...(managed ? { managed } : {})}
           />
+        ) : view.section === "assistant" && isDesktopHost() ? (
+          <Panel title="助手"><CanvasWorkspaceSection canManage={canManage} canvasId={canvasId} editSession={editSession} /></Panel>
         ) : view.section === "runtimes" ? (
           <Panel title="运行时组件" hint="管理按需下载的可选功能。"><RuntimeComponentsSection /></Panel>
         ) : view.section === "appearance" ? (
@@ -516,7 +525,7 @@ function Panel({
   children
 }: {
   title: string;
-  hint: string;
+  hint?: string;
   action?: ReactNode;
   /** 卡片网格类内容用满内容列；表单分区保持默认可读行宽。 */
   wide?: boolean;
@@ -528,7 +537,7 @@ function Panel({
         <h2>{title}</h2>
         {action}
       </div>
-      <p className="settings-page__hint">{hint}</p>
+      {hint ? <p className="settings-page__hint">{hint}</p> : null}
       {children}
     </section>
   );

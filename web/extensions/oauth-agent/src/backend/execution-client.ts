@@ -14,7 +14,7 @@ export function createExecutorCodexAdapter(options: Omit<CodexAdapterDependencie
     ownerRuns.add(controller); active.set(input.ownerId, ownerRuns);
     const { signal: _signal, mcpGrantToken: _grant, ...serializable } = input;
     try {
-      const outcome = await options.executor.run({ executor: "oauth-agent", owner: input.ownerId, requestId: input.requestId,
+      const outcome = await options.executor.run({ executor: "oauth-agent", owner: input.prepared.workspace?.owner ?? input.ownerId, requestId: input.requestId,
         prepared: input.prepared, signal: controller.signal,
         payload: { input: { ...serializable, images: input.images?.map(image => ({ ...image, bytes: Buffer.from(image.bytes).toString("base64") })) },
           deployment: { codexHomeDir: options.codexHomeDir, workspaceDir: options.workspaceDir, codexBin: options.codexBin,

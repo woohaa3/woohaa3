@@ -265,3 +265,4 @@ export * from "./canvas/soma-motion/timing.js";
 
 export * from "./canvas/soma-motion/interaction.js";
 export { SOMA_BODY_ADAPTATION_VERSION, somaBodyRootScale, validateSomaBodyAdaptation } from "./canvas/soma-motion/body-adaptation.js";
+export * from "./extension/assistant/canvas-agent-workspace.js";

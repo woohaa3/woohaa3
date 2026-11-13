@@ -98,9 +98,9 @@ function failureText(result: Record<string, unknown> | undefined): string {
 }
 
 /** 成功结果的正文：同样优先结构化，其次文本块。 */
-function successText(result: Record<string, unknown> | undefined): string {
+function successText(result: Record<string, unknown> | undefined, workspace = false): string {
   const structured = result?.structuredContent;
-  if (structured !== undefined) return JSON.stringify(structured).slice(0, 8000);
+  if (structured !== undefined) return workspace ? JSON.stringify(structured) : JSON.stringify(structured).slice(0, 8000);
   const content = result?.content;
   if (Array.isArray(content)) {
     const text = content
@@ -179,7 +179,7 @@ export function createMcpToolClient(options: McpToolClientOptions): McpToolClien
       // `isError` 是 MCP 的显式失败标记；structuredContent.ok === false 是宿主的业务失败。
       const structured = result?.structuredContent as Record<string, unknown> | undefined;
       const ok = result?.isError !== true && structured?.ok !== false;
-      return { ok, content: ok ? successText(result) : failureText(result) };
+      return { ok, content: ok ? successText(result, name.startsWith("workspace_")) : failureText(result) };
     },
 
     dispose() {

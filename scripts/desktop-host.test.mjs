@@ -62,3 +62,21 @@ test('desktop development uses local dependencies; only packaged hosts enable co
   assert.equal(disabled.WOOHAA3_RUNTIME_INSTALL,'disabled');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('workspace handoff explicitly excludes assistant files and preserves the receiving installation root state',async()=>{
+ const {systemTarExec}=await import('./lib/desktop-platform-commands.mjs');
+ const source=temp(),target=temp(),output=temp();try{
+  commitDataVersion(source,{schema:1,build:'test'});
+  fs.mkdirSync(path.join(source,'agent-workspaces/canvas/shared'),{recursive:true});fs.writeFileSync(path.join(source,'agent-workspaces/canvas/shared/private'),'local assistant file');
+  fs.mkdirSync(path.join(source,'.local/executor'),{recursive:true});fs.writeFileSync(path.join(source,'.local/executor/canvas-workspaces.json'),JSON.stringify({rootPath:'/foreign/root'}));
+  fs.mkdirSync(path.join(target,'.local/executor'),{recursive:true});fs.writeFileSync(path.join(target,'.local/executor/canvas-workspaces.json'),JSON.stringify({rootPath:'/this/installation'}));
+  fs.mkdirSync(path.join(target,'agent-workspaces'));fs.writeFileSync(path.join(target,'agent-workspaces/keep'),'existing');
+  const archive=path.join(output,'handoff.woohaa'),result=exportWorkspace(source,archive);
+  assert.match(result.message,/不包含助手/);assert.ok(result.excluded.includes('agent-workspaces'));
+  const names=systemTarExec(['-tzf',archive],{encoding:'utf8'});assert.doesNotMatch(names,/agent-workspaces|executor/);
+  systemTarExec(['-xzf',archive,'-C',output]);const metadata=JSON.parse(fs.readFileSync(path.join(output,'workspace-format.json'),'utf8'));assert.match(metadata.exclusionNote,/助手/);
+  importWorkspace(target,archive);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(target,'.local/executor/canvas-workspaces.json'),'utf8')).rootPath,'/this/installation');
+  assert.equal(fs.readFileSync(path.join(target,'agent-workspaces/keep'),'utf8'),'existing');
+ }finally{for(const dir of [source,target,output])fs.rmSync(dir,{recursive:true,force:true});}
+});

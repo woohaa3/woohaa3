@@ -333,7 +333,7 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
         };
       }
       // 目标回合必须至少有一条真实回执：模型可能只聊了两句就结束，那不是"改好了"。
-      if (receipts.length === 0) {
+      if (input.intent.action !== "discuss" && receipts.length === 0) {
         return {
           status: "failed",
           assistantText: result.text,
@@ -354,7 +354,7 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
    * 取本轮的宿主工具通道。
    *
    * 判据是**动作类型 + 宿主准备的工具集 + 通道实现**，三者缺一不可：
-   * - `action === "discuss"` 是纯对话，永远不开工具（即使角色声明了工具）；
+   * - 桌面已冻结工作目录的讨论可使用辅助工具；其他讨论不开工具；
    * - `prepared.tools` 为空说明宿主求交后没有可用工具；
    * - 没有通道实现（宿主未装配）时只做讨论。
    *
@@ -363,7 +363,7 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
    */
   const toolChannelFor = async (input: AgentAdapterRunInput): Promise<RemoteToolChannel | null> => {
     if (options.toolChannel === undefined) return null;
-    if (input.intent.action === "discuss") return null;
+    if (input.intent.action === "discuss" && !input.prepared?.workspace) return null;
     const prepared = input.prepared;
     if (!prepared || prepared.tools.length === 0) return null;
     return options.toolChannel(input);

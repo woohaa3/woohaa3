@@ -303,7 +303,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
             return {
               ok: true,
               payload: {
-                ...(section === "backend" || section === "plugins" || section === "appearance" || section === "notifications" || section === "runtimes" || section === "about"
+                ...(section === "backend" || section === "plugins" || section === "appearance" || section === "notifications" || section === "runtimes" || section === "assistant" || section === "about"
                   ? { section }
                   : {}),
                 ...(pluginId ? { pluginId } : {})
@@ -318,6 +318,7 @@ export function settingsPlugin(options: SettingsPluginOptions = {}): Plugin.Func
             <Suspense fallback={<SettingsLoading onRequestClose={requestClose} instanceId={dialogInstance.instanceId} />}>
               <SettingsWorkspace
                 backend={backend}
+                {...(ctx.appRouter.getLocation().page === "canvas" && ctx.appRouter.getLocation().canvasId ? { canvasId: ctx.appRouter.getLocation().canvasId! } : {})}
                 theme={ctx.theme}
                 extensions={facade}
                 settingsPanels={settingsPanels}

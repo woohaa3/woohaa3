@@ -187,6 +187,8 @@ export type AgentRoleTargetRef = {
  * 浏览器请求不得构造或改写本对象。
  */
 export type PreparedAgentRoleTurn = {
+  /** Trusted desktop auxiliary capability, frozen by the host after role preparation. */
+  readonly workspace?: import("./canvas-agent-workspace.js").CanvasWorkspaceHandle;
   readonly schemaVersion: 1;
   readonly roleRef: AgentRoleRef;
   /** 已合成的规范消息（definition.instructions 在最前）。 */

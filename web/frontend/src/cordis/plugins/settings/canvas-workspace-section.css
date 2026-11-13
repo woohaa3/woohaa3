@@ -1,0 +1,11 @@
+.settings-agent-workspace__path {
+  margin: 10px 0 16px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.settings-agent-workspace__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}

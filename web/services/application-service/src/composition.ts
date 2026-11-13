@@ -1,3 +1,4 @@
+import { CanvasAgentWorkspaceService } from "./workspaces/service.js";
 import { AssistantTextStore } from "./repository/assistant-text-store.js";
 import { ImageDirectorSceneStore } from "./repository/image-director-scene-store.js";
 import { ImageDirectorSceneService } from "./extensions/image-director-scene-service.js";
@@ -94,6 +95,8 @@ export type ApplicationServiceOptions = {
    * daemon 未配置或不可用时明确失败，不提供进程内执行回退。
    */
   agentRuntime?: HostRuntimeOptions;
+  /** Trusted Tauri bootstrap only. Never derived from frontend or environment flags. */
+  canvasAgentWorkspace?: { importArtifact?: (input: { canvasId: string; bytesBase64: string; contentType: string }) => Promise<MediaMetadata>; authorize: (identity: { owner: string; canvasId: string }) => Promise<boolean> };
   roleContextFor?: (input: {
     owner: string;
     canvasId: string;
@@ -277,6 +280,7 @@ export type ApplicationService = {
   agentRoles: () => AgentRoleRegistry;
   /** 宿主 Agent 会话/回合服务（change: 2026-10-12-add-agent-conversation-panel）。 */
   agentConversations: () => AgentConversationService;
+  canvasAgentWorkspaces: () => CanvasAgentWorkspaceService | null;
   assistantTextRuns: () => import("@woohaa3/contracts").AssistantTextRunGateway;
   /** 来源连接发现注册表（change: 2026-10-16-add-agent-appserver-and-sdk-connections）。 */
   agentConnections: () => AgentConnectionRegistry;
@@ -480,7 +484,10 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       ? createRuntimeConversationAdapter(handle.adapter, executorRuntime.optionsFor(handle.owner.extensionId, handle.owner.configVersion, handle.adapter.runtimeExecutor), agentConnections)
       : handle.adapter
   });
+  const canvasAgentWorkspaces = options.canvasAgentWorkspace && options.agentRuntime
+    ? new CanvasAgentWorkspaceService({ runtime: options.agentRuntime, store: conversationStore, authorize: options.canvasAgentWorkspace.authorize, ...(options.canvasAgentWorkspace.importArtifact ? { importArtifact: options.canvasAgentWorkspace.importArtifact } : {}) }) : null;
   const agentConversations = createAgentConversationService({
+    ...(canvasAgentWorkspaces ? { canvasAgentWorkspaces } : {}),
     store: conversationStore,
     registry: agentAdapterRegistry,
     connections: agentConnections,
@@ -491,6 +498,17 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => now().toISOString()
   });
+  let workspaceReconciling = false;
+  const reconcileWorkspaces = async () => {
+    if (!canvasAgentWorkspaces || workspaceReconciling) return;
+    workspaceReconciling = true;
+    try { await canvasAgentWorkspaces.reconcile(); }
+    catch (error) { options.logger?.({ event: "workspace-reconcile-failed", message: String(error) }); }
+    finally { workspaceReconciling = false; }
+  };
+  const workspaceTimer = canvasAgentWorkspaces ? setInterval(() => void reconcileWorkspaces(), 2_000) : null;
+  workspaceTimer?.unref();
+  void reconcileWorkspaces();
   // 角色停用/升级：只精确取消冻结该角色的活动回合（适配器在 abort 时撤销 grant）。
   agentRoles.onUnregistered((ref) => agentConversations.onRoleRevoked(ref.namespacedId));
   const skillMedia = options.skillMedia && skillMediaStore
@@ -636,6 +654,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     host: () => extensionHost,
     config: () => config,
     agentConversations: () => agentConversations,
+    canvasAgentWorkspaces: () => canvasAgentWorkspaces,
     agentRoles: () => agentRoles,
     assistantTextRuns: () => assistantText.gateway(),
     agentConnections: () => agentConnections,
@@ -644,6 +663,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
     accessEnforcer: () => accessEnforcer,
     skillMedia: () => skillMedia,
     close: async () => {
+      if (workspaceTimer) clearInterval(workspaceTimer);
       clearInterval(recoveryTimer);
       await extensionControlPlane.dispose();
       // 外部注入的宿主由提供方（统一后端）负责释放；本服务只释放自建宿主。

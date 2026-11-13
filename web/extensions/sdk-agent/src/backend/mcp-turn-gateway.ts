@@ -145,7 +145,7 @@ export async function createMcpTurnGateway(options: {
               if (target[field] && properties?.[field]) args[field] = target[field];
             }
           }
-          const write = !name.startsWith("get_");
+          const write = !name.startsWith("get_") && !name.startsWith("workspace_");
           if (write) attemptedWrites++;
           if (write && firstWrite) {
             if (options.validateTarget && !(await options.validateTarget())) reject("target-precondition-failed", "目标内容已变化，本轮写入前提不成立");

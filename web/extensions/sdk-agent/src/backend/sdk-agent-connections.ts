@@ -146,7 +146,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     // 通道只消费宿主准备好的角色回合；缺失即拒绝，不从 mode/用户文字推断业务职责。
     const prepared = input.prepared;
     if (!prepared) return fail("role-not-found", "本回合没有宿主准备的角色请求");
-    const toolNames = input.intent.action === "discuss" ? [] : prepared.tools;
+    const toolNames = input.intent.action === "discuss" && !prepared.workspace ? [] : prepared.tools;
     const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: toolNames.length > 0, imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
     if (!preflight.ok) return fail(preflight.code, preflight.message);
     const source = options.serviceConnections ? await sdkSourceFor(options.serviceConnections, input.owner, record.connectionId, options.service) : null;
@@ -200,7 +200,11 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     try {
       relay = await createModelTransport({ apiType: engine.apiType, upstream: baseUrl, apiKey: credential.secret,
         policy: endpointPolicy, valid, signal: controller.signal });
-      if (input.intent.action !== "discuss") {
+      if (input.intent.action === "discuss" && toolNames.length > 0) {
+        if (!options.tools || !options.mcpServerUrl) return fail("capability-unsupported", "桌面辅助执行需要受控工具入口");
+        const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" }, workId: input.requestId, canvasId: input.canvasId, nodeId: "", tools: toolNames });
+        gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid });
+      } else if (input.intent.action !== "discuss") {
         stage = "target";
         if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId) return fail("capability-unsupported", "目标执行需要受控工具与权威目标");
         if (input.intent.mode === "world" || input.intent.mode === "canvas-group") {

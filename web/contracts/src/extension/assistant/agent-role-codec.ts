@@ -23,6 +23,7 @@ import type {
   AgentRoleToolset,
   PreparedAgentRoleTurn
 } from "./agent-role.js";
+import { decodeCanvasWorkspaceHandle } from "./canvas-agent-workspace.js";
 import {
   isAgentNativeCapability,
   isAgentRoleStructuredOutput,
@@ -372,7 +373,12 @@ export function decodePreparedAgentRoleTurn(value: unknown): AgentRoleFailure | 
   if (!isJsonObject(value.target) || (value.target.canvasId !== undefined && !isBoundedId(value.target.canvasId))) {
     return { ok: false, code: "role-version-conflict", message: "prepared turn 目标非法" };
   }
+  const workspace = value.workspace === undefined ? undefined : decodeCanvasWorkspaceHandle(value.workspace);
+  if (workspace === null || (workspace && workspace.canvasId !== value.target.canvasId)) {
+    return { ok: false, code: "role-version-conflict", message: "prepared turn 工作目录授权非法" };
+  }
   const turn: PreparedAgentRoleTurn = {
+    ...(workspace ? { workspace } : {}),
     schemaVersion: 1,
     roleRef: value.roleRef,
     messages: messages.value,

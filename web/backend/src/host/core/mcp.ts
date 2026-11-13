@@ -24,10 +24,10 @@ import { decodeWorkflowGroupData } from "@woohaa3/contracts";
 import { importCodexGeneratedImage } from "../../ports/import-generated-image.js";
 import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 
-export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
+export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined>; desktopCanvasAgentWorkspace?: { version: 1 } }> = {
   name: "mcp",
   inject: ["log", "gateway", "canvas", "task", "media", "storage"],
-  apply(ctx, { env }) {
+  apply(ctx, { env, desktopCanvasAgentWorkspace }) {
     // 持久 grant registry（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）：
     // 与应用库同目录的独立文件，避免与业务表争锁；没有可用库路径时退回内存。
     const storePath = env.WOOHAA3_APPLICATION_STORE_PATH?.trim() || env.WOOHAA3_TASK_STORE_PATH?.trim() || "";
@@ -143,6 +143,11 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       materialize: (canvasId, result, createdAt) => prepareHumanoidMotionAsset(ctx.media.port(),canvasId,result,createdAt)
     });
     const mcp = createMcpService({
+      ...(desktopCanvasAgentWorkspace?.version === 1 ? { canvasWorkspace: async input => {
+        const workspace = application().canvasAgentWorkspaces();
+        if (!workspace) throw Object.assign(new Error("桌面工作目录运行时不可用"), { code: "workspace-unavailable" });
+        return workspace.tool(input);
+      } } : {}),
       env,
       skillClient,
       skillAvailability: { available: true },

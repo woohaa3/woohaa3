@@ -30,6 +30,7 @@ import { createAgentRoleRegistry } from "../agent-roles/registry.js";
  * 无内建能力要求的测试角色，避免每条用例重复角色样板。
  */
 import { testRoleRegistry } from "./test-role-registry.js";
+import type { CanvasAgentWorkspaceService } from "../workspaces/service.js";
 import { createAgentConversationService, hashIntent } from "./agent-conversation-service.js";
 
 const dirs: string[] = [];
@@ -89,7 +90,7 @@ function fakeRegistry(adapter: AgentConversationAdapter) {
   });
 }
 
-function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number, agentRoles = testRoleRegistry()) {
+function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageChars?: number, agentRoles = testRoleRegistry(), canvasAgentWorkspaces?: CanvasAgentWorkspaceService) {
   const controls: FakeAdapterControls = {
     seen: [],
     outcomes: [],
@@ -101,6 +102,7 @@ function setup(adapterOverrides: Partial<FakeAdapterControls> = {}, maxMessageCh
   const service = createAgentConversationService({
     store,
     maxMessageChars,
+    canvasAgentWorkspaces,
     registry: fakeRegistry(fakeAdapter(controls)),
     agentRoles,
     now: () => "2026-10-13T00:00:00.000Z",
@@ -1065,4 +1067,27 @@ describe("turn authority revocation", () => {
     controls.pending[0]?.({ status: "cancelled" });
     await service.whenSettled(accepted.turn.turnId);
   });
+});
+
+
+it("does not authorize or dispatch a turn cancelled while its workspace is being prepared", async () => {
+  let started!: () => void, release!: () => void;
+  const preparing = new Promise<void>(r => { started = r; });
+  const gate = new Promise<void>(r => { release = r; });
+  const workspace = {
+    prepare: vi.fn(async (_identity: unknown, prepared: import("@woohaa3/contracts").PreparedAgentRoleTurn) => { started(); await gate; return prepared; }),
+    cancel: vi.fn(async () => {}), settled: vi.fn(async () => {})
+  } as unknown as CanvasAgentWorkspaceService;
+  const { controls, service, store } = setup({}, undefined, testRoleRegistry(), workspace);
+  const created = service.createConversation({ owner: "user-a", canvasId: "canvas-1" });
+  if (!created.ok) throw new Error("create failed");
+  const accepted = service.acceptTurn({ owner: "user-a", conversationId: created.conversation.conversationId, requestId: "cancel-prepare", entry: entry() });
+  if (!accepted.ok) throw new Error("accept failed");
+  void service.dispatchTurn(accepted.turn.turnId); await preparing;
+  expect(service.cancelTurn({ owner: "user-a", requestId: "cancel-prepare" })).toEqual({ ok: true });
+  release(); await service.whenSettled(accepted.turn.turnId);
+  expect(store.getTurn(accepted.turn.turnId)?.status).toBe("cancelled");
+  expect(store.getTurnAuthority(accepted.turn.turnId)).toBeUndefined();
+  expect(controls.seen).toHaveLength(0);
+  expect(workspace.cancel).toHaveBeenLastCalledWith({ owner: "user-a", canvasId: "canvas-1", requestId: "cancel-prepare" });
 });

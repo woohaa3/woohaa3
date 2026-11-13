@@ -57,12 +57,13 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
         ...(options.extensionHost ? { extensionHost: options.extensionHost } : {})
       })
     ),
-    await timed("mcp", () => ctx.plugin(mcpPlugin, { env })),
+    await timed("mcp", () => ctx.plugin(mcpPlugin, { env, ...(options.desktopCanvasAgentWorkspace ? { desktopCanvasAgentWorkspace: options.desktopCanvasAgentWorkspace } : {}) })),
     await timed("mcp-installation", () => ctx.plugin(mcpInstallationPlugin, { env, basePath: options.basePath ?? "/" })),
     await timed("application", () =>
       ctx.plugin(applicationPlugin, {
         env,
         basePath: options.basePath,
+        ...(options.desktopCanvasAgentWorkspace ? { desktopCanvasAgentWorkspace: options.desktopCanvasAgentWorkspace } : {}),
         ...(options.applicationExtensionMetadata ? { applicationExtensionMetadata: options.applicationExtensionMetadata } : {}),
         ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
         ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),

@@ -126,7 +126,7 @@ export function createChatGptConversationAdapter(
     // 通道只消费宿主准备好的角色回合。
     const prepared = input.prepared;
     if (!prepared) return { status: "failed", error: { code: "role-not-found", message: "本回合没有宿主准备的角色请求" } };
-    // 仅讨论：无工具面、无写能力；历史只当内容（design D2/D5）。
+    // 讨论只接入宿主冻结的桌面辅助工具；历史不携带授权。
     if (input.intent.action === "discuss") {
       input.emit({ type: "stage", stage: "reasoning" });
       const controller = input.candidate ? new AbortController() : null;
@@ -145,7 +145,11 @@ export function createChatGptConversationAdapter(
         ...(isChatGptReasoningEffort(input.intent.reasoningEffort) ? { reasoningEffort: input.intent.reasoningEffort } : {}),
         history: input.history.map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content })),
         signal: controller?.signal ?? input.signal,
-        onStage: (stage) => input.emit({ type: "stage", stage })
+        onStage: (stage) => input.emit({ type: "stage", stage }),
+        onTool: event => {
+          if (event.type === "tool-started") input.emit({ type: "tool-started", tool: event.tool, callId: event.callId });
+          else if (event.type === "tool") input.emit({ type: "tool-completed", tool: event.tool, callId: event.callId, ok: event.ok, summary: event.message });
+        }
       });
       const key = JSON.stringify([input.owner, input.requestId]);
       if (controller) candidateRuns.set(key, { controller, done: operation });

@@ -72,6 +72,7 @@ export { hashIntent } from "./agent-conversation-projection.js";
 
 export type AgentConversationServiceOptions = {
   store: AgentConversationStore;
+  canvasAgentWorkspaces?: import("../workspaces/service.js").CanvasAgentWorkspaceService;
   registry: AgentAdapterRegistry;
   /**
    * 连接发现注册表（change: 2026-10-16-...，任务 2.1/2.3）。
@@ -458,11 +459,29 @@ export function createAgentConversationService(options: AgentConversationService
       prepared = frozenPrepared(turn);
     } else {
       const rolePrepared = await prepareFrozenRole(turn, entry, bound.handle.capabilities);
+      if (isTerminalTurnStatus(store.getTurn(turn.turnId)?.status ?? "cancelled")) return;
       if (!rolePrepared.ok) {
         finishTurn(turn, { status: "failed", error: { code: rolePrepared.code, message: rolePrepared.message } });
         return;
       }
       prepared = rolePrepared.prepared;
+    }
+
+    if (prepared && !delivery && !candidate && !adoption && options.canvasAgentWorkspaces) {
+      try {
+        prepared = await options.canvasAgentWorkspaces.prepare({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId }, prepared, bound.handle.capabilities.tools);
+        store.updateTurn(turn.turnId, { preparedJson: safeJson(prepared) }, now());
+      } catch (error) {
+        finishTurn(turn, { status: "failed", error: { code: (error as { code?: string }).code ?? "workspace-unavailable", message: error instanceof Error ? error.message : String(error) } });
+        return;
+      }
+    }
+
+    // Cancellation may arrive while role/workspace preparation is awaiting I/O.
+    // Never resurrect a cancelled durable turn or leave a late lease active.
+    if (isTerminalTurnStatus(store.getTurn(turn.turnId)?.status ?? "cancelled")) {
+      await options.canvasAgentWorkspaces?.cancel({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId });
+      return;
     }
 
     // 回合授权（任务 2.1/2.3）：在调用通道前持久冻结 owner/连接版本/目标/方法/工具范围，
@@ -736,6 +755,7 @@ export function createAgentConversationService(options: AgentConversationService
     if (binding) {
       store.updateConversation(turn.conversationId, { status: conversationStatusFor(store.latestTurn(turn.conversationId)), latestRequestId: turn.requestId }, now());
     }
+    void options.canvasAgentWorkspaces?.settled({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId }, status).catch(error => log({ event: "workspace-settle-failed", requestId: turn.requestId, message: String(error) }));
     log({ event: "agent-conversation-turn-settled", conversationId: turn.conversationId, requestId: turn.requestId, status });
     try {
       options.onTurnSettled?.({
@@ -1255,6 +1275,7 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
       controller?.abort();
+      void options.canvasAgentWorkspaces?.cancel({ owner: record.owner, canvasId: record.canvasId, requestId: record.requestId }).catch(error => log({ event: "workspace-cancel-failed", requestId: record.requestId, message: String(error) }));
       store.revokeTurnAuthority(record.turnId, now());
       // 宿主重启后没有在途控制器：活动回合按用户停止结算；旧 unknown 已由启动核对结算失败。
       if (!controller && ["queued", "running", "committing"].includes(record.status)) {

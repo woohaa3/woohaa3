@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Real isolated bundle smoke. No source imports, no system Node in child PATH. */
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawn,execFileSync} from 'node:child_process';import {createInterface} from 'node:readline';import assert from 'node:assert/strict';
-import {systemTar,installedHostLayout,isolatedHostEnvironment} from './lib/desktop-platform-commands.mjs';
+import {systemTarExec,installedHostLayout,isolatedHostEnvironment} from './lib/desktop-platform-commands.mjs';
 import {agentRuntimeDirectory,hashKey} from './lib/agent-runtime-endpoints.mjs';
 const app=path.resolve(process.argv.slice(2).filter(arg=>arg!=='--')[0]??(process.platform==='win32'?'desktop/target/release':'desktop/target/debug/bundle/macos/WooHaa3.app'));
 const work=fs.mkdtempSync(path.join(os.tmpdir(),'woohaa-bundle-smoke-'));const root=path.join(work,'runtime'),data=path.join(work,'data');fs.mkdirSync(root);fs.mkdirSync(data);

@@ -239,10 +239,10 @@ export function createLocalAgentExecutor(options: LocalAgentExecutorOptions = {}
             workId: input.requestId,
             canvasId: payload.canvasId,
             nodeId: payload.intent.nodeId ?? "",
-            mode: payload.intent.mode,
+            ...(payload.intent.action !== "discuss" ? { mode: payload.intent.mode } : {}),
             ...(payload.intent.cameraId ? { cameraId: payload.intent.cameraId } : {}),
-            ...(payload.intent.worldScope ? { worldScope: payload.intent.worldScope } : {}),
-            ...(payload.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: payload.intent.allowSceneAreaExpansion === true } : {}),
+            ...(payload.intent.action !== "discuss" && payload.intent.worldScope ? { worldScope: payload.intent.worldScope } : {}),
+            ...(payload.intent.action !== "discuss" && payload.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: payload.intent.allowSceneAreaExpansion === true } : {}),
             tools: toolNames
           });
           toolToken = grant.token;
@@ -283,7 +283,7 @@ export function createLocalAgentExecutor(options: LocalAgentExecutorOptions = {}
           emit: (event: AgentConversationAdapterEvent) => {
             if (event.type === "tool-completed" && toolNames.includes(event.tool)) {
               if (event.ok === false) toolFailure = event.summary ?? "工具执行失败";
-              if (event.ok === true && !AGENT_READ_ONLY_TOOLS.includes(event.tool)) successfulWrite = true;
+              if (event.ok === true && !event.tool.startsWith("workspace_") && !AGENT_READ_ONLY_TOOLS.includes(event.tool)) successfulWrite = true;
             }
             context.emit(event.type, event);
           }

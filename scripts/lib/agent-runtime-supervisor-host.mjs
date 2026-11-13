@@ -129,6 +129,8 @@ export function readRuntimeIdentity(runtimeDir) {
  *   workspaceKey?: string,
  *   scriptPath?: string,
  *   expectedRuntimeBuild?: string,
+ *   canvasWorkspaceRoot?: string,
+ *   canvasWorkspaceProtectedPaths?: string[],
  *   rpc?: typeof supervisorRpc,
  *   spawnProcess?: typeof spawn,
  *   stopRuntime?: () => Promise<void>,
@@ -144,6 +146,8 @@ export function createAgentSupervisorHost({
 	workspaceKey = hashKey(path.resolve(root)),
 	scriptPath = null,
 	expectedRuntimeBuild = null,
+	canvasWorkspaceRoot = null,
+	canvasWorkspaceProtectedPaths = [],
 	rpc = supervisorRpc,
 	spawnProcess = spawn,
 	stopRuntime = null,
@@ -268,7 +272,8 @@ export function createAgentSupervisorHost({
 			}
 			if (healthy) {
 				const marker = readBuildMarker();
-				if (!expectedRuntimeBuild || marker === expectedRuntimeBuild) {
+				const workspaceReady = !canvasWorkspaceRoot || await rpc({ socketPath: identity.socketPath, token: identity.token, workspaceKey }, "workspace.settings").then(value => value?.available === true, () => false);
+				if ((!expectedRuntimeBuild || marker === expectedRuntimeBuild) && workspaceReady) {
 					log(`复用执行器运行时（pid ${identity.pid}，${identity.runtimeVersion}）`);
 					return { socketPath: identity.socketPath, token: identity.token, workspaceKey, pid: identity.pid, reused: true };
 				}
@@ -289,7 +294,7 @@ export function createAgentSupervisorHost({
 		if (process.platform !== "win32") {
 			try { fs.unlinkSync(socketPath); } catch { /* already removed */ }
 		}
-		const child = spawnProcess(nodeBin, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey], {
+		const child = spawnProcess(nodeBin, [ensureScript(), "daemon", "--socket", socketPath, "--state", runtimeDir, "--token", next.token, "--workspace", workspaceKey, ...(canvasWorkspaceRoot ? ["--canvas-workspace-root", canvasWorkspaceRoot, ...canvasWorkspaceProtectedPaths.flatMap(location => ["--canvas-workspace-protected-path", location])] : [])], {
 			cwd: root, detached: true, stdio: "ignore", windowsHide: true
 		});
 		child.unref();

@@ -1,3 +1,4 @@
+import { preparedTurnHash, stripPreparedHash } from "@woohaa3/contracts";
 import { nativeContextFor, nativeContextKey } from "@woohaa3/agent-connections";
 /**
  * local-agent 连接装配与会话 adapter 测试（注入 fake；不启动真实进程）
@@ -661,4 +662,24 @@ it.each(LOCAL_AGENT_ADAPTERS)("$adapterId candidate run passes images/schema wit
   records[0]!.credentialEpoch++;
   expect(await adapter.run(input)).toMatchObject({ status: "failed" });
   expect(inputs).toHaveLength(1);
+});
+
+
+it("desktop discussion receives only frozen auxiliary tools without content write privileges", async () => {
+  const { service } = fakeService([record()]);
+  const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
+  const { facade } = fakeToolFacade(), issue = vi.spyOn(facade, "issue");
+  const { transport, inputs } = fakeTransport(input => {
+    input.onEvent({ type: "tool-started", tool: "workspace_execute", callId: "aux" });
+    input.onEvent({ type: "tool-completed", tool: "workspace_execute", callId: "aux", ok: true });
+    return { ok: true, outcome: { status: "succeeded", assistantText: "计算完成" } };
+  });
+  const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
+  const input = runInput({ intent: { action: "discuss", canvasId: "canvas-1", prompt: "计算" } });
+  const body = { ...stripPreparedHash(input.prepared!), tools: ["workspace_execute"], workspace: { schemaVersion: 1 as const, owner: "u1", canvasId: "canvas-1", requestId: "req-1", directoryKey: "a".repeat(64), runKey: "b".repeat(64), generation: 1 } };
+  input.prepared = { ...body, preparedHash: preparedTurnHash(body) };
+  expect((await adapter.run(input)).status).toBe("succeeded");
+  expect(inputs[0]!.toolToken).toBe("grant-1"); expect(inputs[0]!.allowedTools).toEqual(["workspace_execute"]);
+  expect(issue).toHaveBeenCalledWith(expect.objectContaining({ workId: "req-1", canvasId: "canvas-1", tools: ["workspace_execute"] }));
+  expect(issue.mock.calls[0]![0]).not.toHaveProperty("mode"); expect(issue.mock.calls[0]![0]).not.toHaveProperty("worldScope");
 });

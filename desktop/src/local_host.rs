@@ -685,7 +685,7 @@ pub fn handle_menu(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
         status(
             &app,
             match action {
-                ArchiveAction::Export => "正在停止宿主并导出工作区（包含配置和密钥）…",
+                ArchiveAction::Export => "正在停止宿主并导出工作区（包含配置和密钥，不含助手工作文件）…",
                 ArchiveAction::Import => "正在备份并导入工作区…",
                 ArchiveAction::ImportConfig => {
                     "正在备份并导入配置（保留画布、任务、媒体和个人会话）…"

@@ -88,10 +88,10 @@ export function exportWorkspace(dataDir,output) {
  try{
   if(inside(path.resolve(dataDir),path.resolve(output)))throw new Error('导出文件不能位于正在导出的工作区内部');
   validateDataTree(dataDir);
-  fs.writeFileSync(path.join(stage,'workspace-format.json'),JSON.stringify({format:'woohaa-workspace',version:1}),{mode:0o600});
+  fs.writeFileSync(path.join(stage,'workspace-format.json'),JSON.stringify({format:'woohaa-workspace',version:1,excluded:['agent-workspaces','executor-runtime'],exclusionNote:'助手工作文件和本机目录位置未包含在此导出中'}),{mode:0o600});
   const entries=DATA_ENTRIES.filter(entry=>fs.existsSync(path.join(dataDir,entry)));
   tar(['-czf',temporary,'-C',stage,'workspace-format.json','-C',path.resolve(dataDir),...entries]);
-  fs.copyFileSync(temporary,output);fs.chmodSync(output,0o600);return {bytes:fs.statSync(output).size};
+  fs.copyFileSync(temporary,output);fs.chmodSync(output,0o600);return {bytes:fs.statSync(output).size,excluded:['agent-workspaces','executor-runtime'],message:'导出不包含助手工作文件和本机目录位置'};
  }finally{fs.rmSync(stage,{recursive:true,force:true});unlock();}
 }
 export function restoreBackup(dataDir,source) {

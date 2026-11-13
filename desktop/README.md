@@ -58,7 +58,7 @@ The build exposes two hooks instead of implementing signing:
 
 ## Data and verification
 
-Application data is held in the platform application-data directory under `com.woohaa.desktop` (`com.woohaa.desktop.dev` in debug mode). `WOOHAA_DESKTOP_DATA_DIR` selects an isolated directory. Workspace export produces an unencrypted `.woohaa` archive containing data, media, configuration and secrets. Import stops the host, creates a backup and replaces the workspace; it does not merge databases.
+Application data is held in the platform application-data directory under `com.woohaa.desktop` (`com.woohaa.desktop.dev` in debug mode). `WOOHAA_DESKTOP_DATA_DIR` selects an isolated directory. Workspace export produces an unencrypted `.woohaa` archive containing data, media, configuration and secrets. Import stops the host, creates a backup and replaces the workspace; it does not merge databases. Agent working files and executor state are excluded from export. Import preserves this installation’s agent workspace root and existing working files.
 
 ```sh
 pnpm desktop:host:check -- /path/to/installed/woohaa-desktop
@@ -85,3 +85,12 @@ Optional Agent engines, recording, and model rendering use explicit runtime comp
 文件经 `CreatePerformanceUpload` 获取私有 PUT 地址，直传对象存储后用同一个 key 调用 `CommitPerformanceUpload`；登记响应丢失时复用 key 重试，避免重复登记。会话令牌仅由本机宿主持有，不进入诊断包；对象上传不携带会话 Bearer。后台在档案列表中显示“诊断日志”、触发原因和运行 ID。完整分类需要部署含诊断档案元数据迁移的服务端及管理端；旧服务端不认识新增字段。
 
 正常结束标记由 Tauri 实际 `Exit` 事件写入，不能放在不会返回的 `app.run()` 之后；取消退出或宿主停止失败不会提前记为正常结束。缺少标记仅表示“上次未正常结束”，并非已确认崩溃。新启动会清除旧目的地描述，等待本次 remote-server 插件启动且会话可用后才提示；上传结果提示也只对当前连接的账号和服务端展示。
+
+
+## Canvas agent working directories
+
+The bundled Tauri host enables a per-canvas working directory at `<app data>/agent-workspaces/<opaque canvas key>`. Assistants on the same canvas share `shared/`; each turn gets `runs/<opaque turn key>/` for temporary files and code. Settings → 助手 provides the native folder picker, root/current-canvas open actions, migration status and cleanup of completed turns. Changing the root moves all managed canvas directories after accepted work drains. Existing work continues; new users receive `workspace-migrating`. Unknown processes block migration and cleanup.
+
+Local, SDK, OAuth and desktop-originated remote model turns use the same authorized auxiliary tools. Commands run locally with the user's OS permissions; Node uses the bundled runtime. Other runtimes must already exist. Relative file validation and cwd are not an OS sandbox. The standalone Web host does not enable this capability, including when a browser sends desktop flags. An external-host development window does not automatically enable disk execution on the shared host.
+
+Workspace files and root paths are local installation state. They are excluded from `.woohaa`, Y.Doc and remote sync. Explicitly import final media through the existing asset service before deleting temporary files. Usage, role examples, recovery behavior and known platform verification gaps are in [agent workspaces](../docs/agent-workspaces.md).

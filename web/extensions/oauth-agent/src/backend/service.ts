@@ -7,7 +7,7 @@
  * 直接写 Y.Doc/数据库，也不把 token 交给任何下游。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { WOOHAA3_PROTOCOL_VERSION } from "@woohaa3/contracts";
+import { WOOHAA3_PROTOCOL_VERSION, CANVAS_WORKSPACE_TOOLS } from "@woohaa3/contracts";
 import { createChatGptCredentialStore } from "./credentials.js";
 import { createOwnerResolver, deriveSessionSecret } from "./identity.js";
 import { ChatGptOAuth } from "./oauth.js";
@@ -104,6 +104,7 @@ export type ChatGptService = {
     outputSchema?: Record<string, unknown>;
     signal?: AbortSignal;
     onStage?: (stage: string) => void;
+    onTool?: (event: import("./codex-adapter.js").CodexRunEvent) => void;
   }) => Promise<{ ok: true; text: string } | { ok: false; code: string; message: string }>;
   close: () => Promise<void>;
 };
@@ -130,7 +131,7 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
         const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
         if (pathname !== disabledBase && !pathname.startsWith(`${disabledBase}/`)) return false;
         // 明确不可用状态；不静默回退到临时目录或 404 冒充未注册。
-        const payload = JSON.stringify({ code: "not-configured", message: resolved.reason, protocolVersion: WOOHAA3_PROTOCOL_VERSION });
+        const payload = JSON.stringify({ code: "not-configured", message: resolved.reason, protocolVersion: WOOHAA3_PROTOCOL_VERSION, CANVAS_WORKSPACE_TOOLS });
         res.statusCode = 503;
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Content-Length", String(Buffer.byteLength(payload)));
@@ -255,17 +256,24 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
         return { ok: false as const, code: "authorization-required", message: error instanceof Error ? error.message : "授权不可用" };
       }
       const prompt = buildConversationPrompt(input.history, input.prompt);
+      const workspace = input.prepared.workspace;
+      let grant: string | undefined;
       try {
+        if (workspace) {
+          if (workspace.requestId !== input.requestId || !options.toolGrants || input.prepared.tools.some(tool => !CANVAS_WORKSPACE_TOOLS.includes(tool as never))) throw new Error("桌面讨论辅助工具授权不可用");
+          grant = (await options.toolGrants.issue({ delegation: { subject: workspace.owner, authLevel: "authenticated" }, workId: workspace.requestId, canvasId: workspace.canvasId, nodeId: "", tools: input.prepared.tools })).token;
+        }
         const { finalResponse } = await codex.runStreamed(
-          { ownerId: input.ownerId, requestId: input.requestId, prepared: input.prepared, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: true, ...(input.images ? { images: input.images } : {}), ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}), ...(input.signal ? { signal: input.signal } : {}) },
+          { ownerId: input.ownerId, requestId: input.requestId, prepared: input.prepared, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: !grant, ...(grant ? { mcpGrantToken: grant } : {}), ...(input.images ? { images: input.images } : {}), ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}), ...(input.signal ? { signal: input.signal } : {}) },
           (event) => {
             if (event.type === "progress") input.onStage?.(event.stage);
+            else if (event.type === "tool" || event.type === "tool-started") input.onTool?.(event);
           }
         );
         return { ok: true as const, text: finalResponse };
       } catch (error) {
         return { ok: false as const, code: "inference-failed", message: error instanceof Error ? error.message : "讨论推理失败" };
-      }
+      } finally { if (grant && workspace) options.toolGrants?.revoke(workspace.requestId, { subject: workspace.owner, authLevel: "authenticated" }); }
     },
     handle: handler,
     close: async () => {

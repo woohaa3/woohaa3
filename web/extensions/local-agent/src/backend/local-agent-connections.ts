@@ -91,17 +91,17 @@ async function issueToolGrant(
   tools: readonly string[]
 ): Promise<ToolGrantOutcome> {
   if (!facade) return { token: null, message: "宿主未配置工具委托" };
-  if (input.intent.action === "discuss") return { token: null, message: "讨论回合不需要工具授权" };
+  if (input.intent.action === "discuss" && !input.prepared?.workspace) return { token: null, message: "讨论回合不需要工具授权" };
   try {
     const grant = await facade.issue({
       delegation: { subject: input.owner, authLevel: "authenticated" },
       workId: input.requestId,
       canvasId: input.canvasId,
       nodeId: input.intent.nodeId ?? "",
-      mode: input.intent.mode,
+      ...(input.intent.action !== "discuss" ? { mode: input.intent.mode } : {}),
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
-      ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
-            ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
+      ...(input.intent.action !== "discuss" && input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+            ...(input.intent.action !== "discuss" && input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
       ...(input.intent.mode === "canvas-group" && input.intent.expectedContentHash?.startsWith("group-epoch:")
         ? { expectedScopeEpoch: Number(input.intent.expectedContentHash.slice("group-epoch:".length)) }
         : {}),
@@ -384,7 +384,7 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
           }
           if (event.type === "tool-completed" && toolNames.includes(event.tool)) {
             if (event.ok === false) toolFailure = event.summary ?? "画布工具执行失败";
-            if (event.ok === true && !readTools.has(event.tool)) successfulWrite = true;
+            if (event.ok === true && !event.tool.startsWith("workspace_") && !readTools.has(event.tool)) successfulWrite = true;
             if (event.tool === "import_generated_image" && event.ok === true) imageImported = true;
           }
           input.emit(event);

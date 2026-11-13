@@ -9,6 +9,7 @@
  * 锁定的现场故障：导演区提交后报「助手返回了工具调用文本」，模型把调用写成了
  * `<｜DSML｜invoke>` 这样的文本——它根本没收到 `tools` 声明，因为那一轮被当成了讨论。
  */
+import { preparedTurnHash, stripPreparedHash } from "@woohaa3/contracts";
 import { describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -308,4 +309,28 @@ describe("导演区工具回合（真实 MCP 线格式）", () => {
     mcp.server.close();
     chat.server.close();
   }, 60_000);
+});
+
+
+it("desktop discussion calls local workspace tools and returns complete structured output without a canvas receipt", async () => {
+  const content = "计算结果".repeat(5000);
+  const mcp = await startMcpServer({ tools: [{ name: "workspace_read" }, { name: "delete_everything" }], call: () => ({ ok: true, structured: { ok: true, result: { content, hash: "digest" } } }) });
+  const chat = await startChatServer([
+    { choices: [{ finish_reason: "tool_calls", message: { role: "assistant", content: null, tool_calls: [{ id: "aux", type: "function", function: { name: "workspace_read", arguments: '{"path":"shared/result"}' } }] } }] },
+    { choices: [{ finish_reason: "stop", message: { role: "assistant", content: "已读取计算结果" } }] }
+  ]);
+  const issued: unknown[] = [], revoked: unknown[] = [];
+  try {
+    const assistant = createRemoteAssistant({ fetchImpl: fetch, session: async () => ({ serverUrl: chat.baseUrl, token: "model-token" }), toolChannel: input => createCanvasToolChannel(input, { endpoint: mcp.endpoint, fetchImpl: fetch, tools: { issue: async request => { issued.push(request); return { token: "grant", workId: request.workId, canvasIds: ["canvas-1"], nodeIds: [], tools: request.tools ?? [] }; }, revoke: (...args) => { revoked.push(args); }, authorize: () => ({ ok: true }) } }) });
+    const input = worldTurn({ intent: { action: "discuss", canvasId: "canvas-1", prompt: "读取计算结果", model: "m" } });
+    const body = { ...stripPreparedHash(input.prepared!), tools: ["workspace_read"], target: { canvasId: "canvas-1" }, output: { kind: "reply" as const }, workspace: { schemaVersion: 1 as const, owner: input.owner, canvasId: input.canvasId, requestId: input.requestId, directoryKey: "a".repeat(64), runKey: "b".repeat(64), generation: 1 } };
+    input.prepared = { ...body, preparedHash: preparedTurnHash(body) };
+    expect(await assistant.adapter.run(input)).toMatchObject({ status: "succeeded", assistantText: "已读取计算结果" });
+    expect(chat.requests[0]!.tools).toHaveLength(1); expect(mcp.calls).toEqual([{ name: "workspace_read", args: { path: "shared/result" } }]);
+    const toolMessage = chat.requests[1]!.messages.find(message => message.role === "tool")!;
+    expect(JSON.parse(String(toolMessage.content))).toMatchObject({ result: { content, hash: "digest" } });
+    expect(issued[0]).not.toHaveProperty("mode"); expect(issued[0]).not.toHaveProperty("worldScope"); expect(revoked).toHaveLength(1);
+  } finally {
+    await Promise.all([mcp.server, chat.server].map(server => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); })));
+  }
 });

@@ -9,9 +9,10 @@ import http from "node:http";
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodexFactoryOptions, CodexLike } from "../src/backend/index.js";
 import { createExecutor } from "../src/backend/executor.js";
+import { preparedTurnHash, stripPreparedHash, type ApplicationToolDelegationFacade } from "@woohaa3/contracts";
 import type { ApplicationExtensionExecutorFacade } from "@woohaa3/contracts";
 import { createChatGptService } from "../src/backend/service.js";
 import { testPreparedTurn } from "./role-fixture.js";
@@ -60,7 +61,7 @@ function ports(): ChatGptCanvasPorts {
 
 async function boot(
   threads: Parameters<CodexLike["startThread"]>[0][] = [],
-  options: { fetchImpl?: typeof globalThis.fetch } = {}
+  options: { fetchImpl?: typeof globalThis.fetch; toolGrants?: ApplicationToolDelegationFacade; executor?: ApplicationExtensionExecutorFacade } = {}
 ) {
   const dir = tempDir();
   const service = createChatGptService({
@@ -78,7 +79,8 @@ async function boot(
       ok: true,
       prepared: testPreparedTurn({ requestId: request.requestId, canvasId: request.canvasId, nodeId: request.nodeId, mode: request.mode, prompt: request.prompt, ...(request.selectedCameraId ? { selectedCameraId: request.selectedCameraId } : {}) })
     }),
-    executor: {
+    toolGrants: options.toolGrants,
+    executor: options.executor ?? {
       run: async input => createExecutor({ createCodex: fakeCodex(threads) }).run({ kind: "agent", turnId: input.requestId, requestId: input.requestId, prepared: input.prepared, payload: input.payload }, {
         signal: input.signal ?? new AbortController().signal, turnId: input.requestId, requestId: input.requestId,
         stateDir: tempDir(), workspaceKey: "test", emit: (type, payload) => input.onEvent?.({ type, payload }),
@@ -342,4 +344,27 @@ describe("ChatGPT 未配置部署", () => {
     expect(status).toBe(503);
     expect(service.credentialDirectory()).toBeNull();
   });
+});
+
+
+it("OAuth desktop discussion delegates with the workspace owner while keeping the credential owner isolated", async () => {
+  const issue = vi.fn(async (request: { workId: string }) => ({ token: "workspace-grant", workId: request.workId, canvasIds: ["cv"], nodeIds: [], tools: ["workspace_execute"] }));
+  const revoke = vi.fn();
+  const run = vi.fn<ApplicationExtensionExecutorFacade["run"]>(async input => {
+    expect(input.owner).toBe("host-owner");
+    expect(input.payload).toMatchObject({ input: { ownerId: "credential-owner", noTools: false } });
+    expect(JSON.stringify(input.payload)).not.toContain("workspace-grant");
+    expect(await input.hostCall!("oauth.tool-grant", {})).toBe("workspace-grant");
+    input.onEvent?.({ type: "oauth-event", payload: { type: "tool", tool: "workspace_execute", callId: "aux", ok: true } });
+    return { status: "succeeded", result: { finalResponse: "computed" } };
+  });
+  const app = await boot([], { toolGrants: { issue, revoke, authorize: () => ({ ok: true }) }, executor: { run, query: async () => null, cancel: async () => undefined } });
+  app.service.credentials!.write("credential-owner", { account: { clientId: "client-1", subject: "chatgpt-sub", scopes: [CHATGPT_PLAN_SCOPE], accessToken: "access-secret", refreshToken: "refresh-secret", expiresAt: Date.now() + 3600_000, connectedAt: new Date().toISOString() }, host: { extAgentHostId: "h1" } });
+  const prepared = testPreparedTurn({ requestId: "request", canvasId: "cv", tools: ["workspace_execute"], output: { kind: "reply" } });
+  const body = { ...stripPreparedHash(prepared), workspace: { schemaVersion: 1 as const, owner: "host-owner", canvasId: "cv", requestId: "request", directoryKey: "a".repeat(64), runKey: "b".repeat(64), generation: 1 } };
+  const onTool = vi.fn();
+  expect(await app.service.converse({ ownerId: "credential-owner", requestId: "request", prepared: { ...body, preparedHash: preparedTurnHash(body) }, model: "gpt-6.1-sol", prompt: "计算", history: [], onTool })).toEqual({ ok: true, text: "computed" });
+  expect(issue).toHaveBeenCalledWith(expect.objectContaining({ delegation: { subject: "host-owner", authLevel: "authenticated" }, workId: "request", canvasId: "cv", tools: ["workspace_execute"] }));
+  expect(onTool).toHaveBeenCalledWith(expect.objectContaining({ tool: "workspace_execute" }));
+  expect(revoke).toHaveBeenCalledWith("request", { subject: "host-owner", authLevel: "authenticated" });
 });
