@@ -269,7 +269,7 @@ export const RUNNINGHUB_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   name: "RunningHub Provider",
   description: "RunningHub Provider：图片／视频生成、官方文字模型与临时图床。",
   // 2.2.0：官方文字目录与独立端点、临时图床提供商候选。
-  version: "2.2.1",
+  version: "2.2.2",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "runninghub-provider-config", schemaVersion: 1 },
