@@ -65,6 +65,7 @@ type YjsCommandDoc = {
   /** Canvas script 首次提交元数据（源码无关）；旧文档缺省。 */
   script?: import("@woohaa3/contracts").CanvasScriptSubmissionMeta;
   modelBatch?: import("@woohaa3/contracts").ModelScriptBatchMeta;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
 };
 
 /** 部署级 writer lock 单文档（`_id` 天然唯一，提供跨进程 CAS）。 */
@@ -234,7 +235,8 @@ export class MongoYjsRepository implements YjsDocumentRepository {
             actorId: commit.command.actorId,
             createdAt: commit.command.createdAt,
             ...(commit.command.script ? { script: commit.command.script } : {}),
-            ...(commit.command.modelBatch ? { modelBatch: commit.command.modelBatch } : {})
+            ...(commit.command.modelBatch ? { modelBatch: commit.command.modelBatch } : {}),
+            ...(commit.command.resourceEdit ? { resourceEdit: commit.command.resourceEdit } : {})
           },
           { session }
         );
@@ -262,7 +264,8 @@ export class MongoYjsRepository implements YjsDocumentRepository {
       actorId: doc.actorId,
       createdAt: doc.createdAt,
       ...(doc.script ? { script: doc.script } : {}),
-      ...(doc.modelBatch ? { modelBatch: doc.modelBatch } : {})
+      ...(doc.modelBatch ? { modelBatch: doc.modelBatch } : {}),
+      ...(doc.resourceEdit ? { resourceEdit: doc.resourceEdit } : {})
     };
   }
 

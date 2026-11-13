@@ -29,6 +29,7 @@ export type RoomSubmitOptions = {
   modelBatch?: ModelScriptBatchMeta;
   /** Immutable scene-area authority receipt (T06) persisted with the command. */
   worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
 };
 
 /**
@@ -100,6 +101,7 @@ export type RoomCommandResult =
       modelBatch?: ModelScriptBatchMeta;
       /** Frozen scene-area authority receipt; duplicate returns the first value. */
       worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
       /** duplicate 时标记该回执来自 durable 首次记录。 */
       duplicate?: boolean;
     }

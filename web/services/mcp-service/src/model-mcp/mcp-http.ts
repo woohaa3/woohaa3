@@ -190,6 +190,7 @@ const GRANTED_TOOLS = new Set([
   "submit_model_scripts",
   "validate_model_scripts",
   "set_node_prompt",
+  "edit_scene_area", "edit_world_model", "edit_world_camera", "edit_world_model_script", "edit_scene_animation_script",
   "create_world_model",
   "replace_world_model_content",
   "append_world_model_script",

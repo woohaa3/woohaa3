@@ -280,8 +280,8 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       this.db
         .prepare(
           `INSERT INTO canvas_yjs_commands
-             (canvas_id, command_id, payload_hash, revision, changed, actor_id, created_at, script_meta_json, model_batch_json, world_authoring_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (canvas_id, command_id, payload_hash, revision, changed, actor_id, created_at, script_meta_json, model_batch_json, world_authoring_json, resource_edit_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           commit.canvasId,
@@ -293,7 +293,8 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
           commit.command.createdAt,
           commit.command.script ? JSON.stringify(commit.command.script) : null,
           commit.command.modelBatch ? JSON.stringify(commit.command.modelBatch) : null,
-          commit.command.worldAuthoring ? JSON.stringify(commit.command.worldAuthoring) : null
+          commit.command.worldAuthoring ? JSON.stringify(commit.command.worldAuthoring) : null,
+          commit.command.resourceEdit ? JSON.stringify(commit.command.resourceEdit) : null
         );
 
       return { ok: true, storageSeq: nextSeq, revision: commit.revision, duplicate: false } satisfies YjsCommitResult;
@@ -410,10 +411,11 @@ export class SqliteYjsRepository implements YjsDocumentRepository {
       const update = this.db.prepare("INSERT INTO canvas_yjs_updates (canvas_id, seq, update_bytes, sha256, created_at) VALUES (?, ?, ?, ?, ?)");
       for (const entry of state.updates) update.run(canvasId, entry.seq, toBlob(entry.update), entry.sha256, state.updatedAt);
       const command = this.db.prepare(`INSERT INTO canvas_yjs_commands
-        (canvas_id, command_id, payload_hash, revision, changed, actor_id, created_at, script_meta_json, model_batch_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        (canvas_id, command_id, payload_hash, revision, changed, actor_id, created_at, script_meta_json, model_batch_json, world_authoring_json, resource_edit_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const entry of commands) command.run(canvasId, entry.commandId, entry.payloadHash,
         entry.revision, entry.changed ? 1 : 0, entry.actorId, entry.createdAt,
-        entry.script ? JSON.stringify(entry.script) : null, entry.modelBatch ? JSON.stringify(entry.modelBatch) : null);
+        entry.script ? JSON.stringify(entry.script) : null, entry.modelBatch ? JSON.stringify(entry.modelBatch) : null,
+        entry.worldAuthoring ? JSON.stringify(entry.worldAuthoring) : null, entry.resourceEdit ? JSON.stringify(entry.resourceEdit) : null);
     });
   }
 

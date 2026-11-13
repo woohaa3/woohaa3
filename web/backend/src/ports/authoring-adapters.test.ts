@@ -175,7 +175,7 @@ describe("进程内 authoring 适配器", () => {
   await expect(services.tools.issue({ ...request, tools: ["submit_model_script"] })).rejects.toThrow("工具不属于本轮世界范围");
   expect(issue).not.toHaveBeenCalled();
   const grant = await services.tools.issue(request);
-  expect(grant.tools).toEqual(["get_world_context", "set_world_camera", "complete_world_camera"]);
+  expect(grant.tools).toEqual(["get_world_context", "read_world_resource", "edit_world_camera"]);
   expect(grant.world?.scope.scope).toEqual(scope);
   expect(issue).toHaveBeenCalledWith(expect.objectContaining({ scope }));
 });

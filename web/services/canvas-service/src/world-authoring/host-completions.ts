@@ -112,6 +112,8 @@ export type AssistantWorldWriteIntent = {
   cameraId: string;
   /** Exact command identity this intent is allowed to prove. */
   commandId: string;
+  /** Grouped commands can update several cameras; each intent keys its own row. */
+  receiptCommandId?: string;
   /** Canonical settings version observed before the write. */
   expectedSettingsVersion: string;
   /** Canonical node a successful commit must have patched. */

@@ -976,7 +976,7 @@ describe("assistant spatial failure codes", () => {
     const identity = {kind:"instance" as const,instanceId:"instance-1"};
     const version = worldObjectVersion(canvas,identity)!;
     const {service} = harness({canvas,context:contextFor(scope,[{...identity,version}]),commitFailure});
-    const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:scope.scope});
+    const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:{kind:"scene-area",areaId:"area-1"}});
     if(!issued.ok) throw Error(issued.message);
     return {service, canvas, identity, version, contextId:issued.context.contextId};
   }
@@ -1022,7 +1022,7 @@ describe("assistant spatial failure codes", () => {
     canvas.nodeData.area = {sceneArea:{kind:"scene-area",version:"shared-world-v1",areaId:"area-1",scopeVersion:"scope-1",
       animationOrigin:{u:0,v:0},bounds:{min:{u:0,v:0},max:{u:10,v:10}}}};
     const {service} = harness({canvas});
-    const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:scope.scope});
+    const issued = await service.issue({canvasId:canvas.id,requestId:"r",runId:"run-1",epoch:0,executionId:"exec-1",scope:{kind:"scene-area",areaId:"area-1"}});
     if(!issued.ok) throw Error(issued.message);
     const result = await service.write({contextId:issued.context.contextId,operation:{
       kind:"create-world-camera",operationId:"create-outside",nodeId:"node-outside",cameraId:"camera-outside",

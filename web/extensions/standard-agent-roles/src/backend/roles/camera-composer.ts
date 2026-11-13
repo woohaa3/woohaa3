@@ -11,7 +11,7 @@ import { CAMERA_COMPOSER_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.
 export const cameraComposerRole: AgentRoleImplementation = {
   definition: {
     id: "camera-composer",
-    revision: "1",
+    revision: "2",
     title: "镜头构图",
     specialty: "读取权威镜头与场景包围盒，只调整所选镜头的机位、朝向、FoV 与画幅",
     instructions: ["你是 Woohaa3 镜头构图 Agent。", ...TOOL_COMMON_RULES, ...CAMERA_COMPOSER_FLOW].join("\n"),

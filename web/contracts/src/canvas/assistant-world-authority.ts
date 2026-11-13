@@ -34,6 +34,8 @@ import type { WorldAuthoringConflict, WorldAuthoringFailure, WorldAuthoringFailu
 import { isBoundedId, isJsonObject } from "../validation.js";
 import { decodeGroundAabb } from "./creation-scope-codec.js";
 
+import { WORLD_RESOURCE_TOOLS, type WorldResourceEdit } from "./world-resource-tools.js";
+
 export const ASSISTANT_WORLD_AUTHORITY_VERSION = "assistant-world-authority-v1" as const;
 
 /** Selectable authoring scopes. */
@@ -68,13 +70,13 @@ export const ASSISTANT_WORLD_TOOL = {
   completeCamera: "complete_world_camera"
 } as const;
 
-export type AssistantWorldToolName = (typeof ASSISTANT_WORLD_TOOL)[keyof typeof ASSISTANT_WORLD_TOOL];
+export type AssistantWorldToolName = (typeof ASSISTANT_WORLD_TOOL)[keyof typeof ASSISTANT_WORLD_TOOL] | (typeof WORLD_RESOURCE_TOOLS)[keyof typeof WORLD_RESOURCE_TOOLS];
 
 /** Read-only context tools are the only tools a 2D group selection can receive. */
 export const ASSISTANT_WORLD_READ_TOOLS = [ASSISTANT_WORLD_TOOL.readContext] as const;
 
 /** Scene-area write tools. Membership in a 2D group never grants these. */
-export const ASSISTANT_WORLD_WRITE_TOOLS = [
+export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.createModel,
   ASSISTANT_WORLD_TOOL.replaceModel,
   ASSISTANT_WORLD_TOOL.appendModelScript,
@@ -87,23 +89,21 @@ export const ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.completeCamera
 ] as const;
 
+export const ASSISTANT_WORLD_WRITE_TOOLS = [
+  WORLD_RESOURCE_TOOLS.area, WORLD_RESOURCE_TOOLS.model, WORLD_RESOURCE_TOOLS.camera,
+  WORLD_RESOURCE_TOOLS.modelScript, WORLD_RESOURCE_TOOLS.animation
+] as const;
 export const ASSISTANT_WORLD_TOOLS = [
-  ...ASSISTANT_WORLD_READ_TOOLS,
-  ASSISTANT_WORLD_TOOL.readModelScript,
-  ASSISTANT_WORLD_TOOL.readModelRig,
-  ASSISTANT_WORLD_TOOL.sampleAnimation,
-  ...ASSISTANT_WORLD_WRITE_TOOLS
-] as const satisfies readonly AssistantWorldToolName[];
-
+  ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read,
+  ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS
+] as const;
 export const ASSISTANT_WORLD_CAMERA_TOOLS = [
-  ASSISTANT_WORLD_TOOL.readContext,
-  ASSISTANT_WORLD_TOOL.setCamera,
-  ASSISTANT_WORLD_TOOL.completeCamera
+  ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read, WORLD_RESOURCE_TOOLS.camera
 ] as const;
 
 /** Actual tool catalog for a selected scope. */
-export function assistantWorldToolsForScope(scope: AssistantWorldScopeSelection): readonly AssistantWorldToolName[] {
-  return scope.kind === "world-camera" ? ASSISTANT_WORLD_CAMERA_TOOLS : ASSISTANT_WORLD_TOOLS;
+export function assistantWorldToolsForScope(scope: WorldScopeVersion["scope"]): readonly AssistantWorldToolName[] {
+  return scope.kind === "world-camera" ? ASSISTANT_WORLD_CAMERA_TOOLS : scope.kind === "scene-area" ? ASSISTANT_WORLD_TOOLS : ASSISTANT_WORLD_READ_TOOLS;
 }
 
 /** Per-source capability declaration consumed by the assistant directory. */
@@ -126,7 +126,7 @@ export function assistantWorldSourceCapability(
     version: ASSISTANT_WORLD_AUTHORITY_VERSION,
     targets: [...targets],
     tools: [...tools],
-    completion: tools.includes(ASSISTANT_WORLD_TOOL.completeCamera)
+    completion: tools.includes(ASSISTANT_WORLD_TOOL.completeCamera) || tools.includes(WORLD_RESOURCE_TOOLS.camera)
   };
 }
 
@@ -174,7 +174,9 @@ export type AssistantWorldFailureCode =
   /** `oldString` occurs more than once; the caller must supply more context. */
   | "patch-ambiguous"
   /** `oldString === newString`; nothing changed and no version advanced. */
-  | "patch-noop";
+  | "patch-noop"
+  | "reference-conflict"
+  | "already-exists";
 
 /** One place a patch `oldString` occurs; `line` is 1-based. */
 export interface AssistantWorldPatchMatch {
@@ -212,6 +214,8 @@ export interface AssistantWorldFailure {
   patchDiagnostic?: AssistantWorldPatchDiagnostic;
   /** Current authoritative version, present on `version-conflict` when it could be read. */
   currentVersion?: WorldVersion;
+  references?: Array<{ nodeId: string; kind: string }>;
+  editIndex?: number;
 }
 
 export type AssistantWorldIssueOutcome = ({ ok: true } & AssistantWorldIssued) | AssistantWorldFailure;
@@ -230,6 +234,7 @@ export interface AssistantWorldModelContent {
 }
 
 export type AssistantWorldWriteOperation =
+  | { kind: "edit-resource"; operationId: string; edit: WorldResourceEdit }
   | {
       kind: "create-model";
       operationId: WorldId;
@@ -340,6 +345,8 @@ export type AssistantWorldWriteOutcome =
        * treating a successful write as a correct framing.
        */
       view?: WorldCameraView;
+      target?: import("./world-resource-tools.js").WorldResourceTarget;
+      deleted?: boolean;
     }
   | AssistantWorldFailure;
 
@@ -945,6 +952,9 @@ export type AssistantWorldContextView = {
   bounds?: { min: { u: number; v: number }; max: { u: number; v: number } };
   /** Current published animation for this director area. Omitted by older hosts and for 2D groups. */
   sceneArea?: {
+    areaId?: string;
+    title?: string;
+    resourceVersion?: string;
     nodeId: WorldId;
     revision: number;
     /** Canonical scope version the next range write must present. */
@@ -965,6 +975,8 @@ export type AssistantWorldContextView = {
    * Omitted by hosts that predate chunked authoring.
    */
   modelScripts?: Record<WorldId, string>;
+  resourceVersions?: Record<string, string>;
+  sceneCameras?: Array<{ nodeId: string; title: string; settings: WorldCameraData }>;
   /** A 2D group has no writable world set and no completion. */
   worldWritable: boolean;
 };

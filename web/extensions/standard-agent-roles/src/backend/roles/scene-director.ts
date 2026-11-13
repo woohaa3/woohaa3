@@ -4,7 +4,7 @@
  * 迁移自 `target-prompt` 的 world/scene-area 分支。写资格仍由宿主签发的世界范围决定，
  * 角色声明只是允许集合。
  */
-import { ASSISTANT_WORLD_TOOLS, ASSISTANT_WORLD_TOOL, ASSISTANT_WORLD_WRITE_TOOLS } from "@woohaa3/contracts";
+import { ASSISTANT_WORLD_TOOLS, ASSISTANT_WORLD_TOOL, ASSISTANT_WORLD_WRITE_TOOLS, WORLD_RESOURCE_TOOLS } from "@woohaa3/contracts";
 import type { AgentRoleImplementation } from "@woohaa3/contracts";
 import { conversationPrompt, CONVERSATION_INPUT_SCHEMA, OPEN_CONTEXT_SCHEMA, RECEIPTS_OUTPUT } from "../role-shared.js";
 import { SCENE_DIRECTOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.js";
@@ -12,17 +12,17 @@ import { SCENE_DIRECTOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.j
 export const sceneDirectorRole: AgentRoleImplementation = {
   definition: {
     id: "scene-director",
-    revision: "3",
+    revision: "4",
     title: "导演区作者",
     specialty: "在导演区共享世界中创建、修改模型与镜头，并制作确定性动画",
     instructions: ["你是 Woohaa3 导演区的共享世界创作 Agent。", ...TOOL_COMMON_RULES, ...SCENE_DIRECTOR_FLOW].join("\n"),
     inputSchema: CONVERSATION_INPUT_SCHEMA,
     contextSchema: OPEN_CONTEXT_SCHEMA,
     // 读上下文是所有世界范围的最小必需工具；具体写入/建模工具按本轮 scope 收窄。
-    // get_world_model_script 是分段写入前的版本/脚本读取入口，和 rig/sample 一样是可选读工具。
+    // 资源查询提供脚本/rig 精确读取，采样独立用于数据诊断。
     tools: {
       required: [ASSISTANT_WORLD_TOOL.readContext],
-      optional: ["get_model_api", ASSISTANT_WORLD_TOOL.readModelScript, ASSISTANT_WORLD_TOOL.readModelRig, ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS]
+      optional: ["get_model_api", WORLD_RESOURCE_TOOLS.read, ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS]
     },
     nativeCapabilities: { required: [], optional: [] },
     requirements: { imageInput: false, toolCalling: true, structuredOutput: "none" },
@@ -38,7 +38,7 @@ export const sceneDirectorRole: AgentRoleImplementation = {
       );
     }
     lines.push(
-      "为模型做骨骼/关节动画或行走前，先用 get_world_model_rig 读取真实部件、参考姿态与行走 profile；profile 为 null 表示不支持，不能伪造。",
+      "为模型做骨骼/关节动画或行走前，先用 read_world_resource（resourceType=world_model_rig, operation=get） 读取真实部件、参考姿态与行走 profile；profile 为 null 表示不支持，不能伪造。",
       "用 sample_scene_animation 采样关节与接地诊断，warning 需按用户意图处理；只能报告数据验证，未看画面不可宣称视觉验收。"
     );
     if (expectedContentHash) lines.push(`宿主冻结的内容哈希：${expectedContentHash}；提交前仍以工具读取结果为准。`);

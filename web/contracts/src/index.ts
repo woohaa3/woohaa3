@@ -247,3 +247,5 @@ export {
   redactLogPatterns, redactLogText,
   type LogAttrValue, type LogLevel, type LogRecord, type LogRuntime, type NormalizeLogInput
 } from "./log/index.js";
+
+export * from "./canvas/world-resource-tools.js";

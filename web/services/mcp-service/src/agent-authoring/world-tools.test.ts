@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { executeModelWithStoredRig, describeWorldModelAnimationRig, HUMANOID_REFERENCE_PARAMETERS, assistantWorldToolsForScope } from "@woohaa3/contracts";
+import { executeModelWithStoredRig, describeWorldModelAnimationRig, HUMANOID_REFERENCE_PARAMETERS, assistantWorldToolsForScope, ASSISTANT_WORLD_TOOL } from "@woohaa3/contracts";
 import type { ApplicationToolGrant, WorldAnimationScript } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "../model-mcp/mcp-http.js";
 import type { AgentCanvasClient } from "../downstream/agent-canvas-client.js";
@@ -29,7 +29,7 @@ function grant(): ApplicationToolGrant {
     token: "grant-token",
     canvasIds: ["canvas-1"],
     nodeIds: [],
-    tools: [...assistantWorldToolsForScope({kind:"scene-area",areaId:"area-1"})],
+    tools: Object.values(ASSISTANT_WORLD_TOOL),
     workId: "req-1",
     subject: "owner-1",
     world: {
@@ -401,7 +401,7 @@ it("describes the default 4x4 area and the resize prerequisite", async () => {
   const describe = (name: string) => catalog.result.tools.find(tool => tool.name === name)?.description ?? "";
   for (const name of ["get_world_context", "create_world_model", "resize_scene_area"]) {
     expect(describe(name)).toContain("4×4");
-    expect(describe(name)).toContain("resize_scene_area");
+    expect(describe(name)).toContain(name === "get_world_context" ? "edit_scene_area" : "resize_scene_area");
   }
   const create = describe("create_world_model");
   for (const term of ["outside-scope", "version-conflict", "version-unknown"]) expect(create).toContain(term);

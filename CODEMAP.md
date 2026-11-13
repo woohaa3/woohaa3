@@ -1,4 +1,11 @@
 # Client code map
+
+## Director resource tools (2026-11-13)
+
+`web/contracts/src/canvas/world-resource-tools.ts` defines five editable resource types and frozen edit receipts. `web/services/mcp-service/src/agent-authoring/world-resource-tools.ts` registers `read_world_resource` and five resource editors; `world-tool-shared.ts` holds shared schemas/grant/diagnostic helpers. Together with context, model API and animation sampling the current scene-director role exposes exactly nine tools. Camera-composer exposes only context, resource query and selected-camera update. Explicit old grants retain legacy compatibility without duplicating the new role catalogue.
+
+`world-authoring/assistant-service.ts` composes script edits inside the Room queue, compiles the complete result, checks references and commits atomically with host-owned scope/version/lease authority. Scripts support create/replace/append/patch/delete; structured resources use create/update/delete, narrowed to update for the current root scene-area grant. Area move/rotation uses existing scene plans. `sync/command-execution.ts` persists resourceEdit metadata with canonical commands; SQLite Yjs schema 8 and Mongo retain frozen receipts through retries/archive restore. SQLite assistant completion schema 5 records each camera intent separately against a shared receipt command, allowing multi-camera area edits to recover after reopen. Camera lookAt resolves inside the authoritative queue; completion/history remains host automatic.
+
 > **2026-11-05 清理**：画布旧「普通组」与「片场组」能力已删除，且不再保留读取期迁移；
 > 旧 `group` / `film-set-shot-preview` 节点按未知类型收敛为 `custom`。片场扩展、镜头/对象/录制、
 > 组徽标与组创作入口均已移除。下文仍提到它们的句子属于历史记录，以源码为准。

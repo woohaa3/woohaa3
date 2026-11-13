@@ -1,7 +1,7 @@
+import { WORLD_RESOURCE_TOOLS } from "./world-resource-tools.js";
 import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_WORLD_CAMERA_TOOLS,
-  ASSISTANT_WORLD_TOOL,
   appendWorldModelChunk,
   assistantWorldSourceCapability,
   assistantWorldToolsForScope,
@@ -29,7 +29,7 @@ describe("assistant world scope", () => {
   });
 
   it("grants the scene-area and camera tool surfaces", () => {
-    expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" })).toContain(ASSISTANT_WORLD_TOOL.setCamera);
+    expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" })).toContain(WORLD_RESOURCE_TOOLS.camera);
     expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" })).toEqual([...ASSISTANT_WORLD_CAMERA_TOOLS]);
     const capability = assistantWorldSourceCapability({ targets: ["world-camera"] });
     expect(capability.tools).toEqual([...ASSISTANT_WORLD_CAMERA_TOOLS]);
@@ -130,16 +130,17 @@ describe("assistant world write decoding", () => {
     }).ok).toBe(false);
   });
 
-  it("allows an empty skeleton script but keeps card layout optional", () => {
+  it("allows an empty skeleton script and rejects legacy card layout", () => {
     // 空脚本 = 骨架：身份与版本照常派生，内容在追加前不参与渲染。
-    expect(decodeAssistantWorldModelContent({ modelScript: "", cardPosition: { x: 0, y: 0 } })).toEqual({
+    expect(decodeAssistantWorldModelContent({ modelScript: "" })).toEqual({
       ok: true,
-      value: { modelScript: "", cardPosition: { x: 0, y: 0 } }
+      value: { modelScript: "" }
     });
     expect(decodeAssistantWorldModelContent({ modelScript: "scene.box({});" })).toEqual({
       ok: true,
       value: { modelScript: "scene.box({});" }
     });
+    expect(decodeAssistantWorldModelContent({ modelScript: "", cardPosition: { x: 0, y: 0 } }).ok).toBe(false);
     expect(decodeAssistantWorldModelContent({ modelScript: undefined }).ok).toBe(false);
   });
 });
@@ -220,17 +221,17 @@ describe("chunked write operation decoding", () => {
 
   it("keeps the new tools in the scene-area surface only", () => {
     // 写入口只在导演区；2D 组与镜头范围都拿不到。
-    for (const name of [ASSISTANT_WORLD_TOOL.appendModelScript, ASSISTANT_WORLD_TOOL.patchModelScript]) {
+    for (const name of [WORLD_RESOURCE_TOOLS.modelScript, WORLD_RESOURCE_TOOLS.animation]) {
       expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" }), name).toContain(name);
       expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" }), name).not.toContain(name);
     }
     // 读取入口随导演区读写面提供，镜头范围没有脚本编辑能力。
-    expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" })).toContain(ASSISTANT_WORLD_TOOL.readModelScript);
-    expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" })).not.toContain(ASSISTANT_WORLD_TOOL.readModelScript);
+    expect(assistantWorldToolsForScope({ kind: "scene-area", areaId: "a" })).toContain(WORLD_RESOURCE_TOOLS.read);
+    expect(assistantWorldToolsForScope({ kind: "world-camera", cameraId: "c" })).toContain(WORLD_RESOURCE_TOOLS.read);
     expect(assistantWorldSourceCapability({ targets: ["scene-area"] }).tools).toEqual(expect.arrayContaining([
-      ASSISTANT_WORLD_TOOL.readModelScript,
-      ASSISTANT_WORLD_TOOL.appendModelScript,
-      ASSISTANT_WORLD_TOOL.patchModelScript
+      WORLD_RESOURCE_TOOLS.read,
+      WORLD_RESOURCE_TOOLS.modelScript,
+      WORLD_RESOURCE_TOOLS.animation
     ]));
   });
 });
@@ -240,12 +241,12 @@ it("decodes a camera scope strictly and grants only camera adjustments", () => {
   expect(decodeAssistantWorldScope(scope)).toEqual({ ok: true, value: scope });
   expect(decodeAssistantWorldScope({ ...scope, areaId: "area" }).ok).toBe(false);
   expect(decodeAssistantWorldScope({ ...scope, cameraId: "" }).ok).toBe(false);
-  expect(assistantWorldToolsForScope(scope)).toEqual(["get_world_context", "set_world_camera", "complete_world_camera"]);
-  expect(assistantWorldSourceCapability({ targets: ["world-camera"] })).toMatchObject({ targets: ["world-camera"], tools: ["get_world_context", "set_world_camera", "complete_world_camera"], completion: true });
+  expect(assistantWorldToolsForScope(scope)).toEqual(["get_world_context", "read_world_resource", "edit_world_camera"]);
+  expect(assistantWorldSourceCapability({ targets: ["world-camera"] })).toMatchObject({ targets: ["world-camera"], tools: ["get_world_context", "read_world_resource", "edit_world_camera"], completion: true });
 });
 
 it("grants rig reads and scene samples only to a director area", () => {
-  for (const name of ["get_world_model_rig", "sample_scene_animation"]) {
+  for (const name of ["edit_world_model_script", "sample_scene_animation"]) {
     expect(assistantWorldToolsForScope({kind:"scene-area",areaId:"a"})).toContain(name);
     expect(assistantWorldToolsForScope({kind:"world-camera",cameraId:"c"})).not.toContain(name);
   }

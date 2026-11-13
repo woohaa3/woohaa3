@@ -22,7 +22,7 @@ import {
   type AssistantWorldWriteIntent
 } from "../../world-authoring/host-completions.js";
 
-export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 4;
+export const SQLITE_ASSISTANT_HOST_COMPLETION_SCHEMA_VERSION = 5;
 
 export type SqliteAssistantHostCompletionRepositoryOptions = {
   path: string;
@@ -43,6 +43,7 @@ type Row = {
 };
 
 type IntentRow = {
+  receipt_command_id: string | null;
   command_id: string;
   canvas_id: string;
   request_id: string;
@@ -186,6 +187,8 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
           created_at TEXT NOT NULL
         )
       `);
+      const intentColumns = this.db.prepare("PRAGMA table_info(assistant_world_write_intents)").all() as Array<{ name: string }>;
+      if (!intentColumns.some(column => column.name === "receipt_command_id")) this.db.exec("ALTER TABLE assistant_world_write_intents ADD COLUMN receipt_command_id TEXT");
       this.db.exec(
         "CREATE INDEX IF NOT EXISTS idx_awwi_run ON assistant_world_write_intents(canvas_id, run_id)"
       );
@@ -333,8 +336,8 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
           `INSERT INTO assistant_world_write_intents
              (command_id, canvas_id, request_id, run_id, epoch, execution_id, context_id,
               completion_id, camera_id, expected_settings_version, node_id, settings_version,
-              camera_json, payload_hash, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              camera_json, payload_hash, created_at, receipt_command_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(command_id) DO UPDATE SET
              canvas_id = excluded.canvas_id,
              request_id = excluded.request_id,
@@ -348,7 +351,8 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
              node_id = excluded.node_id,
              settings_version = excluded.settings_version,
              camera_json = excluded.camera_json,
-             payload_hash = excluded.payload_hash`
+             payload_hash = excluded.payload_hash,
+             receipt_command_id = excluded.receipt_command_id`
         )
         .run(
           intent.commandId,
@@ -365,7 +369,8 @@ export class SqliteAssistantHostCompletionRepository implements AssistantHostCom
           intent.settingsVersion,
           JSON.stringify(intent.snapshot),
           intent.payloadHash,
-          this.now()
+          this.now(),
+          intent.receiptCommandId ?? null
         );
     });
   }
@@ -449,6 +454,7 @@ function rowToIntent(row: IntentRow): AssistantWorldWriteIntent | null {
     completionId: row.completion_id,
     cameraId: row.camera_id,
     commandId: row.command_id,
+    ...(row.receipt_command_id ? { receiptCommandId: row.receipt_command_id } : {}),
     expectedSettingsVersion: row.expected_settings_version,
     nodeId: row.node_id,
     settingsVersion: row.settings_version,
