@@ -121,7 +121,7 @@ function contextView(overrides: Partial<AssistantWorldContextView> = {}): Assist
 }
 
 
-it('advertises exactly nine current tools, excludes legacy names, validates operation branches before dispatch', async () => {
+it('advertises the current tool catalog, excludes legacy names, validates operation branches before dispatch', async () => {
   const issued = scopeGrant();
   const writes: unknown[] = [];
   const base = await start({ read: async () => ({ ok: true, view: contextView() }), write: async input => {
