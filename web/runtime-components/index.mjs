@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
-  extractNpmTarball, planLayout, packageDirectory, platformKey, probeNpmToolchain, registryTarballUrl,
+  extractNpmTarball, orderRegistries, planLayout, packageDirectory, platformKey, probeNpmToolchain, registryTarballUrl,
   runAllowedScripts, selectPlatformPackages, tarballCacheName, verifyEntry, verifyIntegrity, verifyLayout
 } from './npm-registry.mjs';
 const exec = promisify(execFile);
@@ -15,6 +15,9 @@ export class RuntimeComponentError extends Error {
   constructor(code, message) { super(message); this.name = 'RuntimeComponentError'; this.code = code; }
 }
 const fail = (code, message) => { throw new RuntimeComponentError(code, message); };
+function attemptSignal(signal, timeoutMs) {
+  return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+}
 const segment = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value) && value !== '..';
 async function json(file, optional = false) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch (error) { if (optional && error.code === 'ENOENT') return {}; throw error; }
@@ -41,8 +44,12 @@ function validateConfig(value, user = false) {
   // arbitrary registry any more than they can type an arbitrary package name.
   if (value.registry) {
     if (user) fail('INVALID_CONFIG', 'The npm registry is managed by the deployment');
-    if (Object.keys(value.registry).some(k => k !== 'baseUrl')) fail('INVALID_CONFIG', 'Unknown registry configuration field');
+    if (Object.keys(value.registry).some(k => !['baseUrl', 'mirrors'].includes(k))) fail('INVALID_CONFIG', 'Unknown registry configuration field');
     if (value.registry.baseUrl) validateUrl(value.registry.baseUrl);
+    if (value.registry.mirrors !== undefined) {
+      if (!Array.isArray(value.registry.mirrors) || value.registry.mirrors.length > 8 || value.registry.mirrors.some(m => typeof m !== 'string')) fail('INVALID_CONFIG', 'Invalid npm registry mirrors');
+      for (const mirror of value.registry.mirrors) validateUrl(mirror);
+    }
   }
   for (const [id, config] of Object.entries(value.components || {})) {
     if (!segment(id) || Object.keys(config).some(k => !['source', 'path'].includes(k)) || !['managed', 'npm-registry', 'local'].includes(config.source)) fail('INVALID_CONFIG', `Invalid component configuration: ${id}`);
@@ -97,9 +104,12 @@ async function extract(archive, destination, maxBytes, signal) {
 export function createRuntimeComponentManager({
   dataDir, defaultsPath, lockPath,
   npmLockPath = null, toolsDir = null, registryUrl = null, installEnabled = true,
+  probeTimeoutMs = 2000, downloadTimeoutMs = 120000,
   nodeExecPath = process.execPath,
   platform = process.platform, arch = process.arch, fetchImpl = globalThis.fetch
 }) {
+  if (!Number.isInteger(probeTimeoutMs) || probeTimeoutMs <= 0) fail('INVALID_CONFIG', 'Invalid npm registry probe timeout');
+  if (!Number.isInteger(downloadTimeoutMs) || downloadTimeoutMs <= 0) fail('INVALID_CONFIG', 'Invalid npm registry download timeout');
   if (!dataDir || !defaultsPath || !lockPath) fail('INVALID_CONFIG', 'Runtime data directory, defaults and lock paths are required');
   const configFile = path.join(dataDir, 'config/runtime-downloads.json');
   const jobs = new Map(), states = new Map(), leases = new Map();
@@ -112,6 +122,13 @@ export function createRuntimeComponentManager({
     if (npmCache && npmCache.mtimeMs === info.mtimeMs && npmCache.size === info.size) return npmCache.value;
     const value = await json(npmLockPath);
     if (value.schemaVersion !== 1 || value.kind !== 'woohaa-runtime-npm-lock' || !value.engines || typeof value.engines !== 'object') fail('INVALID_CONFIG', 'Invalid runtime npm registry lock');
+    if (typeof value.registry?.default !== 'string') fail('INVALID_CONFIG', 'Invalid runtime npm registry lock');
+    if (value.registry.mirrors !== undefined) {
+      if (!Array.isArray(value.registry.mirrors) || value.registry.mirrors.length > 8 || value.registry.mirrors.some(m => typeof m !== 'string')) fail('INVALID_CONFIG', 'Invalid runtime npm registry mirrors');
+      for (const mirror of value.registry.mirrors) {
+        try { validateUrl(mirror); } catch { fail('INVALID_CONFIG', 'Invalid runtime npm registry mirror'); }
+      }
+    }
     for (const [id, engine] of Object.entries(value.engines)) {
       if (!segment(id) || !segment(engine.version) || !engine.packages || !engine.packages[`${engine.package}@${engine.version}`]) fail('INVALID_CONFIG', `Invalid npm runtime lock entry: ${id}`);
       for (const [packageId, entry] of Object.entries(engine.packages)) {
@@ -140,12 +157,23 @@ export function createRuntimeComponentManager({
     const blocked = source === 'npm-registry' && (!installEnabled || !engine)
       ? (installEnabled ? `${id} has no locked npm registry runtime` : '管理员未启用运行时安装')
       : undefined;
+    // 显式主 registry（环境变量或部署配置）保持单源语义；要加 fallback 必须同时提供 mirrors。
+    const explicitPrimary = registryUrl || defaults.registry?.baseUrl;
+    const primaryRegistry = explicitPrimary || npm?.registry?.default || 'https://registry.npmjs.org/';
+    // 部署显式提供的 mirrors 替换随包 lock 的 mirrors；空数组表示只使用主 registry。
+    const mirrors = defaults.registry?.mirrors ?? (explicitPrimary ? [] : npm?.registry?.mirrors ?? []);
+    const registryNames = [primaryRegistry, ...mirrors];
+    const registryUrls = [];
+    for (const candidate of registryNames) {
+      if (candidate && !registryUrls.includes(candidate)) registryUrls.push(candidate);
+    }
     return {
       lock, item, engine, npm,
       version: source === 'npm-registry' ? engine?.version ?? item?.version : item?.version,
       config: { ...defaults.components?.[id], ...user.components?.[id], source },
       baseUrl: user.cdn?.baseUrl ?? defaults.cdn?.baseUrl,
-      registryUrl: registryUrl || defaults.registry?.baseUrl || npm?.registry?.default || 'https://registry.npmjs.org/',
+      registryUrl: primaryRegistry,
+      registryUrls,
       blocked,
       keys: [...defaults.trustKeys || [], ...user.additionalTrustKeys || []]
     };
@@ -426,6 +454,48 @@ export function createRuntimeComponentManager({
     finally { if (staging) await fs.rm(staging, { recursive: true, force: true }); if (ownsLock) await fs.rm(lockDir, { recursive: true, force: true }); }
   }
   /**
+   * 按探测后的顺序下载单个 tarball；失败切下一个源，成功后把该源作为本安装的首选。
+   * 网络错误、超时、非 2xx 和 integrity 不匹配都不激活内容。
+   */
+  async function downloadNpmTarball(entry, registryOrder, preferred, signal) {
+    if (!registryOrder.length) fail('INVALID_CONFIG', 'No npm registry configured');
+    const errors = [];
+    let integrityFailure = false;
+    let nextPreferred = preferred;
+    for (let offset = 0; offset < registryOrder.length; offset += 1) {
+      const index = (preferred + offset) % registryOrder.length;
+      const base = registryOrder[index];
+      const target = registryTarballUrl(base, entry.name, entry.version);
+      let response;
+      try {
+        response = await fetchImpl(target, { signal: attemptSignal(signal, downloadTimeoutMs), redirect: 'error' });
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
+        errors.push(`${base}: ${error?.message ?? error}`);
+        nextPreferred = (index + 1) % registryOrder.length;
+        continue;
+      }
+      if (!response.ok) {
+        errors.push(`${base}: HTTP ${response.status}`);
+        await response.body?.cancel().catch(() => {});
+        nextPreferred = (index + 1) % registryOrder.length;
+        continue;
+      }
+      try {
+        const bytes = Buffer.from(await response.arrayBuffer());
+        verifyIntegrity(bytes, entry.integrity);
+        return { bytes, preferred: index };
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
+        if (error?.code === 'INVALID_HASH' || error?.code === 'INVALID_INTEGRITY') integrityFailure = true;
+        errors.push(`${base}: ${error?.message ?? error}`);
+        nextPreferred = (index + 1) % registryOrder.length;
+      }
+    }
+    if (integrityFailure) fail('INVALID_HASH', `npm tarball integrity mismatch for ${entry.name}@${entry.version}: ${errors.join('; ')}`);
+    fail('REGISTRY_UNAVAILABLE', `npm registry unreachable for ${entry.name}@${entry.version}: ${errors.join('; ')}`);
+  }
+  /**
    * npm registry 安装：锁定 tarball → integrity → staging → 布局/入口/脚本探针 → 原子发布。
    * 与 CDN 安装共用 `install()` 的 single-flight、租约、取消和版本目录约定。
    */
@@ -472,12 +542,23 @@ export function createRuntimeComponentManager({
       if (space.bavail * space.bsize < engine.spaceBytes) fail('INSUFFICIENT_SPACE', 'Insufficient space for runtime installation');
       const cacheDir = path.join(dataDir, 'cache/npm');
       await fs.mkdir(cacheDir, { recursive: true });
+      // 预检与工具链探测并行，避免额外串行等待；探测只决定顺序，失败仍按配置顺序下载。
+      states.set(id, { status: 'checking' });
+      const registryOrderPromise = orderRegistries({
+        registryUrls: s.registryUrls, name: engine.package, version: engine.version,
+        fetchImpl, signal, timeoutMs: probeTimeoutMs
+      });
+      // 工具链探测先失败时不会走到 await；给预检挂一个空处理器，避免延迟拒绝变成未处理异常。
+      registryOrderPromise.catch(() => {});
       const tools = toolsDir ? await probeNpmToolchain({ toolsDir, env: { HOME: cacheDir, TMPDIR: cacheDir, TEMP: cacheDir, SystemRoot: process.env.SystemRoot }, node: nodeExecPath }) : undefined;
+      const registryOrder = await registryOrderPromise;
       const staging = `${root}.staging-${randomUUID()}`;
       await fs.mkdir(staging);
       const directories = new Map();
       try {
-        states.set(id, { status: 'downloading', progress: { received: 0, total: plan.selected.size } });
+        states.set(id, { status: 'downloading', progress: { received: 0, total: plan.selected.size }, registry: registryOrder[0] });
+        const usedRegistries = new Set();
+        let preferred = 0;
         let done = 0;
         for (const packageId of plan.selected) {
           signal.throwIfAborted();
@@ -488,17 +569,16 @@ export function createRuntimeComponentManager({
             bytes = await fs.readFile(file);
             verifyIntegrity(bytes, entry.integrity);
           } catch {
-            const target = registryTarballUrl(s.registryUrl, entry.name, entry.version);
-            const response = await fetchImpl(target, { signal, redirect: 'error' });
-            if (!response.ok) fail('REGISTRY_UNAVAILABLE', `npm registry HTTP ${response.status} for ${entry.name}@${entry.version}`);
-            bytes = Buffer.from(await response.arrayBuffer());
-            verifyIntegrity(bytes, entry.integrity);
+            const downloaded = await downloadNpmTarball(entry, registryOrder, preferred, signal);
+            bytes = downloaded.bytes;
+            preferred = downloaded.preferred;
+            usedRegistries.add(registryOrder[preferred]);
             const temporary = `${file}.${randomUUID()}.partial`;
             await fs.writeFile(temporary, bytes);
             await fs.rename(temporary, file);
           }
           done += 1;
-          states.set(id, { status: 'downloading', progress: { received: done, total: plan.selected.size } });
+          states.set(id, { status: 'downloading', progress: { received: done, total: plan.selected.size }, registry: registryOrder[preferred] });
         }
         states.set(id, { status: 'extracting' });
         const extraction = plan.placements;
@@ -538,6 +618,7 @@ export function createRuntimeComponentManager({
           entrySha256: await fileHash(entry.file),
           lockSha256: createHash('sha256').update(lockBytes).digest('hex'),
           registry: s.registryUrl,
+          ...(usedRegistries.size ? { registries: [...usedRegistries] } : {}),
           packages: extracted.size,
           ...(executed.length ? { scripts: executed } : {}),
           installedAt: new Date().toISOString()
