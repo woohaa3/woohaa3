@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-tokenhub-provider",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "腾讯云 TokenHub 生成 Provider：从 GET /v1/models 发现模型，文本走 Chat Completions，图片与视频按系列接口提交。",

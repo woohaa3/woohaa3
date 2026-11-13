@@ -152,9 +152,10 @@ bevy        ──►  与 contracts 对齐的渲染协议（不 import TS）
 2. **`api/gen/es` 是生成物**。协议变更以重新生成的绑定提交进来，不在本仓补 `.proto` 或手改绑定。管理面契约（`*_admin_pb.ts` / `ops_pb.ts` / `rbac_pb.ts` / `inspect_pb.ts`）不得出现。
 3. **宿主不认识业务 ID**。按扩展 ID、Provider 名或私有内容字段做 `if` 的代码属于放错位置；改成公共端口、slot 或 contracts 声明。
 4. **扩展只走公共入口**，具名导入。新增扩展不改框架源码；声明写在自己的 `extension.json`。
-5. **界面面向电脑与平板**，不为手机或极窄窗口做专用布局。无障碍不是默认验收项，除非明确要求。
-6. **渲染结论必须来自真实 GPU**。macOS 用 `/usr/sbin/system_profiler SPDisplaysDataType`（出现 Apple M* / AMD / Intel 即真实 GPU）；Linux 看 `/dev/dri/renderD*`，WSL2 看 `/dev/dxg` 与 `/usr/lib/wsl/lib/libcuda.so.1`（WSL 不产生 `renderD*`）。macOS 没有 `/dev/dri` 是正常现象。容器 / WSL 里没有本机 GPU 时用宿主浏览器 CDP（`WOOHAA_E2E_CDP` + `E2E_BASE_URL`，实现见 [web/e2e/base-test.ts](web/e2e/base-test.ts)）取证，不 launch 本地软件渲染浏览器。禁止用 SwiftShader / lavapipe 或估算冒充硬件结论。
-7. **凭据、本机配置、用户数据、构建产物、签名密钥不进 Git**。许可证与第三方归属文件必须保留。未获版权方指示不得选定项目许可证。
+5. **改了扩展就要推进版本**。分发版本只有一个真源：`extension.json` 的 `version`；`site.version`、`package.json.version`、前端 `metadata.ts` 与被声明的后端元数据里的 `version` 必须与它相等。改完扩展运行 `pnpm ext:bump <extensionId> --patch`（或 `--minor` / `--major`），它一次改全部位置并写 `CHANGELOG.md`。**不要手改单个文件**——四处不一致会被 `extensions:check` 与 `build:browser` 拒绝。历史分叉（如某扩展的元数据版本被单独维护过）用 `pnpm ext:bump <id> --align` 收口到最高值，不要往低压。
+6. **界面面向电脑与平板**，不为手机或极窄窗口做专用布局。无障碍不是默认验收项，除非明确要求。
+7. **渲染结论必须来自真实 GPU**。macOS 用 `/usr/sbin/system_profiler SPDisplaysDataType`（出现 Apple M* / AMD / Intel 即真实 GPU）；Linux 看 `/dev/dri/renderD*`，WSL2 看 `/dev/dxg` 与 `/usr/lib/wsl/lib/libcuda.so.1`（WSL 不产生 `renderD*`）。macOS 没有 `/dev/dri` 是正常现象。容器 / WSL 里没有本机 GPU 时用宿主浏览器 CDP（`WOOHAA_E2E_CDP` + `E2E_BASE_URL`，实现见 [web/e2e/base-test.ts](web/e2e/base-test.ts)）取证，不 launch 本地软件渲染浏览器。禁止用 SwiftShader / lavapipe 或估算冒充硬件结论。
+8. **凭据、本机配置、用户数据、构建产物、签名密钥不进 Git**。许可证与第三方归属文件必须保留。未获版权方指示不得选定项目许可证。
 
 ## 常用检查
 
@@ -165,6 +166,9 @@ pnpm -C web --filter @woohaa3/contracts typecheck   # 其余包同理：frontend
 pnpm -C web --filter @woohaa3/frontend test
 pnpm boundary:check                                  # import、脚本、配置越界时
 pnpm extensions:check                                # 改了扩展声明、产物或槽位
+pnpm extensions:check --strict --bump-base origin/main   # CI 口径：把「改了扩展没 bump」也判失败
+pnpm ext:bump <extensionId> --patch                  # 改完扩展后推进版本（见硬规则 5）
+pnpm ext:release <extensionId>                       # 发布：先拒绝不可被市场覆盖的形态，再转交 release:extension
 ```
 
 单元测试通常与源码相邻。跨包门禁在 `web/tooling`，业务 E2E 在 `web/e2e`，Rust 测试在相邻 `tests.rs` 与 `bevy/tests`。

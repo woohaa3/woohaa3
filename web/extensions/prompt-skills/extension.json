@@ -29,5 +29,6 @@
       "route": "prompt-skills",
       "methods": ["GET", "POST"]
     }
-  ]
+  ],
+  "version": "0.1.0"
 }

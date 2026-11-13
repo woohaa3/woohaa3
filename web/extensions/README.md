@@ -313,10 +313,74 @@ change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extensio
 2. **提交与审核**：上传 `.wxt` 后提交（需要 `marketplace.publish`），版本进入「待审核」；管理端「扩展市场」页由持有 `marketplace.review` 的管理员通过、拒绝（必填理由）或撤回。拒绝与撤回都是终态，同一版本号不能复用，重新发布要升版本。
 3. **客户端信任**：官方市场的发布公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码），因此官方包不需要再手工配置；本机 `extensions.marketplace.trustedKeys` 只能**追加**其它发布者，不能移除内置官方 key。服务端 `GetMarketplaceInfo` 下发的其它公钥仍然只展示，管理员确认后才会写入。
 4. **从市场安装**：设置「插件配置 → 从市场安装」，或 `POST /api/extensions/install` 的 `{ sourceId: "woohaa-server", extensionId, range }`。安装仍走同一条校验链（摘要、签名、预检），服务端返回的审核状态与 keyId 不参与信任判断。
-5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`，否则 `package.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级。计划经市场发布的内置插件应让分发版本与 `site.version` / provider metadata 的 `version` 保持一致，否则设置面可能同时显示站点版本与内置包版本。
+5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级，`pnpm ext:release` 会在打包前直接拒绝这类扩展。分发版本与 `site.version` / provider metadata 的 `version` 必须一致，否则预检与 `build:browser` 都会失败（见下文「扩展发版」）。
 6. **发布者绑定**：内置扩展只接受官方发布者 key 的覆盖；已安装受管扩展绑定首次安装的签名 key（TOFU），后续更新 key 变了会被 `MARKETPLACE_PUBLISHER_CHANGED` 拒绝，需要先卸载再安装。未签名本地包不能升级已签名扩展。
 
 撤回立即阻止新的解析与下载（含未过期的下载地址），但**不会**卸载已安装的副本。
+
+### 扩展发版
+
+change: 2026-11-13-add-extension-version-governance。改完扩展只提交代码、不推进版本，会让市场升级判定失真：
+受管版本必须**严格高于**内置分发版本才允许覆盖，因此「内置版本从不变化」等于用户装过一次市场版之后，
+再发多少客户端版本都拿不回这个扩展。发版因此变成一条固定流程：
+
+**1. 版本只有一个真源**：`extension.json` 的 `version`。其余三处是它的副本，必须相等：
+
+| 位置 | 消费者 |
+| --- | --- |
+| `extension.json.version` | 市场升级判定、受管覆盖比较、`.wxt` 包名（**真源**） |
+| `extension.json.site.version` | 站点控制面与站点目录展示 |
+| `package.json.version` | npm 口径；受管预检与服务端 `pkgformat` 双向比对 |
+| `src/frontend/metadata.ts` / `extension.json` 声明的 `metadata.export`（如 `src/shared.ts`） | 浏览器与后端插件卡片的展示版本 |
+
+`pnpm extensions:check` 对不一致报 `EXTENSION_VERSION_MISMATCH`；`build:browser` 在求值 metadata
+后补最后一道（覆盖 `version: SOME_CONSTANT.version` 这类静态读不到的写法）。
+
+**历史分叉只向上对齐，绝不向下压平**：部分扩展的插件元数据版本被单独维护过（`runninghub-provider`
+是 2.2.0，`remote-server` 与若干 provider 是 1.0.0），而 `extension.json` 原先没有版本字段。
+两者分叉时**取最大值**统一——把分发版本抬上去，而不是把元数据压低。理由：压低会让设置面显示的
+版本突然倒退，用户看到「v2.2.0 → v0.1.0」；而抬上去之后展示不变，升级判定也拿到同一个数字。
+
+```bash
+pnpm ext:bump <extensionId> --align     # 把四处收口到最高值（不递增）
+```
+
+**2. 推进版本**：
+
+```bash
+pnpm ext:bump <extensionId|目录> --patch     # 或 --minor / --major / --version 1.2.0
+```
+
+一次改全四处并追加 `CHANGELOG.md`。命令**不推断**这次改动算不算破坏兼容——`patch` / `minor` / `major`
+由发布者决定。新版本必须严格高于当前值；目标不更高时命令失败且不写任何文件。四处尚未对齐时会
+拒绝执行并提示先跑 `--align`。
+
+**3. 门禁：改了就必须 bump**：
+
+```bash
+pnpm extensions:check                                  # 基线缺省 HEAD，直接检查工作树改动
+pnpm extensions:check --strict --bump-base origin/main # CI 口径（失败而非告警）
+pnpm extensions:check --no-bump-check                  # 确实不该检查时显式关闭
+```
+
+扩展目录在基线之后有改动而分发版本没变时报告 `EXTENSION_VERSION_NOT_BUMPED`；该告警缺省不阻断、
+`--strict` 时失败。**基线缺省是 `HEAD`**，因为默认命令才是 agent 与开发者真正会跑的那条——如果只有
+显式传 `--bump-base` 才检查，这个门禁在实践中等于不存在。
+
+判定用 git 而不是 mtime，因此可跨 checkout 复现；仓库不可用 git 时只告警跳过，不让非 git 环境无法预检。
+
+**4. 发布**：
+
+```bash
+pnpm ext:release <extensionId|目录> --notes "修了 X" [--approve]
+```
+
+先做两项判定，再转交父仓 `pnpm release:extension`（打包、签名、上传、提交、审核只有那一份实现）：
+
+- **不可被市场覆盖的形态直接拒绝**：站点 `backend` 工厂（运行期 `checkBuiltinUpgrade` 会拒绝）与
+  `bootstrap` 槽位（受管根禁止）只能随客户端发版。当前 `local-agent` / `oauth-agent` / `sdk-agent` /
+  `prompt-skills` / `standard-agent-roles` / `infinspire-migration` 属于这一类。
+- **有未发版改动时拒绝**，并提示先运行 `ext:bump`。
 
 ### 经 GitHub Release 分发
 

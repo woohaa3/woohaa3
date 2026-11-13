@@ -24,6 +24,7 @@
  *   node scripts/extensions-preflight.mjs [--strict] [--json]
  */
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -32,6 +33,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { EXTENSION_PACKAGE_PREFIX, hasBrowserEntry, readExtensionDescriptor } from "./lib/extension-scan.mjs";
 import { syncExtensionIconAssets } from "./lib/extension-icon-assets.mjs";
 import { checkEnginesCompatible, contentDeclarationCollisions, validateExtensionDescriptor } from "./lib/extension-descriptor.mjs";
+import {
+  EXTENSION_VERSION_CODES,
+  readVersionDeclarations,
+  unreleasedChanges,
+  versionProblems
+} from "./lib/extension-version.mjs";
 import { loadExtensionContracts } from "./lib/extension-release-protocol.mjs";
 import {
   FOUNDATION_SLOT_NAMES,
@@ -99,7 +106,7 @@ export function packageFilesProblems(extensions) {
  *
  * 返回 `{ errors, warnings }`；`errors` 非空表示预检失败。
  */
-export function collectPreflightProblems(host, { slotDeclarations = null } = {}) {
+export function collectPreflightProblems(host, { slotDeclarations = null, bumpBase = null } = {}) {
   const errors = [];
   const warnings = [];
   // 品牌图形生成物（`web/frontend/public/plugin-icons/`）与扩展包内资产必须一致：漂移会让设置页
@@ -121,6 +128,7 @@ export function collectPreflightProblems(host, { slotDeclarations = null } = {})
   }
   errors.push(...contentDeclarationCollisions(host.registrations));
   errors.push(...packageFilesProblems(host.scan.extensions));
+  errors.push(...extensionVersionProblems(host, { bumpBase, warnings }));
   for (const extension of host.scan.extensions) {
     const built = hasBrowserArtifact(extension.dir);
     const hasSources = hasBrowserEntry(extension.dir);
@@ -176,6 +184,87 @@ export function collectPreflightProblems(host, { slotDeclarations = null } = {})
     }
   }
   return { errors, warnings };
+}
+
+/**
+ * 分发版本检查（change: 2026-11-13-add-extension-version-governance）。
+ *
+ * 两件事：
+ *
+ * 1. **一致性**（失败）：`extension.json.version` 必须存在，且 `package.json` / `site` /
+ *    `metadata` 字面量与之相等。四处并存是有意的（各自有真实消费者，见
+ *    `scripts/lib/extension-version.mjs` 的文件头），但值必须只有一个。
+ * 2. **单调性**（`bumpBase` 提供时判定）：扩展目录在基线之后有改动而分发版本没变，说明
+ *    「改了代码没发版」。缺省告警，`--strict` 时升级为失败；基线不可用时只告警跳过。
+ *
+ * 只读 JSON 与字面量，不 import 扩展模块。
+ */
+function extensionVersionProblems(host, { bumpBase = null, warnings = [] } = {}) {
+  const errors = [];
+  // 基线检查必须用**宿主自己的仓库根**：预检既跑在真实仓库，也跑在测试与部署的临时树上，
+  // 写死 `DEFAULT_REPO_ROOT` 会让后者全部落到「目录不在仓库内」而静默跳过。
+  const repoRoot = typeof host.repoRoot === "string" && host.repoRoot.length > 0 ? host.repoRoot : DEFAULT_REPO_ROOT;
+  const directories = new Map();
+  // 注册表里每个扩展都至少有一份声明（`loadExtensionHost` 已解析）；禁用目录不在注册表里，
+  // 但仍属于仓库内的扩展目录，单独补进来，否则「停用的扩展」会跳过一致性检查。
+  for (const registration of host.registrations ?? []) {
+    directories.set(registration.extensionId, registration.directory);
+  }
+  for (const disabled of host.disabled ?? []) {
+    if (typeof disabled.dir === "string") directories.set(path.basename(disabled.dir).replace(/^\.+/, ""), disabled.dir);
+  }
+
+  for (const [extensionId, directory] of directories) {
+    // 纯浏览器扩展可以没有 `extension.json`（`metadata.ts` 是唯一身份来源）：没有声明就没有
+    // 分发版本可查，跳过而不是报缺字段。
+    if (!fs.existsSync(path.join(directory, "extension.json"))) continue;
+    let declarations;
+    try {
+      declarations = readVersionDeclarations(directory);
+    } catch (error) {
+      errors.push({
+        code: EXTENSION_VERSION_CODES.mismatch,
+        extensionId,
+        directory,
+        message: `无法读取版本声明：${error instanceof Error ? error.message : String(error)}`
+      });
+      continue;
+    }
+    const problems = versionProblems({
+      extensionId,
+      descriptor: declarations.descriptor,
+      packageVersion: declarations.packageJson?.version,
+      metadataVersions: declarations.metadataVersions,
+      location: path.relative(repoRoot, directory) || directory
+    });
+    for (const problem of problems) {
+      errors.push({ ...problem, extensionId, directory, message: problem.message });
+    }
+    if (problems.length > 0) continue;
+
+    const current = declarations.distributionVersion;
+    const change = unreleasedChanges({ repoRoot, base: bumpBase, dir: directory, currentVersion: current });
+    if (!change.available) {
+      if (change.invalidBase) {
+        // 显式给了错的基线：那是调用方错误，不能静默跳过（design「失败语义」）。
+        errors.push({
+          code: EXTENSION_VERSION_CODES.notBumped,
+          extensionId,
+          directory,
+          message: `无法使用 --bump-base ${bumpBase}：${change.reason}`
+        });
+      }
+      continue;
+    }
+    if (change.bumped) continue;
+    warnings.push({
+      code: EXTENSION_VERSION_CODES.notBumped,
+      extensionId,
+      directory,
+      message: `${extensionId} 有改动（${change.changed.slice(0, 3).join("、")}${change.changed.length > 3 ? " 等" : ""}）但分发版本仍是 ${current}；改扩展后运行 \`pnpm ext:bump ${extensionId} --patch\``
+    });
+  }
+  return errors;
 }
 
 /**
@@ -418,6 +507,13 @@ function createHashHex(bytes) {
 async function main() {
   const strict = process.argv.includes("--strict");
   const asJson = process.argv.includes("--json");
+  const bumpBaseIndex = process.argv.indexOf("--bump-base");
+  // 缺省基线取 `HEAD`：agent 与本地开发者跑的通常是同一个命令，如果只有显式传 `--bump-base` 才检查
+  // 「改了没 bump」，那么实际上没人会开这个检查。`--no-bump-check` 用于确实不该检查的场合
+  // （例如导出/打包流水线里在别处已校验过）。
+  const bumpBase = process.argv.includes("--no-bump-check")
+    ? null
+    : bumpBaseIndex >= 0 ? process.argv[bumpBaseIndex + 1] : "HEAD";
   const logger = (event) => process.stderr.write(`${JSON.stringify(event)}\n`);
 
   let host;
@@ -444,7 +540,7 @@ async function main() {
     };
   }
 
-  const { errors, warnings } = slotError === null ? collectPreflightProblems(host, { slotDeclarations }) : { errors: [], warnings: [] };
+  const { errors, warnings } = slotError === null ? collectPreflightProblems(host, { slotDeclarations, bumpBase }) : { errors: [], warnings: [] };
   if (slotError) errors.push({ extensionId: `槽位声明（${slotError.code}）`, message: slotError.message });
   // 声明与实现漂移（死工厂）：单独探测，让它在预检阶段失败而不是等人按声明构造时炸。
   errors.push(...(await probeDeclaredExports(host)));
@@ -469,6 +565,7 @@ async function main() {
   const payload = {
     ok: failing.length === 0,
     strict,
+    ...(bumpBase ? { bumpBase } : {}),
     extensions: host.registrations.length,
     browserArtifacts: host.browserArtifacts.length,
     disabled: host.disabled.length,

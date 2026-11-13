@@ -3,5 +3,6 @@
   "extensionId": "bailian-provider",
   "metadata": { "module": "./shared", "export": "BAILIAN_PLUGIN_METADATA", "order": 33 },
   "hostPlugin": { "module": "./backend", "factory": "createBailianProviderPlugin", "features": ["provider"], "order": 21 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "1.0.0"
 }

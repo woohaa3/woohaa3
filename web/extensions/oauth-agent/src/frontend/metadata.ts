@@ -12,7 +12,7 @@ import { OAUTH_AGENT_PLUGIN_ID } from "../shared.js";
 
 export const OAUTH_AGENT_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: OAUTH_AGENT_PLUGIN_ID,
-  version: "0.1.0",
+  version: "1.0.0",
   label: "OAuth Agent 来源",
   description: "个人 OAuth 授权与连接（首个 provider：ChatGPT）。",
   icon: "identity",
