@@ -4,7 +4,7 @@
   "site": {
     "name": "SDK Agent 来源",
     "description": "配置 OpenAI / Anthropic / OpenAI 兼容 / Gemini API Key，并使用对应固定 Agent 引擎，作为 Agent 生成来源。",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "configSchema": {
       "schemaId": "sdk-agent-config",
       "schemaVersion": 1
@@ -42,5 +42,5 @@
       "export": "createExecutor"
     }
   ],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

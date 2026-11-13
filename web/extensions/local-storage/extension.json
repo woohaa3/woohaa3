@@ -2,5 +2,11 @@
   "schemaVersion": 1,
   "extensionId": "local-storage",
   "hostPlugin": { "module": "./backend", "factory": "createLocalStoragePlugin", "features": ["storage"], "order": 5 },
-  "version": "0.1.0"
+  "version": "0.1.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "log": 1, "storage": 1 }
+  }
 }

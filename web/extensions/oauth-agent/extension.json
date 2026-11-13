@@ -4,7 +4,7 @@
   "site": {
     "name": "OAuth Agent 来源",
     "description": "个人 OAuth 授权与连接；3D 生成面板由宿主内置（design D10）。",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "configSchema": { "schemaId": "chatgpt-plugin-config", "schemaVersion": 1 },
     "capabilities": [
       { "id": "chatgpt.status", "kind": "handler", "description": "授权状态快照", "auth": "public" },
@@ -43,5 +43,5 @@
       "export": "createExecutor"
     }
   ],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-sdk-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "四类 API 的固定 Agent 框架运行时；按 owner/连接隔离 API Key 与执行上下文。",

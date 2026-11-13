@@ -4,5 +4,11 @@
   "metadata": { "module": "./shared", "export": "TOKENHUB_PLUGIN_METADATA", "order": 25 },
   "hostPlugin": { "module": "./backend", "factory": "createTokenHubProviderPlugin", "features": ["provider"], "order": 15 },
   "icon": { "asset": "./assets/icon.png" },
-  "version": "1.0.0"
+  "version": "1.0.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1, "log": 1 }
+  }
 }

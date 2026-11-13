@@ -4,5 +4,11 @@
   "metadata": { "module": "./shared", "export": "BAILIAN_PLUGIN_METADATA", "order": 33 },
   "hostPlugin": { "module": "./backend", "factory": "createBailianProviderPlugin", "features": ["provider"], "order": 21 },
   "icon": { "asset": "./assets/icon.png" },
-  "version": "1.0.0"
+  "version": "1.0.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1, "log": 1 }
+  }
 }

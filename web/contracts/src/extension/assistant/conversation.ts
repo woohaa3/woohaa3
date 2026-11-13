@@ -636,6 +636,16 @@ export type AgentConversationAdapter = {
  */
 export const AGENT_CONVERSATION_IDENTITY_CAPABILITY_ID = "agent-conversation-identity" as const;
 
+/**
+ * `agent-conversation-identity` 与 `agent-conversation-adapter:*` 的形状版本
+ * （change: 2026-11-13-add-extension-capability-abi）。
+ *
+ * 提供方按此版本注册，注册中心按此版本解析；`AgentConversationIdentityPort` /
+ * `AgentConversationAdapter` 的成员或语义变化时抬高。
+ */
+export const AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION = 1;
+export const AGENT_CONVERSATION_IDENTITY_CAPABILITY_VERSION = 1;
+
 /** 本地会话身份解析结果（宿主 owner + 会话绑定；仅新建会话时下发 Set-Cookie）。 */
 export type AgentConversationSessionIdentity = {
   /** 宿主会话 owner（provider 扩展的凭据 owner 命名空间；不来自请求自报）。 */
