@@ -1,6 +1,5 @@
 import { itemMeta } from "./summary.js";
 import type { ServerCanvas } from "@woohaa3/contracts";
-import { ScenePackageImport } from "../scene-experience/import-controls.js";
 /**
  * Canvas Switcher chrome
  * （change: 2026-09-29-add-multi-canvas-workspace，任务 4.1–4.5 / design D7；
@@ -779,7 +778,6 @@ const catalogItemActions = deps.slots.list("canvas.catalog-item-action");
               ) : null}
             </Dialog.Section>
           ) : null}
-          <ScenePackageImport openCanvas={(id) => { requestClose(); deps.switchTo(id); }} />
           {error ? <p className="canvas-switcher__error" role="status">{error}</p> : null}
         </Dialog.Body>
         <Dialog.Footer>

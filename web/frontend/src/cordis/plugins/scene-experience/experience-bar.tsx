@@ -6,7 +6,7 @@ import { appBuildVersion } from '../../services/build-info.js';
 import { sceneDiagnosticsSnapshot } from '../canvas-runtime/scene-diagnostics.js';
 import { consumeSceneEntry, markSceneEntry, type SceneEntryOrigin, createScenePackageClient, numericTree, SceneFrameWindow, type SceneReceipt } from './scene-experience.js';
 import { makeExperienceReport, type ExperienceFeedback, type ExperienceSample } from './report.js';
-import { phaseLabels } from './import-controls.js';
+import { phaseLabels } from './scene-experience.js';
 import { SceneNavigationIntent } from './navigation-intent.js';
 import './scene-experience.css';
 const client=createScenePackageClient();

@@ -1,5 +1,12 @@
 export { createScenePackageClient, decodeReceipt } from '../../services/scene-package-client.js';
 export type { SceneReceipt, SceneJob } from '../../services/scene-package-client.js';
+import type { SceneJob } from '../../services/scene-package-client.js';
+
+/** Labels retained for the existing local scene reset status; package upload UI is removed. */
+export const phaseLabels: Record<SceneJob['phase'], string> = {
+  uploaded: '已上传', validating: '正在校验场景包', 'staging-media': '正在准备本机媒体',
+  committing: '正在创建画布', ready: '已就绪', failed: '导入失败', cancelled: '已取消'
+};
 
 /** Numeric counters only. Never serialize runtime payloads or error/source strings. */
 export function numericTree(value: unknown, depth=0): Record<string, unknown> {
