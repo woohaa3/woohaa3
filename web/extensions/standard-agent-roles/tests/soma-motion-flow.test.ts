@@ -29,3 +29,10 @@ it('distinguishes source events from timeline starts and inspects interaction ti
  expect(text).toContain('inspectTiming:true');expect(text).toContain('sourceStartTime');expect(text).toContain('blendInDuration');
  expect(text).toContain('片内');expect(text).toContain('不证明接触');expect(text).toContain('负 startTime');
 });
+
+it('keeps motion guidance compatible with resource-only world authoring',()=>{
+ const text=sceneDirectorRole.definition.instructions;
+ for(const old of ['get_world_model_rig','set_scene_animation_script','move_world_model'])expect(text).not.toContain(old);
+ expect(text).toContain('read_world_resource');expect(text).toContain('resourceType=scene_animation_script');
+ expect(text).toContain('edit_scene_animation_script');expect(text).toContain('expectedParentVersion');
+});

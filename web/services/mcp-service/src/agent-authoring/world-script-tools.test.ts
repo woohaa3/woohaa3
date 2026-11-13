@@ -25,7 +25,7 @@ const emptyClient: AgentCanvasClient = {
   async applyPlan() { return { ok: false, code: "unavailable", message: "not used" }; }
 } as AgentCanvasClient;
 
-function scopeGrant(tools: readonly string[] = assistantWorldToolsForScope({ kind: "scene-area", areaId: "area-1" })): ApplicationToolGrant {
+function scopeGrant(tools: readonly string[] = Object.values(ASSISTANT_WORLD_TOOL)): ApplicationToolGrant {
   return {
     token: "grant-token",
     canvasIds: ["canvas-1"],
@@ -137,9 +137,9 @@ describe("分段脚本写入：目录与能力声明", () => {
     const capability = assistantWorldSourceCapability({ targets: ["scene-area"] });
     const sceneTools = assistantWorldToolsForScope({ kind: "scene-area", areaId: "area-1" });
     for (const tool of newTools) {
-      expect(capability.tools, tool).toContain(tool);
-      expect(sceneTools, tool).toContain(tool);
-      expect(ASSISTANT_WORLD_TOOLS, tool).toContain(tool);
+      expect(capability.tools, tool).not.toContain(tool);
+      expect(sceneTools, tool).not.toContain(tool);
+      expect(ASSISTANT_WORLD_TOOLS, tool).not.toContain(tool);
     }
     // 3. 实际注册路径（含条件式 world 工具）也没有第二份手写清单：每个工具名都来自同一注册器。
     const registered = listModelMcpToolNames({ agentAuthoring: { client: emptyClient, world: {} as AssistantWorldToolClient } });
@@ -255,7 +255,7 @@ describe("分段脚本写入：追加与修补转发", () => {
   });
 
   it.each([
-    ["patch-not-found", { occurrences: 0, scriptLength: 12, closest: { line: 1, column: 1, excerpt: "scene.box({…" } }, ["get_world_model_script", "更长的上下文"]],
+    ["patch-not-found", { occurrences: 0, scriptLength: 12, closest: { line: 1, column: 1, excerpt: "scene.box({…" } }, ["read_world_resource", "更长的上下文"]],
     ["patch-ambiguous", { occurrences: 2, scriptLength: 40, matches: [{ line: 1, column: 1, excerpt: "a" }, { line: 2, column: 1, excerpt: "a" }] }, ["命中多处", "行号", "唯一"]],
     ["patch-noop", { occurrences: 1, scriptLength: 40 }, ["内容与版本都没变化", "不要重复提交"]]
   ] as const)("把宿主 %s 回执原样带给调用方", async (code, diagnostic, hints) => {

@@ -24,6 +24,7 @@ import {
   projectSomaRootTranslation,
   isSomaMotionMetadata,
   DEFAULT_MODEL_PLACEMENT,
+  planSceneAreaOperation, SCENE_AREA_PLAN_CONTRACT_VERSION,
   describeWorldModelAnimationRig,
   findNonOverlappingNodePosition,
   initialCameraCardPosition,
@@ -65,7 +66,9 @@ import {
   planWorldModelScriptPatch,
   mergeWorldCameraSettings,
   serializeWorldAnimationScript,
-  worldCameraView
+  worldCameraView,
+  worldCameraRotationLookingAt,
+  type WorldCameraSettings
 } from "@woohaa3/contracts";
 import { YJS_SYNC_PROTOCOL_VERSION, computeCommandPayloadHash, stableStringify } from "@woohaa3/contracts/canvas-yjs";
 import { executeSceneIr } from "../model-mcp/script-executor.js";
@@ -75,6 +78,7 @@ import { instanceFootprint, stableAuthorityVersion, worldObjectVersion, nextScen
 import { findWorldCameraNodeId, planWorldCameraSettings, worldCameraSettingsOf, type WorldCameraSettingsService } from "./camera-service.js";
 import type { WorldCameraCompletionVerification } from "./camera-service.js";
 import type { WorldAuthoringService } from "./scene-area-service.js";
+import { buildForwardCommands } from "./scene-area-command-mapping.js";
 import { objectKey, type LeaseRecord, type SpatialWriteContext } from "./spatial-leases.js";
 import {
   hostCompletionKey,
@@ -124,7 +128,7 @@ type RunLedger = {
   epoch: number;
   executionId: string;
   completionId: string;
-  writes: Map<string, { identity: WorldObjectIdentity; version: string; snapshot?: WorldCameraData }>;
+  writes: Map<string, { identity: WorldObjectIdentity; version: string; snapshot?: WorldCameraData; resourceRevision?: number }>;
   /**
    * `operationId → intent hash` for chunk writes. Reusing one operation id for a
    * different chunk is a reused identity (request-id-reused), not a retry; the
@@ -401,6 +405,25 @@ function findArea(canvas: ServerCanvas, areaId: string): { node: ServerCanvas["d
 }
 
 
+function resourceVersion(canvas: ServerCanvas, type: import("@woohaa3/contracts").WorldResourceType, target: import("@woohaa3/contracts").WorldResourceTarget): string | null {
+  if ("instanceId" in target) {
+    const found = findInstanceNode(canvas, target.instanceId);
+    if (!found) return null;
+    if (type === "world_model_script" && !found.fields.modelScript) return null;
+    const version = worldObjectVersion(canvas, { kind: "instance", instanceId: target.instanceId });
+    return type === "world_model_script" ? stableAuthorityVersion("model-script-resource", { script: found.fields.modelScript, language: found.fields.modelScriptLanguage, version: found.fields.modelScriptVersion, content: found.fields.modelContentVersion, rig: found.fields.modelRig }) : stableAuthorityVersion("model-resource", { version, title: found.fields.title ?? "" });
+  }
+  if ("cameraId" in target) {
+    const id = findWorldCameraNodeId(canvas, target.cameraId);
+    return id ? stableAuthorityVersion("camera-resource", { data: canvas.nodeData[id]?.worldCamera, title: canvas.nodeData[id]?.title ?? "" }) : null;
+  }
+  const found = findArea(canvas, target.areaId);
+  if (!found) return null;
+  const { animationScript, ...area } = found.area;
+  return type === "scene_animation_script" ? animationScript ? stableAuthorityVersion("animation-resource", animationScript) : null
+    : stableAuthorityVersion("area-resource", { area, title: canvas.nodeData[found.node.id]?.title ?? "" });
+}
+
 export function createAssistantWorldService(deps: AssistantWorldServiceDeps): AssistantWorldService {
   const rigCache = new Map<string, import("@woohaa3/contracts").WorldModelAnimationRig | null>();
 async function animationRigOf(fields: Record<string, unknown>): Promise<import("@woohaa3/contracts").WorldModelAnimationRig | null> {
@@ -563,7 +586,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     if (typeof room.lookupCommand !== "function") return { status: "uncommitted" };
     let receipt: Awaited<ReturnType<CanvasRoom["lookupCommand"]>>;
     try {
-      receipt = await room.lookupCommand(intent.commandId);
+      receipt = await room.lookupCommand(intent.receiptCommandId ?? intent.commandId);
     } catch {
       return { status: "unknown", failure: failure("not-ready", "无法读取世界写入回执") };
     }
@@ -867,6 +890,12 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     if (!inspected.ok) return inspected;
     const { ledger, context } = resolved;
     if (ledger.canvasId !== input.canvasId || context.canvasId !== input.canvasId) return failure("stale-epoch", "工具上下文不属于当前画布");
+    if (context.scope.scope.kind === "scene-area") {
+      const prepared = await deps.authority.prepareCanvas(inspected.canvas, context.scope.scope);
+      if (!prepared.ok) return failure(prepared.code, prepared.message);
+      const valid = resolve(input.contextId);
+      if ("ok" in valid) return valid;
+    }
     let sceneArea: import("@woohaa3/contracts").AssistantWorldContextView["sceneArea"];
     let bounds: import("@woohaa3/contracts").AssistantWorldContextView["bounds"];
     if (context.scope.scope.kind === "scene-area") {
@@ -925,6 +954,8 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         bounds = decoded.value.bounds;
         sceneArea = {
           nodeId: node.id,
+          areaId, title: String(inspected.canvas.nodeData[node.id]?.title ?? ""),
+          resourceVersion: resourceVersion(inspected.canvas, "scene_area", { areaId }) ?? undefined,
           revision: inspected.canvas.revision,
           scopeVersion: decoded.value.scopeVersion,
           animationOrigin: sceneAreaAnimationOrigin(decoded.value),
@@ -943,15 +974,12 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         const targets = [...context.writableTargets.map((entry) => entry.target), ...context.readOnlyReferences];
         cameraView = {
           sceneModels: targets.flatMap((target) => {
-            const model = target.kind === "instance" ? cache.instances.get(target.instanceId) : undefined;
-            if (!model) return [];
-            return [{
-              instanceId: model.identity.instanceId,
-              nodeId: model.nodeId,
-              title: String(inspected.canvas.nodeData[model.nodeId]?.title ?? model.nodeId),
-              transform: model.data.transform,
-              localBounds: model.localAabb
-            }];
+            if (target.kind !== "instance") return [];
+            const found = findInstanceNode(inspected.canvas, target.instanceId);
+            const decoded = decodeWorldInstanceData(found?.fields.sharedWorldInstance);
+            if (!found || !decoded.ok) return [];
+            const model = cache.instances.get(target.instanceId);
+            return [{ instanceId: target.instanceId, nodeId: found.nodeId, title: String(found.fields.title ?? found.nodeId), transform: decoded.value.transform, localBounds: model?.localAabb ?? null }];
           })
         };
       }
@@ -1016,6 +1044,19 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         ...(bounds ? { bounds } : {}),
         ...(sceneArea ? { sceneArea } : {}),
         ...cameraView,
+        resourceVersions: Object.fromEntries([
+          ...context.writableTargets.map(entry => entry.target), ...context.readOnlyReferences
+        ].flatMap(target => {
+          const ref = target.kind === "instance" ? { instanceId: target.instanceId } : { cameraId: target.cameraId };
+          const types = target.kind === "instance" ? ["world_model", "world_model_script"] as const : ["world_camera"] as const;
+          return types.flatMap(type => { const version = resourceVersion(inspected.canvas, type, ref); return version ? [[`${type}:${target.kind === "instance" ? target.instanceId : target.cameraId}`, version]] : []; });
+        }).concat(context.scope.scope.kind === "scene-area" ? [[`scene_animation_script:${context.scope.scope.areaId}`, resourceVersion(inspected.canvas, "scene_animation_script", { areaId: context.scope.scope.areaId }) ?? ""]] : [])),
+        sceneCameras: [...context.writableTargets.map(entry => entry.target), ...context.readOnlyReferences].flatMap(target => {
+          if (target.kind !== "camera") return [];
+          const nodeId = findWorldCameraNodeId(inspected.canvas, target.cameraId);
+          const decoded = decodeWorldCamera(nodeId ? inspected.canvas.nodeData[nodeId]?.worldCamera : null);
+          return nodeId && decoded.ok ? [{ nodeId, title: String(inspected.canvas.nodeData[nodeId]?.title ?? ""), settings: decoded.value }] : [];
+        }),
         worldWritable: context.scope.scope.kind === "scene-area" || context.scope.scope.kind === "world-camera"
       }
     };
@@ -1026,6 +1067,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     if ("ok" in resolved) return resolved;
     const { ledger, context, capability } = resolved;
     const operation = input.operation;
+    if (operation.kind === "edit-resource") return editResource(ledger, context, capability, operation.edit);
     if (context.scope.scope.kind === "workflow-group-2d") {
       return failure("capability-unsupported", "2D 组成员不授予世界写资格");
     }
@@ -1081,6 +1123,303 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     return writeCamera(ledger, context, operation, inspected);
   }
 
+
+  /** Grouped edits compose and validate in the Room queue, then freeze their response. */
+  async function editResource(
+    ledger: RunLedger, context: WorldToolContext, capability: SpatialWriteContext,
+    edit: import("@woohaa3/contracts").WorldResourceEdit
+  ): Promise<AssistantWorldWriteOutcome> {
+    const inspected = await inspect(ledger.canvasId);
+    if (!inspected.ok) return inspected;
+    const commandId = `assistant-resource:${stableAuthorityVersion("resource-operation", { runId: ledger.runId, operationId: edit.operationId })}`;
+    const intentHash = stableAuthorityVersion("resource-intent", edit);
+    let rejected: AssistantWorldFailure | null = null;
+    const reject = (value: AssistantWorldFailure) => { rejected = value; return value; };
+    const result = await inspected.room.submitDerived({
+      commandId, expectedResourceEditHash: intentHash,
+      async derive(canvas) {
+        const issued = resolve(context.contextId);
+        if ("ok" in issued) return reject(issued);
+        const currentContext = issued.context;
+        const scope = currentContext.scope.scope;
+        const isArea = scope.kind === "scene-area";
+        const isCamera = edit.resourceType === "world_camera";
+        if (!isArea && !(scope.kind === "world-camera" && isCamera && edit.operation === "update"
+          && edit.target && "cameraId" in edit.target && edit.target.cameraId === scope.cameraId)) {
+          return reject(failure("outside-scope", "当前授权不允许该资源操作"));
+        }
+        if (isArea) {
+          const prepared = await deps.authority.prepareCanvas(canvas, scope);
+          if (!prepared.ok) return reject(failure(prepared.code, prepared.message));
+        } else if (scope.kind === "world-camera" && deps.authority.prepareCamera) {
+          const prepared = await deps.authority.prepareCamera(canvas, scope.cameraId);
+          if (!prepared.ok) return reject(failure(prepared.code, prepared.message));
+        }
+        // No canvas lifecycle grant is minted by a director-area turn.
+        if (edit.resourceType === "scene_area" && edit.operation !== "update") {
+          return reject(failure("outside-scope", "创建或删除导演区需要画布生命周期授权"));
+        }
+        const areaId = isArea ? scope.areaId : "";
+        const area = isArea ? findArea(canvas, areaId) : null;
+        if (isArea && (!area || area.area.scopeVersion !== currentContext.scope.scopeVersion)) return reject(failure("version-conflict", "导演区范围已变化"));
+        const creatingObject = edit.operation === "create" && (edit.resourceType === "world_model" || isCamera);
+        if (creatingObject && edit.areaId !== areaId) return reject(failure("outside-scope", "父导演区不属于本轮授权"));
+        const generatedId = `resource-${stableAuthorityVersion("resource-id", { runId: ledger.runId, operationId: edit.operationId })}`;
+        const target = creatingObject
+          ? isCamera ? { cameraId: generatedId } : { instanceId: generatedId }
+          : edit.target;
+        if (!target) return reject(failure("invalid-data", "缺少目标"));
+        const identity: WorldObjectIdentity | null = "instanceId" in target ? { kind: "instance", instanceId: target.instanceId }
+          : "cameraId" in target ? { kind: "camera", cameraId: target.cameraId } : null;
+        if ("areaId" in target && target.areaId !== areaId) return reject(failure("outside-scope", "导演区不属于本轮授权"));
+        if (identity && !creatingObject && !findWritable(currentContext, identity)) return reject(failure("outside-scope", "目标不在本轮可写集合"));
+        const model = identity?.kind === "instance" ? findInstanceNode(canvas, identity.instanceId) : null;
+        const cameraNodeId = identity?.kind === "camera" ? findWorldCameraNodeId(canvas, identity.cameraId) : null;
+        const nodeId = creatingObject ? generatedId : model?.nodeId ?? cameraNodeId ?? area?.node.id;
+        if (!nodeId) return reject(failure("not-found", "资源不存在"));
+        const before = canvas.nodeData[nodeId] as unknown as Record<string, unknown> | undefined;
+        if (edit.resourceType === "world_model_script" && model?.fields.modelSourceKind === "glb") return reject(failure("capability-unsupported", "文件模型没有可编辑的模型脚本"));
+        const currentScript = edit.resourceType === "world_model_script" ? String(model?.fields.modelScript ?? "")
+          : edit.resourceType === "scene_animation_script" ? area?.area.animationScript?.script ?? "" : null;
+        const scriptExists = currentScript !== null && currentScript !== "";
+        const isScript = currentScript !== null;
+        if (edit.operation === "create" && isScript && scriptExists) return reject(failure("already-exists", "脚本已存在，请使用 replace 或 patch"));
+        if (edit.operation !== "create" && isScript && !scriptExists) return reject(failure("not-found", "脚本不存在，请先 create"));
+        if (creatingObject && before) return reject(failure("already-exists", "资源已存在"));
+        if (!creatingObject) {
+          const parentType = edit.resourceType === "world_model_script" ? "world_model" : "scene_area";
+          const expected = edit.operation === "create" ? edit.expectedParentVersion : edit.expectedVersion;
+          const actual = resourceVersion(canvas, edit.operation === "create" ? parentType : edit.resourceType, target);
+          if (!expected || expected !== actual) return reject(failure("version-conflict", "资源版本已变化，请重新读取", actual ? { currentVersion: actual } : {}));
+        }
+        let fields: Record<string, unknown> = {};
+        let areaCommands: import("@woohaa3/contracts").CanvasCommand[] | null = null;
+        let script = currentScript ?? "";
+        if (isScript && edit.operation !== "delete") {
+          if (edit.operation === "create" || edit.operation === "replace") script = edit.script ?? "";
+          if (edit.operation === "append") script += edit.chunk ?? "";
+          if (edit.operation === "patch") {
+            for (const [editIndex, patch] of (edit.edits ?? []).entries()) {
+              const planned = planWorldModelScriptPatch(script, patch.oldString, patch.newString);
+              if (!planned.ok) return reject(failure(planned.code, "脚本精确替换失败", { patchDiagnostic: planned.diagnostic, editIndex }));
+              script = planned.script;
+            }
+          }
+        }
+        if (edit.resourceType === "world_model") {
+          if (creatingObject) {
+            let definition: Record<string, unknown>;
+            try { definition = edit.initialScript ? contentFields({ modelScript: edit.initialScript }) : skeletonContentFields({ modelScript: "" }); }
+            catch (error) { return reject(failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效")); }
+            fields = { ...instanceFields(definition, generatedId, edit.transform!), ...(edit.title !== undefined ? { title: edit.title } : {}) };
+          } else if (edit.operation === "update") {
+            const instance = decodeWorldInstanceData(model?.fields.sharedWorldInstance);
+            if (!instance.ok) return reject(failure("not-ready", "模型实例数据无效"));
+            const transform = { ...instance.value.transform, ...edit.patch?.transform };
+            fields = { sharedWorldInstance: { ...instance.value, transform }, ...(edit.patch?.title !== undefined ? { title: edit.patch.title } : {}) };
+          }
+        } else if (edit.resourceType === "world_model_script") {
+          if (edit.operation === "delete") {
+            const previous = model!.fields.modelContentVersion as { revision: number; sourceHash: string; contentHash: string } | undefined;
+            const normalized = normalizeModelDefinition({ modelScript: "", modelScriptLanguage: "javascript", modelScriptVersion: "woohaa-model-js-v2", previous, rig: model!.fields.modelRig });
+            if (!normalized.ok) return reject(failure("invalid-data", normalized.reason));
+            fields = { ...skeletonContentFields({ modelScript: "" }), modelContentVersion: normalized.value.contentVersion };
+          } else {
+            const composed = await composeContent({ previousFields: model!.fields, script, identity: identity! });
+            if ("ok" in composed) return reject(composed);
+            fields = composed.fields;
+          }
+        } else if (isCamera) {
+          if (edit.operation !== "delete") {
+            const decoded = decodeWorldCamera(before?.worldCamera);
+            if (!creatingObject && !decoded.ok) return reject(failure("not-found", "镜头不存在"));
+            const { lookAt, ...incoming } = (creatingObject ? edit.settings : edit.patch?.settings) ?? {};
+            if (lookAt && incoming.rotation) return reject(failure("invalid-data", "lookAt 与 rotation 互斥"));
+            const settings = creatingObject ? incoming as WorldCameraSettings : mergeWorldCameraSettings(worldCameraSettingsOf(decoded.ok ? decoded.value : null as never), incoming);
+            if (lookAt) {
+              const rotation = worldCameraRotationLookingAt(settings.position, lookAt);
+              if (!rotation) return reject(failure("invalid-data", "无法计算镜头朝向"));
+              settings.rotation = rotation;
+            }
+            if (!settings.rotation) return reject(failure("invalid-data", "新镜头须提供 rotation 或 lookAt"));
+            if (settings.boundInstanceId !== null && (creatingObject || !decoded.ok || settings.boundInstanceId !== decoded.value.boundInstanceId) && !findInstanceNode(canvas, settings.boundInstanceId)) return reject(failure("not-found", "绑定的模型不存在"));
+            if (scope.kind === "world-camera" && decoded.ok && (settings.projection.kind !== "perspective" || settings.boundInstanceId !== decoded.value.boundInstanceId || settings.captureMode.kind !== decoded.value.captureMode.kind)) return reject(failure("outside-scope", "单镜头授权只允许修改构图"));
+            const planned = planWorldCameraSettings((target as { cameraId: string }).cameraId, settings);
+            if ("ok" in planned) return reject(failure("invalid-data", planned.message));
+            fields = { worldCamera: planned, ...((edit.title ?? edit.patch?.title) !== undefined ? { title: edit.title ?? edit.patch?.title } : {}) };
+          }
+        } else if (edit.resourceType === "scene_area") {
+          const changes = edit.patch ?? {};
+          if ([changes.bounds, changes.moveBy, changes.rotateClockwise].filter(Boolean).length > 1) return reject(failure("invalid-data", "bounds/moveBy/rotateClockwise 只能选择一种空间操作"));
+          if (changes.moveBy || changes.rotateClockwise) {
+            const prepared = await deps.authority.prepareCanvas(canvas, { kind: "scene-area", areaId });
+            if (!prepared.ok) return reject(failure(prepared.code, prepared.message));
+            for (const member of prepared.snapshot.writable) if (!findWritable(currentContext, member)) return reject(failure("outside-scope", "区域包含本轮未授权对象，不能整体变换"));
+            if (area!.area.animationScript) {
+              const animation = area!.area.animationScript;
+              const compiled = executeWorldAnimationScript(animation.script, animation);
+              if (!compiled.ok) return reject(failure("invalid-data", "原动画无法编译，不能整体变换"));
+              if ([...compiled.ir.instanceTracks, ...(compiled.ir.partTracks ?? []), ...(compiled.ir.walkTracks ?? [])].some(track => !findWritable(currentContext, { kind: "instance", instanceId: track.targetId })) || compiled.ir.cameraTracks.some(track => !findWritable(currentContext, { kind: "camera", cameraId: track.targetId }))) return reject(failure("outside-scope", "动画包含本轮不可写对象，不能整体变换"));
+            }
+            const base = { contractVersion: SCENE_AREA_PLAN_CONTRACT_VERSION, canvasId: ledger.canvasId, operationId: edit.operationId, area: prepared.snapshot.area, members: prepared.snapshot.members };
+            const planned = planSceneAreaOperation(changes.moveBy ? { ...base, intent: "move", delta: changes.moveBy } : { ...base, intent: "rotate" });
+            if (!planned.ok) return reject(failure("invalid-data", planned.code));
+            const mapped = buildForwardCommands(canvas, planned.plan);
+            if (!mapped.ok) return reject(failure("invalid-data", mapped.message));
+            areaCommands = mapped.commands;
+            const areaPatch = areaCommands.find(command => command.type === "nodeData.patch" && command.nodeId === nodeId);
+            fields = areaPatch?.type === "nodeData.patch" ? areaPatch.value as unknown as Record<string, unknown> : {};
+            if (changes.title !== undefined) fields.title = changes.title;
+            if (areaPatch?.type === "nodeData.patch") areaPatch.value = fields as CanvasNodeData;
+          } else {
+            const bounds = changes.bounds ?? area!.area.bounds;
+            fields = { sceneArea: { ...area!.area, bounds, animationOrigin: sceneAreaAnimationOrigin(area!.area), scopeVersion: nextSceneAreaScopeVersion(areaId, bounds) }, ...(changes.title !== undefined ? { title: changes.title } : {}) };
+          }
+        } else if (edit.resourceType === "scene_animation_script") {
+          const old = area!.area.animationScript;
+          if (old) {
+            const compiledOld = executeWorldAnimationScript(old.script, { duration: old.duration, loop: old.loop });
+            if (!compiledOld.ok) return reject(failure("invalid-data", "原动画无法编译，不能安全局部修改"));
+            const outside = [...compiledOld.ir.instanceTracks, ...(compiledOld.ir.partTracks ?? []), ...(compiledOld.ir.walkTracks ?? [])].some(track => !findWritable(currentContext, { kind: "instance", instanceId: track.targetId }))
+              || compiledOld.ir.cameraTracks.some(track => !findWritable(currentContext, { kind: "camera", cameraId: track.targetId }));
+            if (outside) return reject(failure("outside-scope", "原动画包含本轮不可写目标，不能覆盖或清空"));
+          }
+
+          let animationScript: import("@woohaa3/contracts").WorldAnimationScript | undefined;
+          if (edit.operation !== "delete") {
+            const duration = edit.duration ?? edit.patch?.duration ?? old?.duration;
+            const loop = edit.loop ?? edit.patch?.loop ?? old?.loop;
+            if (duration === undefined || loop === undefined) return reject(failure("invalid-data", "动画缺少 duration/loop"));
+            const compiled = executeWorldAnimationScript(script, { duration, loop });
+            if (!compiled.ok) return reject(failure("invalid-data", compiled.message));
+            for (const track of [...compiled.ir.instanceTracks, ...(compiled.ir.partTracks ?? []), ...(compiled.ir.walkTracks ?? [])]) {
+              if (!findWritable(currentContext, { kind: "instance", instanceId: track.targetId })) return reject(failure("outside-scope", "动画模型不在本轮可写集合"));
+            }
+            for (const track of compiled.ir.cameraTracks) if (!findWritable(currentContext, { kind: "camera", cameraId: track.targetId })) return reject(failure("outside-scope", "动画镜头不在本轮可写集合"));
+            for (const track of compiled.ir.partTracks ?? []) {
+              const ref = findInstanceNode(canvas, track.targetId);
+              const rig = ref ? await animationRigOf(ref.fields) : null;
+              if (!rig?.groups.some(group => group.id === track.partId)) return reject(failure("invalid-data", `模型没有动画部件 ${track.partId}`));
+            }
+            for (const track of compiled.ir.walkTracks ?? []) {
+              const ref = findInstanceNode(canvas, track.targetId);
+              const rig = ref ? await animationRigOf(ref.fields) : null;
+              const instance = decodeWorldInstanceData(ref?.fields.sharedWorldInstance);
+              if (!instance.ok || !rig?.walkProfile || stableStringify(rig.walkProfile) !== stableStringify(track.profile)) return reject(failure("invalid-data", "行走 profile 必须来自真实模型骨骼"));
+              const q = instance.value.transform.rotation;
+              const yaw = 2 * Math.atan2(q[2], q[3]) * 180 / Math.PI;
+              const difference = ((track.baseYawDegrees - yaw + 180) % 360 + 360) % 360 - 180;
+              if (Math.abs(q[0]) + Math.abs(q[1]) > 1e-6 || Math.abs(difference) > 1e-5 || Math.abs(track.scale - instance.value.transform.scale) > 1e-6) return reject(failure("invalid-data", "行走姿态和比例必须匹配当前模型"));
+            }
+            animationScript = old && old.script === script && old.duration === duration && old.loop === loop ? old : createWorldAnimationScript({ script, duration, loop, revision: (old?.revision ?? 0) + 1 });
+          }
+          // Explicitly remove the singleton while retaining static world state.
+          const { animationScript: removed, ...rest } = area!.area;
+          void removed;
+          fields = { sceneArea: { ...rest, ...(animationScript ? { animationScript } : {}) } };
+        }
+        const removeNode = edit.operation === "delete" && !isScript;
+        const preview = structuredClone(canvas);
+        if (creatingObject) preview.document.nodes.push({ id: nodeId, type: isCamera ? "world-camera" : "model3d" });
+        if (removeNode) {
+          preview.document.nodes = preview.document.nodes.filter(node => node.id !== nodeId);
+          delete preview.nodeData[nodeId];
+        } else {
+          preview.nodeData[nodeId] = { ...before, ...fields } as CanvasNodeData;
+        }
+        // Removing targets or parts must never silently orphan an existing animation/binding.
+        if (identity && (removeNode || edit.resourceType === "world_model_script")) {
+          const refs = await resourceReferences(canvas, preview, identity);
+          if (refs.length) return reject(failure("reference-conflict", "资源仍被引用，请先显式处理引用", { references: refs }));
+        }
+        if (!removeNode && identity?.kind === "instance" && String(preview.nodeData[nodeId]?.modelScript ?? "") !== "") {
+          if (!await deps.authority.prepareContent(preview.nodeData[nodeId] as unknown as Record<string, unknown>, preview)) return reject(failure("invalid-data", "模型无法编译或占地未知"));
+        }
+        if (areaCommands) for (const command of areaCommands) {
+          if (command.type === "nodeData.patch") preview.nodeData[command.nodeId] = { ...preview.nodeData[command.nodeId], ...command.value } as CanvasNodeData;
+        }
+        const version = edit.operation === "delete" ? `absent-${intentHash}` : resourceVersion(preview, edit.resourceType, target);
+        if (!version) return reject(failure("invalid-data", "无法计算资源版本"));
+        const camera = isCamera && !removeNode ? fields.worldCamera as WorldCameraData : undefined;
+        const movedCameras = (areaCommands ?? []).flatMap(command => {
+          const decoded = command.type === "nodeData.patch" ? decodeWorldCamera(command.value?.worldCamera) : null;
+          return decoded?.ok ? [decoded.value] : [];
+        });
+        const resourceEdit = { intentHash, target, version, ...(movedCameras.length ? { cameras: movedCameras } : {}), ...(edit.operation === "delete" ? { deleted: true } : {}), ...(camera ? { camera } : {}) };
+        const commands: import("@woohaa3/contracts").CanvasCommand[] = areaCommands ?? (removeNode ? [{ type: "node.remove", nodeIds: [nodeId] }]
+          : creatingObject ? [{ type: "node.add", node: { id: nodeId, type: isCamera ? "world-camera" : "model3d", ...(isCamera ? { position: initialCameraCardPosition(camera!), width: WORLD_CAMERA_CARD_SIZE.width, height: WORLD_CAMERA_CARD_SIZE.height } : {}) }, nodeData: fields as CanvasNodeData }]
+          : [{ type: "nodeData.patch", nodeId, value: fields as CanvasNodeData }]);
+        for (const camera of [...(resourceEdit.cameras ?? []), ...(resourceEdit.camera ? [resourceEdit.camera] : [])]) {
+          // Persist before canonical commit so restart recovery can verify the exact receipt.
+          await persistWriteIntent({ canvasId: ledger.canvasId, requestId: ledger.requestId, runId: ledger.runId, epoch: ledger.epoch, executionId: ledger.executionId, contextId: ledger.contextId, completionId: ledger.completionId,
+            cameraId: camera.cameraId, commandId: `${commandId}:camera:${camera.cameraId}`, receiptCommandId: commandId, expectedSettingsVersion: edit.expectedVersion ?? "absent", nodeId: findWorldCameraNodeId(preview, camera.cameraId) ?? nodeId,
+            settingsVersion: camera.settingsVersion, snapshot: camera, payloadHash: await computeCommandPayloadHash({ canvasId: ledger.canvasId, commands }) });
+        }
+        // Compile/rig awaits can outlive cancellation. Resolve once more before leaving derive.
+        const still = resolve(context.contextId);
+        if ("ok" in still) return reject(still);
+        return { ok: true as const, resourceEdit, batch: { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: ledger.canvasId, commandId, actorId: `assistant-world:${context.runId}`, baseRevision: canvas.revision, commands } };
+      }
+    }, { spatialContext: capability });
+    if (!result.ok) return rejected ?? commandFailure(result);
+    const receipt = result.resourceEdit;
+    if (!receipt) return failure("not-ready", "缺少资源编辑的持久回执");
+    const after = await inspected.room.inspectPublished(value => value);
+    if (!after.ok) return failure("not-ready", "无法读取提交后状态");
+    const target = receipt.target;
+    const identity: WorldObjectIdentity | null = "instanceId" in target ? { kind: "instance", instanceId: target.instanceId } : "cameraId" in target ? { kind: "camera", cameraId: target.cameraId } : null;
+    if (identity && (ledger.writes.get(objectKey(identity))?.resourceRevision ?? -1) <= after.canvas.revision) {
+      const version = worldObjectVersion(after.canvas, identity);
+      if (version) {
+        const currentCamera = identity.kind === "camera" ? decodeWorldCamera(after.canvas.nodeData[findWorldCameraNodeId(after.canvas, identity.cameraId) ?? ""]?.worldCamera) : null;
+        ledger.writes.set(objectKey(identity), { identity, version, resourceRevision: after.canvas.revision, ...(currentCamera?.ok ? { snapshot: currentCamera.value } : {}) });
+        deps.worldAuthoring.refreshContextVersions({ canvasId: ledger.canvasId, contextId: ledger.contextId, targets: [{ ...identity, version }] });
+      } else ledger.writes.delete(objectKey(identity));
+    }
+    if (context.scope.scope.kind === "scene-area") {
+      const current = findArea(after.canvas, context.scope.scope.areaId);
+      if (current) deps.worldAuthoring.refreshContextScope({ canvasId: ledger.canvasId, contextId: ledger.contextId, scope: { scope: context.scope.scope, scopeVersion: current.area.scopeVersion } });
+    }
+    if (receipt.cameras?.length || edit.resourceType === "scene_area") {
+      const targets = [...context.writableTargets].flatMap(entry => {
+        const version = worldObjectVersion(after.canvas, entry.target);
+        return version ? [{ ...entry.target, version }] : [];
+      });
+      deps.worldAuthoring.refreshContextVersions({ canvasId: ledger.canvasId, contextId: ledger.contextId, targets });
+    }
+    for (const camera of [...(receipt.cameras ?? []), ...(receipt.camera ? [receipt.camera] : [])]) {
+      const current = decodeWorldCamera(after.canvas.nodeData[findWorldCameraNodeId(after.canvas, camera.cameraId) ?? ""]?.worldCamera);
+      if (!current.ok || current.value.settingsVersion !== camera.settingsVersion) continue;
+      const identity = { kind: "camera" as const, cameraId: camera.cameraId };
+      if ((ledger.writes.get(objectKey(identity))?.resourceRevision ?? -1) <= after.canvas.revision) ledger.writes.set(objectKey(identity), { identity, version: camera.settingsVersion, snapshot: camera, resourceRevision: after.canvas.revision });
+      await rememberCommittedWrite({ canvasId: ledger.canvasId, requestId: ledger.requestId, runId: ledger.runId, epoch: ledger.epoch, executionId: ledger.executionId, contextId: ledger.contextId, completionId: ledger.completionId,
+        cameraId: camera.cameraId, settingsVersion: camera.settingsVersion, snapshot: camera });
+    }
+    return { ok: true, canvasId: ledger.canvasId, commandId, revision: result.revision, duplicate: result.duplicate === true, noop: result.noop === true, target, version: receipt.version,
+      ...(receipt.deleted ? { deleted: true } : {}), ...(receipt.camera ? { cameraId: receipt.camera.cameraId, settingsVersion: receipt.camera.settingsVersion, view: worldCameraView(receipt.camera) } : {}) };
+  }
+
+  async function resourceReferences(before: ServerCanvas, after: ServerCanvas, identity: WorldObjectIdentity): Promise<Array<{ nodeId: string; kind: string }>> {
+    const refs: Array<{ nodeId: string; kind: string }> = [];
+    const afterModel = identity.kind === "instance" ? findInstanceNode(after, identity.instanceId) : null;
+    const rig = afterModel && String(afterModel.fields.modelScript ?? "") !== "" ? await animationRigOf(afterModel.fields) : null;
+    for (const node of before.document.nodes) {
+      const fields = before.nodeData[node.id];
+      const camera = decodeWorldCamera(fields?.worldCamera);
+      if (identity.kind === "instance" && !afterModel && camera.ok && camera.value.boundInstanceId === identity.instanceId) refs.push({ nodeId: node.id, kind: "camera-binding" });
+      const area = decodeSceneAreaData(fields?.sceneArea);
+      if (!area.ok || !area.value.animationScript) continue;
+      const animation = area.value.animationScript;
+      const compiled = executeWorldAnimationScript(animation.script, { duration: animation.duration, loop: animation.loop });
+      if (!compiled.ok) { refs.push({ nodeId: node.id, kind: "unreadable-animation" }); continue; }
+      const invalid = identity.kind === "camera" ? compiled.ir.cameraTracks.some(track => track.targetId === identity.cameraId)
+        : [...compiled.ir.instanceTracks, ...(compiled.ir.walkTracks ?? [])].some(track => track.targetId === identity.instanceId && (!afterModel || String(afterModel.fields.modelScript ?? "") === ""))
+          || (compiled.ir.partTracks ?? []).some(track => track.targetId === identity.instanceId && !rig?.groups.some(group => group.id === track.partId))
+          || (compiled.ir.walkTracks ?? []).some(track => track.targetId === identity.instanceId && stableStringify(track.profile) !== stableStringify(rig?.walkProfile));
+      if (invalid) refs.push({ nodeId: node.id, kind: "animation" });
+    }
+    return refs;
+  }
 
   async function setSceneAnimationScript(
     ledger: RunLedger,
@@ -1496,10 +1835,9 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
   }): Promise<{ composed: true; fields: Record<string, unknown> } | AssistantWorldFailure> {
     const previous = input.previousFields.modelContentVersion as { revision?: number; contentHash?: string; sourceHash?: string } | undefined;
     // An empty skeleton contributes no rig, so its first chunk may still introduce one.
-    const hadScript = typeof input.previousFields.modelScript === "string" && input.previousFields.modelScript !== "";
-    let definition: Record<string, unknown>;
+        let definition: Record<string, unknown>;
     try {
-      definition = contentFields({ modelScript: input.script }, hadScript ? input.previousFields.modelRig : undefined);
+      definition = contentFields({ modelScript: input.script }, input.previousFields.modelRig);
     } catch (error) {
       return failure("invalid-data", error instanceof Error ? error.message : "模型脚本无效");
     }
@@ -2211,7 +2549,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       if (ledger.completionId !== completion.completionId) return false;
       const identity: WorldObjectIdentity = { kind: "camera", cameraId: completion.cameraId };
       const write = ledger.writes.get(objectKey(identity));
-      if (!write) return false;
+      if (!write) return host.snapshot ? { snapshot: host.snapshot } : false;
       if (!sameIdentity(write.identity, identity) || write.version !== completion.settingsVersion) return false;
       const snapshot = host.snapshot ?? write.snapshot;
       return snapshot ? { snapshot } : true;

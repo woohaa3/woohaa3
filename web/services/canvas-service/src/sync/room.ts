@@ -292,11 +292,12 @@ export class CanvasRoom {
     expectedModelBatchHash?: string;
     /** T06: same operationId must carry the same frozen scene-area intent. */
     expectedWorldAuthoringHash?: string;
+    expectedResourceEditHash?: string;
     derive: (canvas: ServerCanvas) =>
-      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
+      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt }
       | { ok: false; code: string; message: string }
       | Promise<
-          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta }
+          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt }
           | { ok: false; code: string; message: string }
         >;
   }, options?: RoomSubmitOptions): Promise<RoomCommandResult> {

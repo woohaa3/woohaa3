@@ -49,6 +49,7 @@ export type YjsCommandRecord = {
   modelBatch?: ModelScriptBatchMeta;
   /** Immutable scene-area authority receipt (T06); written in the same transaction. */
   worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
 };
 
 /** 从存储恢复出的完整 Yjs 状态。 */

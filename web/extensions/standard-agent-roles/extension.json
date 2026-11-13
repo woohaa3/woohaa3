@@ -4,7 +4,7 @@
   "site": {
     "name": "标准 Agent 角色",
     "description": "提供模型作者、导演区作者、镜头构图、节点组搭建、文本作者、图片场景重建与讨论角色。角色只声明职责、输入输出与工具边界，不拥有执行通道或权限。",
-    "version": "0.2.2",
+    "version": "0.3.1",
     "configSchema": {
       "schemaId": "standard-agent-roles-config",
       "schemaVersion": 1
@@ -25,5 +25,5 @@
     "optionsType": "StandardAgentRolesExtensionOptions",
     "order": 55
   },
-  "version": "0.2.2"
+  "version": "0.3.1"
 }

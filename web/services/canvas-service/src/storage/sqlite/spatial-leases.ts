@@ -173,13 +173,12 @@ export class SqliteSpatialLeaseStore {
     if (record.state !== "active") throw new SpatialLeaseError("cancelled");
     const nextScope = normalize({ ...record.intent, scope }).scope;
     const scopeChanged = JSON.stringify(nextScope) !== JSON.stringify(record.intent.scope);
-    // Only an explicit scene-area bounds write may advance the scope version, and it
-    // must not carry object versions in the same commit.
+    // A validated area move/rotation advances scope and member versions together.
+    // The scope identity, every prior object version and every lock must still match.
     if (scopeChanged && JSON.stringify(nextScope.scope) !== JSON.stringify(record.intent.scope.scope)) {
       throw new SpatialLeaseError("version-conflict");
     }
     const normalized = normalizeTargets(targets);
-    if (scopeChanged && normalized.length > 0) throw new SpatialLeaseError("version-conflict");
     const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
     for (const target of normalized) {
       if (granted.get(objectKey(target)) !== target.version) throw new SpatialLeaseError("version-conflict");
@@ -201,7 +200,6 @@ export class SqliteSpatialLeaseStore {
       throw new SpatialLeaseError("version-conflict");
     }
     const before = normalizeTargets(previous), after = normalizeTargets(next);
-    if (scopeChanged && after.length > 0) throw new SpatialLeaseError("version-conflict");
     if (before.length !== after.length || before.some((t, i) => objectKey(t) !== objectKey(after[i]!))) throw new SpatialLeaseError("invalid-data");
     const granted = new Map(record.intent.writable.map(t => [objectKey(t), t.version]));
     for (const target of before) {

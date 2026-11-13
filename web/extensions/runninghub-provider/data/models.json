@@ -77,6 +77,55 @@
       }
     },
     {
+      "id": "bytedance/jimeng-seed3-tilesr",
+      "family": "Seedream",
+      "outputType": "image",
+      "label": "即梦智能超清",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "bytedance/jimeng-seed3-tilesr/image-upscale",
+          "collect": [
+            "imageUrl"
+          ],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "imageUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG"
+            ],
+            "x-max-size": 30
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "4k",
+              "8k"
+            ],
+            "default": "4k"
+          },
+          "scale": {
+            "type": "integer",
+            "default": 50
+          }
+        }
+      },
+      "defaultInput": {
+        "resolution": "4k",
+        "scale": 50
+      }
+    },
+    {
       "id": "bytedance/seedance-2.0-global",
       "family": "Seedance",
       "outputType": "video",
@@ -441,6 +490,400 @@
       }
     },
     {
+      "id": "bytedance/seedance-2.5-global-token",
+      "family": "Seedance",
+      "outputType": "video",
+      "label": "seedance2.5-global/样片成片 Token",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "bytedance/seedance-2.5-global-token/draft-to-video",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "draftTaskId",
+          "resolution"
+        ],
+        "properties": {
+          "draftTaskId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "native1080p"
+            ],
+            "default": "native1080p"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "mp4",
+              "mov"
+            ],
+            "default": "mp4"
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "returnLastFrame": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "defaultInput": {
+        "resolution": "native1080p",
+        "outputFormat": "mp4",
+        "watermark": false,
+        "returnLastFrame": false
+      }
+    },
+    {
+      "id": "bytedance/seedance-2.5-token",
+      "family": "Seedance",
+      "outputType": "video",
+      "label": "seedance2.5/样片成片 Token",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "bytedance/seedance-2.5-token/multimodal-video",
+          "collect": [
+            "imageUrls",
+            "videoUrls",
+            "audioUrls"
+          ],
+          "match": {
+            "anyMedia": [
+              "video",
+              "audio"
+            ],
+            "minImages": 2
+          }
+        },
+        {
+          "endpoint": "bytedance/seedance-2.5-token/image-to-video",
+          "collect": [
+            "firstFrameUrl",
+            "lastFrameUrl"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "bytedance/seedance-2.5-token/text-to-video",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "resolution"
+        ],
+        "properties": {
+          "draftTaskId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "native1080p"
+            ],
+            "default": "native1080p"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "mp4",
+              "mov"
+            ],
+            "default": "mp4"
+          },
+          "watermark": {
+            "type": "boolean",
+            "default": false
+          },
+          "returnLastFrame": {
+            "type": "boolean",
+            "default": false
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 20480
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "-1",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15",
+              "16",
+              "17",
+              "18",
+              "19",
+              "20",
+              "21",
+              "22",
+              "23",
+              "24",
+              "25",
+              "26",
+              "27",
+              "28",
+              "29",
+              "30"
+            ],
+            "default": "5"
+          },
+          "firstFrameUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF",
+              "HEIC",
+              "HEIF"
+            ],
+            "x-max-size": 30
+          },
+          "lastFrameUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF",
+              "HEIC",
+              "HEIF"
+            ],
+            "x-max-size": 30
+          },
+          "generateAudio": {
+            "type": "boolean",
+            "default": true
+          },
+          "ratio": {
+            "type": "string",
+            "enum": [
+              "adaptive"
+            ],
+            "default": "adaptive"
+          },
+          "realPersonMode": {
+            "type": "boolean",
+            "default": true
+          },
+          "conversionSlots": {
+            "type": "string",
+            "enum": [
+              "all",
+              "firstFrameUrl",
+              "lastFrameUrl"
+            ],
+            "default": "all"
+          },
+          "bitrateMode": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "high"
+            ],
+            "default": "standard"
+          },
+          "seed": {
+            "type": "integer",
+            "default": -1
+          },
+          "draft": {
+            "type": "boolean",
+            "default": false
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF",
+              "HEIC",
+              "HEIF"
+            ],
+            "x-max-size": 50
+          },
+          "videoUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-video",
+            "x-accept": [
+              "MP4",
+              "MOV"
+            ],
+            "x-max-size": 50
+          },
+          "audioUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-audio",
+            "x-accept": [
+              "MP3",
+              "WAV"
+            ],
+            "x-max-size": 50
+          },
+          "omniReferenceTaskType": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "reference",
+              "edit",
+              "extend"
+            ],
+            "default": "auto"
+          },
+          "webSearch": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "defaultInput": {
+        "resolution": "native1080p",
+        "outputFormat": "mp4",
+        "watermark": false,
+        "returnLastFrame": false,
+        "duration": "5",
+        "generateAudio": true,
+        "ratio": "adaptive",
+        "realPersonMode": true,
+        "conversionSlots": "all",
+        "bitrateMode": "standard",
+        "seed": -1,
+        "draft": false,
+        "omniReferenceTaskType": "auto",
+        "webSearch": false
+      }
+    },
+    {
+      "id": "dola-Seedream-5.0-flash",
+      "family": "Seedream",
+      "outputType": "image",
+      "label": "Dola Seedream 5.0 Flash Image To Image",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "dola-Seedream-5.0-flash/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "dola-Seedream-5.0-flash/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "width": {
+            "type": "integer",
+            "default": 1024
+          },
+          "height": {
+            "type": "integer",
+            "default": 1024
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP"
+            ],
+            "x-max-size": 30
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "1.5k",
+              "2k"
+            ],
+            "default": "2k"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "default": "jpeg"
+          },
+          "imageUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF"
+            ],
+            "x-max-size": 30
+          }
+        }
+      },
+      "defaultInput": {
+        "width": 1024,
+        "height": 1024,
+        "resolution": "2k",
+        "outputFormat": "jpeg"
+      }
+    },
+    {
       "id": "dola-Seedream-5.0-pro",
       "family": "Seedream",
       "outputType": "image",
@@ -513,6 +956,139 @@
         "height": 1024,
         "resolution": "2k",
         "outputFormat": "jpeg"
+      }
+    },
+    {
+      "id": "dola-Seedream-5.5",
+      "family": "Seedream",
+      "outputType": "image",
+      "label": "Dola-Seedream-5.5-图生图",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "dola-Seedream-5.5/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "dola-Seedream-5.5/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "width": {
+            "type": "integer",
+            "default": 1024
+          },
+          "height": {
+            "type": "integer",
+            "default": 1024
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP"
+            ],
+            "x-max-size": 30
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1K",
+              "1.5K",
+              "2K"
+            ],
+            "default": "2K"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "watermark": {
+            "type": "string",
+            "enum": [
+              "false",
+              "true"
+            ],
+            "default": "false"
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "transparent",
+              "opaque"
+            ],
+            "default": "auto"
+          },
+          "optimizePromptMode": {
+            "type": "string",
+            "enum": [
+              "standard"
+            ],
+            "default": "standard"
+          },
+          "safetyIdentifier": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "imageUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF"
+            ],
+            "x-max-size": 30
+          },
+          "maxImages": {
+            "type": "integer",
+            "default": 30
+          },
+          "textRecognition": {
+            "type": "string",
+            "enum": [
+              "false",
+              "true"
+            ],
+            "default": "false"
+          }
+        }
+      },
+      "defaultInput": {
+        "width": 1024,
+        "height": 1024,
+        "resolution": "2K",
+        "outputFormat": "png",
+        "watermark": "false",
+        "background": "auto",
+        "optimizePromptMode": "standard",
+        "maxImages": 30,
+        "textRecognition": "false"
       }
     },
     {
@@ -802,6 +1378,17 @@
             "type": "string",
             "maxLength": 32000
           },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP"
+            ],
+            "x-max-size": 50
+          },
           "aspectRatio": {
             "type": "string",
             "enum": [
@@ -861,17 +1448,6 @@
               "webp"
             ],
             "default": "png"
-          },
-          "imageUrls": {
-            "type": "array",
-            "x-pptask-semantic": "reference-image",
-            "x-accept": [
-              "JPG",
-              "JPEG",
-              "PNG",
-              "WEBP"
-            ],
-            "x-max-size": 50
           }
         }
       },
@@ -917,6 +1493,17 @@
             "type": "string",
             "maxLength": 32000
           },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP"
+            ],
+            "x-max-size": 50
+          },
           "aspectRatio": {
             "type": "string",
             "enum": [
@@ -976,17 +1563,6 @@
               "webp"
             ],
             "default": "png"
-          },
-          "imageUrls": {
-            "type": "array",
-            "x-pptask-semantic": "reference-image",
-            "x-accept": [
-              "JPG",
-              "JPEG",
-              "PNG",
-              "WEBP"
-            ],
-            "x-max-size": 50
           }
         }
       },
@@ -1031,6 +1607,15 @@
             "type": "string",
             "maxLength": 20000
           },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "PNG"
+            ],
+            "x-max-size": 50
+          },
           "aspectRatio": {
             "type": "string",
             "enum": [
@@ -1055,15 +1640,6 @@
               "4k"
             ],
             "default": "1k"
-          },
-          "imageUrls": {
-            "type": "array",
-            "x-pptask-semantic": "reference-image",
-            "x-accept": [
-              "JPG",
-              "PNG"
-            ],
-            "x-max-size": 50
           }
         }
       },
@@ -1105,6 +1681,15 @@
             "type": "string",
             "maxLength": 20000
           },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "PNG"
+            ],
+            "x-max-size": 50
+          },
           "aspectRatio": {
             "type": "string",
             "enum": [
@@ -1129,21 +1714,302 @@
               "4k"
             ],
             "default": "1k"
-          },
-          "imageUrls": {
-            "type": "array",
-            "x-pptask-semantic": "reference-image",
-            "x-accept": [
-              "JPG",
-              "PNG"
-            ],
-            "x-max-size": 50
           }
         }
       },
       "defaultInput": {
         "aspectRatio": "16:9",
         "resolution": "1k"
+      }
+    },
+    {
+      "id": "rhart-image-g-2.6-official-token/flare",
+      "family": "GPT Image",
+      "outputType": "image",
+      "label": "gpt-image-2.6/flare/image-to-image/stable-token",
+      "promptRequirement": "required",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "rhart-image-g-2.6-official-token/flare/edit",
+          "collect": [
+            "imageUrls",
+            "markupUrl"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "rhart-image-g-2.6-official-token/flare/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 32000
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP"
+            ],
+            "x-max-size": 50
+          },
+          "markupUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG"
+            ],
+            "x-max-size": 25
+          },
+          "size": {
+            "type": "string",
+            "maxLength": 32,
+            "default": "auto"
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "transparent",
+              "opaque"
+            ],
+            "default": "auto"
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default": "auto"
+          },
+          "complexity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "frameCount": {
+            "type": "integer"
+          },
+          "frameDurationMs": {
+            "type": "integer"
+          },
+          "outputCompression": {
+            "type": "integer"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp",
+              "gif"
+            ],
+            "default": "png"
+          },
+          "moderation": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low"
+            ]
+          },
+          "svgModel": {
+            "type": "string",
+            "enum": [
+              "gpt-4.1-mini",
+              "gpt-5.4-mini",
+              "gpt-5.6-sol",
+              "gpt-5.6-terra",
+              "gpt-6-astra",
+              "gpt-6-luna"
+            ]
+          },
+          "svgReasoningEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        }
+      },
+      "defaultInput": {
+        "size": "auto",
+        "background": "auto",
+        "quality": "auto",
+        "outputFormat": "png"
+      }
+    },
+    {
+      "id": "rhart-image-g-2.6-official-token/sunburst",
+      "family": "GPT Image",
+      "outputType": "image",
+      "label": "gpt-image-2.6/sunburst/image-to-image/stable-token",
+      "promptRequirement": "required",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "rhart-image-g-2.6-official-token/sunburst/edit",
+          "collect": [
+            "imageUrls",
+            "markupUrl"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "rhart-image-g-2.6-official-token/sunburst/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 32000
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "JPEG",
+              "PNG",
+              "WEBP"
+            ],
+            "x-max-size": 50
+          },
+          "markupUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG"
+            ],
+            "x-max-size": 25
+          },
+          "size": {
+            "type": "string",
+            "maxLength": 32,
+            "default": "auto"
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "transparent",
+              "opaque"
+            ],
+            "default": "auto"
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default": "auto"
+          },
+          "complexity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "frameCount": {
+            "type": "integer"
+          },
+          "frameDurationMs": {
+            "type": "integer"
+          },
+          "outputCompression": {
+            "type": "integer"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png",
+              "webp",
+              "gif"
+            ],
+            "default": "png"
+          },
+          "moderation": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "low"
+            ]
+          },
+          "svgModel": {
+            "type": "string",
+            "enum": [
+              "gpt-4.1-mini",
+              "gpt-5.4-mini",
+              "gpt-5.6-sol",
+              "gpt-5.6-terra",
+              "gpt-6-astra",
+              "gpt-6-luna"
+            ]
+          },
+          "svgReasoningEffort": {
+            "type": "string",
+            "enum": [
+              "none",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        }
+      },
+      "defaultInput": {
+        "size": "auto",
+        "background": "auto",
+        "quality": "auto",
+        "outputFormat": "png"
       }
     },
     {
@@ -1525,6 +2391,174 @@
       },
       "defaultInput": {
         "resolution": "1k"
+      }
+    },
+    {
+      "id": "rhart-image-n-nb21",
+      "family": "Nano Banana",
+      "outputType": "image",
+      "label": "nano-banana-2.1/image-to-image/economy",
+      "promptRequirement": "required",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "rhart-image-n-nb21/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "rhart-image-n-nb21/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "resolution"
+        ],
+        "properties": {
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "PNG"
+            ],
+            "x-max-size": 10
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "aspectRatio": {
+            "type": "string",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "5:4",
+              "4:5",
+              "21:9",
+              "1:4",
+              "4:1",
+              "1:8",
+              "8:1"
+            ],
+            "default": "1:1"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k",
+              "4k"
+            ],
+            "default": "1k"
+          }
+        }
+      },
+      "defaultInput": {
+        "aspectRatio": "1:1",
+        "resolution": "1k"
+      }
+    },
+    {
+      "id": "rhart-image-n-nb21-official",
+      "family": "Nano Banana",
+      "outputType": "image",
+      "label": "nano-banana-2.1/image-to-image-official-stable",
+      "promptRequirement": "required",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "rhart-image-n-nb21-official/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "rhart-image-n-nb21-official/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "resolution"
+        ],
+        "properties": {
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "JPG",
+              "PNG"
+            ],
+            "x-max-size": 10
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "aspectRatio": {
+            "type": "string",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "5:4",
+              "4:5",
+              "21:9",
+              "1:4",
+              "4:1",
+              "1:8",
+              "8:1"
+            ],
+            "default": "1:1"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k",
+              "4k"
+            ],
+            "default": "1k"
+          },
+          "thinkingLevel": {
+            "type": "string",
+            "enum": [
+              "minimal",
+              "medium",
+              "high"
+            ],
+            "default": "medium"
+          }
+        }
+      },
+      "defaultInput": {
+        "aspectRatio": "1:1",
+        "resolution": "1k",
+        "thinkingLevel": "medium"
       }
     },
     {
@@ -2601,6 +3635,173 @@
       }
     },
     {
+      "id": "seedream-v4.7",
+      "family": "Seedream",
+      "outputType": "image",
+      "label": "seedream-v4.7-图生图",
+      "promptRequirement": "required",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "seedream-v4.7/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "seedream-v4.7/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "width": {
+            "type": "integer",
+            "default": 2048
+          },
+          "height": {
+            "type": "integer",
+            "default": 2048
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG"
+            ],
+            "x-max-size": 10
+          },
+          "sequentialImageGeneration": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "auto"
+            ],
+            "default": "disabled"
+          },
+          "maxImages": {
+            "type": "integer",
+            "default": 1
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "2k",
+              "4k"
+            ]
+          }
+        }
+      },
+      "defaultInput": {
+        "width": 2048,
+        "height": 2048,
+        "sequentialImageGeneration": "disabled",
+        "maxImages": 1
+      }
+    },
+    {
+      "id": "seedream-v5-flash",
+      "family": "Seedream",
+      "outputType": "image",
+      "label": "seedream-v5-flash-图生图",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "seedream-v5-flash/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "seedream-v5-flash/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "width": {
+            "type": "integer",
+            "default": 1024
+          },
+          "height": {
+            "type": "integer",
+            "default": 1024
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP"
+            ],
+            "x-max-size": 30
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1k",
+              "1.5k",
+              "2k"
+            ],
+            "default": "2k"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "default": "jpeg"
+          },
+          "imageUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF"
+            ],
+            "x-max-size": 30
+          }
+        }
+      },
+      "defaultInput": {
+        "width": 1024,
+        "height": 1024,
+        "resolution": "2k",
+        "outputFormat": "jpeg"
+      }
+    },
+    {
       "id": "seedream-v5-lite",
       "family": "Seedream",
       "outputType": "image",
@@ -2691,7 +3892,7 @@
       "family": "Seedream",
       "outputType": "image",
       "label": "seedream-v5-pro-图生图",
-      "promptRequirement": "required",
+      "promptRequirement": "optional",
       "cancel": "unsupported",
       "routes": [
         {
@@ -2711,9 +3912,7 @@
       ],
       "inputSchema": {
         "type": "object",
-        "required": [
-          "prompt"
-        ],
+        "required": [],
         "properties": {
           "prompt": {
             "type": "string",
@@ -2751,6 +3950,19 @@
               "png"
             ],
             "default": "jpeg"
+          },
+          "imageUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF"
+            ],
+            "x-max-size": 30
           }
         }
       },
@@ -2759,6 +3971,139 @@
         "height": 1024,
         "resolution": "2k",
         "outputFormat": "jpeg"
+      }
+    },
+    {
+      "id": "seedream-v5.5",
+      "family": "Seedream",
+      "outputType": "image",
+      "label": "seedream-v5.5-图生图",
+      "promptRequirement": "optional",
+      "cancel": "unsupported",
+      "routes": [
+        {
+          "endpoint": "seedream-v5.5/image-to-image",
+          "collect": [
+            "imageUrls"
+          ],
+          "match": {
+            "minImages": 1
+          }
+        },
+        {
+          "endpoint": "seedream-v5.5/text-to-image",
+          "collect": [],
+          "match": {}
+        }
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "width": {
+            "type": "integer",
+            "default": 1024
+          },
+          "height": {
+            "type": "integer",
+            "default": 1024
+          },
+          "imageUrls": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP"
+            ],
+            "x-max-size": 30
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "1K",
+              "1.5K",
+              "2K"
+            ],
+            "default": "2K"
+          },
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg"
+            ],
+            "default": "png"
+          },
+          "watermark": {
+            "type": "string",
+            "enum": [
+              "false",
+              "true"
+            ],
+            "default": "false"
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "transparent",
+              "opaque"
+            ],
+            "default": "auto"
+          },
+          "optimizePromptMode": {
+            "type": "string",
+            "enum": [
+              "standard"
+            ],
+            "default": "standard"
+          },
+          "safetyIdentifier": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "imageUrl": {
+            "type": "array",
+            "x-pptask-semantic": "reference-image",
+            "x-accept": [
+              "PNG",
+              "JPEG",
+              "WEBP",
+              "BMP",
+              "TIFF",
+              "GIF"
+            ],
+            "x-max-size": 30
+          },
+          "maxImages": {
+            "type": "integer",
+            "default": 30
+          },
+          "textRecognition": {
+            "type": "string",
+            "enum": [
+              "false",
+              "true"
+            ],
+            "default": "false"
+          }
+        }
+      },
+      "defaultInput": {
+        "width": 1024,
+        "height": 1024,
+        "resolution": "2K",
+        "outputFormat": "png",
+        "watermark": "false",
+        "background": "auto",
+        "optimizePromptMode": "standard",
+        "maxImages": 30,
+        "textRecognition": "false"
       }
     }
   ]

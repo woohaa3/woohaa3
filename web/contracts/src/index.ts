@@ -248,6 +248,7 @@ export {
   type LogAttrValue, type LogLevel, type LogRecord, type LogRuntime, type NormalizeLogInput
 } from "./log/index.js";
 
+export * from "./canvas/world-resource-tools.js";
 export * from "./canvas/soma-motion/index.js";
 
 export { SOMA77_JOINTS } from "./canvas/soma-humanoid/skeleton.js";

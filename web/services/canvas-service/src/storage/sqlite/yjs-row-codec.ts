@@ -38,6 +38,7 @@ export type CommandRow = {
   script_meta_json?: string | null;
   model_batch_json?: string | null;
   world_authoring_json?: string | null;
+  resource_edit_json?: string | null;
 };
 
 /** `node:sqlite` 的 BLOB 列以 Uint8Array 返回；统一成新数组避免外部持有内部视图。 */
@@ -103,6 +104,7 @@ export function decodeCommandRow(row: CommandRow): {
   script?: import("@woohaa3/contracts").CanvasScriptSubmissionMeta;
   modelBatch?: import("@woohaa3/contracts").ModelScriptBatchMeta;
   worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
 } {
   const record = {
     commandId: row.command_id,
@@ -121,7 +123,8 @@ export function decodeCommandRow(row: CommandRow): {
     ...record,
     ...(script ? { script } : {}),
     ...(modelBatch ? { modelBatch } : {}),
-    ...(worldAuthoring ? { worldAuthoring } : {})
+    ...(worldAuthoring ? { worldAuthoring } : {}),
+    ...(row.resource_edit_json ? { resourceEdit: JSON.parse(row.resource_edit_json) } : {})
   };
 }
 
