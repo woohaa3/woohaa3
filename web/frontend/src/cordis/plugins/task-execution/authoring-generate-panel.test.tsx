@@ -619,9 +619,11 @@ describe("统一 Agent 创作入口", () => {
       mode: "world",
       worldScope: { kind: "scene-area", areaId: "area-1" },
     });
-    const expansion = el.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
-    expect(expansion.checked).toBe(false);
-    await act(async () => expansion.click());
+    const sizeLock = el.querySelector<HTMLButtonElement>('.assistant-size-lock .ui-switch')!;
+    expect(sizeLock.getAttribute("data-state")).toBe("checked");
+    expect(sizeLock.closest(".assistant-toolbar__before-submit")).not.toBeNull();
+    await act(async () => sizeLock.click());
+    expect(sizeLock.getAttribute("data-state")).toBe("unchecked");
     await input("textarea", "把桌子移到左边");
     const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
       (entry) => entry.textContent === "生成",
@@ -636,7 +638,7 @@ describe("统一 Agent 创作入口", () => {
       allowSceneAreaExpansion: true,
       prompt: "把桌子移到左边",
     });
-    expect(expansion.checked).toBe(false);
+    expect(sizeLock.getAttribute("data-state")).toBe("checked");
   });
 
   it("镜头生成面板提交所选镜头，保持调整用途和用户输入", async () => {

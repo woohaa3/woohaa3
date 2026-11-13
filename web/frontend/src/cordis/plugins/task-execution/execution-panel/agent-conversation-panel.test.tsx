@@ -671,10 +671,12 @@ describe("AgentConversationPanel · 续聊目标身份", () => {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "继续讨论这个场景");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
-      const option = el.querySelector<HTMLInputElement>('.assistant-expansion-option input');
+      const option = el.querySelector<HTMLButtonElement>('.assistant-size-lock .ui-switch');
       if (worldScope.kind === "scene-area") {
-        expect(option?.checked).toBe(false);
+        expect(option?.getAttribute("data-state")).toBe("checked");
+        expect(option?.closest(".assistant-toolbar__before-submit")).not.toBeNull();
         await act(async () => option!.click());
+        expect(option?.getAttribute("data-state")).toBe("unchecked");
       } else expect(option).toBeNull();
       const form = el.querySelector<HTMLFormElement>(".agent-detail__reply")!;
       await act(async () => {
@@ -683,7 +685,7 @@ describe("AgentConversationPanel · 续聊目标身份", () => {
       await act(async () => undefined);
       expect(accept).toHaveBeenCalledTimes(1);
       expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "world", worldScope, ...(worldScope.kind === "scene-area" ? { allowSceneAreaExpansion: true } : {}) });
-      if (option) expect(option.checked).toBe(false);
+      if (option) expect(option.getAttribute("data-state")).toBe("checked");
       expect(el.querySelector(".agent-detail__reply-error")).toBeNull();
     } finally { await act(async () => { root.unmount(); }); el.remove(); }
   });

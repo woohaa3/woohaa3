@@ -21,7 +21,7 @@ import {
 } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
-import { Button } from "@woohaa3/ui/primitives";
+import { Button, Switch } from "@woohaa3/ui/primitives";
 import { SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
@@ -455,7 +455,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                 onSubmit={() => void submit()}
               />
             )}
-            {props.mode === "world" && props.worldScope?.kind === "scene-area" ? <label className="assistant-expansion-option"><input type="checkbox" checked={input.draft.allowSceneAreaExpansion === true} disabled={locked || !props.writable || Boolean(input.pending)} onChange={event => controller.edit({ allowSceneAreaExpansion: event.target.checked })} />允许自动扩大导演区</label> : null}
           </div>
         }
         assistant={service ? <AssistantConfiguration service={service} connectionId={connectionId ?? ""} model={model} purpose={props.mode ?? "world"}
@@ -581,6 +580,16 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
               ) : null}
           </>
         }
+        beforeSubmit={props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
+          <label className="assistant-size-lock">
+            <Switch
+              checked={input.draft.allowSceneAreaExpansion !== true}
+              disabled={locked || !props.writable || Boolean(input.pending)}
+              onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
+            />
+            锁定大小
+          </label>
+        ) : null}
         submit={
           delivery ? (
             delivery.cancel ? (

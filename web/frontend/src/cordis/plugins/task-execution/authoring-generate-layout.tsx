@@ -19,6 +19,7 @@ type AuthoringLayoutProps = {
   assistant: ReactNode;
   model?: ReactNode;
   detail?: ReactNode;
+  beforeSubmit?: ReactNode;
   submit: ReactNode;
   onRefresh?: () => void;
   onManage?: () => void;
@@ -63,6 +64,7 @@ export function AuthoringGenerateLayout({
   assistant,
   model,
   detail,
+  beforeSubmit,
   submit,
   onRefresh,
   onManage,
@@ -77,9 +79,10 @@ export function AuthoringGenerateLayout({
       parameters={model}
       submit={submit}
       beforeSubmit={
-        detail ? (
-          <div className="authoring-generate__actions">{detail}</div>
-        ) : undefined
+        <>
+          {detail ? <div className="authoring-generate__actions">{detail}</div> : null}
+          {beforeSubmit}
+        </>
       }
       onRefresh={onRefresh}
       onManage={onManage}
