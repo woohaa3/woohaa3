@@ -381,12 +381,6 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     (invalidEffort ? "当前模型已不支持所选 思考强度，请重新选择。" : null);
 
   return (
-    <>
-      {props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
-        <div className="authoring-generate__quick-tools">
-          <DirectorCharacterToolbar canvasId={props.canvasId} nodeId={props.nodeId} areaId={props.worldScope.areaId} writable={props.writable} />
-        </div>
-      ) : null}
     <div
       className="mc-panel authoring-generate"
       data-testid="authoring-generate"
@@ -396,6 +390,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     >
       <AuthoringGenerateLayout
         inspector={inspector}
+        quickActions={props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
+          <DirectorCharacterToolbar canvasId={props.canvasId} nodeId={props.nodeId} areaId={props.worldScope.areaId} writable={props.writable} />
+        ) : undefined}
         presentation={props.presentation === "expanded" ? "expanded" : "dock"}
         requestPresentation={props.requestPresentation}
         onRefresh={() => {
@@ -672,6 +669,5 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         </p>
       ) : null}
     </div>
-    </>
   );
 }

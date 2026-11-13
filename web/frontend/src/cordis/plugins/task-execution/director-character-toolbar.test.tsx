@@ -14,7 +14,7 @@ it("shows exactly two direct factory actions and disables both read-only", async
   const root = createRoot(container); dispose = () => act(() => root.unmount());
   await act(async () => root.render(<DirectorCharacterToolbar canvasId="c" nodeId="a" areaId="a" writable />));
   const buttons = [...container.querySelectorAll<HTMLButtonElement>("button")];
-  expect(buttons.map(b => b.textContent)).toEqual(["胶囊人", "普通人"]);
+  expect(buttons.map(b => b.textContent)).toEqual(["胶囊人", "骨架人"]);
   await act(async () => buttons[0].click());
   await act(async () => buttons[1].click());
   expect(mocks.create.mock.calls.map(call => (call as unknown as [{kind:string}])[0].kind)).toEqual(["capsule", "humanoid"]);
