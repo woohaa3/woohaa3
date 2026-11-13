@@ -183,3 +183,22 @@ it('smooth connector tangents join both ends of the complete lap without hard tu
  expect(max).toBeLessThan(.1);
  expect(facts.entryLength).toBeGreaterThan(0);
 });
+
+it('separates source in-point from timeline start, blends from source zero and round trips',async()=>{
+ const source=`motion.soma.clip('instance',${JSON.stringify({...options,startTime:.5,sourceStartTime:1/30,blendInDuration:.01})});`;
+ const result=executeWorldAnimationScript(source,{duration:1,loop:false});
+ expect(result.ok).toBe(true);if(!result.ok)return;
+ expect(result.ir.somaTracks?.[0]?.endTime).toBeCloseTo(.5+1/30);
+ expect(executeWorldAnimationScript(serializeWorldAnimationScript(result.ir),{duration:1,loop:false})).toEqual(result);
+ const p=await prepareSomaMotion(bytes('skin'),bytes('motion'));p.rootPositions.set([5,1,8,9,3,20]);
+ const sample=(t:number)=>sampleWorldAnimation(result.ir,t,{resolveSomaMotion:()=>p}).instances.get('instance')!;
+ expect(sample(.4).partPositions?.['actor.Hips']?.[1]).toBeCloseTo(1);
+ expect(sample(.505).partPositions?.['actor.Hips']?.[1]).toBeCloseTo(2);
+ expect(sample(.52).partPositions?.['actor.Hips']?.[1]).toBeCloseTo(3);
+ expect(sample(.505)).toEqual(sample(.505));
+});
+it('rejects invalid source windows, oversized transitions and trimming translated motion',()=>{
+ for(const extra of [{sourceStartTime:-.1},{sourceStartTime:Infinity},{sourceStartTime:2/30},{sourceStartTime:1/30,endTime:.05},{blendInDuration:-1},{blendInDuration:1},{sourceStartTime:.01,rootMotion:'translate'}]) {
+  expect(executeWorldAnimationScript(`motion.soma.clip('instance',${JSON.stringify({...options,...extra})});`,{duration:1,loop:false}).ok).toBe(false);
+ }
+});

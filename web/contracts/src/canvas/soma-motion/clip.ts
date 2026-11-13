@@ -6,20 +6,25 @@ import type { WorldRotation, WorldPoint } from '../shared-world.js';
 /** Immutable asset identity and bounded playback metadata; never contains NPZ data. */
 export type WorldSomaClipTrack = {
   targetId: string; assetId: string; checksum: string; fps: number; frameCount: number;
-  startTime: number; endTime: number; jointPrefix: string; rootMotion?: 'in-place' | 'translate'; route?: SomaSceneLapRoute;
+  startTime: number; endTime: number; sourceStartTime?: number; blendInDuration?: number; jointPrefix: string; rootMotion?: 'in-place' | 'translate'; route?: SomaSceneLapRoute;
 };
 export function validateSomaClip(input: unknown, duration: number): WorldSomaClipTrack {
   const x = input as Record<string, unknown>;
   const fail = () => { throw new Error('Invalid SOMA clip metadata'); };
-  if (!x || typeof x !== 'object' || Array.isArray(x) || !Object.keys(x).every(k => ['targetId','assetId','checksum','fps','frameCount','startTime','endTime','jointPrefix','rootMotion','route'].includes(k))) return fail();
+  if (!x || typeof x !== 'object' || Array.isArray(x) || !Object.keys(x).every(k => ['targetId','assetId','checksum','fps','frameCount','startTime','endTime','jointPrefix','rootMotion','route','sourceStartTime','blendInDuration'].includes(k))) return fail();
   for (const k of ['targetId','assetId','checksum','jointPrefix']) if (typeof x[k] !== 'string' || !(x[k] as string).trim() || (x[k] as string).length > 200) return fail();
   if (!/^[a-f0-9]{64}$/i.test(x.checksum as string) || typeof x.fps !== 'number' || !Number.isFinite(x.fps) || x.fps <= 0 || x.fps > 240 || !Number.isInteger(x.frameCount) || (x.frameCount as number) < 1 || (x.frameCount as number) > 18000 || typeof x.startTime !== 'number' || !Number.isFinite(x.startTime) || x.startTime < 0) return fail();
   if (x.rootMotion !== undefined && x.rootMotion !== 'in-place' && x.rootMotion !== 'translate') return fail();
-  const endTime = x.endTime === undefined ? Math.min(duration, x.startTime + (x.frameCount as number) / x.fps) : x.endTime;
-  if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime <= x.startTime || endTime > duration || endTime - x.startTime > (x.frameCount as number) / x.fps + 1e-8) return fail();
+  const sourceStartTime = x.sourceStartTime === undefined ? 0 : x.sourceStartTime, blendInDuration = x.blendInDuration === undefined ? 0 : x.blendInDuration;
+  const sourceDuration = (x.frameCount as number) / x.fps;
+  if (typeof sourceStartTime !== 'number' || !Number.isFinite(sourceStartTime) || sourceStartTime < 0 || sourceStartTime >= sourceDuration || typeof blendInDuration !== 'number' || !Number.isFinite(blendInDuration) || blendInDuration < 0 || blendInDuration > 1) return fail();
+  // Root translation and route planning still use the complete source path.
+  if ((sourceStartTime > 0 || blendInDuration > 0) && (x.rootMotion === 'translate' || x.route !== undefined)) return fail();
+  const endTime = x.endTime === undefined ? Math.min(duration, x.startTime + sourceDuration - sourceStartTime) : x.endTime;
+  if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime <= x.startTime || endTime > duration || endTime - x.startTime > sourceDuration - sourceStartTime + 1e-8 || blendInDuration > endTime - x.startTime + 1e-8) return fail();
   const route=x.route===undefined ? undefined : validateSomaSceneLapRoute(x.route,endTime-x.startTime);
   if(route && x.rootMotion!=='in-place')return fail();
-  return {...(route ? {route} : {}),targetId:x.targetId as string,assetId:x.assetId as string,checksum:x.checksum as string,fps:x.fps,frameCount:x.frameCount as number,startTime:x.startTime,endTime,jointPrefix:x.jointPrefix as string,...(x.rootMotion !== undefined ? {rootMotion:x.rootMotion as WorldSomaClipTrack['rootMotion']} : {})};
+  return {...(x.sourceStartTime !== undefined ? {sourceStartTime} : {}), ...(x.blendInDuration !== undefined ? {blendInDuration} : {}), ...(route ? {route} : {}),targetId:x.targetId as string,assetId:x.assetId as string,checksum:x.checksum as string,fps:x.fps,frameCount:x.frameCount as number,startTime:x.startTime,endTime,jointPrefix:x.jointPrefix as string,...(x.rootMotion !== undefined ? {rootMotion:x.rootMotion as WorldSomaClipTrack['rootMotion']} : {})};
 }
 function matrixQuaternion(m: number[]): Quat {
   const trace = m[0]! + m[4]! + m[8]!;
@@ -58,4 +63,19 @@ export function sampleSomaClip(p:PreparedSomaMotion,jointPrefix:string,time:numb
     if(p.jointNames[n]==='Hips' && parent<0)partPositions[`${jointPrefix}.Hips`]=[0,p.rootPositions[a*3+1]!*(1-t)+p.rootPositions[b*3+1]!*t-p.bindTransforms[n*16+7]!,0];
   }
   return {partRotations,partPositions,...(rootMotion === 'translate' ? {rootTranslation:[p.rootPositions[a*3]!*(1-t)+p.rootPositions[b*3]!*t-p.rootPositions[0]!,0,p.rootPositions[a*3+2]!*(1-t)+p.rootPositions[b*3+2]!*t-p.rootPositions[2]!] as Vec3} : {})};
+}
+
+/** Seekable source-window sampling. Blend occupies timeline time; it does not delay source events. */
+export function sampleSomaClipTrack(p:PreparedSomaMotion, track:WorldSomaClipTrack, now:number) {
+  const elapsed=Math.max(0,Math.min(now,track.endTime)-track.startTime);
+  const sourceStart=track.sourceStartTime??0, blend=track.blendInDuration??0;
+  if(now<track.startTime && blend>0)return sampleSomaClip(p,track.jointPrefix,0,track.rootMotion,!!track.route);
+  const pose=sampleSomaClip(p,track.jointPrefix,sourceStart+elapsed,track.rootMotion,!!track.route);
+  if(blend>0 && elapsed<blend){
+    const initial=sampleSomaClip(p,track.jointPrefix,0,track.rootMotion,!!track.route);
+    const t=elapsed/blend, weight=t*t*(3-2*t);
+    for(const key of Object.keys(pose.partRotations))pose.partRotations[key]=slerp(initial.partRotations[key]! as Quat,pose.partRotations[key]! as Quat,weight);
+    for(const key of Object.keys(pose.partPositions))pose.partPositions[key]=pose.partPositions[key]!.map((v,i)=>initial.partPositions[key]![i]!*(1-weight)+v*weight) as Vec3;
+  }
+  return pose;
 }

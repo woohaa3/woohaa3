@@ -125,6 +125,11 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       }
     };
     assistantWorld.humanoidMotion = createHumanoidMotionTools({
+      readAsset: async (canvasId,assetId) => {
+        const room=await ctx.canvas.sync?.registry.resolve(canvasId);
+        const snapshot=room?.exportCanvas();
+        return snapshot?.ok?snapshot.canvas.assets.find(asset=>asset.id===assetId):undefined;
+      },
       compose: (canvasId,walk,wave) => composeHumanoidMotionAsset(ctx.media.port(),canvasId,walk,wave),
       readBytes: async ({canvasId,storageKey,maxBytes}) => {
         const bucket=ctx.storage.bucket('media',{canvasId});

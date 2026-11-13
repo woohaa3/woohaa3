@@ -23,7 +23,7 @@ export function DirectorCharacterToolbar(props: { canvasId: string; nodeId: stri
     finally { running.current = false; setBusy(false); }
   };
   return <>
-    <div className="director-character-toolbar" style={{ display: "flex", gap: 6, paddingBottom: 8 }}>
+    <div className="director-character-toolbar" style={{ display: "flex", gap: 6 }}>
       <Button size="sm" style={{ whiteSpace: "nowrap", paddingInline: 12, flexShrink: 0 }} disabled={!props.writable || busy || !remote || !edit || !session} onClick={() => void create("capsule")}>胶囊人</Button>
       <Button size="sm" style={{ whiteSpace: "nowrap", paddingInline: 12, flexShrink: 0 }} disabled={!props.writable || busy || !remote || !edit || !session} onClick={() => void create("humanoid")}>普通人</Button>
     </div>

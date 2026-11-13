@@ -1,3 +1,7 @@
+.authoring-generate__quick-tools {
+  padding-inline: 16px;
+}
+
 .authoring-generate {
   --authoring-secondary: var(--app-web-text-muted);
   min-width: 0;

@@ -510,3 +510,17 @@ it("returns axial joint warnings after a successful save in a fresh director are
   expect(model.somaMotion).toMatchObject({skeletonId:'somaskel77',jointCount:77,tool:'animate_humanoid'});
   expect(model.animationRig.groups).toBeUndefined();
  });
+
+it('forwards inspection and source-window inputs under the current world grant',async()=>{
+ let inspected:unknown,applied:unknown;
+ const world:AssistantWorldToolClient={async read(){throw Error('unused');},async write(){throw Error('unused');},async complete(){throw Error('unused');},humanoidMotion:{async animate(){throw Error('unused');},async generate(){throw Error('unused');},async get(input){inspected=input;return {ok:true};},async apply(input){applied=input;return {ok:true};}}};
+ const base=await start(world,grant());
+ const inspection=await callTool(base,'get_humanoid_motion',{instanceId:'actor',generationId:'known',inspectTiming:true},grant().token);
+ expect(inspection.result?.structuredContent).toMatchObject({ok:true});
+ expect(inspected).toMatchObject({canvasId:'canvas-1',contextId:'ctx-1',inspectTiming:true});
+ const result=await callTool(base,'apply_humanoid_motion',{instanceId:'actor',assetId:'bound',expectedVersion:'v1',startTime:.6,sourceStartTime:1.1,blendInDuration:.1,replaceExisting:true},grant().token);
+ expect(result.result?.structuredContent).toMatchObject({ok:true});
+ expect(applied).toMatchObject({canvasId:'canvas-1',contextId:'ctx-1',assetId:'bound',sourceStartTime:1.1,blendInDuration:.1,replaceExisting:true});
+ const bad=await callTool(base,'apply_humanoid_motion',{instanceId:'actor',generationId:'known',expectedVersion:'v1',startTime:-.1},grant().token);
+ expect(bad.error??bad.result?.isError).toBeTruthy();
+});

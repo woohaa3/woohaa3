@@ -11,7 +11,7 @@ import { sampleSomaSceneLapRoute, transformSomaSceneLapPoint } from './soma-moti
  *
  * 目标必须是导演区完整包含的实例/镜头；权限与占用由权威写入时校验。
  */
-import { sampleSomaClip, validateSomaClip, type WorldSomaClipTrack } from "./soma-motion/clip.js";
+import { sampleSomaClipTrack, validateSomaClip, type WorldSomaClipTrack } from "./soma-motion/clip.js";
 import type { PreparedSomaMotion } from "./soma-motion/index.js";
 import {validateHumanoidWalk,sampleHumanoidWalk,HUMANOID_WALK_PART_IDS,type HumanoidWalkTrack} from "./world-walk.js";
 import { rotateGroundQuarterTurns, rotateWorldQuarterTurn } from "./world-quarter-turn.js";
@@ -464,7 +464,7 @@ export function sampleWorldAnimation(
   for(const track of ir.somaTracks ?? []) {
     const prepared=context?.resolveSomaMotion(track);
     if(!prepared || prepared.fps!==track.fps || prepared.frameCount!==track.frameCount)continue;
-    const pose=sampleSomaClip(prepared,track.jointPrefix,Math.max(0,Math.min(now,track.endTime)-track.startTime),track.rootMotion,!!track.route);
+    const pose=sampleSomaClipTrack(prepared,track,now);
     const route=track.route ? {...sampleSomaSceneLapRoute(track.route,(now-track.startTime)/(track.endTime-track.startTime)),absoluteTransform:true as const,scale:track.route.scale} : {};
     instances.set(track.targetId,{...instances.get(track.targetId),...pose,...route});
   }

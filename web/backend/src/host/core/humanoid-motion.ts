@@ -2,12 +2,12 @@ import {validateRaisedWavePrerequisite} from '../../ports/humanoid-motion-gestur
 import {createHumanoidSceneLap} from '../../ports/humanoid-scene-lap.js';
 import { validateHumanoidMotionPath, type HumanoidMotionPathInput } from '../../ports/humanoid-motion-path.js';
 import { createHash } from 'node:crypto';
-import { executeWorldAnimationScript, removeWorldAnimationInstanceTracks, serializeWorldAnimationScript, somaSkeletonPrefix, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteInput, type AssistantWorldWriteOutcome, type BackendTaskPort, type CanvasTaskCatalog, type TaskResultSummary, type StoredAsset } from '@woohaa3/contracts';
+import { isSomaMotionMetadata, decodeSomaPosedJoints, inspectSomaMotionTiming, executeWorldAnimationScript, removeWorldAnimationInstanceTracks, serializeWorldAnimationScript, somaSkeletonPrefix, type AssistantWorldContextView, type AssistantWorldFailure, type AssistantWorldWriteInput, type AssistantWorldWriteOutcome, type BackendTaskPort, type CanvasTaskCatalog, type TaskResultSummary, type StoredAsset } from '@woohaa3/contracts';
 
 type Binding = { canvasId:string; contextId:string; instanceId:string };
 type Generate = Binding & { expectedVersion:string; prompt:string; duration:number; requestId:string; steps?:number };
-type Lookup = Binding & { generationId:string };
-type Apply = Lookup & { upperBodyGenerationId?:string; expectedVersion:string; startTime:number; loop?:boolean; rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean;requiresRaisedWave?:boolean };
+type Lookup = Binding & { generationId?:string; assetId?:string; inspectTiming?:boolean };
+type Apply = Lookup & { upperBodyGenerationId?:string; expectedVersion:string; startTime:number; sourceStartTime?:number; blendInDuration?:number; loop?:boolean; rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean;requiresRaisedWave?:boolean };
 type Animate = Binding & {prompt:string;duration:number;requestId:string;startTime?:number;rootMotion?:'in-place'|'translate';locomotion?:'scene-lap';replaceExisting?:boolean};
 type Outcome = Record<string,unknown> & {ok:boolean};
 export type HumanoidMotionTools = {animate(input:Animate):Promise<Outcome>;generate(input:Generate):Promise<Outcome>;get(input:Lookup):Promise<Outcome>;apply(input:Apply):Promise<Outcome>};
@@ -19,7 +19,7 @@ const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value))
 const fail=(code:string,message:string):Outcome=>({ok:false,code,message});
 /** Shared compiled-frame verification used by the authority commit path too. */
 export const somaJointPrefix=somaSkeletonPrefix;
-export function createHumanoidMotionTools(deps:{compose?: (canvasId:string,walk:StoredAsset,wave:StoredAsset)=>Promise<{assetId:string;checksum:string;asset:StoredAsset;fps:number;frameCount:number;composition:Record<string,unknown>}>;readBytes?:HumanoidMotionPathInput['readBytes'];world:World;task:BackendTaskPort;catalog:()=>Promise<CanvasTaskCatalog>;materialize:(canvasId:string,result:TaskResultSummary,createdAt?:string)=>Promise<{assetId:string;checksum:string;asset:StoredAsset}>}):HumanoidMotionTools {
+export function createHumanoidMotionTools(deps:{readAsset?: (canvasId:string,assetId:string)=>Promise<StoredAsset|undefined>;compose?: (canvasId:string,walk:StoredAsset,wave:StoredAsset)=>Promise<{assetId:string;checksum:string;asset:StoredAsset;fps:number;frameCount:number;composition:Record<string,unknown>}>;readBytes?:HumanoidMotionPathInput['readBytes'];world:World;task:BackendTaskPort;catalog:()=>Promise<CanvasTaskCatalog>;materialize:(canvasId:string,result:TaskResultSummary,createdAt?:string)=>Promise<{assetId:string;checksum:string;asset:StoredAsset}>}):HumanoidMotionTools {
  async function target(input:Binding,expectedVersion?:string){
   const read=await deps.world.read(input);if(!read.ok)return {...read};
   const view=read.view;
@@ -35,19 +35,44 @@ export function createHumanoidMotionTools(deps:{compose?: (canvasId:string,walk:
  const tag=(input:Binding,view:AssistantWorldContextView)=>`humanoid-${digest([input.canvasId,view.scope.scope,input.instanceId])}-`;
  async function lookup(input:Lookup){
   const t=await target(input);if(!t.ok)return t;
-  if(!input.generationId.startsWith(tag(input,t.view)))return {ok:false as const,code:'outside-scope',message:'动作不属于此画布、导演区及角色'};
+  if(typeof input.generationId!=='string'||!input.generationId.startsWith(tag(input,t.view)))return {ok:false as const,code:'outside-scope',message:'动作不属于此画布、导演区及角色'};
   const task=await deps.task.status(input.generationId);
   if(!task||task.canvasId!==input.canvasId||task.nodeId!==tag(input,t.view).slice(0,-1)||task.modelType!=='motion')return {ok:false as const,code:'target-unavailable',message:'动作任务不存在'};
   return {ok:true as const,target:t,task};
  }
  async function get(input:Lookup):Promise<Outcome>{
-  const found=await lookup(input);if(!found.ok)return found;
-  const {task}=found;
-  if(task.state!=='succeeded')return {ok:true,generationId:input.generationId,state:task.state,...(task.error?{error:task.error}:{})};
-  const r=task.result,m=r?.motion;
-  if(!r||r.mediaKind!=='motion'||r.mediaState||!m||m.skeletonId!=='somaskel77'||m.restPoseId!=='kimodo-standard-tpose'||m.formatVersion!=='kimodo-soma-v1'||!Number.isFinite(m.fps)||m.fps<=0||!Number.isInteger(m.frameCount)||m.frameCount<1)return fail('not-ready','动作尚无有效 SOMA77 稳定产物');
-  const asset=await deps.materialize(input.canvasId,r,task.createdAt);
-  return {ok:true,generationId:input.generationId,state:task.state,...asset,fps:m.fps,frameCount:m.frameCount,requestedRaisedWave:task.request?.prompt?.includes('Keep the right hand raised at head height')??false};
+  let asset:{assetId:string;checksum:string;asset:StoredAsset},fps:number,frameCount:number,requestedRaisedWave=false;
+  if(input.assetId!==undefined){
+   if(input.generationId!==undefined)return fail('invalid-data','generationId与assetId只能选一个');
+   const t=await target(input);if(!t.ok)return t;
+   const saved=t.view.sceneArea?.animationScript,compiled=saved?executeWorldAnimationScript(saved.script,saved):null;
+   const track=compiled?.ok?compiled.ir.somaTracks?.find(v=>v.targetId===input.instanceId&&v.assetId===input.assetId):undefined;
+   if(!track)return fail('outside-scope','只能重用当前角色已绑定的动作资产');
+   if(!deps.readAsset)return fail('capability-unsupported','当前宿主无法恢复已绑定动作');
+   const stored=await deps.readAsset(input.canvasId,input.assetId),metadata=stored?.metadata,m=metadata?.motion;
+   if(!stored||stored.id!==input.assetId||stored.status!=='ready'||stored.mediaKind!=='motion'||!metadata||metadata.checksum!==track.checksum||!isSomaMotionMetadata(m)||m.fps!==track.fps||m.frameCount!==track.frameCount)return fail('invalid-data','已绑定动作的稳定资产身份不匹配');
+   asset={assetId:stored.id,checksum:track.checksum,asset:stored};fps=m.fps;frameCount=m.frameCount;
+  }else{
+   const found=await lookup(input);if(!found.ok)return found;
+   const {task}=found;
+   if(task.state!=='succeeded')return {ok:true,generationId:input.generationId,state:task.state,...(task.error?{error:task.error}:{})};
+   const r=task.result,m=r?.motion;
+   if(!r||r.mediaKind!=='motion'||r.mediaState||!m||m.skeletonId!=='somaskel77'||m.restPoseId!=='kimodo-standard-tpose'||m.formatVersion!=='kimodo-soma-v1'||!Number.isFinite(m.fps)||m.fps<=0||!Number.isInteger(m.frameCount)||m.frameCount<1)return fail('not-ready','动作尚无有效 SOMA77 稳定产物');
+   asset=await deps.materialize(input.canvasId,r,task.createdAt);fps=m.fps;frameCount=m.frameCount;
+   requestedRaisedWave=task.request?.prompt?.includes('Keep the right hand raised at head height')??false;
+  }
+  let timing:ReturnType<typeof inspectSomaMotionTiming>|undefined;
+  if(input.inspectTiming){
+   if(!deps.readBytes)return fail('capability-unsupported','当前宿主无法读取动作时序');
+   try{
+    const metadata=asset.asset.metadata;
+    if(!metadata||typeof metadata.storageKey!=='string'||!Number.isInteger(metadata.size)||Number(metadata.size)<=0||Number(metadata.size)>128*1024*1024||metadata.checksum!==asset.checksum)throw Error('动作缺少稳定字节身份');
+    const bytes=await deps.readBytes({canvasId:input.canvasId,storageKey:metadata.storageKey,maxBytes:128*1024*1024});
+    if(bytes.byteLength!==metadata.size||createHash('sha256').update(bytes).digest('hex')!==asset.checksum)throw Error('动作字节校验失败');
+    timing=inspectSomaMotionTiming(await decodeSomaPosedJoints(bytes),fps,frameCount);
+   }catch(error){return fail('invalid-data',error instanceof Error?error.message:'动作时序读取失败');}
+  }
+  return {ok:true,generationId:input.generationId,state:'succeeded',...asset,...(timing?{timing}:{}),fps,frameCount,requestedRaisedWave};
  }
  const api:HumanoidMotionTools = {
   async animate(input){
@@ -77,7 +102,7 @@ export function createHumanoidMotionTools(deps:{compose?: (canvasId:string,walk:
      if(requiresRaisedWave){
       if(!deps.compose)return fail('capability-unsupported','当前宿主未装配复合动作合成');
       const upper=await api.generate({...frozen,requestId:input.requestId+':upper-body',duration:4,prompt:'A person stands still and waves goodbye continuously with the right hand. Keep the right hand raised at head height, elbow bent, open palm facing outward. Repeatedly wave the raised hand from side to side. Do not walk.',steps:50});
-      if(!upper.ok)return upper;
+      if(!upper.ok)return {...upper,generationId,fallback:{allowed:false,mode:'joint-animation',reason:'partial-generation',taskSubmitted:true}};
       upperBodyGenerationId=String(upper.generationId);
       let ready=false;
       while(Date.now()<deadline){
@@ -108,7 +133,11 @@ export function createHumanoidMotionTools(deps:{compose?: (canvasId:string,walk:
    const catalog=await deps.catalog();
    const available=catalog.models.filter(m=>m.modelType==='motion');
    const model=available.find(m=>m.modelKey===catalog.defaultModels.motion)??available[0];
-   if(!catalog.available||!model)return fail('capability-unsupported','当前没有可用的动作生成模型');
+   if(!catalog.available||!model)return {
+    ...fail('capability-unsupported',catalog.available?'当前没有可用的动作生成模型，可使用真实骨架编写关节动画':'当前动作模型目录不可用，可暂用关节动画；不能据此判断远端 GPU 状态'),
+    fallback:{allowed:true,mode:'joint-animation',reason:catalog.available?'motion-model-unavailable':'motion-catalog-unavailable',taskSubmitted:false},
+    ...(catalog.reason?{catalogReason:catalog.reason}:{})
+   };
    // Re-read after catalog await, immediately before durable submission.
    const current=await target(input,input.expectedVersion);if(!current.ok)return current;
    const accepted=await deps.task.submit({workerTaskKey:generationId,canvasId:input.canvasId,nodeId:tag(input,t.view).slice(0,-1),runId:generationId,jobId:generationId,nodeType:'motion',modelType:'motion',modelKey:model.modelKey,interaction:model.interaction,prompt:input.prompt,parameters:{...model.defaultInput,duration:input.duration,...(input.steps!==undefined?{steps:input.steps}:{})},inputs:[]});
@@ -118,7 +147,7 @@ export function createHumanoidMotionTools(deps:{compose?: (canvasId:string,walk:
    let asset=await get(input);if(!asset.ok||asset.state!=='succeeded')return asset.ok?fail('not-ready','动作生成尚未完成'):asset;
    if(input.upperBodyGenerationId){
     if(!deps.compose)return fail('capability-unsupported','复合动作合成不可用');
-    const upper=await get({...input,generationId:input.upperBodyGenerationId});if(!upper.ok||upper.state!=='succeeded')return upper.ok?fail('not-ready','挥手素材尚未完成'):upper;
+    const upper=await get({...input,assetId:undefined,generationId:input.upperBodyGenerationId});if(!upper.ok||upper.state!=='succeeded')return upper.ok?fail('not-ready','挥手素材尚未完成'):upper;
     try{asset={...asset,...await deps.compose(input.canvasId,asset.asset as StoredAsset,upper.asset as StoredAsset)};}
     catch(error){return fail('motion-quality-rejected',error instanceof Error?error.message:'复合动作合成失败');}
    }
@@ -148,17 +177,22 @@ export function createHumanoidMotionTools(deps:{compose?: (canvasId:string,walk:
      if(input.upperBodyGenerationId&&Math.max(Number(gestureVerification.leftRaisedFraction),Number(gestureVerification.rightRaisedFraction))<.98)throw new Error('合成动作未保持持续抬手，原动画未替换');
     }catch(error){return fail('motion-quality-rejected',error instanceof Error?error.message:'挥手姿态检查失败');}
    }
-   const endTime=input.startTime+Number(asset.frameCount)/Number(asset.fps);
-   const clip={assetId:asset.assetId,checksum:asset.checksum,fps:asset.fps,frameCount:asset.frameCount,startTime:input.startTime,endTime,jointPrefix:t.prefix,rootMotion:planned?'in-place':input.rootMotion??'in-place',...(planned?{route:planned.route}:{})};
+   const sourceDuration=Number(asset.frameCount)/Number(asset.fps);
+   const sourceStartTime=input.sourceStartTime??0;
+   const blendInDuration=input.blendInDuration??(sourceStartTime>0?Math.min(.12,sourceDuration-sourceStartTime):0);
+   if(!Number.isFinite(sourceStartTime)||sourceStartTime<0||sourceStartTime>=sourceDuration||!Number.isFinite(blendInDuration)||blendInDuration<0||blendInDuration>Math.min(1,sourceDuration-sourceStartTime)||!Number.isFinite(input.startTime)||input.startTime<0)return fail('invalid-data','动作片内起点或过渡时间无效');
+   if((sourceStartTime>0||blendInDuration>0)&&(input.rootMotion==='translate'||planned))return fail('capability-unsupported','当前片内裁切仅支持原地动作；位移和绕场继续使用完整素材');
+   const endTime=input.startTime+sourceDuration-sourceStartTime;
+   const clip={assetId:asset.assetId,checksum:asset.checksum,fps:asset.fps,frameCount:asset.frameCount,startTime:input.startTime,endTime,...(input.sourceStartTime!==undefined?{sourceStartTime}:{}),...(blendInDuration>0||input.blendInDuration!==undefined?{blendInDuration}:{}),jointPrefix:t.prefix,rootMotion:planned?'in-place':input.rootMotion??'in-place',...(planned?{route:planned.route}:{})};
    const declaration=`motion.soma.clip(${JSON.stringify(input.instanceId)},${JSON.stringify(clip)});`;
    const compiled=saved?executeWorldAnimationScript(saved.script,saved):null;
-   const alreadyBound=compiled?.ok && compiled.ir.somaTracks?.some(track=>track.targetId===input.instanceId&&Object.entries(clip).every(([key,value])=>JSON.stringify((track as unknown as Record<string,unknown>)[key])===JSON.stringify(value)));
+   const alreadyBound=compiled?.ok && compiled.ir.somaTracks?.some(track=>track.targetId===input.instanceId&&(track.sourceStartTime??0)===sourceStartTime&&(track.blendInDuration??0)===blendInDuration&&Object.entries(clip).every(([key,value])=>JSON.stringify((track as unknown as Record<string,unknown>)[key])===JSON.stringify(value)));
    if(alreadyBound&&(input.loop===undefined||saved?.loop===input.loop))return {ok:true,noop:true,generationId:input.generationId};
    if(saved&&!compiled?.ok)return fail('invalid-data','当前动画脚本无法编译，不能安全替换角色动作');
    const base=input.replaceExisting&&compiled?.ok?serializeWorldAnimationScript(removeWorldAnimationInstanceTracks(compiled.ir,new Set([input.instanceId]))):saved?.script??'';
    const script=alreadyBound?saved!.script:base+'\n'+declaration;
-   const outcome=await deps.world.write({contextId:input.contextId,operation:{kind:'set-scene-animation-script',motionBaseRevision:saved?.revision??0,motionTarget:{instanceId:input.instanceId,expectedVersion:input.expectedVersion,scopeVersion:t.view.sceneArea?.scopeVersion,...(planned?{canvasRevision:t.view.sceneArea?.revision}:{})},motionAsset:asset.asset as StoredAsset,operationId:`humanoid-apply-${digest([input.generationId,input.startTime,saved?.revision,input.expectedVersion,input.rootMotion,input.locomotion,input.replaceExisting,input.upperBodyGenerationId])}`,script,duration:Math.max(saved?.duration??0,endTime),loop:input.loop??saved?.loop??false}});
-   return {...outcome,...(outcome.ok?{generationId:input.generationId,replacedExisting:!!input.replaceExisting,...(asset.composition?{composition:asset.composition}:{}),...(gestureVerification?{gestureVerification}:{}),...(planned?{locomotion:'scene-lap',routeVerification:planned.facts,verification:'route-data-verified; body-motion-and-foot-contact-require-visual-review'}:{})}:{})};
+   const outcome=await deps.world.write({contextId:input.contextId,operation:{kind:'set-scene-animation-script',motionBaseRevision:saved?.revision??0,motionTarget:{instanceId:input.instanceId,expectedVersion:input.expectedVersion,scopeVersion:t.view.sceneArea?.scopeVersion,...(planned?{canvasRevision:t.view.sceneArea?.revision}:{})},motionAsset:asset.asset as StoredAsset,operationId:`humanoid-apply-${digest([input.generationId,input.assetId,input.startTime,saved?.revision,input.expectedVersion,input.rootMotion,input.locomotion,input.replaceExisting,input.upperBodyGenerationId,sourceStartTime,blendInDuration])}`,script,duration:Math.max(saved?.duration??0,endTime),loop:input.loop??saved?.loop??false}});
+   return {...outcome,...(outcome.ok?{generationId:input.generationId,assetId:asset.assetId,timing:{startTime:input.startTime,sourceStartTime,blendInDuration,endTime,eventMapping:"timelineTime = startTime + sourceEventTime - sourceStartTime"},replacedExisting:!!input.replaceExisting,...(asset.composition?{composition:asset.composition}:{}),...(gestureVerification?{gestureVerification}:{}),...(planned?{locomotion:'scene-lap',routeVerification:planned.facts,verification:'route-data-verified; body-motion-and-foot-contact-require-visual-review'}:{})}:{})};
   }
  };
  return api;
