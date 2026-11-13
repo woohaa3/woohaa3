@@ -127,6 +127,66 @@ describe("DialogSurface adapter（任务 2.5 / 6.1）", () => {
     expect(dialog.getAttribute("aria-busy")).toBe("true");
   });
 
+  it("点击顶部栏（.desktop-canvas-bar）阻止 outside 关闭", () => {
+    const onOpenChange = vi.fn();
+    const topBar = document.createElement("header");
+    topBar.className = "desktop-canvas-bar";
+    const trigger = document.createElement("button");
+    trigger.className = "canvas-switcher-trigger";
+    topBar.appendChild(trigger);
+    document.body.appendChild(topBar);
+
+    render(<HostedDialog open onOpenChange={onOpenChange} />);
+
+    act(() => {
+      trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    topBar.remove();
+  });
+
+  it("即使事件落在顶栏坐标区（clientY <= 26）也阻止 outside 关闭", () => {
+    const onOpenChange = vi.fn();
+    const topBar = document.createElement("header");
+    topBar.className = "desktop-canvas-bar";
+    topBar.getBoundingClientRect = () => ({
+      top: 0,
+      bottom: 26,
+      left: 0,
+      right: 1000,
+      width: 1000,
+      height: 26,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    });
+    document.body.appendChild(topBar);
+
+    render(<HostedDialog open onOpenChange={onOpenChange} />);
+
+    act(() => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientY: 10 }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientY: 10 }));
+    });
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    topBar.remove();
+  });
+
+  it("点击遮罩层自身仍正常产生 close request", () => {
+    const onOpenChange = vi.fn();
+    const { container } = render(<HostedDialog open onOpenChange={onOpenChange} />);
+    const overlay = container.querySelector(".dlg__overlay")!;
+
+    act(() => {
+      overlay.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("non-modal 父层：不暴露 modal 语义", () => {
     const { container } = render(<HostedDialog open onOpenChange={() => undefined} modal={false} />);
     const dialog = container.querySelector('[role="dialog"]')!;

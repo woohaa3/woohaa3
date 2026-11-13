@@ -47,4 +47,14 @@ describe("桌面窗口横栏占位（不是覆盖层）", () => {
     expect(rule).toBeDefined();
     expect(rule).toMatch(/top:\s*var\(--canvas-chrome-height\)/);
   });
+
+  it("横栏 z-index 高于弹窗宿主（70），保持窗口装饰与顶栏可交互", () => {
+    const body = ruleBody(".desktop-canvas-bar");
+    expect(body).toMatch(/z-index:\s*(?:8\d|9\d|1\d{2})/);
+  });
+
+  it("弹窗宿主与遮罩层在桌面端让出横栏高度，不遮盖顶部栏", () => {
+    expect(CSS).toMatch(/:root:has\(\.desktop-canvas-bar\)[^{]*\.dlg-host[^{]*\{[^}]*top:\s*var\(--canvas-chrome-height/);
+    expect(CSS).toMatch(/:root:has\(\.desktop-canvas-bar\)[^{]*\.dlg__overlay[^{]*\{[^}]*top:\s*var\(--canvas-chrome-height/);
+  });
 });
