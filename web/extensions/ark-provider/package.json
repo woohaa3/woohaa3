@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-ark-provider",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Ark（火山方舟）文本、图片与视频生成 Provider。执行协议在 pptask，本插件负责配置、目录注册和视频参考图素材库。",

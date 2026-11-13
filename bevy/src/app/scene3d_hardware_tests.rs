@@ -70,7 +70,7 @@ fn scene(swap: bool, parent_changed: bool) -> Scene {
         let mut node: GraphNode = serde_json::from_value(serde_json::json!({"id":format!("n{i}"),"type":"model", "x":9000.,"y":0.,"width":100.,"height":50.,
             "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":format!("i{i}"),
               "transform":{"version":"shared-world-v1","position":{"u":point.x,"v":-point.z,"h":point.y},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
-        node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None,
+        node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
             resource_key: asset.resource_key,
             scene_version: asset.scene_version,
             signature: asset.signature,

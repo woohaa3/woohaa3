@@ -405,7 +405,7 @@ export async function createSettingsService(options: SettingsServiceOptions): Pr
   };
 
   /**
-   * 写 `extensions.frontend.<id>.enabled`（与普通项同一次串行写入、同样保留注释与顺序）。
+   * 写 `extensions.<id>.enabled`（与普通项同一次串行写入、同样保留注释与顺序）。
    *
    * 不经过 `update()` 的定义表校验路径：这里的键是运行期发现的，写之前只校验 ID 形态。
    */

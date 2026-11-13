@@ -12,7 +12,7 @@ import type { CanvasGenerationHistoryListItem, NodeHistoryKindCounts } from "@wo
 import { CanvasHistoryBrowser } from "./canvas-history-browser.js";
 import { CanvasHistoryController, type CanvasHistoryClient } from "./canvas-history-controller.js";
 
-const COUNTS: NodeHistoryKindCounts = { text: 1, image: 1, video: 0, audio: 0, model: 0 };
+const COUNTS: NodeHistoryKindCounts = { text: 1, image: 1, video: 0, audio: 0, motion: 0, model: 0 };
 
 function item(entryId: string, overrides: Partial<CanvasGenerationHistoryListItem> = {}): CanvasGenerationHistoryListItem {
   return {

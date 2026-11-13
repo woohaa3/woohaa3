@@ -35,7 +35,7 @@ export const CEPHALON_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: CEPHALON_PLUGIN_ID,
   name: "Cephalon Provider",
   description: "端脑云（Cephalon Cloud）。填写 API Key 后，从平台模型列表发现可用的文本、图片与视频模型。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "cephalon-provider-config", schemaVersion: 1 },

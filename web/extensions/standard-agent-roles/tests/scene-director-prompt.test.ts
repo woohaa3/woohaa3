@@ -6,11 +6,11 @@ import { sceneDirectorRole } from "../src/backend/roles/scene-director.js";
 const text = sceneDirectorRole.definition.instructions;
 
 describe("导演区资源工具协议", () => {
-  it("角色使用九个当前工具，不混入旧写入或完成工具", () => {
+  it("角色使用当前资源与人物动作工具，不混入旧写入或完成工具", () => {
     expect(sceneDirectorRole.definition.tools.required).toEqual(["get_world_context"]);
     expect([...sceneDirectorRole.definition.tools.required, ...sceneDirectorRole.definition.tools.optional].sort()).toEqual([...ASSISTANT_WORLD_TOOLS, "get_model_api"].sort());
     for (const tool of Object.values(ASSISTANT_WORLD_TOOL)) {
-      if (tool === "get_world_context" || tool === "sample_scene_animation") continue;
+      if (["get_world_context", "sample_scene_animation", "animate_humanoid", "get_humanoid_motion"].includes(tool)) continue;
       expect(text).not.toContain(tool);
     }
     const prepared = sceneDirectorRole.prepare({ input: { prompt: "生成一座大型宫殿", action: "generate" }, context: {},

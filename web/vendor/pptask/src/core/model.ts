@@ -18,6 +18,7 @@ import type {
   PptaskLanguageModel,
   PptaskLanguageModelImplementation,
   PptaskModel,
+  PptaskMotionModel, PptaskMotionModelImplementation, PptaskMotionOptions, PptaskMotionResult,
   PptaskOperationContext,
   PptaskOperationStartResult,
   PptaskOperationStatusResult,
@@ -198,6 +199,12 @@ export function createVideoModel(
   return generate ? attachExecutor(model, generate) as PptaskVideoModel : model;
 }
 
+export function createMotionModel(providerId:string, modelId:string, implementation:PptaskMotionModelImplementation, pollIntervalMs:number, reporter?:PptaskExecutionReporter):PptaskMotionModel {
+  const generate=(options:PptaskMotionOptions,context?:PptaskModelExecutionContext)=>reportGenerate(reporter,'motion',providerId,modelId,options,context,execution=>runOperation(implementation,options,pollIntervalMs,execution,providerId,modelId,'motion',reporter));
+  const model=tagModel({...implementation,specificationVersion:'motion-v1' as const,provider:providerId,modelId,doGenerate:(options:PptaskMotionOptions)=>generate(options)},'motion');
+  return attachExecutor(model,generate) as PptaskMotionModel;
+}
+
 function attachExecutor<T extends object, OPTIONS>(
   model: T,
   generate: (options: OPTIONS, context?: PptaskModelExecutionContext) => Promise<unknown>,
@@ -211,7 +218,7 @@ function attachExecutor<T extends object, OPTIONS>(
 
 function reportGenerate<OPTIONS, RESULT>(
   reporter: PptaskExecutionReporter | undefined,
-  modelType: 'language' | 'image' | 'video' | 'audio',
+  modelType: 'language' | 'image' | 'video' | 'audio' | 'motion',
   providerId: string,
   modelId: string,
   options: OPTIONS,
@@ -354,7 +361,7 @@ async function runOperation<OPTIONS, RESULT extends object>(
   execution: PptaskModelExecutionContext,
   providerId: string,
   modelId: string,
-  modelType: 'language' | 'image' | 'audio',
+  modelType: 'language' | 'image' | 'audio' | 'motion',
   reporter?: PptaskExecutionReporter,
 ): Promise<RESULT> {
   if (!implementation.doStart || !implementation.doStatus) {

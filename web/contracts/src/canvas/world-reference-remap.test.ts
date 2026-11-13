@@ -557,3 +557,16 @@ it('remaps a compact walk and refuses a missing copied walker',()=>{
  expect(compiled.ok&&compiled.ir.walkTracks?.[0]?.targetId).toBe('copy-instance');
  expectFailed(remapWorldCopyReferences({...input,nodes:[input.nodes[0]!]}),'binding-unavailable');
 });
+
+it('copies SOMA clip instance references and optional immutable asset aliases',()=>{
+ const clip={assetId:'motion-source',checksum:'a'.repeat(64),fps:30,frameCount:30,startTime:0,jointPrefix:'actor'};
+ const animationScript={script:`motion.soma.clip("instance-source",${JSON.stringify(clip)});`,scriptLanguage:'javascript',scriptVersion:'woohaa-world-animation-js-v2',revision:1,sourceHash:'fixture',duration:1,loop:false};
+ const input={nodes:[node('node-area',{sceneArea:{...area('area-1'),animationScript}}),node('node-model',{sharedWorldInstance:instance('instance-source')})],ids:{nodeIds:{'node-area':'copy-area','node-model':'copy-model'},instanceIds:{'instance-source':'copy-instance'},areaIds:{'area-1':'copy-area-id'},assetIds:{'motion-source':'motion-copy'}}};
+ const copied=bySource(expectOk(remapWorldCopyReferences(input)),'node-area').nodeData.sceneArea as SceneAreaData;
+ expect(copied.animationScript!.script).not.toContain('instance-source');
+ const compiled=executeWorldAnimationScript(copied.animationScript!.script,{duration:1,loop:false});
+ expect(compiled.ok&&compiled.ir.somaTracks?.[0]).toMatchObject({targetId:'copy-instance',assetId:'motion-copy',jointPrefix:'actor',checksum:clip.checksum});
+ const shared=bySource(expectOk(remapWorldCopyReferences({...input,ids:{...input.ids,assetIds:undefined}})),'node-area').nodeData.sceneArea as SceneAreaData;
+ expect(shared.animationScript!.script).toContain('motion-source');
+ expectFailed(remapWorldCopyReferences({...input,nodes:[input.nodes[0]!]}),'binding-unavailable');
+});

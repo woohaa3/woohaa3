@@ -96,10 +96,11 @@ export function createSiteProviderSource(options: {
     const factory = provider?.serviceConnectionFactory;
     const purposes = new Set<ServiceConnectionPurpose>();
     const protocol = `provider:${options.providerId}` as const;
-    const capabilities = (provider?.models ?? []).map(model => {
+    const capabilities = (provider?.models ?? []).flatMap(model => {
+      if (model.modelType === "motion") return [];
       const purpose: ServiceConnectionPurpose = model.modelType === "language" ? "text" : model.modelType;
       purposes.add(purpose);
-      return { purpose, protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const, ...(reasoningOf(model) ? { reasoning: reasoningOf(model) } : {}) };
+      return [{ purpose, protocol, modelId: model.providerModelId, imageInput: false, evidence: "adapter" as const, ...(reasoningOf(model) ? { reasoning: reasoningOf(model) } : {}) }];
     });
     const baseUrl = typeof values.baseUrl === "string" ? values.baseUrl : typeof values.baseURL === "string" ? values.baseURL : undefined;
     const assistantProtocol = factory?.assistantProtocol;
@@ -148,7 +149,7 @@ export function createSiteProviderSource(options: {
     return { legacyId: options.providerId, scope: "site", kind: "api", name: options.label,
       endpoints, capabilities: [...capabilities, ...assistantCapabilities],
       bindings: provider ? [{ bindingId: `provider:${options.providerId}`, extensionId: options.extensionId, consumer: "provider", consumerId: options.providerId,
-        purposes: [...purposes], modelKeys: provider.models.map(model => `${options.providerId}:${model.providerModelId}`) }, ...(assistantBinding ? [assistantBinding] : [])] : [],
+        purposes: [...purposes], modelKeys: provider.models.filter(model => model.modelType !== "motion").map(model => `${options.providerId}:${model.providerModelId}`) }, ...(assistantBinding ? [assistantBinding] : [])] : [],
       enabled: provider?.available ?? false, removed: false, locked: fields.some(field => field.lockedBy !== null), credentialConfigured: configured,
       configRevision: Number.parseInt(hash(revisionInput).slice(0, 12), 16), credentialEpoch: 0,
       credentialFingerprint: hash(secretValues) };

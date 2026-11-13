@@ -55,6 +55,13 @@ async function packFixture(name: string, version: string, key = privateKey) {
     if (json.site) json.site.version = version;
     fs.writeFileSync(path.join(dir, file), JSON.stringify(json, null, 2));
   }
+  // 前端 metadata 的 version 也属于同一份版本事实：只改声明会让构建期一致性检查失败
+  // （change: 2026-11-13-add-extension-version-governance）。
+  const metadataFile = path.join(dir, "src", "frontend", "metadata.ts");
+  if (fs.existsSync(metadataFile)) {
+    const source = fs.readFileSync(metadataFile, "utf8");
+    fs.writeFileSync(metadataFile, source.replace(/(\bversion:\s*)(["'])([^"']*)\2/g, (_all, prefix, quote) => `${prefix}${quote}${version}${quote}`));
+  }
   const out = path.join(temp("mp-e2e-pkg-"), `${name}-${version}.wxt`);
   return (await packLib.packExtension({ dir, out, privateKey: key, repoRoot: REPO_ROOT })).outFile;
 }

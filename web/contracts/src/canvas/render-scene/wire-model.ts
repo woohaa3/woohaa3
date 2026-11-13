@@ -26,6 +26,7 @@ export type BevyModelReference = {
   /** Stable bind-pose anchor in asset XYZ; editor projects it onto world ground. */
   groundAnchorLocal?: [number, number, number];
   /** Local additive joint/group rotations; model axes, normalized xyzw quaternion. */
+  partPositions?: Record<string, readonly [number, number, number]>;
   partRotations?: Record<string, readonly [number, number, number, number]>;
   /** Scene IR 版本（V1 或 V2）；显式携带以便 Bevy 区分渲染语义。 */
   sceneVersion: string;

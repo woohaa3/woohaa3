@@ -550,9 +550,9 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
 
     const host = service.host();
     const sourceRegistry = createCanvasSourceRegistry({
-      hasCapability: (id) => host.hasCapability(id),
-      resolveCapability: (id) => host.resolveCapability(id),
-      resolveCapabilityOwner: (id) => host.resolveCapabilityOwner(id),
+      hasCapability: (id, version) => host.hasCapability(id, version),
+      resolveCapability: (id, version) => host.resolveCapability(id, version),
+      resolveCapabilityOwner: (id, version) => host.resolveCapabilityOwner(id, version),
       snapshot: () => host.snapshot()
     });
     const runtime = createBackendRuntime({

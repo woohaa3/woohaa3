@@ -1,3 +1,4 @@
+import { isSomaMotionMetadata } from "../../task/history/guards.js";
 /**
  * 节点生成历史：条目与 payload 的反序列化/校验
  * （自 `node-history.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R06）。
@@ -103,7 +104,7 @@ function decodeOutcome(input: unknown): NodeHistoryOutcome | undefined | null {
 }
 
 function isNodeGenerationKind(value: unknown): value is NodeGenerationKind {
-  return value === "text" || value === "image" || value === "video" || value === "audio" || value === "model";
+  return value === "text" || value === "image" || value === "video" || value === "audio" || value === "motion" || value === "model";
 }
 
 function decodeSourceSummary(input: unknown): NodeHistoryDecodeResult<NodeHistorySourceSummary> {
@@ -231,7 +232,7 @@ export function decodeModelPlacement(input: unknown): NodeHistoryModelPlacement 
 }
 
 function decodeMediaPayload(
-  kind: "image" | "video" | "audio",
+  kind: "image" | "video" | "audio" | "motion",
   input: Record<string, unknown>
 ): NodeHistoryDecodeResult<NodeHistoryMediaPayload> {
   if (!isValidStorageKey(input.storageKey)) return invalid("媒体 payload storageKey 非法");
@@ -248,6 +249,14 @@ function decodeMediaPayload(
   if (input.durationSeconds !== undefined) {
     if (!isFiniteNumber(input.durationSeconds) || input.durationSeconds < 0) return invalid("媒体 payload durationSeconds 非法");
     payload.durationSeconds = input.durationSeconds;
+  }
+  if (input.fps !== undefined) {
+    if (!isFiniteNumber(input.fps) || input.fps <= 0 || input.fps > 240) return invalid("动作采样率非法");
+    payload.fps = input.fps;
+  }
+  if (input.motion !== undefined) {
+    if (kind !== "motion" || !isSomaMotionMetadata(input.motion)) return invalid("动作骨架元数据非法");
+    payload.motion = input.motion;
   }
   if (input.poster !== undefined) {
     if (!isJsonObject(input.poster)) return invalid("媒体 payload poster 非法");

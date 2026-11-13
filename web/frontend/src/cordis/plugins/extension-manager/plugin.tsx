@@ -52,7 +52,7 @@ export type ExtensionManagerOptions = {
   catalog?: readonly CanvasExtensionMetadata[];
   /** 可配置 optional allowlist（缺省静态 allowlist；测试可注入）。 */
   ids?: readonly string[];
-  /** 写入宿主配置的实现（生产实现写 `extensions.frontend.<id>.enabled`）。 */
+  /** 写入宿主配置的实现（生产实现写 `extensions.<id>.enabled`）。 */
   persist?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   /**
    * Composition root 注入的偏好 store（与本次启动选择同一实例）。缺省时 Plugin Manager

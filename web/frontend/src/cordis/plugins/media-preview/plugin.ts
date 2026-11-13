@@ -6,9 +6,11 @@
  * 改为 Plugin effect。所有注册返回 disposer，由 Plugin scope 统一撤销；双击节点只发
  * 类型化事件，Host 通过 Dialog Service 打开。
  */
+import { createElement } from "react";
+import { AudioNodeHost } from "./audio-node-host.js";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
-import { MEDIA_PREVIEW_DIALOG_ID, mediaPreviewDefinition, resolveAudioPreview } from "./media-preview.js";
+import { MEDIA_PREVIEW_DIALOG_ID, mediaPreviewDefinition, resolveMotionPreview } from "./media-preview.js";
 import { TEXT_PREVIEW_DIALOG_ID, textPreviewDefinition } from "./text-preview.js";
 import { ALERT_DIALOG_ID, alertDefinition } from "../../services/dialogs/alert-dialog.js";
 import { createMediaPreviewRenderer, createTextPreviewRenderer, createAlertRenderer } from "./builtin-renderers.js";
@@ -25,6 +27,10 @@ export type { PreviewEvent };
 export const mediaPreviewExtension: Plugin.Function<void> = definePlugin(
   (ctx: Context) => {
     const dialogs = ctx.dialogs;
+    const disposeAudioNodes = ctx.slots.register("canvas.overlay", {
+      id: "audio-node-players", owner: MEDIA_PREVIEW_PLUGIN_ID, priority: 20,
+      render: () => createElement(AudioNodeHost, { ctx })
+    });
 
     const disposePreview = dialogs.registerDialog(MEDIA_PREVIEW_DIALOG_ID, {
       definition: mediaPreviewDefinition,
@@ -39,18 +45,17 @@ export const mediaPreviewExtension: Plugin.Function<void> = definePlugin(
       renderer: createTextPreviewRenderer()
     });
 
-    const disposeAudioAction = ctx.slots.register("canvas.node-action", {
-      id: "audio-preview", owner: MEDIA_PREVIEW_PLUGIN_ID, order: -1, available: () => true,
-      describe: ({ nodeId, nodeType }) => nodeType !== "audio" ? null : {
-        label: "试听", tone: "neutral", enabled: resolveAudioPreview(woohaa3CanvasStore.getState().canvas, nodeId) !== null,
-        reason: "音频尚未就绪或缺少可读取的输出"
+    const disposeMotionAction = ctx.slots.register("canvas.node-action", {
+      id: "motion-preview", owner: MEDIA_PREVIEW_PLUGIN_ID, order: -1, available: () => true,
+      describe: ({ nodeId, nodeType }) => nodeType !== "motion" ? null : {
+        label: "播放动作", tone: "neutral", enabled: resolveMotionPreview(woohaa3CanvasStore.getState().canvas, nodeId) !== null,
+        reason: "动作尚未就绪或缺少可读取的输出"
       },
       activate: ({ nodeId, menu }) => {
         if (menu) return;
         const canvas = woohaa3CanvasStore.getState().canvas;
-        const resolved = resolveAudioPreview(canvas, nodeId);
-        if (resolved) dialogs.open({ dialogId: MEDIA_PREVIEW_DIALOG_ID,
-          payload: { nodeId, assetId: resolved.assetId, title: resolved.title, kind: "audio", canvasId: canvas!.id } });
+        const motion = resolveMotionPreview(canvas, nodeId);
+        if (motion) dialogs.open({ dialogId: MEDIA_PREVIEW_DIALOG_ID, payload: { nodeId, assetId: motion.assetId, title: motion.title, kind: "motion", canvasId: canvas!.id } });
       }
     });
 
@@ -63,7 +68,8 @@ export const mediaPreviewExtension: Plugin.Function<void> = definePlugin(
     });
 
     return () => {
-      disposeAudioAction();
+      disposeAudioNodes();
+      disposeMotionAction();
       offPreview();
       offTextPreview();
       disposeText();
@@ -71,5 +77,5 @@ export const mediaPreviewExtension: Plugin.Function<void> = definePlugin(
       disposePreview();
     };
   },
-  { name: MEDIA_PREVIEW_PLUGIN_ID, inject: ["dialogs", "slots"] }
+  { name: MEDIA_PREVIEW_PLUGIN_ID, inject: ["dialogs", "slots", "canvasRuntime", "canvasNavigation", "runState"] }
 );

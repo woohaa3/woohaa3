@@ -16,6 +16,7 @@
  */
 export * from "./log.js";
 export * from "./capabilities.js";
+export * from "./abi.js";
 export * from "./web-server.js";
 export * from "./diagnostics.js";
 export * from "./facades.js";

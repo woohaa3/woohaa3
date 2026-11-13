@@ -1,3 +1,4 @@
+import { minimumNodeSizeFor } from "./node-minimum-size.js";
 import { executeModelScriptVersioned } from "./model-executor-v2.js";
 /** The only builtin rendering implementation bindings. Domain type validation stays separate. */
 import { isSupportedModelScriptVersion, sceneIrVersionFor } from './model-script.js';
@@ -67,10 +68,11 @@ export function legacyDiagnosticCardBodyFor(
 export function builtinNodeImplementations(): ReadonlyMap<string, NodeCapabilities> {
   const entries = new Map<string, NodeCapabilities>();
   for (const type of ['text', 'image', 'audio', 'video'] as const) entries.set(type, {
-    appearance: { palette: type, defaultSize: rich }, resize: rectangularNodeResize,
+    appearance: { palette: type, defaultSize: rich }, resize: type === "audio" ? { ...rectangularNodeResize, minimum: () => minimumNodeSizeFor("audio") } : rectangularNodeResize,
     ...(type !== "text" ? { actions: nodeActionContributions } : {}), connections: { endpoints: () => 'ordinary' },
     ...((type === 'image' || type === 'video') ? { resources: { channel: type, contentKey: context => context.assetContentKey } } satisfies Pick<NodeCapabilities, 'resources'> : {})
   });
+  entries.set('motion', { appearance: { palette: 'model', defaultSize: rich }, resize: rectangularNodeResize, actions: nodeActionContributions, connections: { endpoints: () => 'ordinary' } });
   entries.set('model3d', worldModelCapabilities);
   entries.set('composite-asset', {
     appearance: { palette: 'model', defaultSize: { width: 260, height: 195 } },

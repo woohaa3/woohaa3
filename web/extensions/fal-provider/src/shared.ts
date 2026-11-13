@@ -26,7 +26,7 @@ export const FAL_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: FAL_PLUGIN_ID,
   name: "fal.ai Provider",
   description: "fal.ai。填写 API Key，以及要使用的模型（endpoint id，例如 fal-ai/flux/schnell）。按队列接口执行图片、视频、音频与文本生成。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "fal-provider-config", schemaVersion: 1 },

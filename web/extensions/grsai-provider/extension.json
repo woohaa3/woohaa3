@@ -3,5 +3,12 @@
   "extensionId": "grsai-provider",
   "metadata": { "module": "./shared", "export": "GRSAI_PLUGIN_METADATA", "order": 29 },
   "hostPlugin": { "module": "./backend", "factory": "createGrsaiProviderPlugin", "features": ["provider"], "order": 19 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "1.0.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1, "log": 1 }
+  }
 }

@@ -12,7 +12,7 @@ import { SCENE_DIRECTOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.j
 export const sceneDirectorRole: AgentRoleImplementation = {
   definition: {
     id: "scene-director",
-    revision: "4",
+    revision: "5",
     title: "导演区作者",
     specialty: "在导演区共享世界中创建、修改模型与镜头，并制作确定性动画",
     instructions: ["你是 Woohaa3 导演区的共享世界创作 Agent。", ...TOOL_COMMON_RULES, ...SCENE_DIRECTOR_FLOW].join("\n"),
@@ -22,7 +22,7 @@ export const sceneDirectorRole: AgentRoleImplementation = {
     // 资源查询提供脚本/rig 精确读取，采样独立用于数据诊断。
     tools: {
       required: [ASSISTANT_WORLD_TOOL.readContext],
-      optional: ["get_model_api", WORLD_RESOURCE_TOOLS.read, ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS]
+      optional: ["get_model_api", WORLD_RESOURCE_TOOLS.read, ASSISTANT_WORLD_TOOL.sampleAnimation, ASSISTANT_WORLD_TOOL.getHumanoidMotion, ...ASSISTANT_WORLD_WRITE_TOOLS]
     },
     nativeCapabilities: { required: [], optional: [] },
     requirements: { imageInput: false, toolCalling: true, structuredOutput: "none" },

@@ -162,6 +162,7 @@ function withArchivedResult(result: unknown, media: ArchivedMedia): unknown {
   delete rest.images;
   delete rest.audios;
   delete rest.videos;
+  delete rest.motions;
   // pptask mirrors the first audio as a top-level base64 string (`audio`) in addition
   // to `audios`.  Keeping it would retain the full payload in SQLite even after the
   // descriptor is archived, so remove the duplicate together with the list.
@@ -179,7 +180,7 @@ function withArchivedResult(result: unknown, media: ArchivedMedia): unknown {
  */
 function firstMediaBytes(result: unknown, kind: BinaryModelType): Uint8Array | undefined {
   if (!isRecord(result)) return undefined;
-  const key = kind === "image" ? "images" : kind === "audio" ? "audios" : "videos";
+  const key = kind === "image" ? "images" : kind === "audio" ? "audios" : kind === "motion" ? "motions" : "videos";
   const list = result[key];
   if (!Array.isArray(list) || list.length !== 1) return undefined;
   return asBytes(list[0], maxBytesFor(kind));
@@ -201,6 +202,7 @@ function asBytes(value: unknown, maxBytes: number): Uint8Array | undefined {
 
 function inferBinaryKind(value: unknown): BinaryModelType | undefined {
   if (!isRecord(value)) return undefined;
+  if (Array.isArray(value.motions)) return "motion";
   if (Array.isArray(value.images)) return "image";
   if (Array.isArray(value.audios)) return "audio";
   if (Array.isArray(value.videos)) return "video";
@@ -209,7 +211,7 @@ function inferBinaryKind(value: unknown): BinaryModelType | undefined {
 
 function binaryKindOf(params: unknown): BinaryModelType | undefined {
   const modelType = isRecord(params) ? params.modelType : undefined;
-  return modelType === "image" || modelType === "audio" || modelType === "video" ? modelType : undefined;
+  return modelType === "image" || modelType === "audio" || modelType === "video" || modelType === "motion" ? modelType : undefined;
 }
 
 function readCanvasId(context: unknown): string | undefined {

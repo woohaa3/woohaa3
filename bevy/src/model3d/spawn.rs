@@ -123,6 +123,7 @@ pub(super) fn spawn_v2(
     strategy: super::batch_strategy::BatchStrategy,
     barriers: &HashSet<String>,
 ) -> ModelRoot {
+    let batched = batched && !model.ops.iter().any(|op|matches!(op,ModelOp::Mesh{skin:Some(_),..}));
     #[cfg(feature = "explicit-instancing")]
     let strategy = if strategy == super::batch_strategy::BatchStrategy::Explicit {
         super::batch_strategy::BatchStrategy::Automatic
@@ -287,11 +288,14 @@ pub(super) fn spawn_v2(
                     .cloned()
                     .unwrap_or_else(|| mesh_key(geometry));
                 // 每几何有效档位：总览根的自定义 Mesh 保持 High，不新增简化任务。
-                let effective = super::mesh::effective_quality(geometry, quality);
-                let Some((mesh, shared_geometry)) = shared.mesh(meshes, &base, geometry, effective)
+                let effective = if model.ops.iter().any(|op|matches!(op,ModelOp::Mesh{id,skin:Some(_),..} if id==&spec.id)){Quality::High}else{super::mesh::effective_quality(geometry, quality)};
+                let Some((mut mesh, shared_geometry)) = shared.mesh(meshes, &base, geometry, effective)
                 else {
                     continue;
                 };
+                if model.ops.iter().any(|op| matches!(op, ModelOp::Mesh{id,skin:Some(_),..} if id==&spec.id)) {
+                    if let Some(source)=meshes.get(&mesh).cloned(){ mesh=meshes.add(source); }
+                }
                 mesh_cache.insert(
                     super::mesh::quality_key(&base, geometry, effective),
                     mesh.clone(),
@@ -349,6 +353,16 @@ pub(super) fn spawn_v2(
             .copied()
             .unwrap_or(root);
         commands.entity(entity).insert(ChildOf(parent));
+    }
+    for op in &model.ops {
+        if let ModelOp::Mesh{id,vertices,skin:Some(skin),..}=op {
+            if let Some(entity)=entities.get(id) {
+                let joints:Option<Vec<Entity>>=skin.joint_ids.iter().map(|id|entities.get(id).copied()).collect();
+                if let Some(joints)=joints {
+                    commands.entity(*entity).insert(super::skin::SkinBinding{joints,skin:skin.clone(),vertices:vertices.clone(),last_matrices:Vec::new()});
+                }
+            }
+        }
     }
     let animation_entities = attach_animations(commands, &model.ops, &entities, &base_transforms);
 

@@ -28,6 +28,8 @@ export function nodeTypeForPanelKind(kind: NodePanelKind): CanvasTaskNodeType {
       return "image";
     case "video-generation":
       return "video";
+    case "motion-generation":
+      return "motion";
     case "audio-generation":
       return "audio";
     case "text-generation":

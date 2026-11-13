@@ -144,6 +144,8 @@ export function fallbackNodeTitle(kind: NodeGenerationKind): string {
       return "图片节点";
     case "video":
       return "视频节点";
+    case "motion":
+      return "动作节点";
     case "audio":
       return "音频节点";
     case "model":

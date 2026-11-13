@@ -28,3 +28,8 @@ describe("媒体就绪字段的白名单", () => {
     });
   });
 });
+
+it("持久化动作采样率与骨架身份",()=>{
+ const motion={fps:30,frameCount:120,skeletonId:"somaskel77",restPoseId:"kimodo-standard-tpose",formatVersion:"kimodo-soma-v1"};
+ expect(sanitizeResult({mediaKind:"motion",fps:30,motion})).toMatchObject({fps:30,motion});
+});

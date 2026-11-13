@@ -65,6 +65,16 @@ function extensionTree(options: { id?: string; version?: string; backend?: boole
   }
   if (options.siteBackend) {
     descriptor.backend = { module: "./backend-dist/entry", factory: "createDefinition" };
+    // 真声明 `site` 段：`backend + site` 是市场可安装的真实形态；缺 site 会把这条路径挡在预检之外，
+    // 让「安装后需要重启」的断言失去意义。
+    descriptor.site = {
+      name: id,
+      description: id,
+      version,
+      configSchema: { schemaId: `${id}-config`, schemaVersion: 1 },
+      capabilities: [{ id: `${id}.probe`, kind: "handler", description: "probe" }],
+      defaultEnabled: true
+    };
     fs.mkdirSync(path.join(dir, "backend-dist"), { recursive: true });
     fs.writeFileSync(
       path.join(dir, "backend-dist", "entry.mjs"),
@@ -415,7 +425,7 @@ describe("Extension Manager", () => {
     expect(h.restarts).toEqual(["admin"]);
   });
 
-  it("站点 backend 扩展：有运行期能力也 restart-required，不 swap、不热登记", async () => {
+  it("站点 backend 扩展（带 site 段）：restart-required，不 swap、不热登记", async () => {
     await setup();
     const swaps: unknown[] = [];
     const runtime = {
@@ -438,7 +448,7 @@ describe("Extension Manager", () => {
     });
   });
 
-  it("站点 backend 扩展卸载：不调用运行期 remove，仍要求重启", async () => {
+  it("站点 backend 扩展（带 site 段）卸载：不调用运行期 remove，仍要求重启", async () => {
     await setup();
     const removes: string[] = [];
     const runtime = {

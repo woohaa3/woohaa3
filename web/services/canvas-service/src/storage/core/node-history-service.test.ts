@@ -217,7 +217,7 @@ describe("节点历史 repository / 应用服务", () => {
     expect(page.items.map((item) => item.nodeTitle)).toEqual(["图片节点", "脚本节点"]);
     const textItem = page.items.find((item) => item.nodeId === "node-1");
     expect(textItem?.current).toBe(true);
-    expect(page.kindCounts).toEqual({ text: 1, image: 1, video: 0, audio: 0, model: 0 });
+    expect(page.kindCounts).toEqual({ text: 1, image: 1, video: 0, audio: 0, motion: 0, model: 0 });
     // 安全：列表 JSON 不含 storageKey / 完整正文。
     const json = JSON.stringify(page);
     expect(json).not.toContain("sha256-");
@@ -746,7 +746,7 @@ async function assertCanvasListContract(repository: NodeHistoryRepository): Prom
   expect(other.items).toHaveLength(0);
 
   // 种类计数与筛选无关，反映全部历史。
-  expect(await repository.canvasKindCounts(CANVAS)).toEqual({ text: 2, image: 2, video: 1, audio: 0, model: 0 });
+  expect(await repository.canvasKindCounts(CANVAS)).toEqual({ text: 2, image: 2, video: 1, audio: 0, motion: 0, model: 0 });
 
   // A busy node must not push an old node's failure or its current version out of summaries.
   const failure = sampleEntry({ entryId: "old-failure", nodeId: "old", kind: "text", createdAt: "2000-01-01" });

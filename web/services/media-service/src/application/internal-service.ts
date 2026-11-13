@@ -37,7 +37,8 @@ export const GENERATED_IMPORT_MEDIA_TYPES = [
   "audio/mpeg",
   "audio/wav",
   "audio/ogg",
-  "audio/mp4"
+  "audio/mp4",
+  "application/x-npz"
 ] as const;
 
 export const DEFAULT_SIGN_TTL_SECONDS = 900;
@@ -158,7 +159,7 @@ export function createMediaApplicationService(
     if (input.bytes.byteLength > requestedMax) throw new MediaApplicationError("limit-exceeded", "导入内容超过上限");
     const contentType = normalizeMediaType(input.contentType);
     if (!isAllowedMediaType(contentType, [...GENERATED_IMPORT_MEDIA_TYPES])) {
-      throw new MediaApplicationError("unsupported", "只接受受控的图片、视频或音频输出");
+      throw new MediaApplicationError("unsupported", "只接受受控的图片、视频、音频或动作输出");
     }
     const kindLimit = defaultMaxOutputBytesFor(contentType);
     if (input.bytes.byteLength > Math.min(requestedMax, kindLimit)) {

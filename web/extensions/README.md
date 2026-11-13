@@ -60,8 +60,7 @@ src/integration/{shared,browser,backend}  # 宿主协议适配、注册、权限
 只有 `hostPlugin`、没有 `site` 的 Provider / 存储后端不进控制面，它们的 `defaultEnabled` 与
 配置文件里的 `enabled` 都不生效。
 
-Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节（路径由插件自己用
-`ctx.gateway.route` 注册并鉴权）；插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
+Provider 插件用 `ExtensionPlugin.modelRefresh` 声明设置弹窗插件详情里的「可用模型」一节。刷新路由**不要自己取 `ctx.gateway`**：扩展可见的服务面里没有 `gateway`（见[本机宿主插件树](../../../docs/code-map/backend-host.md)），用 `@woohaa3/provider-sdk` 的 `registerModelRefreshRoute(ctx, { path, refresh })` 注册，鉴权（`MODELS_MANAGE_ACTION`）与响应形状都由它统一处理。走 `ctx.webServer` 的扩展只能拿到 `register` / `registerHttp` / `registerRawHttp` 三个登记口，路由键为 `<extensionId>/<相对 route>`。插件源码 MUST NOT 写死宿主静态目录里的品牌图形路径。
 
 **上游没有模型列表接口时不要声明 `modelRefresh`**：目录改成源码里的手写表，并在表头注释与
 `assets/README.md` 里写清每个数字来自哪一页官方文档。[bailian-provider](bailian-provider) 是这种形态：
@@ -280,6 +279,37 @@ pnpm dev --dev-source web/extensions/<id>
 - 边界：不签名、不进 `installations.json`、不参与市场信任；同 id 时开发者目录优先于受管与内置版本，移除即回落。
 - 发布形态没有这个入口：它只在本机开发时由你显式开启。
 
+## 能力依赖声明（`engines.host` / `engines.capabilities`）
+
+change: 2026-11-13-add-extension-capability-abi。扩展在**编写阶段**就依赖宿主的能力面：
+后端插件 `inject: ["generation", "storage"]` 拿到的 `ctx.generation` / `ctx.storage` 是有形状的类型。
+这些面演化时，`engines.hostAbi` 感知不到——它描述的是 SDK 整体形状，不是逐个服务面。
+
+因此按面各声明一个版本：
+
+```json
+{
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1, "storage": 1 },
+    "capabilities": { "agent-conversation-adapter:foo": 1 }
+  }
+}
+```
+
+- `host`：服务面名 → 所需版本。版本表是 `@woohaa3/contracts` 的 `HOST_SERVICE_ABI`（唯一来源）。
+- `capabilities`：跨扩展 capability 的 id → 所需形状版本。注册与解析都按 `id@version` 记账，
+  同 id 不同版本**并存**，提供一个新形状不会静默顶掉旧的。
+- 两者**缺省都表示「不依赖」**（过渡期语义，见 `docs/security/COMPATIBILITY.md` 第 7 条）。
+
+**校验时机**：扩展层装配时（内置根 / 可写根不兼容 → fail-fast；受管根只拒绝该扩展并记
+`EXTENSION_CAPABILITY_INCOMPATIBLE`），以及受管包安装预检时（用当前宿主版本比对）。
+
+**版本推进规则**：破坏性变更（删除成员、改签名或语义）才抬版本，纯增量（新增可选成员）不抬。
+与 `protocolVersion` 同口径，用**精确相等**判定，不做兼容推断。
+
 ## 打包与分发（`.wxt`）
 
 change: 2026-10-21-add-extension-marketplace-point。仓库内的扩展（内置根）照旧随发布装配；要**单独分发**一个扩展，打成 `.wxt` 包，由本机宿主的 Extension Manager 安装到**受管根**（`WOOHAA3_EXTENSION_MANAGED_DIR`，开发缺省 `.woohaa3/extensions/`，生产 `shared/extensions-managed`）。
@@ -298,8 +328,8 @@ pnpm pack:extension <扩展目录> --key ./my-signing.key       # build:browser 
 | 受管扩展可以 | 受管扩展不可以（预检拒绝） |
 | --- | --- |
 | `server-active` / `browser-local` 前端入口：安装后已打开页面**不刷新**即可装配 | `always` / `required` activation |
-| 后端 `hostPlugin` 或带 `site` 的 `backend`：在宿主内加载；独立形态可热装配，executor 在 daemon 加载 | `bootstrap` 槽位、`canvasContent`、市场来源（`marketplace-source`）——只允许内置根 |
-| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）；公开路径用 `publicRoutes` 声明 | `hostPlugin.kind = storage`（存储后端必须进程内）、包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
+| 后端 `hostPlugin` 或带 `site` 的 `backend`：在宿主内加载；独立形态可热装配，executor 在 daemon 加载 | `bootstrap` 槽位、`canvasContent`、`content` 声明、市场来源（`marketplace-source`）、`hostPlugin.features` 含 `storage`（存储后端必须进程内）——只允许内置根 |
+| 声明 `engines`（`hostAbi` / `sdkAbi` / `protocolVersion`）；公开路径用 `publicRoutes` 声明 | 包内 `.node` 原生模块、`backend-dist` 以外的后端入口 |
 | 使用所装配的公共宿主端口、配置与路由；权限由宿主端口执行 | `migrate`（本期不支持数据迁移）、未内联的 `workspace:` 运行时依赖 |
 
 升级保留上一版本：新版本有观察期，期间激活失败或健康持续失败会**自动回滚**；也可在卡片上手动回滚。卸载先经站点控制面停用并等在途工作收尾，再删指针；勾选「同时清除数据」会删除该扩展的 documents。
@@ -314,10 +344,74 @@ change: 2026-10-21-add-server-extension-marketplace（设计见 [server-extensio
 2. **提交与审核**：上传 `.wxt` 后提交（需要 `marketplace.publish`），版本进入「待审核」；管理端「扩展市场」页由持有 `marketplace.review` 的管理员通过、拒绝（必填理由）或撤回。拒绝与撤回都是终态，同一版本号不能复用，重新发布要升版本。
 3. **客户端信任**：官方市场的发布公钥随客户端发布内置（dev / Web release / 桌面宿主同一份后端代码），因此官方包不需要再手工配置；本机 `extensions.marketplace.trustedKeys` 只能**追加**其它发布者，不能移除内置官方 key。服务端 `GetMarketplaceInfo` 下发的其它公钥仍然只展示，管理员确认后才会写入。
 4. **从市场安装**：设置「插件配置 → 从市场安装」，或 `POST /api/extensions/install` 的 `{ sourceId: "woohaa-server", extensionId, range }`。安装仍走同一条校验链（摘要、签名、预检），服务端返回的审核状态与 keyId 不参与信任判断。
-5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`，否则 `package.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级。计划经市场发布的内置插件应让分发版本与 `site.version` / provider metadata 的 `version` 保持一致，否则设置面可能同时显示站点版本与内置包版本。
+5. **内置插件升级**：dev、Web release 与桌面宿主都带内置插件；市场版本按**严格 semver** 与内置分发版本（`extension.json.version`）比较。只有市场版本更高时才允许安装并覆盖同 id 内置版本；相同或更低版本会被 `MARKETPLACE_BUILTIN_CONFLICT` 拒绝。卸载覆盖版本后回到内置版本（能热切换时立即恢复，否则下一次启动）。站点后端（`backend` 工厂）暂不支持覆盖升级，`pnpm ext:release` 会在打包前直接拒绝这类扩展。分发版本与 `site.version` / provider metadata 的 `version` 必须一致，否则预检与 `build:browser` 都会失败（见下文「扩展发版」）。
 6. **发布者绑定**：内置扩展只接受官方发布者 key 的覆盖；已安装受管扩展绑定首次安装的签名 key（TOFU），后续更新 key 变了会被 `MARKETPLACE_PUBLISHER_CHANGED` 拒绝，需要先卸载再安装。未签名本地包不能升级已签名扩展。
 
 撤回立即阻止新的解析与下载（含未过期的下载地址），但**不会**卸载已安装的副本。
+
+### 扩展发版
+
+change: 2026-11-13-add-extension-version-governance。改完扩展只提交代码、不推进版本，会让市场升级判定失真：
+受管版本必须**严格高于**内置分发版本才允许覆盖，因此「内置版本从不变化」等于用户装过一次市场版之后，
+再发多少客户端版本都拿不回这个扩展。发版因此变成一条固定流程：
+
+**1. 版本只有一个真源**：`extension.json` 的 `version`。其余三处是它的副本，必须相等：
+
+| 位置 | 消费者 |
+| --- | --- |
+| `extension.json.version` | 市场升级判定、受管覆盖比较、`.wxt` 包名（**真源**） |
+| `extension.json.site.version` | 站点控制面与站点目录展示 |
+| `package.json.version` | npm 口径；受管预检与服务端 `pkgformat` 双向比对 |
+| `src/frontend/metadata.ts` / `extension.json` 声明的 `metadata.export`（如 `src/shared.ts`） | 浏览器与后端插件卡片的展示版本 |
+
+`pnpm extensions:check` 对不一致报 `EXTENSION_VERSION_MISMATCH`；`build:browser` 在求值 metadata
+后补最后一道（覆盖 `version: SOME_CONSTANT.version` 这类静态读不到的写法）。
+
+**历史分叉只向上对齐，绝不向下压平**：部分扩展的插件元数据版本被单独维护过（`runninghub-provider`
+是 2.2.0，`remote-server` 与若干 provider 是 1.0.0），而 `extension.json` 原先没有版本字段。
+两者分叉时**取最大值**统一——把分发版本抬上去，而不是把元数据压低。理由：压低会让设置面显示的
+版本突然倒退，用户看到「v2.2.0 → v0.1.0」；而抬上去之后展示不变，升级判定也拿到同一个数字。
+
+```bash
+pnpm ext:bump <extensionId> --align     # 把四处收口到最高值（不递增）
+```
+
+**2. 推进版本**：
+
+```bash
+pnpm ext:bump <extensionId|目录> --patch     # 或 --minor / --major / --version 1.2.0
+```
+
+一次改全四处并追加 `CHANGELOG.md`。命令**不推断**这次改动算不算破坏兼容——`patch` / `minor` / `major`
+由发布者决定。新版本必须严格高于当前值；目标不更高时命令失败且不写任何文件。四处尚未对齐时会
+拒绝执行并提示先跑 `--align`。
+
+**3. 门禁：改了就必须 bump**：
+
+```bash
+pnpm extensions:check                                  # 基线缺省 HEAD，直接检查工作树改动
+pnpm extensions:check --strict --bump-base origin/main # CI 口径（失败而非告警）
+pnpm extensions:check --no-bump-check                  # 确实不该检查时显式关闭
+```
+
+扩展目录在基线之后有改动而分发版本没变时报告 `EXTENSION_VERSION_NOT_BUMPED`；该告警缺省不阻断、
+`--strict` 时失败。**基线缺省是 `HEAD`**，因为默认命令才是 agent 与开发者真正会跑的那条——如果只有
+显式传 `--bump-base` 才检查，这个门禁在实践中等于不存在。
+
+判定用 git 而不是 mtime，因此可跨 checkout 复现；仓库不可用 git 时只告警跳过，不让非 git 环境无法预检。
+
+**4. 发布**：
+
+```bash
+pnpm ext:release <extensionId|目录> --notes "修了 X" [--approve]
+```
+
+先做两项判定，再转交父仓 `pnpm release:extension`（打包、签名、上传、提交、审核只有那一份实现）：
+
+- **不可被市场覆盖的形态直接拒绝**：站点 `backend` 工厂（运行期 `checkBuiltinUpgrade` 会拒绝）与
+  `bootstrap` 槽位（受管根禁止）只能随客户端发版。当前 `local-agent` / `oauth-agent` / `sdk-agent` /
+  `prompt-skills` / `standard-agent-roles` / `infinspire-migration` 属于这一类。
+- **有未发版改动时拒绝**，并提示先运行 `ext:bump`。
 
 ### 经 GitHub Release 分发
 

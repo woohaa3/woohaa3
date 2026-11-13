@@ -14,6 +14,7 @@ export interface SpatialLeaseAuthority {
 
 /** Host resolver must derive versions and scope from the canonical projections. */
 export interface SpatialCommitAuthority extends SpatialLeaseAuthority {
+  userCreateTargets?(before: ServerCanvas, after: ServerCanvas): WorldObjectIdentity[];
   resolve(intent: LeaseIntent, before: ServerCanvas, after: ServerCanvas, targets: WorldObjectIdentity[]): {
     scope: WorldScopeVersion; previous: WorldObjectVersion[]; next: WorldObjectVersion[];
   } | null;

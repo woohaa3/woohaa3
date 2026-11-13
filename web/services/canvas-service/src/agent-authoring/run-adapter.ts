@@ -11,6 +11,7 @@
 import type { CanvasRoom } from "../sync/index.js";
 import {
   AGENT_TEXT_OUTPUT_MAX_CHARS,
+  isSomaMotionMetadata,
   mediaPublicUrlFor,
   type AgentNodeOutputView,
   type AgentRunView,
@@ -49,6 +50,7 @@ export type AgentRunAdapterDependencies = {
 
 function nodeModelType(type: string | undefined): CanvasTaskModelType | null {
   switch (type) {
+    case "motion": return "motion";
     case "image": return "image";
     case "video": return "video";
     case "audio": return "audio";
@@ -326,10 +328,12 @@ export function projectOutputView(canvas: ServerCanvas, canvasId: string, nodeId
   const storageKey = readStorageKey(asset);
   if (!storageKey) return { available: false, reason: "output-unavailable", message: "输出媒体缺少稳定引用" };
   const mediaKind = asset.mediaKind;
-  if (mediaKind !== "image" && mediaKind !== "video" && mediaKind !== "audio") {
+  if (mediaKind !== "image" && mediaKind !== "video" && mediaKind !== "audio" && mediaKind !== "motion") {
     return { available: false, reason: "output-unavailable", message: "输出不是可读取的媒体" };
   }
 
+  const motion = isSomaMotionMetadata(asset.metadata?.motion) ? asset.metadata.motion : undefined;
+  if (mediaKind === "motion" && !motion) return {available:false,reason:"output-unavailable",message:"动作元数据不完整"};
   const posterStorageKey = typeof data?.posterAssetId === "string"
     ? readStorageKey(canvas.assets.find((entry) => entry.id === data.posterAssetId))
     : null;
@@ -337,6 +341,7 @@ export function projectOutputView(canvas: ServerCanvas, canvasId: string, nodeId
     available: true,
     output: {
       kind: mediaKind,
+      ...(motion ? {motion,fps:motion.fps} : {}),
       runId,
       url: mediaPublicUrlFor(storageKey),
       contentType: readContentType(asset, storageKey),
@@ -377,6 +382,7 @@ function readContentType(asset: StoredAsset, storageKey: string): string {
   const contentType = asset.metadata?.contentType;
   if (typeof contentType === "string" && contentType !== "") return contentType.split(";")[0]!.trim().toLowerCase();
   const extension = storageKey.split(".").pop()?.toLowerCase() ?? "";
+  if (extension === "npz") return "application/x-npz";
   if (extension === "mp4") return "video/mp4";
   if (extension === "webm") return "video/webm";
   if (extension === "mp3") return "audio/mpeg";

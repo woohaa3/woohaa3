@@ -97,7 +97,7 @@ export type SkillMediaAttemptView = SkillMediaRunRef & {
   supersededByRunId?: string;
   modelKey?: string;
   jobId?: string;
-  mediaKind?: "text" | "image" | "video" | "audio";
+  mediaKind?: "text" | "image" | "video" | "audio" | "motion";
   /** 安全错误摘要；不含堆栈、本机路径、provider 凭据或签名地址。 */
   error?: string;
   /** 该尝试确认的提示词（历史核对用；事件与 MCP 输出不携带）。 */

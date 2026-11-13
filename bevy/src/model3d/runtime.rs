@@ -266,8 +266,8 @@ pub(crate) fn sync_models(
         let allowed = models.batching_strategy.merges();
         // Joint samples address stable hierarchical part entities. Keep this instance
         // unbatched for the whole timeline, including frames before its first key.
-        let part_motion = reference.part_rotations.is_some();
-        let batched = allowed && !part_motion
+        let part_motion = reference.part_rotations.is_some() || reference.part_positions.is_some();
+        let batched = allowed && !resource.ops.iter().any(|op|matches!(op,crate::protocol::ModelOp::Mesh{skin:Some(_),..})) && !part_motion
             && !models.high_demand.contains(&node.id) && !scene
             .model_editor
             .as_ref()

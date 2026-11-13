@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-bailian-provider",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "阿里云百炼（Model Studio / DashScope）生图 Provider：通义万相与 Qwen-Image 系列，支持文生图与参考图编辑。",

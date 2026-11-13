@@ -16,7 +16,7 @@ export const TOKENHUB_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: TOKENHUB_PLUGIN_ID,
   name: "TokenHub Provider",
   description: "腾讯云 TokenHub。填写 API Key 后，从平台发现可用的文本、图片与视频模型。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "tokenhub-provider-config", schemaVersion: 1 },

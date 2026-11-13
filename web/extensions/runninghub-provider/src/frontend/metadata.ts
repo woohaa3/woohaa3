@@ -10,7 +10,7 @@ import { RUNNINGHUB_PLUGIN_ID } from "../shared/identity.js";
 
 export const RUNNINGHUB_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: RUNNINGHUB_PLUGIN_ID,
-  version: "0.1.0",
+  version: "2.2.1",
   label: "RunningHub App 交互",
   description: "RunningHub App 工作流的模型交互面板（随服务端 Provider 实际状态装配）。",
   activation: "server-active",

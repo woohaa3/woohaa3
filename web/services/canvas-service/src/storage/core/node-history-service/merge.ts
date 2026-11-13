@@ -363,7 +363,7 @@ async function planMerge(
   if (!entry.recoverable) {
     return { ok: false, code: "unrecoverable", message: "来源节点的当前历史版本不可恢复" };
   }
-  if (entry.kind === "image" || entry.kind === "video" || entry.kind === "audio") {
+  if (entry.kind === "image" || entry.kind === "video" || entry.kind === "audio" || entry.kind === "motion") {
     const payload = entry.payload as NodeHistoryMediaPayload;
     const scope = { canvasId };
     if (!(await isMediaResolvable(context, payload, scope))) {

@@ -5,7 +5,7 @@ import type {
   WorldScopeVersion,
   WorldToolContext
 } from "@woohaa3/contracts";
-import { createEmptyWoohaa3ServerCanvas, findNonOverlappingNodePosition, initialCameraCardPosition, WORLD_CAMERA_CARD_SIZE } from "@woohaa3/contracts";
+import { createWorldAnimationScript, createEmptyWoohaa3ServerCanvas, findNonOverlappingNodePosition, initialCameraCardPosition, WORLD_CAMERA_CARD_SIZE } from "@woohaa3/contracts";
 import { worldObjectVersion } from "./authority.js";
 import { createAssistantWorldService } from "./assistant-service.js";
 import { InMemoryAssistantHostCompletionRepository } from "./host-completions.js";
@@ -79,6 +79,7 @@ function harness(overrides: {
   /** Override the initial canonical canvas (for tests needing scene-area data etc.). */
   canvas?: ServerCanvas;
   commitFailure?: Record<string, unknown>;
+  beforeDerive?: () => void;
 } = {}) {
   const context = overrides.context ?? contextFor();
   const revoked: string[] = [];
@@ -92,7 +93,9 @@ function harness(overrides: {
       return { ok: true, canvas: current, value: select(current) };
     },
     async submitDerived<T>(input: { derive: (canvas: ServerCanvas) => T | Promise<T> }): Promise<Record<string, unknown>> {
+      overrides.beforeDerive?.();
       const derived = await input.derive(current);
+      if (overrides.beforeDerive && !(derived as any).ok) return {ok:false,...derived as any};
       submitted.push(derived as Record<string, unknown>);
       if (overrides.commitFailure) return overrides.commitFailure;
       return { ok: true, status: "accepted", commandId: "cmd-1", revision: 2, noop: false, update: null, derived };
@@ -1037,3 +1040,45 @@ describe("assistant spatial failure codes", () => {
     });
   });
 });
+
+
+describe("SOMA director clip authority",()=>{
+ const checksum='a'.repeat(64);
+ const asset:any={id:'wave',title:'wave',source:'generated',mediaKind:'motion',status:'ready',createdAt:now,metadata:{storageKey:'generation-outputs/wave.npz',checksum,contentType:'application/x-npz',size:120,motion:{fps:30,frameCount:60,skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1'}}};
+ async function setup(change?:'animation'|'model'|'scope'|'canvas',wrongSkeleton=false){
+  const canvas=canvasFixture();canvas.nodeData.area={sceneArea:{kind:'scene-area',version:'shared-world-v1',areaId:'area-1',scopeVersion:'scope-1',animationOrigin:{u:0,v:0},bounds:{min:{u:0,v:0},max:{u:10,v:10}}}};
+  canvas.nodeData['model-node']!.modelScript=wrongSkeleton?'scene.box({});':'scene.somaHumanoid({id:"pilot"});';
+  const identity={kind:'instance' as const,instanceId:'instance-1'};const version=worldObjectVersion(canvas,identity)!;
+  const h=harness({canvas,context:contextFor(scope,[{...identity,version}]),...(change?{beforeDerive:()=>{
+   if(change==='canvas')canvas.revision++;
+   else if(change==='scope')(canvas.nodeData.area!.sceneArea as any).scopeVersion='scope-2';
+   else if(change==='model')canvas.nodeData['model-node']!.modelContentVersion={revision:2,sourceHash:'changed',contentHash:'changed'};
+   else (canvas.nodeData.area!.sceneArea as any).animationScript=createWorldAnimationScript({script:'// concurrent camera',duration:2,loop:false,revision:1});
+  }}:{})});
+  const issued=await h.service.issue({canvasId:canvas.id,requestId:'req-1',runId:'run-1',epoch:0,executionId:'exec-1',scope:{kind:'scene-area',areaId:'area-1'}});if(!issued.ok)throw Error(issued.message);
+  const operation:any={kind:'set-scene-animation-script',operationId:'apply-wave',motionBaseRevision:0,motionTarget:{instanceId:'instance-1',expectedVersion:version,scopeVersion:'scope-1',canvasRevision:canvas.revision},motionAsset:asset,script:`motion.soma.clip("instance-1",${JSON.stringify({assetId:asset.id,checksum,fps:30,frameCount:60,startTime:0,jointPrefix:'pilot'})});`,duration:2,loop:false};
+  return {h,issued,operation};
+ }
+ it('commits stable motion asset and clip in one canonical batch',async()=>{
+  const {h,issued,operation}=await setup();expect(await h.service.write({contextId:issued.context.contextId,operation})).toMatchObject({ok:true});
+  const result:any=h.submitted.at(-1);expect(result.batch.commands.map((c:any)=>c.type)).toEqual(['asset.upsert','nodeData.patch']);
+ });
+ it('rejects non-SOMA actor and mismatched asset identity before commit',async()=>{
+  const a=await setup(undefined,true);expect(await a.h.service.write({contextId:a.issued.context.contextId,operation:a.operation})).toMatchObject({ok:false,code:'invalid-data'});expect(a.h.submitted).toHaveLength(0);
+  const b=await setup();b.operation.motionAsset={...asset,metadata:{...asset.metadata,checksum:'b'.repeat(64)}};expect(await b.h.service.write({contextId:b.issued.context.contextId,operation:b.operation})).toMatchObject({ok:false,code:'invalid-data'});
+ });
+ it.each(['animation','model','scope','canvas'] as const)('rechecks %s version inside queued commit',async(change)=>{
+  const {h,issued,operation}=await setup(change);expect(await h.service.write({contextId:issued.context.contextId,operation})).toMatchObject({ok:false,code:'version-conflict'});
+ });
+});
+
+ it('drops deleted SOMA targets while retaining live SOMA-only animation in scoped reads',async()=>{
+  const canvas=canvasFixture();
+  const clip=(id:string)=>`motion.soma.clip("${id}",{assetId:"motion",checksum:"${'a'.repeat(64)}",fps:30,frameCount:60,startTime:0,jointPrefix:"pilot"});`;
+  canvas.nodeData.area={sceneArea:{kind:'scene-area',version:'shared-world-v1',areaId:'area-1',scopeVersion:'scope-1',bounds:{min:{u:0,v:0},max:{u:10,v:10}},animationScript:createWorldAnimationScript({script:clip('deleted')+'\n'+clip('instance-1'),duration:2,loop:false})}};
+  const {service}=harness({canvas});
+  const issued=await service.issue({canvasId:canvas.id,requestId:'req-1',runId:'run-1',epoch:0,executionId:'exec-1',scope:{kind:'scene-area',areaId:'area-1'}});if(!issued.ok)throw Error(issued.message);
+  const result=await service.read({canvasId:canvas.id,contextId:issued.context.contextId});if(!result.ok)throw Error(result.message);
+  expect(result.view.sceneArea?.animationScript?.script).toContain('instance-1');
+  expect(result.view.sceneArea?.animationScript?.script).not.toContain('deleted');
+ });

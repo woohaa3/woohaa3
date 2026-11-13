@@ -40,6 +40,7 @@ export const ALLOWED_MEDIA_TYPES = [
   "text/plain",
   "text/markdown",
   "application/json",
+  "application/x-npz",
   "model/gltf-binary",
   "application/octet-stream"
 ] as const;
@@ -86,6 +87,8 @@ export function extensionForMediaType(contentType: string): string {
       return "ogg";
     case "audio/mp4":
       return "m4a";
+    case "application/x-npz":
+      return "npz";
     case "model/gltf-binary":
       return "glb";
     default:

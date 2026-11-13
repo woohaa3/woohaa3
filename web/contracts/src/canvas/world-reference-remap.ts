@@ -92,6 +92,8 @@ export interface WorldReferenceRemapIdMap {
   readonly areaIds?: WorldCopyIdTable;
   /** `worldCamera.cameraId` namespace. */
   readonly cameraIds?: WorldCopyIdTable;
+  /** Optional immutable media asset aliases; omitted assets retain their identity. */
+  readonly assetIds?: WorldCopyIdTable;
 }
 
 /** One node of the copied collection. Host runtime state is not part of this input. */
@@ -214,6 +216,8 @@ export function remapWorldCopyReferences(input: WorldReferenceRemapInput): World
   if (!groupIds.ok) return groupIds;
   const areaIds = readOptionalIdTable(idsInput, "areaIds");
   if (!areaIds.ok) return areaIds;
+  const assetIds = readOptionalIdTable(idsInput, "assetIds");
+  if (!assetIds.ok) return assetIds;
   const cameraIds = readOptionalIdTable(idsInput, "cameraIds");
   if (!cameraIds.ok) return cameraIds;
 
@@ -246,6 +250,7 @@ export function remapWorldCopyReferences(input: WorldReferenceRemapInput): World
         groupIds: groupIds.table,
         areaIds: areaIds.table,
         cameraIds: cameraIds.table,
+        assetIds: assetIds.table,
         sourceNodeIds,
         sourceInstanceIds: worldIdentities.instanceIds
       });
@@ -363,6 +368,7 @@ function ownWorldIdField(world: DecodedWorld): string {
 }
 
 interface RemapContext {
+  readonly assetIds: ReadonlyMap<WorldId, WorldId> | undefined;
   readonly sourceNodeId: WorldId;
   readonly nodeIds: ReadonlyMap<WorldId, WorldId>;
   readonly instanceIds: ReadonlyMap<WorldId, WorldId> | undefined;
@@ -484,6 +490,13 @@ function remapWorldPayload(
           if (typeof instanceId !== "string") return instanceId;
           walkTracks.push({ ...track, targetId: instanceId });
         }
+        const somaTracks = [];
+        for (const track of compiled.ir.somaTracks ?? []) {
+          if (!context.sourceInstanceIds.has(track.targetId)) return fail("binding-unavailable", {sourceNodeId:context.sourceNodeId,field:"animationScript.somaTracks",reference:{relation:"instance",id:track.targetId}});
+          const instanceId = requireMappedId(context.instanceIds,track.targetId,{relation:"instance",id:track.targetId},context.sourceNodeId);
+          if (typeof instanceId !== "string") return instanceId;
+          somaTracks.push({...track,targetId:instanceId,assetId:context.assetIds?.get(track.assetId) ?? track.assetId});
+        }
         const cameraTracks = [];
         for (const track of compiled.ir.cameraTracks) {
           if (!context.cameraIds?.has(track.targetId)) {
@@ -498,7 +511,7 @@ function remapWorldPayload(
           if (typeof cameraId !== "string") return cameraId;
           cameraTracks.push({ ...track, targetId: cameraId });
         }
-        const script = serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, ...(compiled.ir.partTracks ? { partTracks } : {}), ...(compiled.ir.walkTracks ? {walkTracks} : {}) });
+        const script = serializeWorldAnimationScript({ ...compiled.ir, instanceTracks, cameraTracks, ...(compiled.ir.partTracks ? { partTracks } : {}), ...(compiled.ir.walkTracks ? {walkTracks} : {}), ...(compiled.ir.somaTracks ? {somaTracks} : {}) });
         animationScript = createWorldAnimationScript({
           script,
           duration: animationScript.duration,
@@ -579,7 +592,7 @@ function requireMappedId(
 
 function readOptionalIdTable(
   idsInput: Record<string, unknown>,
-  key: "instanceIds" | "groupIds" | "areaIds" | "cameraIds"
+  key: "instanceIds" | "groupIds" | "areaIds" | "cameraIds" | "assetIds"
 ): { readonly ok: true; readonly table: ReadonlyMap<WorldId, WorldId> | undefined } | WorldReferenceRemapFailure {
   const raw = ownField(idsInput, key);
   if (raw === undefined) return { ok: true, table: undefined };

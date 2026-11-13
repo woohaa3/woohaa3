@@ -243,7 +243,12 @@ export function httpHandlerKey(method: string, route: string): string {
 
 export function toSummary(owner: OwnerState): ExtensionRegistrationSummary {
   return {
-    capabilities: [...owner.capabilities.keys()].sort(),
+    // 注册键是 `id@version`（change: 2026-11-13-add-extension-capability-abi）；
+    // 摘要对外只暴露裸 id——它是「这个扩展提供了哪些能力」的投影，不是解析用的键。
+    capabilities: [...new Set([...owner.capabilities.keys()].map((key) => {
+      const at = key.lastIndexOf("@");
+      return at > 0 ? key.slice(0, at) : key;
+    }))].sort(),
     handlers: [...owner.handlers.values()]
       .map((registration) => ({
         route: registration.route,

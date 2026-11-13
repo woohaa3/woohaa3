@@ -95,6 +95,7 @@ const TASK_LABEL: Record<ExecutionPanelTaskKind, string> = {
 	"image-generation": "图片",
 	"video-generation": "视频",
 	"audio-generation": "音频",
+	"motion-generation": "动作",
 };
 
 export function ExecutionPanel({

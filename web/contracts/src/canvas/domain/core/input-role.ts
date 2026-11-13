@@ -15,7 +15,7 @@ export function resolveWoohaa3CanvasTaskKind(
   nodeData: Woohaa3CanvasNodeDataLike | undefined,
 ): string | undefined {
   if (typeof nodeData?.taskKind === "string" && nodeData.taskKind.trim()) return nodeData.taskKind.trim();
-  return nodeType === "text" || nodeType === "image" || nodeType === "video" || nodeType === "audio"
+  return nodeType === "text" || nodeType === "image" || nodeType === "video" || nodeType === "audio" || nodeType === "motion"
     ? `${nodeType}-generation`
     : undefined;
 }

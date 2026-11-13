@@ -21,6 +21,8 @@ import type {
 import {
   agentConnectionProviderCapabilityId,
   agentConversationAdapterCapabilityId,
+  AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
+  AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
 } from "@woohaa3/contracts";
 import {
   createConnectionProvider,
@@ -210,6 +212,7 @@ export function createLocalAgentExtension(
       });
       host.registerCapability({
         id: agentConnectionProviderCapabilityId(LOCAL_AGENT_PLUGIN_ID),
+        version: AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
         value: provider,
       });
 
@@ -217,6 +220,7 @@ export function createLocalAgentExtension(
         const instance = createLocalAgentConversationAdapter(adapter, runtimeOptions);
         host.registerCapability({
           id: agentConversationAdapterCapabilityId(adapter.adapterId),
+          version: AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
           value: {
             ...instance,
             runtimeExecutor: "local-agent",

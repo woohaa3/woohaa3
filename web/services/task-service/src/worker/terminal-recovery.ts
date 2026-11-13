@@ -249,18 +249,19 @@ function mapTaskStatus(status: string): TaskExecutionState {
 function readTaskModelType(task: PptaskTaskRecord): PptaskModelType | undefined {
   const params = isRecord(task.params) ? task.params : {};
   const value = params.modelType;
-  return value === "language" || value === "image" || value === "video" || value === "audio" ? value : undefined;
+  return value === "language" || value === "image" || value === "video" || value === "audio" || value === "motion" ? value : undefined;
 }
 
 /** history 已给出 modelType 时优先使用（调度 store 的 params 更权威，两者一致）。 */
 function binaryKindOf(modelType: PptaskModelType | undefined): BinaryModelType | undefined {
-  return modelType === "image" || modelType === "audio" || modelType === "video" ? modelType : undefined;
+  return modelType === "image" || modelType === "audio" || modelType === "video" || modelType === "motion" ? modelType : undefined;
 }
 
 /** 没有 modelType 时按原始结果的容器键推断二进制类型（旧记录/扩展任务）。 */
 function inferBinaryKind(raw: unknown): BinaryModelType | undefined {
   if (!isRecord(raw)) return undefined;
   if (Array.isArray(raw.images) && raw.images.length > 0) return "image";
+  if (Array.isArray(raw.motions) && raw.motions.length > 0) return "motion";
   if (Array.isArray(raw.audios) && raw.audios.length > 0) return "audio";
   if (Array.isArray(raw.videos) && raw.videos.length > 0) return "video";
   return undefined;
@@ -269,7 +270,7 @@ function inferBinaryKind(raw: unknown): BinaryModelType | undefined {
 /** provider 原始结果里的受控输出地址（顶层媒体项或 providerMetadata）。 */
 function readOutputUrl(raw: unknown, kind: BinaryModelType): string | undefined {
   if (!isRecord(raw)) return undefined;
-  const key = kind === "image" ? "images" : kind === "audio" ? "audios" : "videos";
+  const key = kind === "image" ? "images" : kind === "audio" ? "audios" : kind === "motion" ? "motions" : "videos";
   const direct = raw[key];
   if (Array.isArray(direct)) {
     for (const item of direct) {

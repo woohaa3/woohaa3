@@ -162,6 +162,8 @@ pub(crate) struct ModelReference {
     /// Per-instance additive local joint rotations; presence preserves the hierarchy.
     #[serde(default, deserialize_with = "deserialize_part_rotations")]
     pub(crate) part_rotations: Option<std::collections::HashMap<String, [f32; 4]>>,
+    #[serde(default, deserialize_with = "deserialize_part_positions")]
+    pub(crate) part_positions: Option<std::collections::HashMap<String, [f32; 3]>>,
 }
 
 /// 坐标轴对齐包围盒（prepared resource 携带，供渲染/取景复用）。
@@ -460,6 +462,8 @@ pub(crate) enum ModelOp {
         uvs: Option<Vec<[f32; 2]>>,
         #[serde(default)]
         colors: Option<Vec<[f32; 4]>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skin: Option<ModelSkin>,
     },
     /// V2 原生球体 primitive（quality 档由运行时固定）。
     Sphere {
@@ -621,4 +625,35 @@ mod part_rotation_tests {
         let map: std::collections::HashMap<_, _> = (0..4097).map(|i| (i.to_string(), [0.,0.,0.,1.])).collect();
         assert!(serde_json::from_value::<ModelReference>(serde_json::json!({"resourceKey":"m","partRotations":map})).is_err());
     }
+}
+
+fn deserialize_part_positions<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<std::collections::HashMap<String, [f32; 3]>>, D::Error> {
+    let value = Option::<std::collections::HashMap<String, [f32; 3]>>::deserialize(deserializer)?;
+    if let Some(poses) = &value {
+        if poses.len() > 4096 || poses.iter().any(|(id, p)| id.is_empty() || id.len() > 256 || p.iter().any(|v| !v.is_finite() || v.abs() > 10000.0)) {
+            return Err(serde::de::Error::custom("Invalid model part positions"));
+        }
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod part_position_tests {
+    use super::*;
+    #[test]
+    fn reject_unbounded_part_positions() {
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partPositions":{"hips":[0,0.2,0]}}"#).is_ok());
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partPositions":{"hips":[0,10001,0]}}"#).is_err());
+        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partPositions":{"hips":[0,1e50,0]}}"#).is_err());
+    }
+}
+
+/// Column-major inverse bind matrices; all eight influences are authoritative.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelSkin {
+ pub joint_ids: Vec<String>,
+ pub inverse_bind_matrices: Vec<[f32;16]>,
+ pub indices: Vec<[usize;8]>,
+ pub weights: Vec<[f32;8]>,
 }

@@ -48,7 +48,7 @@ export type CanvasTaskActivity = {
   nodeId: string;
   state: TaskExecutionState;
   /** 模型类型摘要（用于卡片与图标）。 */
-  modelType?: "language" | "image" | "video" | "audio";
+  modelType?: "language" | "image" | "video" | "audio" | "motion";
   modelKey?: string;
   /** 权威进度（0..1）；缺失时前端不得伪造百分比。 */
   progress?: number;
@@ -103,7 +103,8 @@ function isTaskResultSummaryLoose(value: unknown): value is TaskResultSummary {
     value.mediaKind !== "text" &&
     value.mediaKind !== "image" &&
     value.mediaKind !== "video" &&
-    value.mediaKind !== "audio"
+    value.mediaKind !== "audio" &&
+    value.mediaKind !== "motion"
   ) {
     return false;
   }
@@ -126,7 +127,8 @@ export function isCanvasTaskActivity(value: unknown): value is CanvasTaskActivit
     value.modelType !== "language" &&
     value.modelType !== "image" &&
     value.modelType !== "video" &&
-    value.modelType !== "audio"
+    value.modelType !== "audio" &&
+    value.modelType !== "motion"
   ) {
     return false;
   }
@@ -323,6 +325,8 @@ export const SAFE_ACTIVITY_RESULT_FIELDS = [
   "size",
   "checksum",
   "durationSeconds",
+  "fps",
+  "motion",
   "poster"
 ] as const;
 

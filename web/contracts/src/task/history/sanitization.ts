@@ -5,7 +5,7 @@
 import { isJsonObject, isStringArray } from "../../validation.js";
 
 /** 结果摘要里允许出现的字段白名单（供实现侧裁剪时复用）。 */
-export const SAFE_RESULT_FIELDS = ["mediaKind", "text", "textTruncated", "storageKey", "locator", "contentType", "size", "checksum", "durationSeconds", "poster"] as const;
+export const SAFE_RESULT_FIELDS = ["mediaKind", "text", "textTruncated", "storageKey", "locator", "contentType", "size", "checksum", "durationSeconds", "fps", "motion", "poster"] as const;
 /** 错误摘要里允许出现的字段白名单。 */
 export const SAFE_ERROR_FIELDS = ["name", "message"] as const;
 /** 详情事件里允许出现的字段白名单。 */

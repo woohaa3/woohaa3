@@ -1,3 +1,4 @@
+import { directorCharacterCommitTargets } from "./director-character-guard.js";
 /**
  * Production scene-area authority (T06).
  *
@@ -780,6 +781,7 @@ export function createWorldAuthoringAuthority(
   }
 
   const authority: WorldAuthoringAuthority = {
+    userCreateTargets: (before, after) => directorCharacterCommitTargets(before, after, (areaId, scopeVersion) => cacheFor(before.id, { scope: { kind: "scene-area", areaId }, scopeVersion })),
     prepareCanvas: prepareArea,
     prepareGroup,
     prepareCamera,

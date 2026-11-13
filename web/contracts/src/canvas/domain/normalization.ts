@@ -41,7 +41,7 @@ export type NormalizeCanvasOptions = {
  * 必须保留它们。已下线的旧类型（`generate`/`edit`/`shot`/`start`/`group`/`film-set-shot-preview`）
  * 不再兼容，读取时收敛为 `custom`；不再保留旧容器迁移。
  */
-export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "model3d", "composite-asset", "workflow-group-2d", "scene-area", "world-camera"] as const;
+export const WOOHAA3_APP_NODE_TYPES = ["text", "image", "video", "audio", "motion", "model3d", "composite-asset", "workflow-group-2d", "scene-area", "world-camera"] as const;
 
 export class InvalidWorldIdentitiesError extends Error {}
 

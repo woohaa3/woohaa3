@@ -21,8 +21,8 @@ const modelWorld = { instanceId: "instance-test", point: { x: 120, y: 80 } };
 
 describe("Agent 节点描述符（任务 1.2）", () => {
   it("暴露全部可创建语义种类与标签", () => {
-    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.kind)).toEqual(["text", "image", "model", "video", "audio"]);
-    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.label)).toEqual(["文本", "图片", "模型", "视频", "音频"]);
+    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.kind)).toEqual(["text", "image", "model", "video", "audio", "motion"]);
+    expect(AGENT_NODE_DESCRIPTORS.map((entry) => entry.label)).toEqual(["文本", "图片", "模型", "视频", "音频", "动作"]);
   });
 
   it("模型语义种类映射为 canonical model3d 且不带任务字段", () => {

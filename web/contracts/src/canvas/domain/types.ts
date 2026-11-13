@@ -4,7 +4,7 @@ import type { Woohaa3CanvasDocument,
 import type { VideoEditIntent } from "../../video/video-edit.js";
 import type { ImageEditDocument } from "../image-edit.js";
 
-export type GenerationKind = "text" | "image" | "video" | "audio";
+export type GenerationKind = "text" | "image" | "video" | "audio" | "motion";
 export type GenerationStatus = "idle" | "queued" | "running" | "success" | "failed" | "draft" | "ready" | "archived";
 
 export type GenerationResult = {
@@ -128,7 +128,7 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
 export type CanvasNodeDataMap<TNodeData extends Woohaa3CanvasJsonObject = CanvasNodeData> =
   Woohaa3CanvasNodeDataMap<TNodeData>;
 
-export type CanvasMediaKind = "image" | "video" | "audio" | "text" | "storyboard" | "file";
+export type CanvasMediaKind = "image" | "video" | "audio" | "text" | "storyboard" | "file" | "motion";
 export type CanvasAssetSource = "generated" | "uploaded" | "external";
 export type CanvasAssetStatus = "ready" | "generating" | "needs-review" | "missing" | "failed";
 

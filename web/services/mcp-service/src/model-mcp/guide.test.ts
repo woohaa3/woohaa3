@@ -11,3 +11,10 @@ describe("model api guide", () => {
     expect(text).toContain("人形和机甲不要照搬这些绝对高度");
   });
 });
+
+it("新建机甲使用完整SOMA模板，旧骨架仅用于兼容编辑",()=>{
+ const text=buildModelApiGuideText();
+ expect(text).toContain('scene.somaHumanoid');
+ expect(text).toContain('不要改为14关节');
+ expect(text).toContain('旧版14关节模型兼容');
+});

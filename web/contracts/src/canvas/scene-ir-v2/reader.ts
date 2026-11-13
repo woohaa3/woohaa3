@@ -229,9 +229,13 @@ export function readShape(
   if (faces.length > SCENE_IR_V2_MAX_MESH_FACES) {
     return fail("mesh-too-large", `mesh ${id} 面数 ${faces.length} 超过上限`);
   }
+  if(raw.skin!==undefined){
+    const s=raw.skin as import("./types.js").SceneV2MeshOp["skin"];
+    if(!s||!Array.isArray(s.jointIds)||!s.jointIds.length||new Set(s.jointIds).size!==s.jointIds.length||s.jointIds.some(j=>typeof j!=="string"||!j)||!Array.isArray(s.inverseBindMatrices)||s.inverseBindMatrices.length!==s.jointIds.length||s.inverseBindMatrices.some(m=>!Array.isArray(m)||m.length!==16||m.some(v=>!Number.isFinite(v)))||!Array.isArray(s.indices)||!Array.isArray(s.weights)||s.indices.length!==vertices.length||s.weights.length!==vertices.length||s.indices.some((r,i)=>!Array.isArray(r)||r.length!==8||r.some(v=>!Number.isInteger(v)||v<0||v>=s.jointIds.length)||!Array.isArray(s.weights[i])||s.weights[i]!.length!==8||s.weights[i]!.some(v=>!Number.isFinite(v)||v<0)||Math.abs(s.weights[i]!.reduce((a,b)=>a+b,0)-1)>.001))return fail("invalid-mesh",`对象 ${id} 的 skin 非法`);
+  }
   const attributes = readMeshAttributes(raw, id, vertices.length);
   if (!attributes.ok) return attributes;
-  return { ok: true, value: { t: "mesh", ...base, vertices, faces, ...attributes.value } };
+  return { ok: true, value: { t: "mesh", ...base, vertices, faces, ...attributes.value, ...(raw.skin===undefined?{}:{skin:raw.skin as NonNullable<import("./types.js").SceneV2MeshOp["skin"]>}) } };
 }
 
 /**

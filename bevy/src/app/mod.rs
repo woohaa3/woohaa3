@@ -288,6 +288,7 @@ fn configure_canvas(app: &mut App) {
                     .after(bevy::text::load_font_assets_into_font_collection)
                     .before(bevy::transform::TransformSystems::Propagate),
                 scene3d::publish_model_poses.after(bevy::transform::TransformSystems::Propagate),
+                crate::model3d::skin::update.after(bevy::transform::TransformSystems::Propagate).before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
                 animation_preview::apply_sampled_camera
                     .after(crate::shot_camera::ShotCameraSet::Derive)
                     .before(crate::shot_camera::ShotCameraSet::Preview),

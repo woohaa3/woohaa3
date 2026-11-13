@@ -89,6 +89,15 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                         for (id, q) in keys { id.hash(&mut hash); q.map(f32::to_bits).hash(&mut hash); }
                         revision = hash.finish();
                     }
+                    if let Some(positions) = reference.and_then(|r| r.part_positions.as_ref()) {
+                        use std::hash::{Hash, Hasher};
+                        let mut keys: Vec<_> = positions.iter().collect();
+                        keys.sort_by_key(|(id, _)| *id);
+                        let mut hash = std::collections::hash_map::DefaultHasher::new();
+                        revision.hash(&mut hash);
+                        for (id, p) in keys { id.hash(&mut hash); p.map(f32::to_bits).hash(&mut hash); }
+                        revision = hash.finish();
+                    }
                     let candidate = if let Some(index) = old.iter().position(|(id, asset, pose, rev, _)| id == &node.id && Arc::ptr_eq(asset, &model) && *pose == root && *rev == revision) {
                         old.swap_remove(index).4
                     } else {
@@ -179,6 +188,9 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, poses: Option<&PartP
     if let Some(rotations) = node.model.as_ref().and_then(|m| m.part_rotations.as_ref()) {
         for (id, q) in rotations { combined.entry(id.clone()).or_default().rotation *= Quat::from_array(*q); }
     }
+    if let Some(positions) = node.model.as_ref().and_then(|m| m.part_positions.as_ref()) {
+        for (id, p) in positions { combined.entry(id.clone()).or_default().translation += Vec3::from_array(*p); }
+    }
     let poses = Some(&combined);
     let Some(root) = super::layout::model_root_transform(node).map(|transform| transform.to_matrix()) else {
         return Vec::new();
@@ -203,11 +215,15 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, poses: Option<&PartP
     }
     let mut triangles = Vec::new();
     for (index, spec) in specs.iter().enumerate() {
-        let Some(world) = world(index, &specs, &indices, root, poses, &mut Vec::new()) else { continue };
+        let Some(part_world) = world(index, &specs, &indices, root, poses, &mut Vec::new()) else { continue };
         let material = spec.material_key.strip_prefix("material:").and_then(|id| materials.get(id));
         if material.is_some_and(|material| material.static_opacity() <= 0.0) { continue; }
         let cull_back = spec.material_key.starts_with("material:") && material.map_or(true, |material| !material.double_sided);
-        let Some(mesh) = spec.geometry.as_ref().and_then(super::mesh::build_mesh) else { continue };
+        let Some(mut mesh) = spec.geometry.as_ref().and_then(super::mesh::build_mesh) else { continue };
+        if let Some(crate::protocol::ModelOp::Mesh{vertices,skin:Some(skin),..})=model.ops.iter().find(|op|matches!(op,crate::protocol::ModelOp::Mesh{id,..} if id==&spec.id)) {
+            let matrices:Option<Vec<Mat4>>=skin.joint_ids.iter().enumerate().map(|(i,id)|Some(part_world.inverse()*world(*indices.get(id.as_str())?, &specs,&indices,root,poses,&mut Vec::new())?*Mat4::from_cols_array(skin.inverse_bind_matrices.get(i)?))).collect();
+            if let Some(matrices)=matrices {mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,super::skin::deform(vertices,skin,&matrices));}
+        }
         let Some(VertexAttributeValues::Float32x3(vertices)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { continue };
         let indices: Vec<usize> = match mesh.indices() {
             Some(Indices::U16(values)) => values.iter().map(|i| *i as usize).collect(),
@@ -216,7 +232,7 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, poses: Option<&PartP
         };
         for face in indices.chunks_exact(3) {
             if let (Some(a), Some(b), Some(c)) = (vertices.get(face[0]), vertices.get(face[1]), vertices.get(face[2])) {
-                triangles.push(crate::canvas_query::model_pick::SurfaceTriangle { vertices: [*a, *b, *c].map(|v| world.transform_point3(Vec3::from_array(v)).to_array()), cull_back });
+                triangles.push(crate::canvas_query::model_pick::SurfaceTriangle { vertices: [*a, *b, *c].map(|v| part_world.transform_point3(Vec3::from_array(v)).to_array()), cull_back });
             }
         }
     }
@@ -244,6 +260,10 @@ mod tests {
         let moved = world_triangles(&node, &model, None);
         assert_ne!(base[0].vertices, moved[0].vertices);
         node.model.as_mut().unwrap().part_rotations = None;
+        assert_eq!(base[0].vertices, world_triangles(&node, &model, None)[0].vertices);
+        node.model.as_mut().unwrap().part_positions = Some(HashMap::from([("joint".into(), [0., 0.2, 0.])]));
+        assert_ne!(base[0].vertices, world_triangles(&node, &model, None)[0].vertices);
+        node.model.as_mut().unwrap().part_positions = None;
         assert_eq!(base[0].vertices, world_triangles(&node, &model, None)[0].vertices);
     }
 
@@ -590,7 +610,7 @@ mod tests {
         crate::bridge::clear_model_assets();
         let node = node(r#"{"id":"mesh","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"sparse"},"sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i","transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
         let ops = vec![
-            crate::protocol::ModelOp::Mesh { id: "surface".into(), parent: Some("parent".into()), position: [0.; 3], rotation: [0.; 3], scale: [1.; 3], color: Some("#ffffff".into()), material: None, vertices: vec![[0., 0., 0.], [2., 0., 0.], [0., 2., 0.]], faces: vec![[0, 1, 2]], normals: None, uvs: None, colors: None },
+            crate::protocol::ModelOp::Mesh { id: "surface".into(), parent: Some("parent".into()), position: [0.; 3], rotation: [0.; 3], scale: [1.; 3], color: Some("#ffffff".into()), material: None, vertices: vec![[0., 0., 0.], [2., 0., 0.], [0., 2., 0.]], faces: vec![[0, 1, 2]], normals: None, uvs: None, colors: None, skin: None },
             crate::protocol::ModelOp::Group { id: "parent".into(), parent: None, position: [2., 0., 0.], rotation: [0.; 3], scale: [1.; 3] },
         ];
         let model = Arc::new(ModelSnapshot::new(Some(crate::protocol::MODEL_SCENE_IR_V2.into()), ops, "sparse".into(), 4., Default::default()));

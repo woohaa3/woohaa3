@@ -93,8 +93,24 @@ export async function packExtension({ dir, out = null, privateKey = null, certif
   if (!validated.ok) throw new PackExtensionError("extension.json 无效：\n  " + validated.errors.join("\n  "));
   const descriptor = validated.value;
   const pkg = JSON.parse(fs.readFileSync(path.join(extensionDir, "package.json"), "utf8"));
-  const version = descriptor.version ?? pkg.version;
-  if (typeof version !== "string") throw new PackExtensionError("无法确定版本：extension.json 与 package.json 都没有 version");
+  // 分发版本只有一个真源：extension.json 的 version。
+  // `package.json` 只是副本，缺真源时不再兜底补齐（change: 2026-11-13-add-extension-version-governance）：
+  // 兜底会让"没声明版本"的目录悄悄打出一个看起来正常的包，而那正是市场升级判定失真的起点。
+  const version = descriptor.version;
+  if (typeof version !== "string" || version.trim() === "") {
+    throw new PackExtensionError(
+      "extension.json 没有声明 version（分发版本真源）：先运行 `pnpm ext:bump " +
+        (descriptor.extensionId ?? "<id>") +
+        " --patch` 或手工补上三段 semver，再打包",
+      { code: "EXTENSION_VERSION_MISSING" }
+    );
+  }
+  if (pkg.version !== version) {
+    throw new PackExtensionError(
+      `package.json 的 version（${String(pkg.version)}）与 extension.json（${version}）不一致：版本只有一处真源，先统一再打包`,
+      { code: "EXTENSION_VERSION_MISMATCH" }
+    );
+  }
   if (descriptor.engines === undefined) logger({ event: "pack-default-engines", engines: defaultEngines() });
 
   const hasBrowser = hasBrowserEntry(extensionDir);

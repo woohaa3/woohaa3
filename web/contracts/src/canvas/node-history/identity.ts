@@ -18,7 +18,7 @@ import type {
  *
  * `model3d`/`composite-asset`（复合资产，含片场与炉体）承载模型脚本；非内容节点没有生成历史。
  */
-export function nodeHistoryKindForNodeType(type: string, _data?: unknown): "text" | "image" | "video" | "audio" | "model" | null {
+export function nodeHistoryKindForNodeType(type: string, _data?: unknown): "text" | "image" | "video" | "audio" | "motion" | "model" | null {
   switch (type) {
     case "text":
       return "text";
@@ -26,6 +26,8 @@ export function nodeHistoryKindForNodeType(type: string, _data?: unknown): "text
       return "image";
     case "video":
       return "video";
+    case "motion":
+      return "motion";
     case "audio":
       return "audio";
     case "model3d":
@@ -37,7 +39,7 @@ export function nodeHistoryKindForNodeType(type: string, _data?: unknown): "text
 }
 
 /** 历史种类 → 节点类型集合（权威恢复时校验节点类型兼容）。 */
-export function nodeTypesForHistoryKind(kind: "text" | "image" | "video" | "audio" | "model"): readonly string[] {
+export function nodeTypesForHistoryKind(kind: "text" | "image" | "video" | "audio" | "motion" | "model"): readonly string[] {
   switch (kind) {
     case "text":
       return ["text"];
@@ -45,6 +47,8 @@ export function nodeTypesForHistoryKind(kind: "text" | "image" | "video" | "audi
       return ["image"];
     case "video":
       return ["video"];
+    case "motion":
+      return ["motion"];
     case "audio":
       return ["audio"];
     case "model":

@@ -12,7 +12,8 @@ export type ExecutionPanelTaskKind =
 	| "text-generation"
 	| "image-generation"
 	| "video-generation"
-	| "audio-generation";
+	| "audio-generation"
+	| "motion-generation";
 
 /** 面板所在的面（对齐原工程 editor surface）。 */
 export type ExecutionPanelSurface = "canvas" | "sidebar" | "dock";
@@ -433,4 +434,5 @@ export const DEFAULT_MODEL_CONFIG_BY_KIND: Record<
 	"image-generation": IMAGE_MODEL_CONFIG,
 	"video-generation": VIDEO_MODEL_CONFIG,
 	"audio-generation": AUDIO_MODEL_CONFIG,
+	"motion-generation": { modelOptions: [], defaultModel: "" },
 };

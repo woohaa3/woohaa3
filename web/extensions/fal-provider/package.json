@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-fal-provider",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "fal.ai Provider：按 endpoint id 读取队列 OpenAPI 定义，图片、视频、音频与文本都走队列接口。",

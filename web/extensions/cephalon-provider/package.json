@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-cephalon-provider",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "端脑云（Cephalon Cloud）生成 Provider：从 GET /user-center/v1/models 发现模型，文本走 Chat Completions，图片走 Images，视频走异步任务。",

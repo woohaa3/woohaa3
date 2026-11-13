@@ -129,7 +129,7 @@ export class CanvasRunService {
     const model = catalog.models.find((entry) => entry.modelKey === modelKey);
     if (!model) return { ok: false, code: "unknown-model", message: `模型 ${modelKey} 不可用` };
     const nodeType: CanvasTaskNodeType =
-      node.type === "text" || node.type === "image" || node.type === "video" || node.type === "audio"
+      node.type === "text" || node.type === "image" || node.type === "video" || node.type === "audio" || node.type === "motion"
         ? node.type
         : "image";
     if (!isNodeModelTypeMatch(nodeType, model.modelType)) {

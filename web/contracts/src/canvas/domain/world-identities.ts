@@ -8,7 +8,7 @@ import { decodeModelContentVersion } from "../model-definition.js";
 import { storedHumanoidRig } from "../humanoid-rig.js";
 
 const WORLD_NODE_FIELDS = new Set(["title", "prompt", "panelPrompt", "agentId", "sceneId", "inputMapping", "workflowGroup2d", "sceneArea", "worldCamera", "imageDirectorSource", "imageDirectorGeneration"]);
-const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelRig"]);
+const MODEL_FIELDS = new Set([...WORLD_NODE_FIELDS, "sharedWorldInstance", "managedBy", "taskKind", "inputMapping", "status", "taskStatus", "activeRunId", "modelKey", "progress", "error", "errorMessage", "result", "resultPreview", "providerTaskId", "durationSeconds", "mediaContent", "outputAssetId", "posterAssetId", "resourceKind", "frozenPreview", "parameters", "modelScript", "modelScriptLanguage", "modelScriptVersion", "modelScriptStatus", "modelScriptError", "modelSourceKind", "modelAssetId", "modelContentVersion", "modelPlacement", "shotPose", "modelRig", "directorCharacterCreation"]);
 const TEXT_FIELDS = ["title", "prompt", "panelPrompt", "agentId", "sceneId"];
 const LOCAL_FIELDS = new Set(["writeLease", "lease", "toolContext", "gpuResource", "gpuHandle", "runtimeHandle", "matrix"]);
 
@@ -37,7 +37,7 @@ function json(value: unknown, seen = new Set<object>()): boolean {
 }
 
 function validResult(value: unknown): boolean {
-  if (!record(value) || !["text", "image", "video", "audio"].includes(value.kind as string)) return false;
+  if (!record(value) || !["text", "image", "video", "audio", "motion"].includes(value.kind as string)) return false;
   return Object.entries(value).every(([key, item]) => key === "kind" || (["text", "url", "posterUrl"].includes(key) && typeof item === "string") || (key === "durationSeconds" && typeof item === "number" && Number.isFinite(item)));
 }
 
@@ -131,6 +131,10 @@ export function validateWorldIdentities(nodes: readonly { id: string; type: stri
         const source = fields.imageDirectorSource;
         const keys = ["operationId", "sourceNodeId", "assetId", "contentVersion"];
         if (!record(source) || Object.keys(source).length !== keys.length || keys.some(key => typeof source[key] !== "string" || !(source[key] as string).trim())) return `Invalid imageDirectorSource on ${node.id}`;
+      }
+      if (fields.directorCharacterCreation !== undefined) {
+        const marker = fields.directorCharacterCreation;
+        if (node.type !== "model3d" || !record(marker) || Object.keys(marker).length !== 3 || typeof marker.areaId !== "string" || !marker.areaId.trim() || typeof marker.scopeVersion !== "string" || !marker.scopeVersion.trim() || (marker.kind !== "capsule" && marker.kind !== "humanoid")) return `Invalid directorCharacterCreation on ${node.id}`;
       }
       if (fields.inputMapping !== undefined && !validInputMapping(fields.inputMapping)) return `Invalid inputMapping on ${node.id}`;
       if (Object.entries(fields).some(([key, value]) => key !== "parameters" && (LOCAL_FIELDS.has(key) || /^gpu/i.test(key) || containsLocalState(value)))) return `Transient state on ${node.id}`;

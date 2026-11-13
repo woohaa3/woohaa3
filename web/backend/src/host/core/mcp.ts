@@ -1,3 +1,6 @@
+import {createHumanoidMotionTools} from "./humanoid-motion.js";
+import {composeHumanoidMotionAsset} from '../../ports/humanoid-motion-compose.js';
+import {prepareHumanoidMotionAsset} from "../../ports/humanoid-motion-asset.js";
 import { readRuntimeGeneratedImages } from "@woohaa3/application-service";
 /**
  * 核心层 · mcp：内置 MCP 服务与共享工具授权表。
@@ -23,7 +26,7 @@ import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from 
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
-  inject: ["log", "gateway", "canvas"],
+  inject: ["log", "gateway", "canvas", "task", "media", "storage"],
   apply(ctx, { env }) {
     // 持久 grant registry（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）：
     // 与应用库同目录的独立文件，避免与业务表争锁；没有可用库路径时退回内存。
@@ -121,6 +124,19 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
         return world.complete(input);
       }
     };
+    assistantWorld.humanoidMotion = createHumanoidMotionTools({
+      compose: (canvasId,walk,wave) => composeHumanoidMotionAsset(ctx.media.port(),canvasId,walk,wave),
+      readBytes: async ({canvasId,storageKey,maxBytes}) => {
+        const bucket=ctx.storage.bucket('media',{canvasId});
+        const stat=await bucket.head(storageKey);
+        if(!stat||stat.size>maxBytes)throw new Error('动作资源不可读取或超出大小限制');
+        return (await bucket.get(storageKey)).bytes;
+      },
+      world: assistantWorld,
+      task: ctx.task.port(),
+      catalog: () => ctx.task.catalog(),
+      materialize: (canvasId, result, createdAt) => prepareHumanoidMotionAsset(ctx.media.port(),canvasId,result,createdAt)
+    });
     const mcp = createMcpService({
       env,
       skillClient,

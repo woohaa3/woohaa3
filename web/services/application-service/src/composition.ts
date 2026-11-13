@@ -467,9 +467,9 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
 
   // 宿主 Agent 会话：adapter 注册表（版本绑定）+ 会话服务（accept-before-dispatch、去重、恢复）。
   const assistantRegistryHost: AgentAdapterRegistryHost = {
-    hasCapability: (id) => extensionHost.hasCapability(id),
-    resolveCapability: (id) => extensionHost.resolveCapability(id),
-    resolveCapabilityOwner: (id) => extensionHost.resolveCapabilityOwner(id),
+    hasCapability: (id, version) => extensionHost.hasCapability(id, version),
+    resolveCapability: (id, version) => extensionHost.resolveCapability(id, version),
+    resolveCapabilityOwner: (id, version) => extensionHost.resolveCapabilityOwner(id, version),
     snapshot: () => extensionHost.snapshot()
   };
   // 来源连接发现注册表（change: 2026-10-16-add-agent-appserver-and-sdk-connections，任务 2.1）：

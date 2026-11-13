@@ -39,6 +39,8 @@
     "typecheck": "pnpm -C web run typecheck",
     "build:browser": "pnpm -C web run build:browser",
     "extensions:check": "node scripts/extensions-preflight.mjs",
+    "ext:bump": "node scripts/bump-extension.mjs",
+    "ext:release": "node scripts/release-extension-market.mjs",
     "pack:extension": "node scripts/pack-extension.mjs",
     "assemble:extensions": "node scripts/assemble-extension-release.mjs",
     "dev:extensions": "pnpm -C web run dev:extensions",

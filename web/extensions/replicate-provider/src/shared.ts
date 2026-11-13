@@ -21,7 +21,7 @@ export const REPLICATE_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: REPLICATE_PLUGIN_ID,
   name: "Replicate Provider",
   description: "Replicate。填写 API Token，以及要使用的模型（owner/name）。图片、视频、音频与文本都通过预测接口运行。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "replicate-provider-config", schemaVersion: 1 },

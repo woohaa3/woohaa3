@@ -23,7 +23,7 @@ import type {
 } from '@ai-sdk/provider';
 import type { PptaskExecutionReporter } from './execution.ts';
 
-export type PptaskModelType = 'language' | 'image' | 'video' | 'audio';
+export type PptaskModelType = 'language' | 'image' | 'video' | 'audio' | 'motion';
 export type PptaskJobState =
   | 'creating'
   | 'pending'
@@ -127,11 +127,18 @@ export type PptaskAudioModel = Omit<SpeechModelV4, 'doGenerate'> &
       options: SpeechModelV4CallOptions,
     ): PromiseLike<PptaskAudioResult>;
   };
+/** Non-SDK binary motion model: stable NPZ media references, never image coercion. */
+export type PptaskMotionResult = { media: { storageKey?: string; locator?: string; contentType: string; size: number; checksum?: string; motion?: {fps:number;frameCount:number;skeletonId:string;restPoseId:string;formatVersion:string} } };
+export type PptaskMotionOptions = Record<string, unknown> & {abortSignal?:AbortSignal};
+export type PptaskMotionModelImplementation = PptaskOperationMethods<PptaskMotionOptions,PptaskMotionResult>;
+export type PptaskMotionModel = PptaskMotionModelImplementation & {specificationVersion:'motion-v1';provider:string;modelId:string;doGenerate(options:PptaskMotionOptions):PromiseLike<PptaskMotionResult>};
+
 export type PptaskModel =
   | PptaskLanguageModel
   | PptaskImageModel
   | PptaskVideoModel
-  | PptaskAudioModel;
+  | PptaskAudioModel
+  | PptaskMotionModel;
 
 export type PptaskLanguageModelImplementation = Pick<LanguageModelV4, 'supportedUrls'> &
   Partial<Pick<LanguageModelV4, 'doGenerate' | 'doStream'>> &
@@ -313,6 +320,7 @@ export type CreatePptaskProviderOptions = {
   imageModel?: (modelId: string) => PptaskImageModelImplementation;
   videoModel?: (modelId: string) => PptaskVideoModelImplementation;
   audioModel?: (modelId: string) => PptaskAudioModelImplementation;
+  motionModel?: (modelId: string) => PptaskMotionModelImplementation;
   files?: FilesV4;
   /** Persistence adapter for durable Pptask jobs. */
   jobRepository?: PptaskJobRepository;
@@ -331,6 +339,7 @@ export type PptaskProvider = Omit<
   imageModel(modelId: string): PptaskImageModel;
   videoModel(modelId: string): PptaskVideoModel;
   audioModel(modelId: string): PptaskAudioModel;
+  motionModel(modelId: string): PptaskMotionModel;
   describe(model: PptaskModel): Promise<PptaskDescription>;
   upload(options: PptaskUploadOptions): Promise<PptaskUploadResult>;
   jobs: PptaskJobs;

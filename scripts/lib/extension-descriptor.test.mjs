@@ -12,6 +12,7 @@ import path from "node:path";
 
 import {
   HOST_ENGINES,
+  checkCapabilityDependencies,
   checkEnginesCompatible,
   contentDeclarationCollisions,
   isSemver,
@@ -298,4 +299,73 @@ test("engines 兼容：缺省兼容；主版本或协议不符时给出原因", 
   assert.equal(result.reasons.length, 2);
   assert.match(result.reasons.join("\n"), /hostAbi/);
   assert.match(result.reasons.join("\n"), /protocolVersion/);
+});
+
+// ---------------------------------------------------------------------------
+// 能力依赖：engines.host / engines.capabilities
+// （change: 2026-11-13-add-extension-capability-abi）
+// ---------------------------------------------------------------------------
+
+test("engines.host / engines.capabilities 接受「名字 → 正整数版本」映射", () => {
+  const value = { ...MINIMAL, engines: { hostAbi: "^1.0.0", sdkAbi: "^1.0.0", protocolVersion: 1, host: { generation: 1, storage: 1 }, capabilities: { "adapter:x": 1 } } };
+  const result = validateExtensionDescriptor(value);
+  assert.equal(result.ok, true, result.ok ? "" : result.errors.join("; "));
+});
+
+test("engines.host 的版本必须是正整数，名字必须非空", () => {
+  const bad = errorsOf({ ...MINIMAL, engines: { hostAbi: "^1", sdkAbi: "^1", protocolVersion: 1, host: { generation: 0 } } });
+  assert.match(bad, /engines\.host\.generation 必须是正整数/);
+
+  const worse = errorsOf({ ...MINIMAL, engines: { hostAbi: "^1", sdkAbi: "^1", protocolVersion: 1, host: { "": 1 } } });
+  assert.match(worse, /必须是对象|键必须是非空字符串/);
+});
+
+test("engines.host 不是对象时拒绝", () => {
+  assert.match(errorsOf({ ...MINIMAL, engines: { hostAbi: "^1", sdkAbi: "^1", protocolVersion: 1, host: ["generation"] } }), /engines\.host 必须是对象/);
+});
+
+test("checkCapabilityDependencies：服务面匹配时通过", () => {
+  const result = checkCapabilityDependencies(
+    { host: { generation: 1 } },
+    { hostServices: { generation: 1 } }
+  );
+  assert.deepEqual(result, { ok: true });
+});
+
+test("checkCapabilityDependencies：版本不符时指出两侧版本", () => {
+  const result = checkCapabilityDependencies(
+    { host: { generation: 2 } },
+    { hostServices: { generation: 1 } }
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reasons[0], /需要 generation@2，宿主提供 1/);
+});
+
+test("checkCapabilityDependencies：未知服务面单独报错", () => {
+  const result = checkCapabilityDependencies({ host: { nosuch: 1 } }, { hostServices: { generation: 1 } });
+  assert.equal(result.ok, false);
+  assert.match(result.reasons[0], /未知服务面 nosuch/);
+});
+
+test("checkCapabilityDependencies：capability 解析不到时失败", () => {
+  const result = checkCapabilityDependencies(
+    { capabilities: { "adapter:x": 1 } },
+    { hostServices: {}, resolvableCapabilities: new Map() }
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reasons[0], /adapter:x@1 在当前宿主解析不到/);
+});
+
+test("checkCapabilityDependencies：capability 只有别的版本时列出可用版本", () => {
+  const result = checkCapabilityDependencies(
+    { capabilities: { "adapter:x": 2 } },
+    { hostServices: {}, resolvableCapabilities: new Map([["adapter:x", new Set([1, 3])]]) }
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reasons[0], /需要 adapter:x@2，当前只有 @1 \/ @3/);
+});
+
+test("checkCapabilityDependencies：未声明时视为不依赖", () => {
+  assert.deepEqual(checkCapabilityDependencies(undefined, {}), { ok: true });
+  assert.deepEqual(checkCapabilityDependencies({}, { hostServices: { generation: 1 } }), { ok: true });
 });

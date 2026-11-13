@@ -1014,3 +1014,38 @@ test("开发者目录装载的扩展同步进入配置安装清单", async (t) =
   assert.equal(row.directory, directory);
   assert.equal(row.writable, false);
 });
+
+// ---------------------------------------------------------------------------
+// 能力依赖装载期校验（change: 2026-11-13-add-extension-capability-abi）
+// ---------------------------------------------------------------------------
+
+test("capabilityDependencyProblem：服务面版本不符时给出两侧版本", async () => {
+  const { capabilityDependencyProblem } = await import("./extension-host.mjs");
+  const contracts = await loadExtensionContracts();
+  const problem = capabilityDependencyProblem(
+    { engines: { host: { generation: 2 } } },
+    { contracts }
+  );
+  assert.ok(problem, "版本不符必须被判定为不兼容");
+  assert.match(problem.message, /需要 generation@2，宿主提供 1/);
+});
+
+test("capabilityDependencyProblem：未声明或不符时放行", async () => {
+  const { capabilityDependencyProblem } = await import("./extension-host.mjs");
+  const contracts = await loadExtensionContracts();
+  assert.equal(capabilityDependencyProblem({}, { contracts }), null);
+  assert.equal(capabilityDependencyProblem({ engines: { host: { generation: 1 } } }, { contracts }), null);
+  // 没有 contracts 时不做判断（不让缺契约变成假阴性阻断启动）。
+  assert.equal(capabilityDependencyProblem({ engines: { host: { generation: 9 } } }, { contracts: null }), null);
+});
+
+test("capabilityDependencyProblem：capability 解析不到时报缺失", async () => {
+  const { capabilityDependencyProblem } = await import("./extension-host.mjs");
+  const contracts = await loadExtensionContracts();
+  const problem = capabilityDependencyProblem(
+    { engines: { capabilities: { "adapter:x": 1 } } },
+    { contracts, resolvableCapabilities: new Map() }
+  );
+  assert.ok(problem);
+  assert.match(problem.message, /adapter:x@1 在当前宿主解析不到/);
+});

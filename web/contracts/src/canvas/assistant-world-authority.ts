@@ -52,6 +52,10 @@ export function assistantWorldScopeIdentity(scope: AssistantWorldScopeSelection)
 /** Stable tool names shared by MCP registration, grant catalogs and prompts. */
 export const ASSISTANT_WORLD_TOOL = {
   readContext: "get_world_context",
+  animateHumanoid: "animate_humanoid",
+  generateHumanoidMotion: "generate_humanoid_motion",
+  getHumanoidMotion: "get_humanoid_motion",
+  applyHumanoidMotion: "apply_humanoid_motion",
   readModelRig: "get_world_model_rig",
   sampleAnimation: "sample_scene_animation",
   createModel: "create_world_model",
@@ -77,6 +81,9 @@ export const ASSISTANT_WORLD_READ_TOOLS = [ASSISTANT_WORLD_TOOL.readContext] as 
 
 /** Scene-area write tools. Membership in a 2D group never grants these. */
 export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
+  ASSISTANT_WORLD_TOOL.animateHumanoid,
+  ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
+  ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
   ASSISTANT_WORLD_TOOL.createModel,
   ASSISTANT_WORLD_TOOL.replaceModel,
   ASSISTANT_WORLD_TOOL.appendModelScript,
@@ -90,13 +97,18 @@ export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
 ] as const;
 
 export const ASSISTANT_WORLD_WRITE_TOOLS = [
+  ASSISTANT_WORLD_TOOL.animateHumanoid,
+  ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
+  ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
   WORLD_RESOURCE_TOOLS.area, WORLD_RESOURCE_TOOLS.model, WORLD_RESOURCE_TOOLS.camera,
   WORLD_RESOURCE_TOOLS.modelScript, WORLD_RESOURCE_TOOLS.animation
 ] as const;
 export const ASSISTANT_WORLD_TOOLS = [
   ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read,
-  ASSISTANT_WORLD_TOOL.sampleAnimation, ...ASSISTANT_WORLD_WRITE_TOOLS
-] as const;
+  ASSISTANT_WORLD_TOOL.sampleAnimation, ASSISTANT_WORLD_TOOL.getHumanoidMotion,
+  ...ASSISTANT_WORLD_WRITE_TOOLS
+] as const satisfies readonly AssistantWorldToolName[];
+
 export const ASSISTANT_WORLD_CAMERA_TOOLS = [
   ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read, WORLD_RESOURCE_TOOLS.camera
 ] as const;
@@ -281,6 +293,10 @@ export type AssistantWorldWriteOperation =
     }
   | {
       kind: "set-scene-animation-script";
+      /** Trusted host-only stable motion asset, committed atomically with the script. */
+      motionAsset?: import("./domain/index.js").StoredAsset;
+      motionTarget?: {instanceId:WorldId;expectedVersion:WorldVersion;scopeVersion?:WorldVersion;canvasRevision?:number};
+      motionBaseRevision?: number;
       operationId: WorldId;
       /** 导演区统一动画脚本源码（`woohaa-world-animation-js-v2`，位置轨道相对 `animationOrigin`）。 */
       script: string;
@@ -482,7 +498,7 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     "append-model-script": ["kind", "operationId", "instanceId", "expectedVersion", "chunk"],
     "patch-model-script": ["kind", "operationId", "instanceId", "expectedVersion", "oldString", "newString"],
     "set-model-transform": ["kind", "operationId", "instanceId", "expectedVersion", "transform"],
-    "set-scene-animation-script": ["kind", "operationId", "script", "duration", "loop"],
+    "set-scene-animation-script": ["kind", "operationId", "script", "duration", "loop", "motionAsset", "motionTarget", "motionBaseRevision"],
     "set-world-camera": ["kind", "operationId", "cameraId", "expectedSettingsVersion", "settings"],
     "create-world-camera": ["kind", "operationId", "nodeId", "cameraId", "settings", "cardPosition"]
   };
@@ -578,6 +594,20 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     };
   }
   if (value.kind === "set-scene-animation-script") {
+    if (value.motionTarget !== undefined && (!isJsonObject(value.motionTarget) || Object.keys(value.motionTarget).some(k => !["instanceId","expectedVersion","scopeVersion","canvasRevision"].includes(k)) || !isBoundedId(value.motionTarget.instanceId) || !isBoundedId(value.motionTarget.expectedVersion) || (value.motionTarget.scopeVersion!==undefined&&!isBoundedId(value.motionTarget.scopeVersion)) || (value.motionTarget.canvasRevision!==undefined&&(!Number.isInteger(value.motionTarget.canvasRevision)||(value.motionTarget.canvasRevision as number)<0)))) return {ok:false,code:"invalid-data",message:"动作目标版本无效"};
+    if (value.motionAsset !== undefined && (!Number.isInteger(value.motionBaseRevision) || (value.motionBaseRevision as number)<0)) return {ok:false,code:"invalid-data",message:"动作应用缺少导演区动画版本"};
+    if ((value.motionAsset === undefined) !== (value.motionTarget === undefined)) return {ok:false,code:"invalid-data",message:"动作资产与目标版本必须同时提供"};
+    if (value.motionAsset !== undefined) {
+      const asset = value.motionAsset;
+      if (!isJsonObject(asset) || Object.keys(asset).some(k => !['id','title','mediaKind','source','status','createdAt','metadata','nodeId','providerTaskId','provenance','durationSeconds'].includes(k))
+        || !isBoundedId(asset.id) || typeof asset.title !== 'string' || asset.mediaKind !== 'motion' || asset.source !== 'generated' || asset.status !== 'ready'
+        || typeof asset.createdAt !== 'string' || !Number.isFinite(Date.parse(asset.createdAt)) || !isJsonObject(asset.metadata)
+        || typeof asset.metadata.storageKey !== 'string' || typeof asset.metadata.checksum !== 'string'
+        || !/^[a-f0-9]{64}$/i.test(asset.metadata.checksum)) {
+        return {ok:false,code:'invalid-data',message:'动作资产必须是宿主提供的稳定 ready motion 资产'};
+      }
+    }
+
     if (typeof value.script !== "string" || value.script.trim() === ""
       || !finite(value.duration) || value.duration <= 0 || value.duration > 3600
       || typeof value.loop !== "boolean") {
@@ -585,7 +615,7 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     }
     return {
       ok: true,
-      value: { kind: "set-scene-animation-script", operationId: value.operationId, script: value.script, duration: value.duration, loop: value.loop }
+      value: { kind: "set-scene-animation-script", operationId: value.operationId, script: value.script, duration: value.duration, loop: value.loop, ...(value.motionBaseRevision === undefined ? {} : {motionBaseRevision:value.motionBaseRevision as number}), ...(value.motionAsset === undefined ? {} : {motionAsset:value.motionAsset as import("./domain/index.js").StoredAsset}), ...(value.motionTarget === undefined ? {} : {motionTarget:value.motionTarget as {instanceId:WorldId;expectedVersion:WorldVersion;scopeVersion?:WorldVersion;canvasRevision?:number}}) }
     };
   }
   if (value.kind === "resize-scene-area") {

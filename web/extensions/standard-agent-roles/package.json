@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-standard-agent-roles",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "标准业务 Agent 角色插件：模型、导演区、镜头、节点组、文本、图片场景重建与讨论。只声明角色，不拥有执行通道或授权。",

@@ -1,5 +1,12 @@
 {
   "schemaVersion": 1,
   "extensionId": "cos-storage",
-  "hostPlugin": { "module": "./backend", "factory": "createCosStoragePlugin", "features": ["storage"], "order": 15 }
+  "hostPlugin": { "module": "./backend", "factory": "createCosStoragePlugin", "features": ["storage"], "order": 15 },
+  "version": "0.1.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "exposer": 1, "log": 1, "storage": 1 }
+  }
 }

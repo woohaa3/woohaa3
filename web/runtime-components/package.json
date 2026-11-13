@@ -1,1 +1,1 @@
-{"name":"@woohaa3/runtime-components","version":"0.1.0","private":true,"type":"module","exports":{".":{"types":"./index.d.ts","import":"./index.mjs"}},"scripts":{"test":"node --test *.test.mjs"}}
+{"name":"@woohaa3/runtime-components","version":"0.1.0","private":true,"type":"module","exports":{".":{"types":"./index.d.ts","import":"./index.mjs","require":"./index.mjs"}},"scripts":{"test":"node --test *.test.mjs"}}

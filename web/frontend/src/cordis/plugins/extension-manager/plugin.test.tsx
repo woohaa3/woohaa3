@@ -34,7 +34,7 @@ const IDS = CATALOG.filter((entry) => entry.configurable).map((entry) => entry.i
 async function makeHarness(options: {
   assembled?: Record<string, boolean>;
   failed?: ReadonlySet<string>;
-  /** 写入宿主配置的替身（生产实现写 \`extensions.frontend.<id>.enabled\`）。 */
+  /** 写入宿主配置的替身（生产实现写 \`extensions.<id>.enabled\`）。 */
   persist?: (id: string, enabled: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
   reload?: () => void;
   /** 站点插件状态 Service 替身（验证站点开关提交）。 */

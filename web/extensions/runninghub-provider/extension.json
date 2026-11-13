@@ -4,7 +4,7 @@
   "site": {
     "name": "RunningHub",
     "description": "RunningHub 模型 API、文字模型与临时图床；账户余额在模型提供商列表行内展示。",
-    "version": "0.1.0",
+    "version": "2.2.1",
     "configSchema": { "schemaId": "runninghub-provider-config", "schemaVersion": 1 },
     "capabilities": [
       { "id": "runninghub.balance", "kind": "handler", "description": "读取当前 RunningHub 账户余额", "auth": "authenticated" }
@@ -14,5 +14,12 @@
   },
   "metadata": { "module": "./shared", "export": "RUNNINGHUB_PLUGIN_METADATA", "order": 30 },
   "hostPlugin": { "module": "./backend", "factory": "createRunningHubProviderPlugin", "features": ["provider"], "order": 20 },
-  "icon": { "asset": "./assets/icon.png" }
+  "icon": { "asset": "./assets/icon.png" },
+  "version": "2.2.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "exposer": 1, "generation": 1, "log": 1, "storage": 1 }
+  }
 }

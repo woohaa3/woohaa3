@@ -106,3 +106,9 @@ describe("Canvas task activity DTO（任务 1.1）", () => {
     expect(decodeCanvasActivityCursor("x".repeat(513))).toBeNull();
   });
 });
+
+it("动作任务的完成消息通过活动契约校验",()=>{
+ const activity=toCanvasTaskActivity({...baseSummary,modelType:"motion",state:"succeeded",result:{mediaKind:"motion"}});
+ expect(isCanvasTaskActivity(activity)).toBe(true);
+ expect(isCanvasTaskActivityEventMessage({record:activity,cursor:2})).toBe(true);
+});

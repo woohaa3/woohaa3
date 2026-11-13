@@ -35,3 +35,8 @@ it("uninstalled, oversized and invalid formats cannot write; valid custom format
   await expect(ingestMediaObject(options)).resolves.toMatchObject({ contentType, size: 2 });
   expect(put).toHaveBeenCalledOnce();
 });
+it('accepts bounded motion NPZ objects through ordinary media ingest',async()=>{
+ const put=vi.fn();const storage={put,exists:async()=>false} as unknown as MediaStorage;
+ const result=await ingestMediaObject({storage,contentType:'application/x-npz',bytes:new Uint8Array([80,75,3,4]),maxBytes:32*1024*1024});
+ expect(result.contentType).toBe('application/x-npz');expect(put).toHaveBeenCalledOnce();
+});

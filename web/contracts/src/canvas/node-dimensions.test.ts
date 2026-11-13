@@ -27,6 +27,11 @@ describe("effectiveCanvasNodeSize", () => {
     expect(effectiveCanvasNodeSize({ type: "model3d" })).toEqual(RICH_CONTENT_NODE_SIZE);
   });
 
+  it("音频节点保留播放器最小空间", () => {
+    expect(effectiveCanvasNodeSize({ type: "audio", width: 10, height: 10 })).toEqual({ width: 200, height: 160 });
+    expect(effectiveCanvasNodeSize({ type: "audio", width: 300, height: 200 })).toEqual({ width: 300, height: 200 });
+  });
+
   it("低于共享下限的尺寸收敛到下限", () => {
     expect(effectiveCanvasNodeSize({ type: "text", width: 10, height: 10 })).toEqual({ width: 180, height: 64 });
   });

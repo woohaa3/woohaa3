@@ -1,3 +1,4 @@
+import { DirectorCharacterToolbar } from "../../plugins/task-execution/director-character-toolbar.js";
 import { agentDirectory } from "../../services/assistant-execution/directory.js";
 import { AssistantConfiguration, ReasoningParameters } from "./configuration.js";
 import { roleIdForTarget } from "../../services/agent-role-bindings.js";
@@ -425,6 +426,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
         }
         prompt={
           <div className="mc-panel__prompt-box authoring-generate__composer">
+            {props.mode === "world" && props.worldScope?.kind === "scene-area" ? <DirectorCharacterToolbar canvasId={props.canvasId} nodeId={props.nodeId} areaId={props.worldScope.areaId} writable={props.writable} /> : null}
             {props.mode === "text" ? (
               <AssistantTextInput
                 nodeId={props.nodeId}

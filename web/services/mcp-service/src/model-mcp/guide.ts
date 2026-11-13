@@ -36,7 +36,15 @@ ${methods}
 尺度约定（模型按真实世界尺度渲染）：
 - ${modelScaleGuidanceTextZh()}
 
-人形骨架（机甲、人物；白模视频要靠这些关节动起来）：
+新建人物/机器人/机甲必须优先使用 SOMA77 标准模板：
+- 调用 scene.somaHumanoid({id:"pilot",style:"mecha",armorColor:"#cbd5d1",jointColor:"#17242c",accentColor:"#ed542c",lightColor:"#45d7ff"}) 即可生成完整可见机甲和77个官方SOMA关节。无需逐个搭建骨架，不要改为14关节，也不要自己重建77关节。
+- 人物/机甲的一句话提示词应直接转为模板外观参数；保留用户指定颜色。不要仅返回解释或创建外部GLB链接。
+- 返回 const human = scene.somaHumanoid(...)；human.root 是根组，human.joint("RightHand") / human.joint("LeftHand") 可用于附加装备的 parent，坐标相对官方关节绑定坐标轴。不要把 handle 命名为 rig，也不要混用旧 rig.joint。
+- 模板固定骨架、绑定姿态和骨长；当前机甲装甲是绑定到关节的刚性可编辑部件，不宣称是官方白模的平滑蒙皮。SOMA兼容不表示已经接好Kimodo或导演区播放。
+- 新建完整最小脚本：scene.somaHumanoid({id:"pilot",style:"mecha"}); 使用 submit_model_script 提交，画布和原生渲染器均通过普通Scene IR渲染。
+- 修改已有SOMA模型时保留模板调用与id，在原脚本上修改外观参数或增加装备；禁止退化成无骨架散件。
+
+旧版14关节模型兼容说明（仅用于编辑已有 rig.joint 作品，新建人形不要采用）：
 - 系统已经有这 ${HUMANOID_V1_JOINT_IDS.length} 个关节：${HUMANOID_V1_JOINT_IDS.join("、")}。
 - 每个可见形状用 rig.joint("LeftUpperLeg") 这类调用做 parent。不要把肢体挂到 Root，也不要自造 thigh、shin、Shoulder、Chest、Neck、Hand。
 - 手和枪用 rig.joint("LeftHand") / rig.joint("RightHand")，它们是前臂挂点，不是关节。
