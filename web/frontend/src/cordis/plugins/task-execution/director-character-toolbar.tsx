@@ -23,9 +23,10 @@ export function DirectorCharacterToolbar(props: { canvasId: string; nodeId: stri
     finally { running.current = false; setBusy(false); }
   };
   return <>
-    <div className="director-character-toolbar" style={{ display: "flex", gap: 6 }}>
+    <div className="director-character-toolbar" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ color: "var(--app-web-text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>快速添加</span>
       <Button size="sm" style={{ whiteSpace: "nowrap", paddingInline: 12, flexShrink: 0 }} disabled={!props.writable || busy || !remote || !edit || !session} onClick={() => void create("capsule")}>胶囊人</Button>
-      <Button size="sm" style={{ whiteSpace: "nowrap", paddingInline: 12, flexShrink: 0 }} disabled={!props.writable || busy || !remote || !edit || !session} onClick={() => void create("humanoid")}>普通人</Button>
+      <Button size="sm" style={{ whiteSpace: "nowrap", paddingInline: 12, flexShrink: 0 }} disabled={!props.writable || busy || !remote || !edit || !session} onClick={() => void create("humanoid")}>骨架人</Button>
     </div>
     {error ? <p className="node-execution-dock__error">{error}</p> : null}
   </>;

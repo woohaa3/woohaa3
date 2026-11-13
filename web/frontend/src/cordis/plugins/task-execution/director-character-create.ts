@@ -84,11 +84,11 @@ export async function createDirectorCharacter(input: {
   const id = createHighEntropyId("character");
   const result = await input.edit.record([{ type: "node.add", node: { id, type: "model3d", position: { x: 0, y: 0 } }, nodeData: {
     directorCharacterCreation: { areaId: input.areaId, scopeVersion: area.value.scopeVersion, kind: input.kind },
-    title: input.kind === "capsule" ? "胶囊人" : "普通人", modelScript: definition.value.modelScript, modelScriptLanguage: definition.value.modelScriptLanguage,
+    title: input.kind === "capsule" ? "胶囊人" : "骨架人", modelScript: definition.value.modelScript, modelScriptLanguage: definition.value.modelScriptLanguage,
     modelScriptVersion: definition.value.modelScriptVersion, modelContentVersion: definition.value.contentVersion,
     modelPlacement: definition.value.placement, ...(definition.value.rig ? { modelRig: definition.value.rig } : {}),
     sharedWorldInstance: { kind: "world-instance", version: "shared-world-v1", instanceId: id,
       transform: { version: "shared-world-v1", position: { ...point, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 } },
-  } }], input.kind === "capsule" ? "创建胶囊人" : "创建普通人");
+  } }], input.kind === "capsule" ? "创建胶囊人" : "创建骨架人");
   if (!result.ok) throw new Error(result.reason);
 }

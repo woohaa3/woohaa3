@@ -12,6 +12,7 @@ import "./authoring-generate-panel.css";
 
 type AuthoringLayoutProps = {
   inspector: boolean;
+  quickActions?: ReactNode;
   references?: ReactNode;
   mcp: ReactNode;
   prompt: ReactNode;
@@ -55,6 +56,7 @@ export function AuthoringGenerateSurface({
 /** Dock and inspector use the same five-control assistant toolbar. */
 export function AuthoringGenerateLayout({
   inspector,
+  quickActions,
   references,
   mcp,
   prompt,
@@ -139,6 +141,9 @@ export function AuthoringGenerateLayout({
   return (
     <>
       <div className="authoring-generate__header">
+        {quickActions ? (
+          <div className="authoring-generate__quick-actions">{quickActions}</div>
+        ) : null}
         {references ? (
           <div className="authoring-generate__references">{references}</div>
         ) : null}
