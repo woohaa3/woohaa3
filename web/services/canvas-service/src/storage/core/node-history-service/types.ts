@@ -97,12 +97,12 @@ export type RegisterTaskHistoryInput = {
   /** 该次执行使用的模型身份（Task 记录的 modelKey）；写入 source.modelId。 */
   modelKey?: string;
   jobId?: string;
-  kind: "text" | "image" | "video" | "audio";
+  kind: "text" | "image" | "video" | "audio" | "motion";
   createdAt: string;
   output:
     | { mediaKind: "text"; text: string }
     | {
-        mediaKind: "image" | "video" | "audio";
+        mediaKind: "image" | "video" | "audio" | "motion";
         asset: StoredAsset;
         posterAsset?: StoredAsset;
         durationSeconds?: number;

@@ -52,18 +52,13 @@ describe("MCP 工具目录", () => {
         runAvailability: { available: true },
         principalId: "test",
         world: {
-          readContext: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          createModel: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          replaceModel: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          moveModel: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          setAnimation: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          resizeArea: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          createCamera: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          setCamera: async () => ({ ok: false, code: "unavailable", message: "unused" }),
-          completeCamera: async () => ({ ok: false, code: "unavailable", message: "unused" })
+          read: async () => ({ ok: false, code: "unavailable", message: "unused" }),
+          write: async () => ({ ok: false, code: "unavailable", message: "unused" }),
+          complete: async () => ({ ok: false, code: "unavailable", message: "unused" })
         } as never
       }
     });
-    expect(names).toEqual(expect.arrayContaining(["get_world_context", "create_world_model", "set_world_camera", "complete_world_camera"]));
+    expect(names).toEqual(expect.arrayContaining(["get_world_context", "read_world_resource", "edit_world_model", "edit_world_camera", "edit_world_model_script", "edit_scene_animation_script"]));
+    expect(names).not.toEqual(expect.arrayContaining(["edit_scene_area", "resize_scene_area", "create_world_model", "set_world_camera", "complete_world_camera"]));
   });
 });

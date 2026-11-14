@@ -102,8 +102,7 @@ export function isCanvasSourceProviderShape(value: unknown): value is CanvasSour
   );
 }
 
-export function isCanvasSourceTrustedContext(value: unknown): value is CanvasSourceTrustedContext {
-  if (!isJsonObject(value)) return false;
+export function isCanvasSourceTrustedContext(value: unknown): value is CanvasSourceTrustedContext {  if (!isJsonObject(value)) return false;
   return (
     isBoundedId(value.subject, 200) &&
     isBoundedId(value.extensionId, 120) &&

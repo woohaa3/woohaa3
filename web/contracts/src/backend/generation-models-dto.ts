@@ -13,7 +13,7 @@ export const DEFAULT_GENERATION_MODELS_BASE_PATH = "/api/generation-models";
 export type GenerationModelPolicyView = {
   modelKey: string;
   providerId: string;
-  modelType: "language" | "image" | "video" | "audio";
+  modelType: "language" | "image" | "video" | "audio" | "motion";
   title?: string;
   enabled: boolean;
   isDefault: boolean;

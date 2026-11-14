@@ -64,8 +64,7 @@ describe("canvas-upstream capability 交接", () => {
       extensionId: "canvas-upstream-test",
       activate: (host) => {
         host.registerCapability({
-          id: PROVIDER_CAPABILITY,
-          value: {
+          id: PROVIDER_CAPABILITY, version: 1, value: {
             providerId: "test-upstream",
             resolve: async (canvasId: string) => {
               resolvedCanvases.push(canvasId);

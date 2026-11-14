@@ -25,7 +25,7 @@ export function createSampleSiteExtensionDefinition(probe: SampleExtensionProbe)
     requiredDependencies: ["sample.fixture.runtime"],
     activate: (host) => {
       // runtime 由依赖的 owner 提供；插件只注册自己的能力，避免覆盖依赖。
-      host.registerCapability({ id: "sample.fixture.action", value: { kind: "sample-action" } });
+      host.registerCapability({ id: "sample.fixture.action", version: 1, value: { kind: "sample-action" } });
       host.registerHandler({
         route: "sample/echo",
         auth: "authenticated",

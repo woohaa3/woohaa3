@@ -37,6 +37,7 @@ export type TurnRuntimeDeps = {
   workspaceKey: string;
   processes: ExecutorProcessPort;
   hostFor?: (input: TurnRunInput) => ExecutorHostPort | null;
+  workspaceFor?: (input: TurnRunInput) => { cwd: string; release(): void } | undefined;
 };
 
 export class TurnStore {
@@ -208,8 +209,11 @@ export class TurnStore {
     }
     const operation = (async () => {
       let outcome: ExecutorOutcome;
+      let workspace: ReturnType<NonNullable<TurnRuntimeDeps["workspaceFor"]>>;
       try {
+        workspace = deps.workspaceFor?.(input);
         outcome = await executor.run(input, {
+          ...(workspace ? { workspace: { cwd: workspace.cwd } } : {}),
           signal: controller.signal,
           turnId: record.turnId,
           requestId: record.requestId,
@@ -228,6 +232,7 @@ export class TurnStore {
           ? { status: "cancelled", error: { code: "cancelled", message: "执行已取消" } }
           : { status: "failed", error: { code: "executor-error", message: error instanceof Error ? error.message : String(error) } };
       } finally {
+        workspace?.release();
         if (record.timer) clearTimeout(record.timer);
         record.controller = undefined;
         record.timer = undefined;

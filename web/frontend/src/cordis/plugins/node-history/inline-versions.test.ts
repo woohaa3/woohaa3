@@ -5,7 +5,7 @@ import type { NodeGenerationHistoryListItem } from "@woohaa3/contracts";
 const item = (id: string, current=false) => ({entryId:id,nodeId:"n",nodeTitle:"test",kind:"image",createdAt:id,current,recoverable:true,outcome:"succeeded",previewable:true,source:{label:id},preview:{}} as unknown as NodeGenerationHistoryListItem & {nodeId:string;nodeTitle:string});
 function setup(items=[item("a"),item("b",true),item("c")], storage?: Pick<Storage,"getItem"|"setItem">|null) {
   const apply=vi.fn(async (_input: unknown) => ({ok:true as const}));
-  const client={listCanvas:vi.fn(async()=>({ok:true as const,items,nextCursor:null,total:items.length,kindCounts:{image:items.length,text:0,video:0,audio:0,model:0}})),apply,
+  const client={listCanvas:vi.fn(async()=>({ok:true as const,items,nextCursor:null,total:items.length,kindCounts:{image:items.length,text:0,video:0,audio:0,motion:0,model:0}})),apply,
     list:vi.fn(),detail:vi.fn(async()=>({ok:false as const,code:"missing",error:"missing"})),previewUrl:vi.fn()};
   const report=vi.fn();
   const onApplyError=vi.fn();

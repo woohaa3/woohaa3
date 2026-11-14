@@ -71,7 +71,7 @@ async function startHarness(): Promise<Harness> {
   await host.activate({
     extensionId: "sample-runtime-owner",
     activate: (h) => {
-      h.registerCapability({ id: "sample.fixture.runtime", value: { kind: "sample-runtime" } });
+      h.registerCapability({ id: "sample.fixture.runtime", version: 1, value: { kind: "sample-runtime" } });
     }
   });
   const plane = createSiteExtensionControlPlane({
@@ -212,7 +212,7 @@ describe("样例站点插件独立验收（任务 5.1）", () => {
           extensionId: SAMPLE_SITE_EXTENSION_METADATA.extensionId,
           requiredDependencies: ["missing-dependency"],
           activate: (h) => {
-            h.registerCapability({ id: "should-not-exist", value: 1 });
+            h.registerCapability({ id: "should-not-exist", version: 1, value: 1 });
           }
         }
       ]

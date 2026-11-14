@@ -501,6 +501,18 @@ pub fn install(
                 }
                 return;
             }
+            if request.uri().path() == "/workspace-folder" {
+                let app = ctx.app_handle().clone();
+                std::thread::spawn(move || {
+                    let _reservation = reservation;
+                    let result = if request.method() == tauri::http::Method::POST {
+                        crate::workspace_fs::control(&app, request.body())
+                    } else { Err("目录操作需要 POST".into()) };
+                    let value = match result { Ok(value) => json!({"ok":true,"value":value}), Err(error) => json!({"ok":false,"error":error}) };
+                    respond(serde_json::to_vec(&value).unwrap(), "application/json");
+                });
+                return;
+            }
             let queued = std::time::Instant::now();
             let app = ctx.app_handle().clone();
             let _ = ctx.app_handle().run_on_main_thread(move || {

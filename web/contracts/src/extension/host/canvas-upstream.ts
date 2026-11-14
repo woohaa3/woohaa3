@@ -29,6 +29,13 @@ import type { CanvasAccess } from "../../canvas/catalog.js";
 /** capability id 前缀。 */
 export const CANVAS_UPSTREAM_CAPABILITY_PREFIX = "canvas-upstream:";
 
+/**
+ * `canvas-upstream:<providerId>` 的形状版本
+ * （change: 2026-11-13-add-extension-capability-abi）。`CanvasUpstreamProvider` 的成员或语义
+ * 变化时抬高；提供方按此版本注册，Backend 按此版本解析。
+ */
+export const CANVAS_UPSTREAM_CAPABILITY_VERSION = 1;
+
 export function canvasUpstreamCapabilityId(providerId: string): string {
   return `${CANVAS_UPSTREAM_CAPABILITY_PREFIX}${providerId}`;
 }

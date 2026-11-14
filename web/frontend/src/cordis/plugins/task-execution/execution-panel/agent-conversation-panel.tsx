@@ -26,12 +26,12 @@ import {
   type ConversationToolActivity,
 } from "@woohaa3/contracts";
 import type { AgentConversationServiceHandle } from "../../../services/agent-conversation-service.js";
-import { assistantInputController } from "../../../services/assistant-execution/controller.js";
+import { assistantInputController, clearAssistantExpansionDrafts } from "../../../services/assistant-execution/controller.js";
 import { assistantConversationPort } from "../../../services/assistant-execution/conversation-port.js";
 import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from "../../../contract/agent-conversation.js";
 import { AssistantComposer } from "@woohaa3/ui/assistant";
 import { AssistantToolbar } from "@woohaa3/ui/assistant";
-import { Button } from "@woohaa3/ui/primitives";
+import { Button, Switch } from "@woohaa3/ui/primitives";
 import { AssistantConfiguration, ReasoningParameters } from "../../../ui/assistant-execution/configuration.js";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
@@ -286,6 +286,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
         ...(continuationWorldScope ? { worldScope: continuationWorldScope } : {}),
         ...(continuationTarget?.cameraId ? { cameraId: continuationTarget.cameraId } : {}),
         ...(execution ? { ...execution, action: "modify", prompt } : {}),
+        ...(continuationMode === "world" && continuationWorldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.draft.allowSceneAreaExpansion === true } : {}),
         // 用户在侧栏显式选择的模型优先于旧目标携带的模型。
         model: replyModel || undefined,
         reasoningEffort: replyEffort || undefined,
@@ -302,6 +303,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
   const clearContext = useCallback(() => {
     const canvasId = service.getDetail()?.conversation.canvasId;
     if (!props.nodeId || !canvasId) return;
+    const dataScopeId = service.getDataScopeId?.() ?? "page";
     setContextError(null);
     void service
       .clearContext({ canvasId, nodeId: props.nodeId })
@@ -310,6 +312,7 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
           setContextError(result.error);
           return;
         }
+        clearAssistantExpansionDrafts(service, { dataScopeId, canvasId, nodeId: props.nodeId });
         setConfirmClear(false);
         props.onClose();
       });
@@ -524,6 +527,16 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
           parameters={<ReasoningParameters value={replyEffort} options={modelSelection.supportedEfforts} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={input.busy || turnActive || Boolean(input.pending)}
             onChange={effort => { controller.edit({ efforts: { ...input.draft.efforts, [effortKey]: effort as typeof replyEffort } }); rememberReply(replyModel, effort as typeof replyEffort); }} />}
 
+          beforeSubmit={continuationMode === "world" && continuationWorldScope?.kind === "scene-area" ? (
+            <label className="assistant-size-lock">
+              <Switch
+                checked={input.draft.allowSceneAreaExpansion !== true}
+                disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)}
+                onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
+              />
+              锁定大小
+            </label>
+          ) : null}
           submit={<Button type="submit" tone="primary" disabled={input.busy || draft.trim() === "" || turnActive || (!modifying && turn?.target.mode !== "text") || Boolean(selectionReason && !input.pending)}>发送并修改</Button>} />
         {selectionReason ? <p className="agent-detail__reply-error">{selectionReason}</p> : null}
         {input.pending ? <button type="button" disabled={input.busy} onClick={() => void controller.query(port)}>核对原请求</button> : null}

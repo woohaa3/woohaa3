@@ -25,13 +25,15 @@ describe("四媒体节点/kind/model 类型", () => {
       text: "text-generation",
       image: "image-generation",
       video: "video-generation",
-      audio: "audio-generation"
+      audio: "audio-generation",
+      motion: "motion-generation"
     });
     expect(TASK_KIND_TO_MODEL_TYPE).toEqual({
       "text-generation": "language",
       "image-generation": "image",
       "video-generation": "video",
-      "audio-generation": "audio"
+      "audio-generation": "audio",
+      "motion-generation": "motion"
     });
   });
 

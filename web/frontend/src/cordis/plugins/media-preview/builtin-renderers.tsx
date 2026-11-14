@@ -10,7 +10,7 @@ import { lazy, Suspense, useSyncExternalStore } from "react";
 import { AlertDialog } from "@woohaa3/ui/dialogs";
 const MediaDialog = lazy(() => import("@woohaa3/ui/media").then(module => ({ default: module.MediaDialog })));
 import type { DialogRendererProps } from "../../services/dialogs/renderer-registry.js";
-import { resolveAudioPreview, resolveImagePreview } from "./media-preview.js";
+import { resolveAudioPreview, resolveImagePreview, resolveMotionPreview } from "./media-preview.js";
 import { resolveTextPreview } from "./text-preview.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { DialogsService } from "../../contracts.js";
@@ -18,6 +18,8 @@ import type { ServerCanvas } from "@woohaa3/contracts";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DialogBody, DialogContent, DialogHeader, DialogTitle } from "@woohaa3/ui/dialogs";
+
+const SomaMotionPlayer = lazy(() => import("../../../shared/soma-motion/player.js").then(module => ({ default: module.SomaMotionPlayer })));
 
 type AlertPayload = {
   title: string;
@@ -42,6 +44,13 @@ export function createMediaPreviewRenderer() {
   return function MediaPreviewRenderer({ instance, requestClose }: DialogRendererProps) {
     const canvas = useCanonicalCanvas();
     const payload = instance.payload as import("./media-preview.js").MediaPreviewPayload;
+    if (payload.kind === "motion") {
+      const motion = canvas?.id === payload.canvasId ? resolveMotionPreview(canvas, payload.nodeId, payload.assetId) : null;
+      return <DialogContent size="lg" ariaLabel="动作预览" instanceId={instance.instanceId}>
+        <DialogHeader onClose={requestClose}><DialogTitle>{motion?.title ?? payload.title}</DialogTitle></DialogHeader>
+        <DialogBody>{motion ? <Suspense fallback={<p>正在载入播放器…</p>}><SomaMotionPlayer url={motion.url} fps={motion.fps} expectedFrameCount={motion.frameCount} /></Suspense> : <p>动作输出已更换或不可读取</p>}</DialogBody>
+      </DialogContent>;
+    }
     const audio = payload.kind === "audio" && canvas?.id === payload.canvasId ? resolveAudioPreview(canvas, payload.nodeId, payload.assetId) : null;
     const resolved = payload.kind === "audio" ? audio : resolveImagePreview(canvas, payload.assetId);
     return (

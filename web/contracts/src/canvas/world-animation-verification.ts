@@ -13,7 +13,7 @@ function diagnosticTimes(ir: WorldAnimationIr, maximum: number): number[] {
   const times = new Set<number>([0,ir.duration]);
   const add = (time:number) => { if(Number.isFinite(time) && time>=0 && time<=ir.duration) times.add(time); };
   for(let i=1;i<32;i++)add(ir.duration*i/32);
-  for(const track of [...ir.instanceTracks,...(ir.partTracks ?? []),...(ir.walkTracks ?? [])]) {
+  for(const track of [...ir.instanceTracks,...(ir.partTracks ?? []),...(ir.walkTracks ?? []),...(ir.somaTracks ?? [])]) {
     add(track.startTime);add(track.endTime);
     for(const fraction of [0.25,0.5,0.75])add(track.startTime+(track.endTime-track.startTime)*fraction);
     const cycle = "partId" in track ? (track as WorldPartTrack).cycle : undefined;
@@ -32,9 +32,11 @@ function diagnosticTimes(ir: WorldAnimationIr, maximum: number): number[] {
 }
 
 export function analyzeWorldAnimationData(ir:WorldAnimationIr, models:readonly Model[], origin:GroundPoint, area?:GroundAabb, quarterTurns = 0) {
-  const targets=new Set([...ir.instanceTracks,...(ir.partTracks ?? []),...(ir.walkTracks ?? [])].map(track=>track.targetId));
+  const targets=new Set([...ir.instanceTracks,...(ir.partTracks ?? []),...(ir.walkTracks ?? []),...(ir.somaTracks ?? [])].map(track=>track.targetId));
   const byId=new Map(models.map(model=>[model.instanceId,model]));
-  const unavailableTargets=new Set<string>();
+  // This diagnostic uses the legacy rig geometry, which does not evaluate SOMA root deltas.
+  // Report incomplete coverage until SOMA-aware geometry diagnostics exist.
+  const unavailableTargets=new Set<string>((ir.somaTracks ?? []).map(track=>track.targetId));
   const issues=new Map<string,Issue>();
   // Bound combined geometry evaluations as well as timeline coverage.
   const maximum=Math.max(2,Math.min(96,Math.floor(512/Math.max(1,targets.size))));

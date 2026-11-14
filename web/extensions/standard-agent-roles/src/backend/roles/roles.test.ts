@@ -95,8 +95,8 @@ describe("standard-agent-roles", () => {
     expect(director).toContain("默认 4×4 米");
     expect(director).toContain("读取工具只是准备阶段，不是完成结果");
     expect(director).toContain("至少一个写工具");
-    expect(director).toContain("resize_scene_area");
-    expect(director).toContain("重新 get_world_context");
+    expect(director).toContain("锁定大小策略");
+    expect(director).not.toContain("edit_scene_area");
     for (const term of ["outside-scope", "version-conflict", "version-unknown", "不要伪造版本"]) {
       expect(director, term).toContain(term);
     }
@@ -118,4 +118,12 @@ describe("standard-agent-roles", () => {
     expect(prepared.messages[0]!.content).toContain("Return only JSON");
     expect(textAuthorRole.definition.output.kind).toBe("candidate");
   });
+});
+
+it("模型作者和导演区生成提示使用SOMA77工厂",()=>{
+ for(const id of ["model-author","scene-director"]){
+  const role=STANDARD_AGENT_ROLES.find(r=>r.definition.id===id)!;
+  expect(role.definition.instructions).toContain("scene.somaHumanoid");
+  expect(role.definition.instructions).toContain("77个SOMA关节");
+ }
 });

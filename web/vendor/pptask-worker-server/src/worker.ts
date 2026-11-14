@@ -177,6 +177,7 @@ export function createPptaskWorker(options: PptaskWorkerOptions): PptaskWorker {
   }
 
   function resolveModel(provider: PptaskProvider, modelType: PptaskModelType, modelId: string) {
+    if (modelType === 'motion') return provider.motionModel(modelId);
     if (modelType === 'image') return provider.imageModel(modelId);
     if (modelType === 'video') return provider.videoModel(modelId);
     if (modelType === 'audio') return provider.audioModel(modelId);

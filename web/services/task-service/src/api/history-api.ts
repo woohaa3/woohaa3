@@ -137,7 +137,7 @@ function handleCandidates(
   const providerId = url.searchParams.get("providerId");
   if (providerId) query.providerId = providerId.slice(0, 200);
   const modelType = url.searchParams.get("modelType");
-  if (modelType === "language" || modelType === "image" || modelType === "video" || modelType === "audio") {
+  if (modelType === "language" || modelType === "image" || modelType === "video" || modelType === "audio" || modelType === "motion") {
     query.modelType = modelType;
   }
   const limit = Number(url.searchParams.get("limit") ?? "0");

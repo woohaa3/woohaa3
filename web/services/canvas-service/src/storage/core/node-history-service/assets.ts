@@ -103,7 +103,9 @@ export function mediaAssetFor(entry: NodeGenerationHistoryEntry, payload: NodeHi
       storageKey: payload.storageKey,
       checksum: payload.checksum,
       contentType: payload.contentType,
-      size: payload.size
+      size: payload.size,
+      ...(payload.fps !== undefined ? { fps: payload.fps } : {}),
+      ...(payload.motion ? { motion: { ...payload.motion } } : {})
     }
   };
 }

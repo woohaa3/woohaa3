@@ -76,11 +76,12 @@ export async function executeDerived(
     expectedModelBatchHash?: string;
     /** T06: same operationId must carry the same frozen scene-area intent. */
     expectedWorldAuthoringHash?: string;
+    expectedResourceEditHash?: string;
     derive: (canvas: ServerCanvas) =>
-      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt }
+      | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt; resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt }
       | { ok: false; code: string; message: string }
       | Promise<
-          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt }
+          | { ok: true; batch: CanvasCommandBatch; script?: CanvasScriptSubmissionMeta; modelBatch?: ModelScriptBatchMeta; worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt; resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt }
           | { ok: false; code: string; message: string }
         >;
   },
@@ -95,6 +96,9 @@ export async function executeDerived(
   // 幂等预检在派生之前：命中同 commandId 的回执直接返回首次结果，不重新读取/应用变更。
   const existing = input.commandId.trim() === "" ? null : await host.repository.getCommandRecord(host.canvasId, input.commandId);
   if (existing) {
+    if (input.expectedResourceEditHash !== undefined && existing.resourceEdit?.intentHash !== input.expectedResourceEditHash) return {
+      ok: false, status: "rejected", commandId: input.commandId, code: "request-id-reused", message: "相同 operationId 使用了不同资源编辑意图"
+    };
     if (input.expectedWorldAuthoringHash !== undefined && existing.worldAuthoring?.intentHash !== input.expectedWorldAuthoringHash) return {
       ok: false, status: "rejected", commandId: input.commandId, code: "request-id-reused", message: "相同 operationId 使用了不同场景意图"
     };
@@ -121,6 +125,7 @@ export async function executeDerived(
       ...(existing.script ? { script: existing.script } : {}),
       ...(existing.modelBatch ? { modelBatch: existing.modelBatch } : {}),
       ...(existing.worldAuthoring ? { worldAuthoring: existing.worldAuthoring } : {}),
+      ...(existing.resourceEdit ? { resourceEdit: existing.resourceEdit } : {}),
       duplicate: true
     };
   }
@@ -135,7 +140,7 @@ export async function executeDerived(
   if (!derived.ok) {
     return { ok: false, status: "rejected", commandId: input.commandId, code: derived.code, message: derived.message };
   }
-  return executeCommand(host, derived.batch, { ...options, ...(derived.script ? { script: derived.script } : {}), ...(derived.modelBatch ? { modelBatch: derived.modelBatch } : {}), ...(derived.worldAuthoring ? { worldAuthoring: derived.worldAuthoring } : {}) });
+  return executeCommand(host, derived.batch, { ...options, ...(derived.script ? { script: derived.script } : {}), ...(derived.modelBatch ? { modelBatch: derived.modelBatch } : {}), ...(derived.worldAuthoring ? { worldAuthoring: derived.worldAuthoring } : {}), ...(derived.resourceEdit ? { resourceEdit: derived.resourceEdit } : {}) });
 }
 
 export async function executeCommand(
@@ -243,7 +248,8 @@ export async function executeCommand(
     // noop 也保存首次回执（spec）；元数据在首次提交时冻结。
     ...(options?.script ? { script: options.script } : {}),
     ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {}),
-    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {})
+    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {}),
+    ...(options?.resourceEdit ? { resourceEdit: options.resourceEdit } : {})
   };
 
   // 无净变化：仍持久化幂等记录，但 update 为空、revision 不变（design D5）。
@@ -294,7 +300,8 @@ export async function executeCommand(
     update: acceptedUpdate,
     ...(options?.script ? { script: options.script } : {}),
     ...(options?.modelBatch ? { modelBatch: options.modelBatch } : {}),
-    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {})
+    ...(options?.worldAuthoring ? { worldAuthoring: options.worldAuthoring } : {}),
+    ...(options?.resourceEdit ? { resourceEdit: options.resourceEdit } : {})
   };
 }
 
@@ -356,6 +363,7 @@ function duplicateResult(
     ...(existing.script ? { script: existing.script } : {}),
       ...(existing.modelBatch ? { modelBatch: existing.modelBatch } : {}),
       ...(existing.worldAuthoring ? { worldAuthoring: existing.worldAuthoring } : {}),
+      ...(existing.resourceEdit ? { resourceEdit: existing.resourceEdit } : {}),
     duplicate: true
   };
 }

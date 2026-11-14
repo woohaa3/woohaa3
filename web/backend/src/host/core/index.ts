@@ -63,6 +63,7 @@ export async function loadCoreLayer(ctx: HostContext, options: CoreLayerOptions)
       ctx.plugin(applicationPlugin, {
         env,
         basePath: options.basePath,
+        ...(options.desktopCanvasAgentWorkspace ? { desktopCanvasAgentWorkspace: options.desktopCanvasAgentWorkspace } : {}),
         ...(options.applicationExtensionMetadata ? { applicationExtensionMetadata: options.applicationExtensionMetadata } : {}),
         ...(options.applicationBackendExtensions ? { applicationBackendExtensions: options.applicationBackendExtensions } : {}),
         ...(options.chatgptServiceOptions ? { chatgptServiceOptions: options.chatgptServiceOptions } : {}),

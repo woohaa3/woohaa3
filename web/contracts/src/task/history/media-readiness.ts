@@ -27,8 +27,8 @@ export type TaskMediaReadinessInput = {
   result?: Pick<TaskResultSummary, "mediaKind" | "mediaState" | "storageKey" | "checksum" | "poster">;
 };
 
-function isBinaryKind(value: string | undefined): value is "image" | "video" | "audio" {
-  return value === "image" || value === "video" || value === "audio";
+function isBinaryKind(value: string | undefined): value is "image" | "video" | "audio" | "motion" {
+  return value === "image" || value === "video" || value === "audio" || value === "motion";
 }
 
 /** 该任务是否属于二进制媒体任务（模型类型或结果都可用于判定）。 */

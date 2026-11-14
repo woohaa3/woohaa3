@@ -1,0 +1,31 @@
+/** Opt-in real local server + separately running protocol mock; no inference. */
+import {it,expect} from 'vitest';
+import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {prepareSomaMotion,sampleSomaMotion} from '@woohaa3/contracts';
+import {createServerStorageBackend} from '../src/backend/storage/backend.js';
+import {exchangeLogin,callConnect} from '../src/backend/connect.js';
+import {createGenerationClient} from '../src/backend/generation/client.js';
+import {decodeGenerationCatalog} from '../src/backend/generation/protocol.js';
+import {createRemoteGenerationProvider,prepareRemoteGenerationInput} from '../src/backend/generation/provider.js';
+const base=process.env.WOOHAA_MOTION_TEST_SERVER;
+it.skipIf(!base)('logs in through remote-server then completes real signed-upload motion job',async()=>{
+ const login=await exchangeLogin(fetch,Date.now,{serverUrl:base!,credential:process.env.WOOHAA_MOTION_TEST_TOKEN??'dev'});
+ expect(login.ok).toBe(true);if(!login.ok)throw Error(login.message);const session=login.session;
+ const bad=await exchangeLogin(fetch,Date.now,{serverUrl:base!,credential:'invalid-local-token'});expect(bad.ok).toBe(false);
+ const create=await callConnect<{canvas:{canvasId:string}}>(fetch,base!,'/woohaa.canvas.v1.CanvasService/CreateCanvas',{title:'SOMA mock worker verification'},{token:session.token});
+ expect(create.ok).toBe(true);if(!create.ok)throw Error(create.message);const canvasId=create.value.canvas.canvasId;
+ const client=createGenerationClient({fetchImpl:fetch});const raw=await client.getCatalog(session);expect(raw.ok).toBe(true);if(!raw.ok)throw Error(raw.message);
+ const catalog=decodeGenerationCatalog(raw.value,"remote-server");const model=catalog.models.find(m=>m.providerModelId==='kimodo-soma');expect(model?.modelType).toBe('motion');if(!model)throw Error('Start mock-kimodo-worker first');
+ const provider=createRemoteGenerationProvider({client,session:async()=>session,modelFor:()=>model,admissionFor:id=>catalog.admission.get(id),pollIntervalMs:20});
+ const input=await prepareRemoteGenerationInput({providerModelId:'kimodo-soma',modelType:'motion',prompt:'A person does a backflip.',parameters:{duration:3,steps:50},references:[],canvasId,taskKey:`mock-${crypto.randomUUID()}`}, {modelFor:()=>model,admissionFor:id=>catalog.admission.get(id)});
+ const job=await provider.jobs.start<{media:{contentType:string;checksum:string;locator:`media://${string}`;motion:{fps:number;frameCount:number}}}>({model:provider.motionModel('kimodo-soma'),input});
+ const output=await job.wait();expect(output.media.contentType).toBe('application/x-npz');expect(output.media.checksum).toBe('6f0c5ae24e3e04aa523b542c4a30a700bbe392cf3364574b107d0461996e6fec');expect(output.media.motion).toMatchObject({fps:30,frameCount:90});
+ const storage=createServerStorageBackend({config:{serverUrl:base!,keyPrefix:''},session:{ensure:async()=>({ok:true,session}),invalidate:async()=>{}}});
+ const object=await storage.readLocator!(output.media.locator);
+ expect(createHash('sha256').update(object.bytes).digest('hex')).toBe(output.media.checksum);
+ const skin=new Uint8Array(await readFile(new URL('../../../frontend/public/soma/skin_standard.npz',import.meta.url)));
+ const prepared=await prepareSomaMotion(skin,object.bytes,{fps:output.media.motion.fps});
+ expect(prepared.frameCount).toBe(90);expect(sampleSomaMotion(prepared,1).positions.every(Number.isFinite)).toBe(true);
+ console.log(JSON.stringify({verified:'remote-login-signed-worker-motion',canvasId,jobId:job.id,media:output.media}));
+},30000);

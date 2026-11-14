@@ -34,6 +34,8 @@ import type { ProcessManager } from "./process-manager.js";
 import type { LocalAgentTransport } from "./transports/transport.js";
 
 export type LocalAgentRuntimeOptions = {
+  /** Runtime-resolved canvas cwd, independent of private harness configuration. */
+  workspace?: { cwd: string };
   service: ConnectionService;
   processManager: ProcessManager;
   /** 每个 adapter 的传输（真实实现绑定回环/stdio；测试注入 fake）。 */
@@ -101,6 +103,7 @@ async function issueToolGrant(
       mode: input.intent.mode,
       ...(input.intent.cameraId ? { cameraId: input.intent.cameraId } : {}),
       ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+            ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
       ...(input.intent.mode === "canvas-group" && input.intent.expectedContentHash?.startsWith("group-epoch:")
         ? { expectedScopeEpoch: Number(input.intent.expectedContentHash.slice("group-epoch:".length)) }
         : {}),
@@ -121,7 +124,7 @@ async function issueToolGrant(
   }
 }
 
-const ADAPTER_CAPS: AgentAdapterCapabilities = { discussion: true, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" };
+const ADAPTER_CAPS: AgentAdapterCapabilities = { workspace: true, discussion: true, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" };
 
 /** 旧目录只有 reasoningEfforts 时补齐统一能力对象；修订号覆盖目录事实。 */
 function catalogSnapshot(models: AgentModelView[]): AgentCatalogSnapshot {
@@ -343,7 +346,8 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
       const promptBody = buildDiscussionPrompt(binding ? [] : input.history, roleText);
       const result = await transport.run({
         configDir: handle.configDir,
-        workDir: handle.workDir,
+        workDir: options.workspace?.cwd ?? handle.workDir,
+        workspace: options.workspace !== undefined,
         loopbackUrl: handle.loopbackUrl,
         httpHeaders: handle.httpHeaders,
         stdio: handle.stdio ?? null,
@@ -371,6 +375,11 @@ export function createLocalAgentConversationAdapter(adapter: LocalAgentAdapterDe
           // 也会以工具事件形态上报；它们不是角色工具，也不应污染本回合的失败状态。
           if (event.type === "tool-started" && ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].includes(event.tool)) return;
           if (event.type === "tool-completed" && ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].includes(event.tool)) return;
+          if (options.workspace && (event.type === "tool-started" || event.type === "tool-completed") &&
+              ["read", "list", "glob", "grep", "edit", "write", "patch", "bash", "Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "NotebookEdit"].includes(event.tool)) {
+            input.emit({ type: "stage", stage: "native-tool", detail: event.tool });
+            return;
+          }
           if (event.type === "tool-started") {
             // 工具事件是观察，不是授权计数：MCP 入口仍然逐次校验范围与撤销状态。
             observation.noteToolCall();

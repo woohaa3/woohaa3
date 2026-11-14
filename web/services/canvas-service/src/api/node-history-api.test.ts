@@ -276,7 +276,7 @@ describe("节点历史 HTTP API", () => {
     };
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({ nodeId: "node-1", nodeTitle: "T" });
-    expect(body.kindCounts).toEqual({ text: 1, image: 0, video: 0, audio: 0, model: 0 });
+    expect(body.kindCounts).toEqual({ text: 1, image: 0, video: 0, audio: 0, motion: 0, model: 0 });
     // 安全：不含完整正文。
     expect(JSON.stringify(body)).not.toContain("x".repeat(1000));
   });

@@ -14,26 +14,28 @@
 import type { GenerationModelCapabilityFacts } from "./model-capabilities.js";
 
 /** 可执行的节点类型。text/image/video/audio 有执行入口。 */
-export type CanvasTaskNodeType = "image" | "text" | "video" | "audio";
+export type CanvasTaskNodeType = "image" | "text" | "video" | "audio" | "motion";
 
 /** 任务类型：与 ExecutionPanel 的 taskKind 对齐。 */
 export type CanvasTaskKind =
   | "text-generation"
   | "image-generation"
   | "video-generation"
-  | "audio-generation";
+  | "audio-generation"
+  | "motion-generation";
 
 /** 服务端 catalog 中模型的 provider 类型。 */
-export type CanvasTaskModelType = "language" | "image" | "video" | "audio";
+export type CanvasTaskModelType = "language" | "image" | "video" | "audio" | "motion";
 
 /** 任务结果的媒体类别（稳定摘要的判别字段）。 */
-export type CanvasTaskMediaKind = "text" | "image" | "video" | "audio";
+export type CanvasTaskMediaKind = "text" | "image" | "video" | "audio" | "motion";
 
 /** 模型可接受的参考输入媒体类别。 */
 export type CanvasReferenceMediaKind = "image" | "video" | "audio";
 
 export const DEFAULT_TASK_TIMEOUT_MS = {
   language: 2 * 60_000,
+  motion: 8 * 60_000,
   image: 8 * 60_000,
   audio: 8 * 60_000,
   video: 20 * 60_000
@@ -83,22 +85,24 @@ export const NODE_TYPE_TO_TASK_KIND: Readonly<Record<CanvasTaskNodeType, CanvasT
   image: "image-generation",
   text: "text-generation",
   video: "video-generation",
-  audio: "audio-generation"
+  audio: "audio-generation",
+  motion: "motion-generation"
 };
 
 export const TASK_KIND_TO_MODEL_TYPE: Readonly<Record<CanvasTaskKind, CanvasTaskModelType>> = {
   "text-generation": "language",
   "image-generation": "image",
   "video-generation": "video",
-  "audio-generation": "audio"
+  "audio-generation": "audio",
+  "motion-generation": "motion"
 };
 
 export function isCanvasTaskNodeType(value: unknown): value is CanvasTaskNodeType {
-  return value === "image" || value === "text" || value === "video" || value === "audio";
+  return value === "image" || value === "text" || value === "video" || value === "audio" || value === "motion";
 }
 
 export function isCanvasTaskModelType(value: unknown): value is CanvasTaskModelType {
-  return value === "language" || value === "image" || value === "video" || value === "audio";
+  return value === "language" || value === "image" || value === "video" || value === "audio" || value === "motion";
 }
 
 /** 节点类型与模型类型的合法配对（图片↔image 等）。 */
@@ -111,6 +115,8 @@ export function isNodeModelTypeMatch(
 
 function modelKindToTaskKind(modelType: CanvasTaskModelType): CanvasTaskKind {
   switch (modelType) {
+    case "motion":
+      return "motion-generation";
     case "language":
       return "text-generation";
     case "image":

@@ -334,7 +334,7 @@ function parseCatalogModel(input: unknown): CanvasTaskCatalog["models"][number] 
   const modelKey = readString(input.modelKey);
   const providerModelId = readString(input.providerModelId) ?? modelKey;
   const modelType =
-    input.modelType === "image" || input.modelType === "language" || input.modelType === "video" || input.modelType === "audio"
+    input.modelType === "image" || input.modelType === "language" || input.modelType === "video" || input.modelType === "audio" || input.modelType === "motion"
       ? input.modelType
       : undefined;
   const interaction = parseInteraction(input.interaction);

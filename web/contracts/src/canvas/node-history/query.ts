@@ -56,7 +56,7 @@ export function normalizeCanvasHistoryQuery(input: unknown): CanvasHistoryQuery 
 
 /** 空计数（全部为 0），供无条目画布与测试使用。 */
 export function emptyNodeHistoryKindCounts(): NodeHistoryKindCounts {
-  return { text: 0, image: 0, video: 0, audio: 0, model: 0 };
+  return { text: 0, image: 0, video: 0, audio: 0, motion: 0, model: 0 };
 }
 
 function base64UrlEncode(value: string): string {

@@ -112,6 +112,18 @@ export class InMemoryYjsDocumentRepository implements YjsDocumentRepository {
     return this.documents.get(canvasId)?.commands.get(commandId) ?? null;
   }
 
+  async findLatestCommand(canvasId: string): Promise<YjsCommandRecord | null> {
+    return [...(this.documents.get(canvasId)?.commands.values() ?? [])].filter(row => row.changed).at(-1) ?? null;
+  }
+
+  async findLatestResourceHistoryCommand(canvasId: string, sourceCommandId: string): Promise<YjsCommandRecord | null> {
+    return [...(this.documents.get(canvasId)?.commands.values() ?? [])].filter(row => row.resourceEdit?.historyReplay?.sourceCommandId === sourceCommandId).at(-1) ?? null;
+  }
+
+  async listResourceEditCommands(canvasId: string, runId: string): Promise<Array<{ commandId: string; revision: number }>> {
+    return [...(this.documents.get(canvasId)?.commands.values() ?? [])].filter(row => row.actorId === `assistant-world:${runId}` && row.changed && row.resourceEdit?.history && !row.resourceEdit.historyReplay).map(row => ({ commandId: row.commandId, revision: row.revision })).sort((a, b) => a.revision - b.revision);
+  }
+
   async replaceCheckpoint(input: {
     canvasId: string;
     cutoffSeq: number;

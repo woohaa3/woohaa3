@@ -1,62 +1,169 @@
 {
   "source": "https://llm.runninghub.ai/v1/models",
-  "fetchedAt": "2026-11-07",
+  "fetchedAt": "2026-11-13",
   "note": "脱敏后的官方文字目录快照：只保留解析所需的身份与逐模型能力字段。模型集合与价格不进产品常量，刷新时以官方接口为准。",
   "object": "list",
   "data": [
     {
-      "id": "glm/glm-5.2",
+      "id": "openai/gpt-6.1-sol",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
-      "context_length": 1000000,
+      "created": 1794556676,
+      "context_length": 1050000,
       "capabilities": {
         "chat": true,
         "tools": true,
-        "vision": false,
-        "thinking": true,
-        "streaming": true,
-        "input_modalities": ["text"],
-        "output_modalities": ["text"]
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
       }
     },
     {
-      "id": "openai/gpt-5.4",
+      "id": "openai/gpt-6.1-sol-saver",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-6-astra-saver",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-6-sol",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-6-sol-saver",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-sol",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-sol-saver",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-terra",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-terra-saver",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
       "context_length": 1050000,
       "capabilities": {
         "chat": true,
         "tools": true,
         "vision": false,
         "streaming": true,
+        "audioInput": false,
         "structuredOutputs": true
       }
     },
     {
-      "id": "bytedance/doubao-seed-2.0-lite",
+      "id": "openai/gpt-5.5-saver",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
-      "context_length": 1048576,
-      "capabilities": {
-        "chat": true,
-        "tools": true,
-        "vision": true,
-        "document": true,
-        "thinking": true,
-        "streaming": true,
-        "web_search": { "enabled": true, "provider": "volcengine" },
-        "input_modalities": ["text", "image", "video", "document"],
-        "output_modalities": ["text"]
-      }
-    },
-    {
-      "id": "openai/gpt-6.1-sol",
-      "object": "model",
-      "owned_by": "runninghub",
-      "created": 1794096952,
+      "created": 1794556676,
       "context_length": 1050000,
       "capabilities": {
         "chat": true,
@@ -67,44 +174,73 @@
       }
     },
     {
-      "id": "qwen/qwen3.8-flash-next",
+      "id": "openai/gpt-6-luna",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
-      "context_length": 262144,
+      "created": 1794556676,
+      "context_length": 1050000,
       "capabilities": {
         "chat": true,
         "tools": true,
         "vision": true,
         "reasoning": true,
-        "streaming": true,
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      }
-    },
-    {
-      "id": "anthropic/claude-sonnet-4.5",
-      "object": "model",
-      "owned_by": "runninghub",
-      "created": 1794096952,
-      "context_length": 1000000,
-      "capabilities": {
-        "chat": true,
-        "tools": true,
-        "vision": false,
         "streaming": true
       }
     },
     {
-      "id": "deepseek/deepseek-v4-flash",
+      "id": "openai/gpt-6-luna-saver",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "google/gemini-3.7-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
       "context_length": 1048576,
       "capabilities": {
         "chat": true,
         "tools": true,
-        "vision": false,
+        "vision": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-luna",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.6-luna-saver",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
         "streaming": true
       }
     },
@@ -112,26 +248,1171 @@
       "id": "google/gemini-3.1-flash-lite-preview",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
+      "created": 1794556676,
       "context_length": 1048576,
       "capabilities": {
         "chat": true,
         "tools": true,
         "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-3.5-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.5-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-flash-next",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": false,
+        "contextCache": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5.2",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
         "streaming": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": false,
+        "contextCache": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-1",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "glm/glm-5.3-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": false,
+        "contextCache": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash-vision-exp",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.4-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5.3",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "reasoning": true,
+        "streaming": true,
+        "toolChoice": "auto-only",
+        "contextCache": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "reasoningAlwaysOn": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-5.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-4.8",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-4.7",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5.2",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "contextCache": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-4.6",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.4",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1050000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.3-codex",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 400000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5.1",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "glm/glm-5-turbo",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-max",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.6",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-5.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.7-max",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5v-turbo",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": true,
+        "thinking": true,
+        "streaming": true,
+        "multimodal": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "file"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-omni-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "thinking": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": true,
+        "audioOutput": false,
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.7-plus",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "xai/grok-4.7",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 500000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "xai/grok-4.6",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 500000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "xai/grok-4.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 500000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "xai/grok-4.3",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.6-plus",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-3.1-pro-preview",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3.1-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-evolving",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "batch": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": {
+          "maxKeyword": 3,
+          "defaultMaxToolCalls": 2,
+          "enabled": true,
+          "limit": 50,
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "provider": "volcengine",
+          "maxToolCalls": 3,
+          "defaultMaxKeyword": 2,
+          "defaultLimit": 10
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.1-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": {
+          "maxKeyword": 3,
+          "defaultMaxToolCalls": 2,
+          "enabled": true,
+          "limit": 50,
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "provider": "volcengine",
+          "maxToolCalls": 3,
+          "defaultMaxKeyword": 2,
+          "defaultLimit": 10
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.1-turbo",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": {
+          "maxKeyword": 3,
+          "defaultMaxToolCalls": 2,
+          "enabled": true,
+          "limit": 50,
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "provider": "volcengine",
+          "maxToolCalls": 3,
+          "defaultMaxKeyword": 2,
+          "defaultLimit": 10
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.1-lite",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "audioInput": false,
+        "web_search": {
+          "maxKeyword": 3,
+          "defaultMaxToolCalls": 2,
+          "enabled": true,
+          "limit": 50,
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "provider": "volcengine",
+          "maxToolCalls": 3,
+          "defaultMaxKeyword": 2,
+          "defaultLimit": 10
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-4.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 200000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.0-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": false,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "web_search": {
+          "maxKeyword": 3,
+          "defaultMaxToolCalls": 2,
+          "enabled": true,
+          "limit": 50,
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "provider": "volcengine",
+          "maxToolCalls": 3,
+          "defaultMaxKeyword": 2,
+          "defaultLimit": 10
+        },
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.0-code",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "web_search": {
+          "maxKeyword": 3,
+          "defaultMaxToolCalls": 2,
+          "enabled": true,
+          "limit": 50,
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "provider": "volcengine",
+          "maxToolCalls": 3,
+          "defaultMaxKeyword": 2,
+          "defaultLimit": 10
+        },
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.6-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.4-mini",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 400000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "openai/gpt-5.4-nano",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 400000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-3-flash-preview",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-2.5-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
       }
     },
     {
       "id": "minimax/minimax-m2.7",
       "object": "model",
       "owned_by": "runninghub",
-      "created": 1794096952,
+      "created": 1794556676,
       "context_length": 204800,
       "capabilities": {
         "chat": true,
         "tools": true,
         "vision": false,
-        "streaming": true
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-haiku-5.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 200000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "anthropic/claude-haiku-4.5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 200000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.6-max-preview",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 256000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-2.5-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-3.5-flash-lite",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-3.5-flash-lite-saver",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "google/gemini-3.6-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-3.8-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "google/gemini-4-argon",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794556676,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "audioInput": true,
+        "structuredOutputs": true
       }
     },
     {
@@ -153,7 +1434,12 @@
       "owned_by": "runninghub",
       "created": 1794096952,
       "context_length": 32000,
-      "capabilities": { "chat": true, "tools": false, "vision": false, "streaming": false },
+      "capabilities": {
+        "chat": true,
+        "tools": false,
+        "vision": false,
+        "streaming": false
+      },
       "deprecated": true,
       "redirect_to": "glm/glm-5.2",
       "sunset_at": "2026-12-02T15:15:00+08:00"

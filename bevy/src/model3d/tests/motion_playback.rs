@@ -499,3 +499,20 @@ fn part_rotations_preserve_hierarchy_instances_and_reset_without_rebuilding() {
     assert!(world.get::<Transform>(parent).unwrap().rotation.abs_diff_eq(Quat::IDENTITY, 1e-5));
     assert!((world.get::<Transform>(entity_of(&world, "body")).unwrap().rotation.y - 0.5_f32.sin()).abs() < 1e-4);
 }
+
+#[test]
+fn part_positions_reset_from_base_each_sample_and_on_removal() {
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), rig_snapshot())]);
+    let mut scene = base_scene();
+    scene.nodes[0].model.as_mut().unwrap().part_positions = Some(std::collections::HashMap::from([("root".into(), [0.0, 0.2, 0.0])]));
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    let root = entity_of(&world, "root");
+    let base = world.get::<Transform>(root).unwrap().translation;
+    run_motion(&mut world, &scene);
+    run_motion(&mut world, &scene);
+    assert!(world.get::<Transform>(root).unwrap().translation.abs_diff_eq(base + Vec3::Y * 0.2, 1e-5));
+    scene.nodes[0].model.as_mut().unwrap().part_positions = None;
+    run_motion(&mut world, &scene);
+    assert!(world.get::<Transform>(root).unwrap().translation.abs_diff_eq(base, 1e-5));
+}

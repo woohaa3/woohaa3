@@ -22,6 +22,7 @@ import {
   isPromptRequirement,
   isValidStorageKey,
   type CanvasTaskModelType,
+  type SomaMotionMetadata,
   type GenerationCancelCapability,
   type GenerationModelDefinition,
   type ModelInteractionDescriptor,
@@ -60,7 +61,7 @@ export const REMOTE_GENERATION_PROVIDER_ID = "remote-server";
 export const REMOTE_GENERATION_MODEL_KEY_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 
 /** 客户端能消费的四种模型类型（其余单条跳过）。 */
-export const REMOTE_GENERATION_MODEL_TYPES = ["language", "image", "video", "audio"] as const;
+export const REMOTE_GENERATION_MODEL_TYPES = ["language", "image", "video", "audio", "motion"] as const;
 
 export function isRemoteGenerationModelType(value: unknown): value is CanvasTaskModelType {
   return typeof value === "string" && (REMOTE_GENERATION_MODEL_TYPES as readonly string[]).includes(value);
@@ -78,7 +79,7 @@ export function isRemoteGenerationModelType(value: unknown): value is CanvasTask
  */
 export function normalizeRemoteModelType(value: unknown): CanvasTaskModelType | null {
   if (typeof value === "number" && Number.isFinite(value)) {
-    const byNumber: CanvasTaskModelType[] = ["language", "image", "video", "audio"];
+    const byNumber: CanvasTaskModelType[] = ["language", "image", "video", "audio", "motion"];
     if (value >= 1 && value <= byNumber.length) return byNumber[value - 1] ?? null;
     return null;
   }
@@ -534,6 +535,7 @@ export type DecodedTaskMedia = {
     size: number;
     checksum?: string;
     durationSeconds?: number;
+    motion?: SomaMotionMetadata;
     poster?: { storageKey?: string; locator?: string; contentType: string; size: number; checksum?: string };
   };
 };
@@ -593,12 +595,22 @@ function decodeMedia(value: unknown): DecodedTaskMedia | null {
       };
     }
   }
+  const rawMotion = readRecordField(record, 'motion');
+  let motion: DecodedTaskMedia['media']['motion'];
+  if (rawMotion) {
+    const fps=typeof rawMotion.fps === "number" ? rawMotion.fps : NaN, frameCount=readIntField(rawMotion,'frameCount','frame_count');
+    const skeletonId=readStringField(rawMotion,'skeletonId','skeleton_id'),restPoseId=readStringField(rawMotion,'restPoseId','rest_pose_id'),formatVersion=readStringField(rawMotion,'formatVersion','format_version');
+    if (!Number.isFinite(fps)||fps<=0||fps>240||frameCount===null||frameCount<=0||frameCount>18000||skeletonId!=="somaskel77"||restPoseId!=="kimodo-standard-tpose"||formatVersion!=="kimodo-soma-v1") return null;
+    motion={fps,frameCount,skeletonId,restPoseId,formatVersion};
+  }
+  if (contentType === 'application/x-npz' && !motion) return null;
   return {
     media: {
       ...(hasKey ? { storageKey: storageKey as string } : {}),
       ...(hasLocator ? { locator: locator as string } : {}),
       contentType,
       size,
+      ...(motion ? {motion} : {}),
       ...(readStringField(record, "checksum") !== null ? { checksum: readStringField(record, "checksum") as string } : {}),
       ...(durationSeconds !== null && durationSeconds >= 0 ? { durationSeconds } : {}),
       ...(poster !== undefined ? { poster } : {})

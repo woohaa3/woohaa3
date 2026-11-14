@@ -1,5 +1,5 @@
 import { createOAuthConnectionProvider } from "./connection-provider.js";
-import { agentConnectionProviderCapabilityId } from "@woohaa3/contracts";
+import { AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION, AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION, AGENT_CONVERSATION_IDENTITY_CAPABILITY_VERSION, agentConversationAdapterCapabilityId, agentConnectionProviderCapabilityId } from "@woohaa3/contracts";
 /**
  * ChatGPT 应用插件后端入口
  * （change: 2026-10-08-unlock-plugin-contracts-and-extensionize-chatgpt，任务 5.1/5.2/5.3/5.4 / design D1/D2/D4）。
@@ -19,7 +19,7 @@ import type {
   ApplicationExtensionRawRequest,
   ApplicationExtensionRawResponse
 } from "@woohaa3/contracts";
-import { AGENT_CONVERSATION_IDENTITY_CAPABILITY_ID, agentConversationAdapterCapabilityId } from "@woohaa3/contracts";
+import { AGENT_CONVERSATION_IDENTITY_CAPABILITY_ID } from "@woohaa3/contracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { OAUTH_AGENT_PLUGIN_ID, OAUTH_AGENT_PROVIDERS, type OAuthAgentProvider } from "../shared.js";
 import { createChatGptService, type ChatGptService, type ChatGptServiceOptions } from "./service.js";
@@ -108,11 +108,11 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
       // 生产裸 principal.subject 映射为 `principal:<subject>`，与凭据 owner 命名空间一致。
       const conversationOwnerIdFor = options.conversationOwnerIdFor ?? defaultConversationOwnerIdFor;
       const conversationAdapter = createChatGptConversationAdapter({ service, ownerIdFor: conversationOwnerIdFor });
-      host.registerCapability({ id: agentConversationAdapterCapabilityId(CHATGPT_CONVERSATION_ADAPTER_ID), value: conversationAdapter });
+      host.registerCapability({ id: agentConversationAdapterCapabilityId(CHATGPT_CONVERSATION_ADAPTER_ID), version: AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION, value: conversationAdapter });
       // Only project a model directory actually returned for this owner and authorization epoch.
       const observedModels = new Map<string, { epoch: number; models: readonly import("@woohaa3/contracts").AgentModelView[] }>();
       const connectionProvider = createOAuthConnectionProvider({ service, adapter: conversationAdapter, ownerIdFor: conversationOwnerIdFor, observedModelsFor: owner => observedModels.get(owner) });
-      host.registerCapability({ id: agentConnectionProviderCapabilityId(OAUTH_AGENT_PLUGIN_ID), value: connectionProvider });
+      host.registerCapability({ id: agentConnectionProviderCapabilityId(OAUTH_AGENT_PLUGIN_ID), version: AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION, value: connectionProvider });
       const readModels = conversationAdapter.models;
       conversationAdapter.models = async input => {
         const before = await connectionProvider.listConnections({ owner: input.owner });
@@ -139,6 +139,7 @@ export function createOAuthAgentExtension(options: OAuthAgentExtensionOptions = 
       // 复用为宿主会话 owner，避免宿主另造浏览器 ID。生产 principal 模式返回 null。
       host.registerCapability({
         id: AGENT_CONVERSATION_IDENTITY_CAPABILITY_ID,
+        version: AGENT_CONVERSATION_IDENTITY_CAPABILITY_VERSION,
         value: { resolveLocalSession: (req: unknown) => service.localSessionIdentity(req as Parameters<ChatGptService["localSessionIdentity"]>[0]) }
       });
 

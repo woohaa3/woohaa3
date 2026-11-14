@@ -96,7 +96,7 @@ export async function restoreNodeHistory(
   }
 
   // 媒体条目在应用前校验底层对象可解析；缺失即稳定不可恢复。
-  if (entry.kind === "image" || entry.kind === "video" || entry.kind === "audio") {
+  if (entry.kind === "image" || entry.kind === "video" || entry.kind === "audio" || entry.kind === "motion") {
     // 条目自带画布 id：远端画布的字节只在托管存储里，核验必须带作用域。
     const scope = { canvasId: entry.canvasId };
     const recoverable = await isMediaResolvable(context, entry.payload as NodeHistoryMediaPayload, scope);

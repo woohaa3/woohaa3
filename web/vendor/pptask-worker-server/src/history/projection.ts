@@ -10,7 +10,7 @@ import {
 } from './repository.js';
 
 export type ExecutionOutput = {
-  kind: 'image' | 'video' | 'audio' | 'file' | 'text' | 'data';
+  kind: 'image' | 'video' | 'audio' | 'motion' | 'file' | 'text' | 'data';
   label?: string;
   url?: string;
   mediaType?: string;
@@ -331,7 +331,7 @@ function stableMediaOutput(value: unknown): ExecutionOutput | undefined {
   const mediaType = typeof media.contentType === 'string' ? media.contentType : undefined;
   const kind = mediaType ? mediaKind(mediaType) : 'image';
   // text/data 不是媒体产物：稳定信封只应承载二进制结果。
-  if (kind !== 'image' && kind !== 'video' && kind !== 'audio') return undefined;
+  if (kind !== 'image' && kind !== 'video' && kind !== 'audio' && kind !== 'motion') return undefined;
   return {
     kind,
     label: `输出 1`,
@@ -474,6 +474,7 @@ function providerImageUrls(value: unknown): string[] {
 
 function urlOutput(url: string, mediaType: string | undefined, index: number): ExecutionOutput { return { kind: mediaKind(mediaType, url), label: `输出 ${index + 1}`, url, mediaType }; }
 function mediaKind(mediaType?: string, url?: string): ExecutionOutput['kind'] {
+  if (mediaType?.split(';')[0]?.trim().toLowerCase() === 'application/x-npz') return 'motion';
   const hint = `${mediaType ?? ''} ${url ?? ''}`.toLowerCase();
   if (hint.includes('image') || /\.(avif|gif|jpe?g|png|svg|webp)(?:[?#]|$)/.test(hint)) return 'image';
   if (hint.includes('video') || /\.(avi|m4v|mov|mp4|webm)(?:[?#]|$)/.test(hint)) return 'video';

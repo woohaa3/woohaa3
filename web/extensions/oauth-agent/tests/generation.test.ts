@@ -322,3 +322,24 @@ describe("ChatGPT durable 工作生命周期（任务 4.1/4.4/4.6）", () => {
   });
 
 });
+
+it.each([false, true])("OAuth Codex accepts native execution only with a trusted workspace=%s", async workspace => {
+  const root = tempDir(), cwd = path.join(root, "canvas");
+  const adapter = createCodexAdapter({ codexHomeDir: path.join(root, "private-config"), workspaceDir: path.join(root, "private-work"), ...(workspace ? { workspace: { cwd } } : {}), accessTokenFor: async () => "test-token", createCodex: options => {
+    expect(options.config["features.shell_tool"]).toBe(workspace);
+    expect(options.env.CODEX_HOME).toContain("private-config");
+    return { startThread: thread => {
+      expect(thread.workingDirectory).toBe(workspace ? cwd : path.join(root, "private-work", path.basename(String(thread.workingDirectory))));
+      expect(thread.sandboxMode).toBe(workspace ? "workspace-write" : "read-only");
+      return { runStreamed: async () => ({ events: (async function* () {
+        yield { type: "item.completed", item: { type: "command_execution", id: "native", command: "node", aggregated_output: "42", exit_code: 0, status: "completed" } } as any;
+        yield { type: "item.completed", item: { type: "agent_message", id: "reply", text: "42" } } as any;
+      })() }) };
+    } };
+  } });
+  try {
+    const run = adapter.runStreamed({ ownerId: "alice", model: "m", prompt: "calculate", noTools: true }, () => {});
+    if (workspace) expect(await run).toEqual({ finalResponse: "42" });
+    else await expect(run).rejects.toThrow();
+  } finally { adapter.dispose(); }
+});

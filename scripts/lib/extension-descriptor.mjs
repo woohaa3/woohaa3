@@ -158,17 +158,78 @@ export function checkEnginesCompatible(engines, host = HOST_ENGINES) {
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
 }
 
+/**
+ * 校验服务面与 capability 依赖（change: 2026-11-13-add-extension-capability-abi）。
+ *
+ * `hostServices` 是宿主提供的「服务面名 → 版本」映射（来自 `HOST_SERVICE_ABI`）；
+ * `resolvableCapabilities` 是当前可解析的「capability id → 可用版本集合」。两者都由调用方传入——
+ * 本模块是纯函数，不认识宿主的运行期状态。
+ *
+ * 缺省表示「不依赖」，跳过（过渡期语义，见 `docs/security/COMPATIBILITY.md`）。
+ *
+ * 返回 `{ ok: true }` 或 `{ ok: false, reasons }`；reason 精确到「需要 X@N，宿主提供 M」。
+ */
+export function checkCapabilityDependencies(engines, { hostServices = {}, resolvableCapabilities = new Map() } = {}) {
+  if (engines === undefined || engines === null) return { ok: true };
+  const reasons = [];
+
+  for (const [name, required] of Object.entries(engines.host ?? {})) {
+    if (!(name in hostServices)) {
+      reasons.push(`engines.host 声明了未知服务面 ${name}（宿主没有这个面）`);
+      continue;
+    }
+    const provided = hostServices[name];
+    if (provided !== required) {
+      reasons.push(`engines.host.${name} 需要 ${name}@${required}，宿主提供 ${provided}`);
+    }
+  }
+
+  for (const [id, required] of Object.entries(engines.capabilities ?? {})) {
+    const available = resolvableCapabilities.get(id);
+    if (available === undefined || available.size === 0) {
+      reasons.push(`engines.capabilities 声明的 ${id}@${required} 在当前宿主解析不到`);
+      continue;
+    }
+    if (!available.has(required)) {
+      reasons.push(`engines.capabilities.${id} 需要 ${id}@${required}，当前只有 @${[...available].sort((a, b) => a - b).join(" / @")}`);
+    }
+  }
+
+  return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+}
+
+/**
+ * `engines.host` / `engines.capabilities` 的形状校验
+ * （change: 2026-11-13-add-extension-capability-abi）。
+ *
+ * 两者都是「名字 → 正整数版本」的映射。名字必须非空、版本必须是正整数；不做「是否已知」的判断——
+ * 那是装载期与预检期的事（宿主才知道自己有哪些面），这里只拒绝明显非法的声明。
+ */
+function validateVersionMap(value, label, errors) {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${label} 必须是对象（名字 → 正整数版本）`);
+    return;
+  }
+  for (const [name, version] of Object.entries(value)) {
+    if (!isNonEmptyString(name)) errors.push(`${label} 的键必须是非空字符串`);
+    if (!Number.isInteger(version) || version < 1) errors.push(`${label}.${name} 必须是正整数`);
+  }
+}
+
 function validateEngines(engines, errors) {
   if (!isPlainObject(engines)) {
     errors.push("engines 必须是对象");
     return;
   }
-  for (const key of unknownKeys(engines, ["hostAbi", "sdkAbi", "protocolVersion"])) errors.push(`engines 未知字段：${key}`);
+  for (const key of unknownKeys(engines, ["hostAbi", "sdkAbi", "protocolVersion", "host", "capabilities"])) errors.push(`engines 未知字段：${key}`);
   for (const key of ["hostAbi", "sdkAbi"]) {
     if (!isNonEmptyString(engines[key])) errors.push(`engines.${key} 必须是非空 semver range（如 ^1.0.0）`);
     else if (satisfiesRange("0.0.0", engines[key]) === null) errors.push(`engines.${key} 不是合法的 semver range：${engines[key]}`);
   }
   if (!Number.isInteger(engines.protocolVersion) || engines.protocolVersion < 1) errors.push("engines.protocolVersion 必须是正整数");
+  validateVersionMap(engines.host, "engines.host", errors);
+  validateVersionMap(engines.capabilities, "engines.capabilities", errors);
 }
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;

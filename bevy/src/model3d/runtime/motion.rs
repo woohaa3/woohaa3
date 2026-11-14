@@ -150,10 +150,11 @@ pub(crate) fn apply_motion_playback(
 ) -> Option<crate::motion::CameraState> {
     let camera = apply_clip_playback(commands, models, materials, opacity, scene);
     let current: HashMap<_, _> = scene.nodes.iter().filter_map(|node| {
-        let rotations = node.model.as_ref()?.part_rotations.as_ref()?;
-        Some((node.id.as_str(), rotations))
+        let model = node.model.as_ref()?;
+        if model.part_rotations.is_none() && model.part_positions.is_none() { return None; }
+        Some((node.id.as_str(), (model.part_rotations.as_ref(), model.part_positions.as_ref())))
     }).collect();
-    if models.joint_targets.is_empty() && current.values().all(|poses| poses.is_empty()) {
+    if models.joint_targets.is_empty() && current.values().all(|(r,p)| r.is_none_or(|v| v.is_empty()) && p.is_none_or(|v| v.is_empty())) {
         return camera;
     }
     let previous = std::mem::take(&mut models.joint_targets);
@@ -169,9 +170,11 @@ pub(crate) fn apply_motion_playback(
     }
     for node_id in active {
         let Some(root) = models.roots.get(node_id) else { continue };
-        let rotations = current.get(node_id).copied();
+        let (rotations, positions) = current.get(node_id).copied().unwrap_or((None, None));
         let targets: std::collections::HashSet<String> = rotations
             .map(|r| r.keys().cloned().collect()).unwrap_or_default();
+        let mut targets = targets;
+        if let Some(positions) = positions { targets.extend(positions.keys().cloned()); }
         let mut affected = previous.get(node_id).cloned().unwrap_or_default();
         affected.extend(targets.iter().cloned());
         for id in affected {
@@ -187,6 +190,7 @@ pub(crate) fn apply_motion_playback(
             if let Some(q) = rotations.and_then(|r| r.get(&id)) {
                 pose.rotation *= Quat::from_array(*q);
             }
+            if let Some(p) = positions.and_then(|p| p.get(&id)) { pose.translation += Vec3::from_array(*p); }
             if let Ok(mut entity) = commands.get_entity(*entity) {
                 entity.insert(pose);
             }

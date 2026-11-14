@@ -185,7 +185,7 @@ export const SDPPPX_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: SDPPPX_PLUGIN_ID,
   name: "SDPPPX",
   description: "sdpppx 微信扫码登录与租户模板生成。登录后把当前租户的模板投影为生成模型。",
-  version: "0.1.0",
+  version: "0.1.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "sdpppx-provider-config", schemaVersion: 1 },

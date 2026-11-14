@@ -43,7 +43,7 @@ export const DEEPSEEK_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: DEEPSEEK_PLUGIN_ID,
   name: "DeepSeek Provider",
   description: "DeepSeek 官方 API。填写 API Key 后，从官方模型列表发现可用的文本模型（含思考模式与图像理解）。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "deepseek-provider-config", schemaVersion: 1 },

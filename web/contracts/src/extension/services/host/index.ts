@@ -16,6 +16,7 @@
  */
 export * from "./log.js";
 export * from "./capabilities.js";
+export * from "./abi.js";
 export * from "./web-server.js";
 export * from "./diagnostics.js";
 export * from "./facades.js";
@@ -26,6 +27,7 @@ export * from "./telemetry.js";
 export * from "./marketplace.js";
 export * from "./media-formats.js";
 export * from "./agent-roles.js";
+export * from "./authoring-tools.js";
 export * from "./context.js";
 
 export type { ExtensionExecutorModule, ExtensionExecutorEvent, ExtensionExecutorOutcome, ApplicationExtensionExecutorFacade } from "./executor.js";

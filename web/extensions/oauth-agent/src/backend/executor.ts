@@ -10,7 +10,7 @@ export function createExecutor(options: Pick<CodexAdapterDependencies, "createCo
     const input = payload.input;
     if (input.noTools && turn.prepared.tools.length) throw new Error("Discussion cannot carry prepared tools");
     if (!input.noTools && turn.prepared.tools.length === 0 && !input.outputSchema) throw new Error("OAuth turn has neither tools nor a candidate schema");
-    const adapter = createCodexAdapter({ ...payload.deployment, ...options,
+    const adapter = createCodexAdapter({ ...payload.deployment, ...options, workspace: context.workspace,
       accessTokenFor: () => host.call<string>("oauth.access-token"),
       logger: event => context.emit("log", event) });
     try {

@@ -122,3 +122,16 @@ it("renders no DOM player and binds a canvas mounted later", async () => {
   pointer(f.canvas,"pointerdown"); expect(f.transport.snapshot().playing).toBe(true);
   await act(async () => root.unmount());
 });
+
+it('offers an explicit retry for failed director motion loading', () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const retry = vi.fn();
+  const runtime = { worldAnimationAssetStatus: () => '动作加载失败：HTTP 502', subscribeWorldAnimationAssets: () => () => {}, retryWorldAnimationAssets: retry } as unknown as CanvasRuntimeService;
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container); cleanups.push(() => act(() => root.unmount()));
+  act(() => root.render(<SceneAreaProgress runtime={runtime} />));
+  const button = container.querySelector('button');
+  expect(button?.textContent).toBe('重试');
+  act(() => button?.click());
+  expect(retry).toHaveBeenCalledTimes(1);
+});

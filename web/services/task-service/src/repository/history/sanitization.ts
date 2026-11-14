@@ -23,6 +23,8 @@ export function sanitizeResult(result: TaskResultSummary): TaskResultSummary {
     ...(result.size !== undefined ? { size: result.size } : {}),
     ...(result.checksum !== undefined ? { checksum: result.checksum } : {}),
     ...(result.durationSeconds !== undefined ? { durationSeconds: result.durationSeconds } : {}),
+    ...(result.fps !== undefined ? { fps: result.fps } : {}),
+    ...(result.motion ? { motion: { ...result.motion } } : {}),
     ...(result.poster ? { poster: { ...result.poster } } : {})
   };
 }

@@ -12,12 +12,14 @@ import "./authoring-generate-panel.css";
 
 type AuthoringLayoutProps = {
   inspector: boolean;
+  quickActions?: ReactNode;
   references?: ReactNode;
   mcp: ReactNode;
   prompt: ReactNode;
   assistant: ReactNode;
   model?: ReactNode;
   detail?: ReactNode;
+  beforeSubmit?: ReactNode;
   submit: ReactNode;
   onRefresh?: () => void;
   onManage?: () => void;
@@ -55,12 +57,14 @@ export function AuthoringGenerateSurface({
 /** Dock and inspector use the same five-control assistant toolbar. */
 export function AuthoringGenerateLayout({
   inspector,
+  quickActions,
   references,
   mcp,
   prompt,
   assistant,
   model,
   detail,
+  beforeSubmit,
   submit,
   onRefresh,
   onManage,
@@ -75,9 +79,10 @@ export function AuthoringGenerateLayout({
       parameters={model}
       submit={submit}
       beforeSubmit={
-        detail ? (
-          <div className="authoring-generate__actions">{detail}</div>
-        ) : undefined
+        <>
+          {detail ? <div className="authoring-generate__actions">{detail}</div> : null}
+          {beforeSubmit}
+        </>
       }
       onRefresh={onRefresh}
       onManage={onManage}
@@ -139,6 +144,9 @@ export function AuthoringGenerateLayout({
   return (
     <>
       <div className="authoring-generate__header">
+        {quickActions ? (
+          <div className="authoring-generate__quick-actions">{quickActions}</div>
+        ) : null}
         {references ? (
           <div className="authoring-generate__references">{references}</div>
         ) : null}

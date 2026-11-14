@@ -89,7 +89,7 @@ export type SkillMediaSettlement = {
   runId: string;
   jobId?: string;
   state: "succeeded" | "failed" | "cancelled";
-  mediaKind?: "text" | "image" | "video" | "audio";
+  mediaKind?: "text" | "image" | "video" | "audio" | "motion";
   error?: string;
   terminalAt?: string;
 };

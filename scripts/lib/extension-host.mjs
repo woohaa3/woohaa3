@@ -26,7 +26,7 @@ import {
   formatWorkspaceCoverageHint,
   scanExtensions
 } from "./extension-scan.mjs";
-import { loadExtensionDescriptor } from "./extension-descriptor.mjs";
+import { checkCapabilityDependencies, loadExtensionDescriptor } from "./extension-descriptor.mjs";
 import { extensionIconAssetFile, extensionIconPublicPath } from "./extension-icon-assets.mjs";
 import { ExtensionLoadError, FALLBACK_ORDER, hasBrowserArtifact, resolveModuleFile } from "./extension-host-modules.mjs";
 import { isSafeModeEssential, suspendedRegistration } from "./extension-host-safe-mode.mjs";
@@ -152,6 +152,30 @@ function assertSlotGraph(sources, { requireFoundationCoverage = true } = {}) {
   }
 }
 
+
+/**
+ * 能力依赖判定（change: 2026-11-13-add-extension-capability-abi）。
+ *
+ * 返回 `null` 表示相容；否则返回 `{ message }`。**只读声明**，不导入扩展模块。
+ *
+ * capability 的「可解析」来自调用方传入的 `resolvableCapabilities`（`id` → 可用版本集合）。
+ * 装载期拿不到运行期注册表时（首次启动，扩展还没被激活过）按「尚未提供」处理——这与运行期
+ * 事实一致：那时确实一个 capability 都还没注册。
+ */
+export function capabilityDependencyProblem(descriptor, { contracts = null, resolvableCapabilities = null } = {}) {
+  const engines = descriptor?.engines;
+  if (!engines) return null;
+  // 服务面版本来自 contracts（`HOST_SERVICE_ABI` 是 TS 侧的唯一来源）；比对逻辑在脚本侧
+  // （`checkCapabilityDependencies`），因为装载与预检都在脚本层。
+  const hostServices = contracts?.HOST_SERVICE_ABI;
+  if (!hostServices) return null;
+  const result = checkCapabilityDependencies(engines, {
+    hostServices,
+    resolvableCapabilities: resolvableCapabilities ?? new Map()
+  });
+  if (result.ok) return null;
+  return { message: result.reasons.join("；") };
+}
 
 /** 站点目录条目（`ApplicationExtensionTrustedEntry` 形状；由 contracts 校验器复核）。 */
 function siteEntryOf(extension, descriptor, { hasBrowser }) {
@@ -328,6 +352,26 @@ export async function loadExtensionHost({ repoRoot, env = process.env, configFil
     const screened = screenExtension({ extension, repoRoot, isolate, rejected, logger });
     if (!screened) continue;
     const { descriptor } = screened;
+    // 能力依赖校验（change: 2026-11-13-add-extension-capability-abi）：
+    // 服务面与 capability 的版本相容性在**装配阶段**判定，不推迟到首次调用。
+    // 内置根 / 可写根 fail-fast；受管根只拒绝该扩展（可选插件不能拖垮宿主）。
+    const dependencyProblem = capabilityDependencyProblem(descriptor, { contracts: resolvedContracts });
+    if (dependencyProblem) {
+      if (extension.managed !== true) {
+        throw new ExtensionLoadError("EXTENSION_CAPABILITY_INCOMPATIBLE", dependencyProblem.message, {
+          extensionId: extension.extensionId,
+          directory: extension.dir
+        });
+      }
+      rejected.push({
+        extensionId: extension.extensionId,
+        directory: extension.dir,
+        code: "EXTENSION_CAPABILITY_INCOMPATIBLE",
+        message: dependencyProblem.message
+      });
+      logger({ event: "extension-managed-rejected", extensionId: extension.extensionId, directory: extension.dir, code: "EXTENSION_CAPABILITY_INCOMPATIBLE", message: dependencyProblem.message });
+      continue;
+    }
     if (safeMode && !isSafeModeEssential(extension, descriptor)) {
       // 不导入任何扩展模块、不发布浏览器产物；只保留纯 JSON 的站点目录条目，供控制面投影 suspended。
       suspended.push({ extensionId: extension.extensionId, directory: extension.dir, rootWritable: extension.rootWritable === true });

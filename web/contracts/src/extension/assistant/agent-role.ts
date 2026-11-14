@@ -170,6 +170,7 @@ export type AgentRoleTargetRef = {
   readonly cameraId?: string;
   /** 领域冻结的内容前置条件（模型内容哈希 / 组 epoch 等）。 */
   readonly expectedContentHash?: string;
+  readonly allowSceneAreaExpansion?: boolean;
   /** 世界目标的宿主已选范围（只含身份，不含版本/租约）。 */
   readonly worldScope?: {
     readonly kind: "scene-area" | "workflow-group-2d" | "world-camera";
@@ -186,6 +187,8 @@ export type AgentRoleTargetRef = {
  * 浏览器请求不得构造或改写本对象。
  */
 export type PreparedAgentRoleTurn = {
+  /** Trusted desktop auxiliary capability, frozen by the host after role preparation. */
+  readonly workspace?: import("./canvas-agent-workspace.js").CanvasWorkspaceHandle;
   readonly schemaVersion: 1;
   readonly roleRef: AgentRoleRef;
   /** 已合成的规范消息（definition.instructions 在最前）。 */

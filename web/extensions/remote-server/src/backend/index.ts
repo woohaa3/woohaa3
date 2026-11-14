@@ -23,10 +23,12 @@ import type {
   CanvasUpstreamLink,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
+import { CANVAS_UPSTREAM_CAPABILITY_VERSION, canvasUpstreamCapabilityId, defineConfigSchema, isBoundedId, type ExtensionPlugin } from "@woohaa3/contracts";
 import {
   agentConnectionProviderCapabilityId,
   agentConversationAdapterCapabilityId,
+  AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
+  AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
 } from "@woohaa3/contracts";
 import {
   CANVAS_SERVICE,
@@ -116,6 +118,7 @@ import {
 import { uploadReference } from "./storage/reference-upload.js";
 import { createServerStorageBackend, type ServerStorageBackendOptions } from "./storage/backend.js";
 import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/config.js";
+import { createHumanoidMotionContribution } from "./humanoid/contribution.js";
 
 export type { RemoteSession, RemoteSessionStore };
 export { createMemorySessionStore };
@@ -757,6 +760,10 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       ctx.effect(() => () => generationBridge.dispose());
       // 已有会话（本进程登录过或从文档存储恢复）时立即拉一次目录；没有会话就是安静休眠。
       void generationBridge.refresh().catch(() => undefined);
+      const unregisterHumanoidMotion = ctx.services?.authoringTools?.register(
+        createHumanoidMotionContribution(() => generationBridge.status().available && generationBridge.hasModelType("motion"))
+      );
+      ctx.effect(() => () => unregisterHumanoidMotion?.());
 
       /**
        * 远端助手通路：连接发现 + 会话适配器。
@@ -792,14 +799,16 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       });
       if (ctx.capabilities) {
         // 与 canvasUpstream 同一注册面：返回注销函数，交给 Cordis 托管。
-        const undoProvider = ctx.capabilities.register(
-          agentConnectionProviderCapabilityId(REMOTE_SERVER_EXTENSION_ID),
-          remoteAssistant.provider
-        );
-        const undoAdapter = ctx.capabilities.register(
-          agentConversationAdapterCapabilityId(REMOTE_ASSISTANT_ADAPTER_ID),
-          remoteAssistant.adapter
-        );
+        const undoProvider = ctx.capabilities.register({
+          id: agentConnectionProviderCapabilityId(REMOTE_SERVER_EXTENSION_ID),
+          version: AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
+          value: remoteAssistant.provider
+        });
+        const undoAdapter = ctx.capabilities.register({
+          id: agentConversationAdapterCapabilityId(REMOTE_ASSISTANT_ADAPTER_ID),
+          version: AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
+          value: remoteAssistant.adapter
+        });
         ctx.effect(() => () => {
           undoAdapter();
           undoProvider();
@@ -1259,7 +1268,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
           return deleteRemoteCanvas(canvasId);
         }
       };
-      { const undo = ctx.capabilities!.register(canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID), upstreamProvider); ctx.effect(() => undo); }
+      { const undo = ctx.capabilities!.register({id:canvasUpstreamCapabilityId(REMOTE_SERVER_EXTENSION_ID),version:CANVAS_UPSTREAM_CAPABILITY_VERSION,value:upstreamProvider}); ctx.effect(() => undo); }
 
       /**
        * 把「本部署市场」作为一个市场来源交给宿主（`ctx.marketplace` 扩展点）。

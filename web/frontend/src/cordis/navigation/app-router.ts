@@ -63,7 +63,7 @@ export type AppTelemetryQuery = {
 export type AppTaskHistoryQuery = {
   tab?: "all" | "active" | "succeeded" | "failed" | "cancelled";
   providerId?: string;
-  modelType?: "language" | "image" | "video" | "audio";
+  modelType?: "language" | "image" | "video" | "audio" | "motion";
   modelKey?: string;
   canvasId?: string;
   nodeId?: string;

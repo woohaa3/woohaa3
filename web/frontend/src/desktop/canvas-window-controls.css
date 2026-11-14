@@ -3,6 +3,10 @@
  * 横栏偏移。`:has(> …)` 只命中真正渲染横栏的内层画布 `.app`；浏览器没有横栏，不产生占位。
  *
  * 只有 `position: fixed` 的浮层不随 `.app` 位移（它们的包含块是视口），仍需显式让位。 */
+:root:has(.desktop-canvas-bar) {
+	--canvas-chrome-height: 26px;
+}
+
 .app:has(> .desktop-canvas-bar) {
 	--canvas-chrome-height: 26px;
 	top: var(--canvas-chrome-height);
@@ -10,11 +14,19 @@
 .app:has(> .desktop-canvas-bar) .agent-detail { top: var(--canvas-chrome-height); }
 .app:has(> .desktop-canvas-bar) .canvas-search { top: calc(var(--canvas-chrome-height) + 16px); }
 
+/* 弹窗遮罩与重连浮层（fixed）在桌面端不得遮盖窗口横栏：
+ * 保持窗口拖拽、窗口控制按钮与顶栏控件始终位于遮罩之上、不被遮罩吞掉点击。 */
+:root:has(.desktop-canvas-bar) .dlg-host,
+:root:has(.desktop-canvas-bar) .dlg__overlay,
+:root:has(.desktop-canvas-bar) .host-reconnecting {
+	top: var(--canvas-chrome-height, 26px);
+}
+
 .desktop-canvas-bar {
 	/* 横栏固定在窗口顶端，属于窗口装饰层；页面内容在它下方的占位区内。 */
 	position: fixed;
 	inset: 0 0 auto;
-	z-index: 44;
+	z-index: 100;
 	height: var(--canvas-chrome-height);
 	display: flex;
 	align-items: center;
@@ -24,6 +36,11 @@
 	background: var(--app-web-subtle);
 	color: var(--app-web-text-primary);
 	user-select: none;
+	pointer-events: auto !important;
+}
+
+.desktop-canvas-bar * {
+	pointer-events: auto;
 }
 .desktop-canvas-bar__brand {
 	flex-shrink: 0;

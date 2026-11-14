@@ -112,6 +112,7 @@ export type SceneV2MeshOp = SceneV2ShapeBase & {
    *
    * 长度必须与 `vertices` 一致；缺失时由运行时光滑法线回退（旧脚本场景语义不变）。
    */
+  skin?: {jointIds:string[];inverseBindMatrices:number[][];indices:number[][];weights:number[][]};
   normals?: Vec3[];
   uvs?: [number, number][];
   colors?: [number, number, number, number][];

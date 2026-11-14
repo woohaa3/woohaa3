@@ -157,6 +157,8 @@ export type ExecutorHostPort = {
 };
 
 export type ExecutorRunContext = {
+  /** Trusted desktop canvas cwd; never taken from model arguments. */
+  workspace?: { cwd: string };
   signal: AbortSignal;
   turnId: string;
   requestId: string;

@@ -16,7 +16,7 @@ import type { CanvasHistoryClient } from "../node-history/canvas-history-control
 let root: Root | undefined;
 let runtime: FrontendRuntime | undefined;
 afterEach(async () => { act(() => root?.unmount()); await runtime?.dispose(); document.body.innerHTML = ""; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-const counts = { text: 1, image: 1, video: 0, audio: 1, model: 0 };
+const counts = { text: 1, image: 1, video: 0, audio: 1, motion: 0, model: 0 };
 const entry = (entryId: string, preview: CanvasGenerationHistoryListItem["preview"] = { kind: "text", excerpt: entryId }): CanvasGenerationHistoryListItem => ({ entryId, nodeId: "node", nodeTitle: entryId, kind: preview.kind === "failure" ? "text" : preview.kind, preview, source: { label: "生成" }, createdAt: "2026-10-26T00:00:00Z", current: false, recoverable: true, previewable: true });
 const page = (items = [entry("first"), entry("second")], nextCursor: string | null = null) => ({ ok: true as const, items, nextCursor, total: items.length, kindCounts: counts });
 async function fixture(read: CanvasHistoryClient["listCanvas"] = async () => page(), canvasId: string | null = "canvas") {

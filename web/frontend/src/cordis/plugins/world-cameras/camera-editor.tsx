@@ -111,7 +111,7 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
     // Record a successful durable write even if this editor was unmounted meanwhile.
     if (result.ok) {
       const adopted = adoptCameraTimeline({ ctx, canvasId: state.canvasId, cameraId: state.source.cameraId,
-        before: state.source, after: result.camera, label: "编辑镜头", operationId,
+        before: state.source, after: result.camera, label: "编辑镜头", operationId, revision: result.revision,
         version: { current: result.settingsVersion } });
       if (worldCameraEditorStore.getSnapshot()?.source !== state.source) return;
       receipt.current = { settingsVersion: result.settingsVersion, revision: result.revision };

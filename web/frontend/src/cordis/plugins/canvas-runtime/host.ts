@@ -1,3 +1,4 @@
+import { DirectorSomaMotionCache } from "../../services/director-soma-motion.js";
 /**
  * Canvas Runtime Service（change: adopt-frontend-cordis-plugin-runtime，design D3）。
  *
@@ -13,7 +14,7 @@ import { type FocusTargetInput } from "../canvas-shell/model-focus-session.js";
 import { createAttachedMedia } from "./attached-media.js";
 import { projectFocusContentRect } from "./project-focus-content-rect.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
-import { decodeSceneAreaData, defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
+import { worldCameraShotContext, decodeSceneAreaData, defaultAppTheme, type BevyModelEditor, type GhostRenderNode, type ModelFocusProjection } from "@woohaa3/contracts";
 import type { AlignmentGuide } from "../../contract/alignment-snap.js";
 import type { AlignmentSnapPolicy } from "../../contract/alignment-snap.js";
 import { applyAlignmentSnapPolicy, createAlignmentSnapRef, readAlignmentGuides, readAlignmentGuidesVersion } from "./alignment-snap-refs.js";
@@ -224,6 +225,9 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     if (!runtime?.requestWorldCapture) return { ok: false, code: "renderer-unavailable" };
     const release = await acquireCaptureLock();
     try {
+      const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+      await this.prepareWorldAnimation(canvas ? worldCameraShotContext(canvas, input.cameraId)?.animation?.areaNodeId ?? null : null);
+      this.controllerInstance?.flush();
       if (this.disposed || runtime !== this.runtimeInstance) return { ok: false, code: "renderer-unavailable" };
       worldCaptureGeneration += 1;
       const frame = await runtime.requestWorldCapture({
@@ -467,6 +471,18 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   // ── 动画节点播放（change: 2026-10-05-bind-model-animation-to-shots） ──
 
   private readonly animationPlaybackStore = new AnimationPlaybackStore();
+  private readonly somaMotions = new DirectorSomaMotionCache();
+  worldAnimationAssetStatus = () => this.somaMotions.snapshot();
+  retryWorldAnimationAssets = () => this.somaMotions.retryFailed();
+  subscribeWorldAnimationAssets = (listener: () => void) => this.somaMotions.subscribe(listener);
+  worldAnimationContext = () => ({ resolveSomaMotion: this.somaMotions.resolve });
+  prepareWorldAnimation = async (areaNodeId?: string | null) => {
+    const area = areaNodeId === undefined ? this.worldAnimation.snapshot().nodeId : areaNodeId;
+    if (area === null) return;
+    this.somaMotions.sync(workingCanvasOf(woohaa3CanvasStore.getState()), () => this.controllerInstance?.invalidate("soma-motion-ready"), new Set(area ? [area] : []));
+    this.somaMotions.retryFailed();
+    await this.somaMotions.ready();
+  };
   private readonly worldAnimation = new WorldAnimationTransport(() => this.controllerInstance?.invalidate("world-animation"));
   /** 当前 attach 的页面级资源需求 owner（change: 2026-10-23-scale-canvas-media-residency）。 */
   private residencyInstance: import("./residency/index.js").CanvasResourceCoordinator | null = null;
@@ -516,6 +532,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
    */
   setCaptureAnimationTimes = (times: ReadonlyMap<string, number> | null): void => {
     this.captureAnimationTimesOverride = times ? new Map(times) : null;
+    this.syncWorldAnimation();
     this.controllerInstance?.invalidate("world-capture-animation");
   };
   worldAnimationTimes = () => this.captureAnimationTimesOverride ?? this.worldAnimation.sampleTimes();
@@ -523,7 +540,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   worldAnimationPlayheads = () => this.worldAnimation.sampleTimes();
   worldAnimationLoop = (nodeId: string) => this.worldAnimation.loopFor(nodeId);
   subscribeWorldAnimation = (listener: () => void) => this.worldAnimation.subscribe(listener);
-  playWorldAnimation = () => this.worldAnimation.play();
+  playWorldAnimation = () => { this.somaMotions.retryFailed(); this.worldAnimation.play(); };
   pauseWorldAnimation = () => this.worldAnimation.pause();
   seekWorldAnimation = (time: number) => this.worldAnimation.seek(time);
   setWorldAnimationLoop = (loop: boolean) => this.worldAnimation.setLoop(loop);
@@ -539,6 +556,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         : [];
     }) ?? [];
     this.worldAnimation.sync(canvas?.id ?? null, definitions, selection.nodeIds.length === 1 ? selection.primaryNodeId : null);
+    const areas = this.captureAnimationTimesOverride ? new Set(this.captureAnimationTimesOverride.keys()) : new Set(this.worldAnimation.snapshot().nodeId ? [this.worldAnimation.snapshot().nodeId!] : []);
+    this.somaMotions.sync(canvas, () => this.controllerInstance?.invalidate("soma-motion-ready"), areas);
   }
   /** 当前活动动画播放投影；无返回 null。 */
   animationPlaybackState = (): import("@woohaa3/contracts").BevyAnimationPlayback | null =>
@@ -712,6 +731,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         getGhostNodes: () => this.ghosts,
         modelFocus: () => this.modelFocus,
         worldAnimationTimes: this.worldAnimationTimes,
+        worldAnimationContext: this.worldAnimationContext,
         worldAnimationPlayheads: this.worldAnimationPlayheads,
         worldAnimationPlayer: this.worldAnimationState,
         worldAnimationLoop: this.worldAnimationLoop,
@@ -821,6 +841,7 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.somaMotions.dispose();
     this.detach?.();
     this.frameWindow?.dispose();
     this.frameWindow = null;

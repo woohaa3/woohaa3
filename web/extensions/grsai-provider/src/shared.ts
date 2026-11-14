@@ -31,7 +31,7 @@ export const GRSAI_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: GRSAI_PLUGIN_ID,
   name: "grsai Provider",
   description: "grsai。填写 API Key 后从公开模型表发现可用的图片、视频与文本模型；图片和视频走统一生成接口，文本走 OpenAI 兼容对话接口。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "grsai-provider-config", schemaVersion: 1 },

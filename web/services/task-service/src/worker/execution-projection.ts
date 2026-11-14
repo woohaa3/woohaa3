@@ -149,9 +149,9 @@ export function readSafeResult(record: ExecutionRecord): TaskResultSummary | und
   const outputs = record.result?.outputs ?? [];
   const binary = outputs.find((output) =>
     (output.url || output.locator || output.storageKey)
-    && (output.kind === "image" || output.kind === "video" || output.kind === "audio")
+    && (output.kind === "image" || output.kind === "video" || output.kind === "audio" || (output.kind as string) === "motion")
   );
-  if (binary && (binary.kind === "image" || binary.kind === "video" || binary.kind === "audio")) {
+  if (binary && (binary.kind === "image" || binary.kind === "video" || binary.kind === "audio" || (binary.kind as string) === "motion")) {
     const stable = readStableMediaResult(record);
     if (stable) {
       // 稳定媒体信封（远端托管生成 / GPU worker）：位置与 metadata 已齐备，原样落历史，
@@ -159,17 +159,19 @@ export function readSafeResult(record: ExecutionRecord): TaskResultSummary | und
       // 此前这里只写 `{ mediaKind }` 占位，把「已有稳定产物」降级成「无产物」，
       // 画布投影于是判成 empty success（2026-11-10 现场）。
       return {
-        mediaKind: binary.kind,
+        mediaKind: binary.kind as TaskResultSummary["mediaKind"],
         ...(stable.media.locator !== undefined ? { locator: stable.media.locator } : {}),
         ...(stable.media.storageKey !== undefined ? { storageKey: stable.media.storageKey } : {}),
         contentType: stable.media.contentType,
         size: stable.media.size,
         ...(stable.media.checksum !== undefined ? { checksum: stable.media.checksum } : {}),
+        ...(stable.media.motion ? { motion: stable.media.motion, fps: stable.media.motion.fps } : {}),
+        ...(stable.media.fps !== undefined ? { fps: stable.media.fps } : {}),
         ...(stable.media.durationSeconds !== undefined ? { durationSeconds: stable.media.durationSeconds } : {})
       };
     }
     // provider 输出 URL 不落历史：只记录媒体类型占位（真实 storageKey 由 Media import 后写入）。
-    return { mediaKind: binary.kind };
+    return { mediaKind: binary.kind as TaskResultSummary["mediaKind"] };
   }
   const text = outputs.find((output) => output.kind === "text" && output.text);
   if (text?.text !== undefined) return { mediaKind: "text", text: text.text };
@@ -208,7 +210,7 @@ export function isTerminalRecord(record: ExecutionRecord): boolean {
 /** 投影里若已带受控下载地址，直接用它（少数 provider 返回 URL）。 */
 export function readBinaryOutputUrl(
   record: ExecutionRecord,
-  modelType: "image" | "video" | "audio"
+  modelType: "image" | "video" | "audio" | "motion"
 ): string | undefined {
   const outputs = record.result?.outputs ?? [];
   const match = outputs.find(

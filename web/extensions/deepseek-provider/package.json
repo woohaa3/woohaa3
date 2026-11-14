@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-deepseek-provider",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "DeepSeek 官方生成 Provider：从 GET /models 发现模型，文本走 OpenAI 兼容 Chat Completions（含思考模式与图像理解）。",

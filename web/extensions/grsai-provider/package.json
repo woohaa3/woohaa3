@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-grsai-provider",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "grsai Provider：纳米香蕉 / GPT Image 绘图走原生绘图接口，Gemini/GPT 文本走 OpenAI 兼容对话接口，参考图由插件自己上传。",

@@ -57,12 +57,14 @@ export type AgentTextOutput = {
  * 不返回 storageKey 本身。
  */
 export type AgentMediaOutput = {
-  kind: "image" | "video" | "audio";
+  kind: "image" | "video" | "audio" | "motion";
   runId: string;
   url: string;
   contentType: string;
   size: number;
   durationSeconds?: number;
+  fps?: number;
+  motion?: import("../task/history/types.js").SomaMotionMetadata;
   /** 视频海报的同源引用（若有）。 */
   posterUrl?: string;
   provenance: { canvasId: string; nodeId: string; runId: string; jobId: string };

@@ -250,6 +250,8 @@ export type AgentTargetSnapshot = {
    * canonical scope/version and leases; the assistant never supplies them.
    */
   worldScope?: AssistantWorldScopeSelection;
+  /** Explicit per-turn permission; omitted on older turns means false. */
+  allowSceneAreaExpansion?: boolean;
   /**
    * 冻结的账户模型 id（来自真实目录）。
    *
@@ -287,6 +289,8 @@ export type AgentEntryIntent = {
   itemId?: string;
   /** Trusted world scope selection for `mode: "world"` (see AgentTargetSnapshot). */
   worldScope?: AssistantWorldScopeSelection;
+  /** Explicit per-turn permission; omitted on older turns means false. */
+  allowSceneAreaExpansion?: boolean;
   /** 冻结的账户模型 id（来自真实目录）；缺失时由 adapter 按当前目录处理或拒绝。 */
   model?: string;
   reasoningEffort?: AgentReasoningEffort;
@@ -320,6 +324,8 @@ export type AgentAdapterCapabilities = {
   discussion: boolean;
   targets: readonly AgentTargetMode[];
   tools: boolean;
+  /** Local harness accepts a host-resolved cwd and provides its own file/shell tools. */
+  workspace?: boolean;
   models: "remote" | "none";
   /**
    * 通道真实支持的内建执行能力（change: 2026-11-07-add-pluggable-agent-roles）。
@@ -636,6 +642,16 @@ export type AgentConversationAdapter = {
  */
 export const AGENT_CONVERSATION_IDENTITY_CAPABILITY_ID = "agent-conversation-identity" as const;
 
+/**
+ * `agent-conversation-identity` 与 `agent-conversation-adapter:*` 的形状版本
+ * （change: 2026-11-13-add-extension-capability-abi）。
+ *
+ * 提供方按此版本注册，注册中心按此版本解析；`AgentConversationIdentityPort` /
+ * `AgentConversationAdapter` 的成员或语义变化时抬高。
+ */
+export const AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION = 1;
+export const AGENT_CONVERSATION_IDENTITY_CAPABILITY_VERSION = 1;
+
 /** 本地会话身份解析结果（宿主 owner + 会话绑定；仅新建会话时下发 Set-Cookie）。 */
 export type AgentConversationSessionIdentity = {
   /** 宿主会话 owner（provider 扩展的凭据 owner 命名空间；不来自请求自报）。 */
@@ -691,6 +707,7 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
   if (!isJsonObject(value)) return false;
   if (!isBoolean(value.discussion)) return false;
   if (!isBoolean(value.tools)) return false;
+  if (value.workspace !== undefined && !isBoolean(value.workspace)) return false;
   if (value.models !== "remote" && value.models !== "none") return false;
   if (!Array.isArray(value.targets)) return false;
   if (value.textDelivery !== undefined && (!isJsonObject(value.textDelivery) || !isBoolean(value.textDelivery.imageInput) || !Number.isSafeInteger(value.textDelivery.maxImages) || (value.textDelivery.maxImages as number) < 0)) return false;

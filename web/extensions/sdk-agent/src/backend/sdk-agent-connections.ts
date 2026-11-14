@@ -15,6 +15,8 @@ import { projectReasoningCapability } from "./adapters/reasoning.js";
 import { ASSISTANT_CANDIDATE_CAPABILITIES } from "@woohaa3/agent-connections";
 
 export type SdkAgentRuntimeOptions = {
+  /** Runtime-resolved canvas cwd, independent of private harness configuration. */
+  workspace?: { cwd: string };
   service: Pick<ConnectionService, "get" | "list" | "readCredential" | "credentialConfigured" | "setRuntimeProbe" | "resolveNativeBinding" | "setNativeBinding" | "setStatus">;
   executor?: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade;
   serviceConnections?: import("@woohaa3/contracts").ApplicationServiceConnectionFacade;
@@ -212,6 +214,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
           const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" },
             workId: input.requestId, canvasId: input.canvasId, nodeId: input.intent.nodeId, mode: input.intent.mode,
             ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+    ...(input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
             ...(expectedScopeEpoch !== undefined ? { expectedScopeEpoch } : {}),
             tools: toolNames });
           gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid,
@@ -250,7 +253,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       // 模型自己声明过的工具调用：与网关实际收到的写入次数对比，能区分「模型没写」和「调用没送达」。
       const suggestedTools: string[] = [];
       trace("sdk-start", { engine: engine.engine, engineModel, effort: input.intent.reasoningEffort ?? null, tools: gateway?.tools?.length ?? 0 });
-      const result = await sdk.run({ model: engineModel, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
+      const result = await sdk.run({ workspace: options.workspace, model: engineModel, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
         ...(input.candidate
           ? { images: input.candidate.images, outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : input.candidate.outputSchema }
           : input.images?.length ? { images: input.images }
@@ -327,7 +330,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" }),
+    capabilities: () => ({ workspace: sdkEngineForAdapter(adapter.adapterId)?.engine !== "gemini-agent-adk", discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";

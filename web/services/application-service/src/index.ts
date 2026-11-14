@@ -42,3 +42,5 @@ export { createSqliteSiteExtensionConfigStore } from "./extensions/config-store.
 
 export * from "./service-connections/registry.js";
 export * from "./skill-media/index.js";
+
+export { CanvasAgentWorkspaceService } from "./workspaces/service.js";

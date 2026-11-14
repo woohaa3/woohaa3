@@ -39,6 +39,7 @@ pub mod view;
 mod web_popups;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod window_controls;
+mod workspace_fs;
 
 pub use host::{HostConfig, NativeCanvasSession, run_host, run_native_only_host};
 pub use view::{CompositionMode, ViewBounds, probe_desktop_session};

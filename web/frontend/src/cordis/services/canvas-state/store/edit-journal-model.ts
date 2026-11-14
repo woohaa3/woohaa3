@@ -20,7 +20,7 @@ export type JournalSubmitOutcome =
   | { ok: false; reason: string; code?: string };
 
 export type JournalSettleOutcome =
-  | { ok: true; committed: boolean }
+  | { ok: true; committed: boolean; revision?: number }
   | { ok: false; reason: string };
 
 export type CanvasJournalEntry = {
@@ -29,6 +29,8 @@ export type CanvasJournalEntry = {
   label: string;
   /** 入队时固定的 wire commandId；重试复用同一个值。 */
   commandId?: string;
+  revision?: number;
+  undoRevision?: number;
   forward: JournalPlannedEdit;
   inverse: JournalPlannedEdit;
   /** 冲突/失败原因（用于界面展示）。 */
@@ -49,6 +51,8 @@ export type ParameterJournalEntry = {
   modelKey: string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
+  revision?: number;
+  undoRevision?: number;
   state: JournalEntryState;
 };
 
@@ -62,12 +66,14 @@ export type ExternalJournalEntry = {
   kind: "external";
   id: string;
   label: string;
+  revision?: number;
+  undoRevision?: number;
   undo: () => Promise<ExternalJournalOutcome>;
   redo: () => Promise<ExternalJournalOutcome>;
   state: JournalEntryState;
 };
 
-export type ExternalJournalOutcome = { ok: true } | { ok: false; reason: string };
+export type ExternalJournalOutcome = { ok: true; revision?: number } | { ok: false; reason: string };
 
 export type JournalEntry = CanvasJournalEntry | ParameterJournalEntry | ExternalJournalEntry;
 
@@ -112,6 +118,9 @@ export type EditJournalDependencies = {
   isWritable: () => boolean;
   /** 规范画布是否有净变化（命令结算后复核）。 */
   hasNetChange: (commandId: string) => boolean;
+  /** Exact accepted revision, including after a reconnect, when still available. */
+  committedRevision?: (commandId: string) => number | undefined;
+  currentRevision?: () => number | undefined;
   /** 同步连接状态（默认 ready，便于纯逻辑单测）。 */
   connectionState?: () => JournalConnectionState;
   /**
@@ -237,7 +246,7 @@ export type JournalHandlers = {
   apply: (
     entry: JournalEntry,
     direction: -1 | 1
-  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  ) => Promise<ExternalJournalOutcome>;
 };
 
 /** 从受保护编辑中提取涉及的稳定实体 ID，用于判定后续记录是否依赖。 */

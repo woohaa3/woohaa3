@@ -64,6 +64,8 @@ async function main(){
   agentSupervisor=createAgentSupervisorHost({
    root:resourceRoot,
    runtimeDir:agentRuntimeDirectory({root:dataDir}),
+   canvasWorkspaceRoot:path.join(dataDir,'agent-workspaces'),
+   canvasWorkspaceProtectedPaths:[resourceRoot,...['config','secrets','stores','media','extension-data','extensions'].map(name=>path.join(dataDir,name))],
    workspaceKey:hashKey(path.resolve(dataDir)),
    scriptPath:executorScript,
    expectedRuntimeBuild:createHash('sha256').update(fs.readFileSync(executorScript)).digest('hex').slice(0,32),
@@ -105,7 +107,7 @@ async function main(){
  const requestedPort=Number(arg('port','0'));
  if(Number.isInteger(requestedPort)&&requestedPort>0)publishDesktopLoopbackPort(requestedPort,[env,process.env]);
  const extensionHost=await loadExtensionHost({repoRoot:manifest.developmentRoot??resourceRoot,env,logger:event=>console.error(`[extensions] ${JSON.stringify(event)}`)});
- const backend=await createBackendService({env,basePath:'/',extensionHost});
+ const backend=await createBackendService({desktopCanvasAgentWorkspace:{version:1},env,basePath:'/',extensionHost});
  runtime=await startDesktopServer({backend,frontendDir:path.join(resourceRoot,'frontend'),extensionHost,instance,port:requestedPort,devOrigin:arg('dev-origin',null),env});
  commitDataVersion(dataDir,version);
  emit(runtime.ready);

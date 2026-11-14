@@ -22,6 +22,8 @@ function publicPreview(preview: NodeHistoryPreview): NodeHistoryPreview {
       return { kind: "image", href: resolve(preview.href) };
     case "video":
       return { kind: "video", href: resolve(preview.href), posterHref: resolveNullable(preview.posterHref), durationSeconds: preview.durationSeconds };
+    case "motion":
+      return { ...preview, href: resolve(preview.href) };
     case "audio":
       return { kind: "audio", href: resolve(preview.href), durationSeconds: preview.durationSeconds };
     case "model":

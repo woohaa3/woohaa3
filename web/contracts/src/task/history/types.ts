@@ -18,7 +18,7 @@ export const TASK_EXECUTION_STATES = [
 export type TaskExecutionState = (typeof TASK_EXECUTION_STATES)[number];
 
 /** 模型类型（与 catalog modelType 对齐）。 */
-export type TaskModelType = "language" | "image" | "video" | "audio";
+export type TaskModelType = "language" | "image" | "video" | "audio" | "motion";
 
 /** 进行中状态（历史页「进行中」tab）。 */
 export const ACTIVE_TASK_STATES: readonly TaskExecutionState[] = ["queued", "pending", "running"];
@@ -53,8 +53,18 @@ export type TaskResultLocation = {
  */
 export type TaskMediaState = "materializing";
 
+export type SomaMotionMetadata = {
+  formatVersion: "kimodo-soma-v1";
+  skeletonId: "somaskel77";
+  restPoseId: "kimodo-standard-tpose";
+  fps: number;
+  frameCount: number;
+  jointCount?: number;
+  skinAssetId?: string;
+};
+
 export type TaskResultSummary = {
-  mediaKind: "text" | "image" | "video" | "audio";
+  mediaKind: "text" | "image" | "video" | "audio" | "motion";
   /**
    * 媒体材料化阶段；缺省表示没有正在进行的转存。
    *
@@ -86,6 +96,9 @@ export type TaskResultSummary = {
   checksum?: string;
   /** 音视频时长（可得时）。 */
   durationSeconds?: number;
+  /** Motion sample rate; independent of video frame rate. */
+  fps?: number;
+  motion?: SomaMotionMetadata;
   /** 可选视频海报/封面的稳定 metadata。 */
   poster?: {
     storageKey: string;

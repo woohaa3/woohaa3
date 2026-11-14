@@ -29,3 +29,31 @@ it("isolates rejected play promises and old events after source change/unmount",
   act(() => root.render(null)); expect(current.getAttribute("src")).toBe(null);
   act(() => current.dispatchEvent(new Event("error"))); expect(host.textContent).toBe("");
 });
+it("seeks on the waveform, clamps the position and changes the actual media mute state", () => {
+  const audio = render("/seek.wav"); ready(audio);
+  const wave = host.querySelector<HTMLElement>(".ui-audio-player__wave")!;
+  wave.getBoundingClientRect = () => ({ left: 100, width: 200 }) as DOMRect;
+  act(() => wave.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 150 })));
+  expect(audio.currentTime).toBe(3);
+  expect(host.querySelector(".ui-audio-player__elapsed")!.textContent).toBe("0:03");
+  act(() => wave.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 500 })));
+  expect(audio.currentTime).toBe(12);
+  act(() => host.querySelector<HTMLButtonElement>(".ui-audio-player__volume")!.click());
+  expect(audio.muted).toBe(true);
+  render("/other.wav");
+  expect(host.querySelector("audio")!.muted).toBe(false);
+});
+
+it("uses an icon-only play control and keeps the seek bar synchronized with playback", () => {
+  const audio = render("/progress.wav"); ready(audio);
+  const play = host.querySelector<HTMLButtonElement>(".ui-audio-player__play")!;
+  expect(play.textContent).toBe(""); expect(play.title).toBe("播放");
+  const seek = host.querySelector<HTMLInputElement>(".ui-audio-player__seek")!;
+  expect(seek.disabled).toBe(false); expect(seek.max).toBe("12");
+  act(() => { audio.currentTime = 6; audio.dispatchEvent(new Event("timeupdate")); });
+  expect(seek.value).toBe("6"); expect(seek.style.getPropertyValue("--audio-progress")).toBe("50%");
+  act(() => { seek.value = "9"; seek.dispatchEvent(new Event("input", { bubbles: true })); });
+  expect(audio.currentTime).toBe(9);
+  expect(host.querySelector(".ui-audio-player__elapsed")!.textContent).toBe("0:09");
+  render("/next.wav"); expect(seek.disabled).toBe(true); expect(seek.value).toBe("0");
+});

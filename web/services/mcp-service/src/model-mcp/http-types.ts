@@ -99,6 +99,8 @@ export type ModelMcpHttpOptions = {
   path?: string;
   logger?: (event: { event: string; status: number; code?: string }) => void;
   agentAuthoring?: AgentAuthoringToolDeps;
+  authoringTools?: import("../agent-authoring/contributions.js").AgentAuthoringToolRegistry;
+  authoringContext?: (grant: import("@woohaa3/contracts").ApplicationToolGrant | null) => import("@woohaa3/contracts").McpToolRegistrationContext;
   toolGrant?: {
     allowedTools?: (token: string) => readonly string[] | undefined;
     /** Host-owned grant lookup used by world tools; absent means those tools stay unavailable. */

@@ -64,7 +64,7 @@ function makePlane(overrides: {
       {
         extensionId: "sample-site-extension",
         activate: (h) => {
-          h.registerCapability({ id: "sample.action", value: { ok: true } });
+          h.registerCapability({ id: "sample.action", version: 1, value: { ok: true } });
         }
       } satisfies ApplicationBackendExtensionDefinition
     ];
@@ -258,7 +258,7 @@ describe("commit 后崩溃与 reconcile（任务 3.1）", () => {
       workStore: work,
       metadata: metadataSource(),
       definitions: [
-        { extensionId: "sample-site-extension", activate: (h) => { h.registerCapability({ id: "sample.action", value: {} }); } }
+        { extensionId: "sample-site-extension", activate: (h) => { h.registerCapability({ id: "sample.action", version: 1, value: {} }); } }
       ]
     });
     expect(plane.status("sample-site-extension")?.actualState).toBe("configuring");
@@ -845,7 +845,7 @@ describe("缺省启停（配置文件 + manifest defaultEnabled）", () => {
       definitions: [{
         extensionId: METADATA.extensionId,
         activate: (h) => {
-          h.registerCapability({ id: "sample.action", value: { ok: true } });
+          h.registerCapability({ id: "sample.action", version: 1, value: { ok: true } });
           h.registerHandler({ route: "sample/connections", auth: "public", handle: () => ({ body: { connections: [] } }) });
           h.registerRawHttpHandler?.({ route: "connections", method: "GET", auth: "public", purpose: "read", handle: async () => undefined });
           return { dispose: () => { disposals += 1; } };
@@ -856,7 +856,7 @@ describe("缺省启停（配置文件 + manifest defaultEnabled）", () => {
     await plane.reconcile();
     expect(store.get(METADATA.extensionId)).toBeUndefined();
     expect(host.activeVersions(METADATA.extensionId)).toEqual([0]);
-    expect(host.resolveCapability("sample.action")).toEqual({ ok: true });
+    expect(host.resolveCapability("sample.action", 1)).toEqual({ ok: true });
     expect(host.resolvePublicRoute(METADATA.extensionId, "connections", "GET")).toEqual({ owned: true });
     expect((await readConnections()).body).toEqual({ connections: [] });
     await plane.reconcile();
@@ -881,11 +881,11 @@ describe("缺省启停（配置文件 + manifest defaultEnabled）", () => {
     const toggles = memoryToggles();
     const { plane, host } = makePlane({ metadata: [{ ...METADATA, defaultEnabled: true }], toggles: toggles.store });
     await plane.reconcile();
-    expect(host.resolveCapability("sample.action")).toEqual({ ok: true });
+    expect(host.resolveCapability("sample.action", 1)).toEqual({ ok: true });
     await toggles.store.set(METADATA.extensionId, false);
     await plane.reconcile();
     expect(host.activeVersions(METADATA.extensionId)).toEqual([]);
-    expect(host.resolveCapability("sample.action")).toBeUndefined();
+    expect(host.resolveCapability("sample.action", 1)).toBeUndefined();
     expect(plane.status(METADATA.extensionId)).toMatchObject({ desiredEnabled: false, actualState: "disabled" });
     await plane.dispose();
   });

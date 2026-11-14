@@ -181,7 +181,7 @@ export function createEmptyWoohaa3ServerCanvas(
   };
 }
 
-const CANVAS_MEDIA_KINDS: readonly CanvasMediaKind[] = ["image", "video", "audio", "text", "storyboard", "file"];
+const CANVAS_MEDIA_KINDS: readonly CanvasMediaKind[] = ["image", "video", "audio", "text", "storyboard", "file", "motion"];
 const GENERATION_STATUSES: readonly GenerationStatus[] = [
   "idle", "queued", "running", "success", "failed", "draft", "ready", "archived"
 ];

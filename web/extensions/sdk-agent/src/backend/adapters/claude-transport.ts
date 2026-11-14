@@ -39,7 +39,7 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
     async run(input): Promise<AgentSdkTransportResult> {
       const key = input.resourceKey ?? connectionKey(`${input.model}:${input.restrictions.workspaceDir}`);
       const configDir = path.join(options.configDir, key);
-      const cwd = path.join(options.workspaceDir, key);
+      const cwd = input.restrictions.workspace ? input.restrictions.workspaceDir : path.join(options.workspaceDir, key);
 
       mkdirSync(configDir, { recursive: true, mode: 0o700 });
       mkdirSync(cwd, { recursive: true, mode: 0o700 });
@@ -54,7 +54,7 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
           return child;
         },
         abortController,
-        tools: [],
+        tools: input.restrictions.workspace ? { type: "preset" as const, preset: "claude_code" as const } : [],
         strictMcpConfig: true,
         includePartialMessages: true,
         persistSession: true,
@@ -63,7 +63,7 @@ export function createClaudeTransport(options: ClaudeTransportOptions): AgentSdk
         cwd,
         settingSources: [] as const,
         permissionMode: "dontAsk" as const,
-        allowedTools: input.mcp ? input.restrictions.allowedTools.map((name) => `mcp__${input.mcp!.name}__${name}`) : [],
+        allowedTools: [...input.restrictions.nativeTools, ...(input.mcp ? input.restrictions.allowedTools.map((name) => `mcp__${input.mcp!.name}__${name}`) : [])],
         disallowedTools: [...input.restrictions.disallowedTools],
         // change: 2026-10-22-remove-agent-execution-limits，任务 2.4：不传 maxTurns。
         // 安装版本 @anthropic-ai/claude-agent-sdk 0.3.301 只在 `if (maxTurns) push("--max-turns")`

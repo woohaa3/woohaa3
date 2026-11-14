@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-sdpppx-provider",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "SDPPPX 接入：宿主侧微信扫码登录、租户模板生成 Provider、参考素材上传与异步任务。",

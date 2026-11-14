@@ -191,6 +191,7 @@ export function installInteractionController(options: InteractionControllerOptio
     worldCameraPreviews: worldCameraPreview.overrides(),
     sceneAreaPreviews,
     sceneAnimationTimes: options.getWorldAnimationTimes?.(),
+    sceneAnimationContext: options.getWorldAnimationContext?.(),
     viewportPreview: state.viewportPreview,
     fallbackViewport: localViewport.get(),
     hoveredNodeId: state.hoveredNodeId,

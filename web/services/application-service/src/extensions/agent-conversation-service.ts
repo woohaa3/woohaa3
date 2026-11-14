@@ -1,3 +1,4 @@
+import { stableStringify } from "@woohaa3/contracts/canvas-yjs";
 import { createHash } from "node:crypto";
 /**
  * 宿主 Agent 会话服务
@@ -71,6 +72,7 @@ export { hashIntent } from "./agent-conversation-projection.js";
 
 export type AgentConversationServiceOptions = {
   store: AgentConversationStore;
+  canvasAgentWorkspaces?: import("../workspaces/service.js").CanvasAgentWorkspaceService;
   registry: AgentAdapterRegistry;
   /**
    * 连接发现注册表（change: 2026-10-16-...，任务 2.1/2.3）。
@@ -457,11 +459,29 @@ export function createAgentConversationService(options: AgentConversationService
       prepared = frozenPrepared(turn);
     } else {
       const rolePrepared = await prepareFrozenRole(turn, entry, bound.handle.capabilities);
+      if (isTerminalTurnStatus(store.getTurn(turn.turnId)?.status ?? "cancelled")) return;
       if (!rolePrepared.ok) {
         finishTurn(turn, { status: "failed", error: { code: rolePrepared.code, message: rolePrepared.message } });
         return;
       }
       prepared = rolePrepared.prepared;
+    }
+
+    if (prepared && !delivery && !candidate && !adoption && options.canvasAgentWorkspaces) {
+      try {
+        prepared = await options.canvasAgentWorkspaces.prepare({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId }, prepared, bound.handle.capabilities.workspace === true);
+        store.updateTurn(turn.turnId, { preparedJson: safeJson(prepared) }, now());
+      } catch (error) {
+        finishTurn(turn, { status: "failed", error: { code: (error as { code?: string }).code ?? "workspace-unavailable", message: error instanceof Error ? error.message : String(error) } });
+        return;
+      }
+    }
+
+    // Cancellation may arrive while role/workspace preparation is awaiting I/O.
+    // Never resurrect a cancelled durable turn or leave a late lease active.
+    if (isTerminalTurnStatus(store.getTurn(turn.turnId)?.status ?? "cancelled")) {
+      await options.canvasAgentWorkspaces?.cancel({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId });
+      return;
     }
 
     // 回合授权（任务 2.1/2.3）：在调用通道前持久冻结 owner/连接版本/目标/方法/工具范围，
@@ -735,6 +755,7 @@ export function createAgentConversationService(options: AgentConversationService
     if (binding) {
       store.updateConversation(turn.conversationId, { status: conversationStatusFor(store.latestTurn(turn.conversationId)), latestRequestId: turn.requestId }, now());
     }
+    void options.canvasAgentWorkspaces?.settled({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId }, status).catch(error => log({ event: "workspace-settle-failed", requestId: turn.requestId, message: String(error) }));
     log({ event: "agent-conversation-turn-settled", conversationId: turn.conversationId, requestId: turn.requestId, status });
     try {
       options.onTurnSettled?.({
@@ -799,6 +820,7 @@ export function createAgentConversationService(options: AgentConversationService
       ...(target.nodeId !== undefined ? { nodeId: target.nodeId } : {}),
       ...(target.mode !== undefined ? { mode: target.mode } : {}),
       ...(target.cameraId !== undefined ? { cameraId: target.cameraId } : {}),
+      ...(target.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: target.allowSceneAreaExpansion === true } : {}),
       ...(target.worldScope ? {
         worldScope: target.worldScope.kind === "scene-area"
           ? { kind: "scene-area" as const, areaId: target.worldScope.areaId }
@@ -1053,6 +1075,7 @@ export function createAgentConversationService(options: AgentConversationService
       if (input.entry.canvasId !== binding.canvasId) return fail("unauthorized", "目标画布与会话不一致");
       if (input.entry.action !== "discuss" && binding.nodeId && input.entry.nodeId !== binding.nodeId) return fail("unauthorized", "目标节点与会话不一致");
 
+      if (input.entry.allowSceneAreaExpansion !== undefined && (typeof input.entry.allowSceneAreaExpansion !== "boolean" || input.entry.mode !== "world" || input.entry.worldScope?.kind !== "scene-area")) return fail("malformed-request", "自动扩区选项仅适用于导演区目标");
       if (input.entry.mode === "text" && input.entry.action !== "discuss" && !acceptingTrustedDelivery) return fail("capability-unsupported", "文本生成必须经过可信文本交付入口");
       const inputHash = hashIntent(input.entry, input.connection ?? null)
         + (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "")
@@ -1060,7 +1083,14 @@ export function createAgentConversationService(options: AgentConversationService
       const existing = store.findTurnByRequest(input.owner, input.requestId);
       if (existing) {
         if (existing.conversationId !== binding.conversationId || existing.canvasId !== binding.canvasId) return fail("request-id-reused", "requestId 已绑定其它会话或画布");
-        if (existing.inputHash !== inputHash) return fail("request-id-reused", "requestId 已用于不同输入");
+        if (existing.inputHash !== inputHash) {
+          // Old world turns predate scope in the hash. Accept their exact frozen
+          // scope and default-false policy only; never upgrade an old grant.
+          const target = JSON.parse(existing.targetJson) as AgentTargetSnapshot;
+          const suffix = (acceptingStructuredHash ? `:${acceptingStructuredHash}` : "") + (input.trustedRole ? `:${createHash("sha256").update(JSON.stringify(input.trustedRole.input ?? null)).digest("hex")}` : "");
+          const legacyHash = hashIntent({ ...input.entry, worldScope: undefined }, input.connection ?? null) + suffix;
+          if (!input.entry.worldScope || input.entry.allowSceneAreaExpansion === true || stableStringify(target.worldScope) !== stableStringify(input.entry.worldScope) || existing.inputHash !== legacyHash) return fail("request-id-reused", "requestId 已用于不同输入");
+        }
         // 相同身份相同输入：返回原运行，不重复推理/写入。
         return { ok: true, conversation: toSummary(binding), turn: toTurn(existing), reused: true };
       }
@@ -1145,6 +1175,7 @@ export function createAgentConversationService(options: AgentConversationService
         ...(input.entry.nodeId !== undefined ? { nodeId: input.entry.nodeId } : {}),
         ...(input.entry.mode !== undefined ? { mode: input.entry.mode } : {}),
         ...(input.entry.worldScope !== undefined ? { worldScope: input.entry.worldScope } : {}),
+        ...(input.entry.worldScope?.kind === "scene-area" && input.entry.mode === "world" ? { allowSceneAreaExpansion: input.entry.allowSceneAreaExpansion === true } : {}),
         ...(input.entry.cameraId !== undefined ? { cameraId: input.entry.cameraId } : {}),
         ...(input.entry.clipId !== undefined ? { clipId: input.entry.clipId } : {}),
         ...(input.entry.itemId !== undefined ? { itemId: input.entry.itemId } : {}),
@@ -1244,6 +1275,7 @@ export function createAgentConversationService(options: AgentConversationService
         }
       }
       controller?.abort();
+      void options.canvasAgentWorkspaces?.cancel({ owner: record.owner, canvasId: record.canvasId, requestId: record.requestId }).catch(error => log({ event: "workspace-cancel-failed", requestId: record.requestId, message: String(error) }));
       store.revokeTurnAuthority(record.turnId, now());
       // 宿主重启后没有在途控制器：活动回合按用户停止结算；旧 unknown 已由启动核对结算失败。
       if (!controller && ["queued", "running", "committing"].includes(record.status)) {

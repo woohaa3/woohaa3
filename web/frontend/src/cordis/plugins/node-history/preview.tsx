@@ -9,6 +9,7 @@
  * 素材失效不等于历史记录消失；预览可用性不替代恢复能力判断。
  */
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+const SomaMotionPlayer = lazy(() => import("../../../shared/soma-motion/player.js").then(module => ({ default: module.SomaMotionPlayer })));
 const ModelThumbnail = lazy(() => import("./model-thumbnail.js").then(module => ({ default: module.ModelThumbnail })));
 import { Button } from "@woohaa3/ui/primitives";
 import { AudioPlayer } from "@woohaa3/ui/media";
@@ -47,7 +48,7 @@ export function HistoryPreview({ preview, thumbnail = true, className, onRetry, 
   const classes = [thumbnail ? "node-history__thumb" : "canvas-history__preview", className].filter(Boolean).join(" ");
   return (
     <div className={classes} data-preview-kind={preview.kind}>
-      {preview.kind === "audio" && !thumbnail ? <AudioPlayer key={preview.href} url={preview.href} /> : preview.kind === "video" && !thumbnail ? <HistoryVideo key={preview.href} href={preview.href} poster={preview.posterHref} /> : preview.kind === "model" ? (
+      {preview.kind === "motion" ? thumbnail ? <span className="node-history__thumb-fallback">动作</span> : <Suspense fallback={<span>正在载入播放器…</span>}><SomaMotionPlayer key={`${preview.href}:${retryKey ?? 0}`} url={preview.href} fps={preview.fps} expectedFrameCount={preview.motion.frameCount} /></Suspense> : preview.kind === "audio" && !thumbnail ? <AudioPlayer key={preview.href} url={preview.href} /> : preview.kind === "video" && !thumbnail ? <HistoryVideo key={preview.href} href={preview.href} poster={preview.posterHref} /> : preview.kind === "model" ? (
         <Suspense fallback={<span className="node-history__thumb-loading" />}><ModelThumbnail key={`${preview.entry.entryId}:${retryKey ?? 0}`} entry={preview.entry} render={renderModelThumbnail ?? unavailableThumbnail} thumbnail={thumbnail}
           {...(onRetry ? { onRetry } : {})} {...(unavailableReason ? { unavailableReason } : {})} /></Suspense>
       ) : preview.kind === "image" ? (

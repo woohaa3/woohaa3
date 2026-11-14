@@ -26,7 +26,7 @@ async function hostWithSource() {
   await host.activate({
     extensionId: "legacy-import",
     activate: (h) => {
-      h.registerCapability({ id: "canvas-source:legacy-source", value: provider("legacy-source") });
+      h.registerCapability({ id: "canvas-source:legacy-source", version: 1, value: provider("legacy-source") });
     }
   });
   return host;
@@ -55,7 +55,7 @@ describe("来源注册表：唯一 owner 与版本绑定（任务 3.1）", () =>
     const result = await host.activate({
       extensionId: "another-extension",
       activate: (h) => {
-        h.registerCapability({ id: "canvas-source:legacy-source", value: provider("legacy-source", "v2") });
+        h.registerCapability({ id: "canvas-source:legacy-source", version: 1, value: provider("legacy-source", "v2") });
       }
     });
     expect(result.ok).toBe(false);
@@ -69,7 +69,7 @@ describe("来源注册表：唯一 owner 与版本绑定（任务 3.1）", () =>
     const result = await host.activate({
       extensionId: "broken",
       activate: (h) => {
-        h.registerCapability({ id: "canvas-source:broken", value: { sourceId: "broken" } });
+        h.registerCapability({ id: "canvas-source:broken", version: 1, value: { sourceId: "broken" } });
       }
     });
     // 宿主允许任意 capability 值；注册表必须拒绝非法的来源 capability。
@@ -94,7 +94,7 @@ describe("来源注册表：每次调用校验 owner/停用（任务 3.2 / 3.3�
     const activation = await host.activate({
       extensionId: "legacy-import",
       activate: (h) => {
-        h.registerCapability({ id: "canvas-source:legacy-source", value: provider("legacy-source") });
+        h.registerCapability({ id: "canvas-source:legacy-source", version: 1, value: provider("legacy-source") });
       }
     });
     if (!activation.ok) throw new Error("activate");
@@ -109,8 +109,8 @@ describe("来源注册表：每次调用校验 owner/停用（任务 3.2 / 3.3�
     await host.activate({
       extensionId: "legacy-import",
       activate: (h) => {
-        h.registerCapability({ id: "canvas-source:zeta", value: provider("zeta") });
-        h.registerCapability({ id: "canvas-source:alpha", value: provider("alpha") });
+        h.registerCapability({ id: "canvas-source:zeta", version: 1, value: provider("zeta") });
+        h.registerCapability({ id: "canvas-source:alpha", version: 1, value: provider("alpha") });
       }
     });
     const registry = createCanvasSourceRegistry(host);

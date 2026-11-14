@@ -179,6 +179,9 @@ function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string 
       ...(subject ? { principalId: subject } : {})
     });
   }
+  if (options.authoringTools && options.authoringContext) {
+    options.authoringTools.registerForRequest(server, options.authoringContext(grant));
+  }
   registerExtensionTools(server, options, { bearerToken, loopback });
   options.registerTools?.(server, { bearerToken, grant });
   return server;
@@ -190,15 +193,11 @@ const GRANTED_TOOLS = new Set([
   "submit_model_scripts",
   "validate_model_scripts",
   "set_node_prompt",
-  "create_world_model",
-  "replace_world_model_content",
-  "append_world_model_script",
-  "patch_world_model_script",
-  "move_world_model",
-  "create_world_camera",
-  "set_world_camera",
-  "complete_world_camera",
-  "resize_scene_area",
+  "edit_world_model", "edit_world_camera", "edit_world_model_script", "edit_scene_animation_script",
+  "animate_humanoid",
+  "generate_humanoid_motion",
+  "get_humanoid_motion",
+  "apply_humanoid_motion",
   "import_generated_image"
 ]);
 
@@ -220,6 +219,9 @@ export function listModelMcpToolNames(options: ModelMcpHttpOptions = {}): readon
   registerModelTools(reg, options);
   registerModelBatchTools(reg, options);
   if (options.agentAuthoring) registerAgentAuthoringTools(server, options.agentAuthoring);
+  if (options.authoringTools && options.authoringContext) {
+    options.authoringTools.registerForRequest(server, options.authoringContext(null));
+  }
   registerExtensionTools(server, options, { bearerToken: null, loopback: false });
   options.registerTools?.(server, { bearerToken: null, grant: null });
   return [...names].sort();

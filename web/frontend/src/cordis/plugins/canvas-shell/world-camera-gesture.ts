@@ -35,7 +35,7 @@ export type WorldCameraGestureFamily = {
 
 /** 提交结果的可用形状；不在本模块决定权威服务实现。 */
 type SaveOutcome =
-  | { ok: true; camera: WorldCameraData; settingsVersion: string }
+  | { ok: true; camera: WorldCameraData; settingsVersion: string; revision?: number }
   | { ok: false; message?: string; code?: string };
 
 export type WorldCameraSavePort = {
@@ -58,6 +58,7 @@ export type WorldCameraGestureDeps = {
   recordExternal?: (entry: {
     id: string;
     label: string;
+    revision?: number;
     undo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
     redo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
   }) => { ok: boolean; reason?: string };
@@ -184,7 +185,7 @@ export function createWorldCameraGestureFamily(
     operationId: string,
     areaCommands: CanvasCommand[]
   ): Promise<
-    | { ok: true; settingsVersion: string }
+    | { ok: true; settingsVersion: string; revision?: number }
     | { ok: false; reason: string; settingsVersion?: string }
   > => {
     if (!deps.save) return { ok: false, reason: "镜头保存端口未就绪" };
@@ -202,7 +203,10 @@ export function createWorldCameraGestureFamily(
       const moved = await deps.moveCard(start.nodeId, card, `${operationId}:card`);
       if (!moved.ok) return { ok: false, reason: moved.reason, settingsVersion: result.settingsVersion };
     }
-    return { ok: true, settingsVersion: result.settingsVersion };
+    // The camera revision precedes any area or card writes in this gesture.
+    // It is a valid ordering boundary only when the camera was the sole write.
+    const revision = areaCommands.length === 0 && !(card && deps.moveCard) ? result.revision : undefined;
+    return { ok: true, settingsVersion: result.settingsVersion, ...(revision !== undefined ? { revision } : {}) };
   };
 
   const commit = (event: PointerEvent) => {
@@ -252,7 +256,7 @@ export function createWorldCameraGestureFamily(
           return { ok: false as const, reason: result.reason };
         }
         version = result.settingsVersion;
-        return { ok: true as const };
+        return { ok: true as const, ...(result.revision !== undefined ? { revision: result.revision } : {}) };
       };
       try {
         const first = await apply(applied.pose, afterCard, operationId, applied.forwardAreas);
@@ -265,6 +269,7 @@ export function createWorldCameraGestureFamily(
         deps.recordExternal?.({
           id: `world-camera:${operationId}`,
           label: gesture.start.mode === "rotate" ? "调整镜头朝向" : "移动镜头",
+          revision: first.revision,
           undo: () => apply(before, beforeCard, `${operationId}:undo`, applied.inverseAreas),
           redo: () => apply(applied.pose, afterCard, `${operationId}:redo`, applied.forwardAreas)
         });

@@ -161,6 +161,7 @@ export function createOpenCodeTransport(options: HttpTransportOptions = {}): Loc
         : null;
       const permissions = [
         { action: "*", resource: "*", effect: "deny" },
+        ...(input.workspace ? ["read", "list", "glob", "grep", "edit", "write", "patch", "bash"].map(action => ({ action, resource: "*", effect: "allow" })) : []),
         ...input.allowedTools.map(tool => ({ action: `${input.mcpEndpoint?.name}_${tool}`, resource: "*", effect: "allow" }))
       ];
       // A native session can be resumed only in the same frozen context/location.

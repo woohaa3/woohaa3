@@ -61,6 +61,8 @@ describe("durable spatial leases", () => {
     expect(one.acquire({ ...original, writable: [...original.writable].reverse() }).intent.writable).toHaveLength(3);
     expect(one.acquire({ ...original, runId: "retry-candidate", epoch: 2, executionId: "retry-execution" }).intent.runId).toBe("one");
     expect(() => one.acquire({ ...original, scope: { ...original.scope, scopeVersion: "different" } })).toThrow("request-conflict");
+    expect(one.acquire({ ...original, allowSceneAreaExpansion: false }).intent.allowSceneAreaExpansion).toBe(false);
+    expect(() => one.acquire({ ...original, allowSceneAreaExpansion: true })).toThrow("request-conflict");
     let writes = 0;
     const faulty = new SqliteSpatialLeaseStore(b, authority, () => { if (++writes === 2) throw new Error("injected"); });
     expect(() => faulty.acquire(intent("failed", [instance("z")]))).toThrow("injected");

@@ -497,3 +497,10 @@ describe("mediaRemote", () => {
     expect(isAllowedMediaUrl("//cdn/x")).toBe(false);
   });
 });
+
+ it("保留服务端 motion 模型目录", async () => {
+ const remote=createTaskRemote({fetchImpl:(async()=>jsonResponse({available:true,models:[{modelKey:"remote-server:kimodo-soma",providerId:"remote-server",providerModelId:"kimodo-soma",modelType:"motion",interaction:{id:"generic-model",version:1}}],defaultModels:{}})) as typeof fetch});
+ const catalog=await remote.fetchCatalog();
+ expect(catalog.models).toHaveLength(1);
+ expect(catalog.models[0]?.modelType).toBe("motion");
+ });

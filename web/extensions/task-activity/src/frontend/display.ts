@@ -24,7 +24,8 @@ const MODEL_TYPE_ACTIONS: Record<NonNullable<CanvasTaskActivity["modelType"]>, s
   language: "生成文字",
   image: "生成图片",
   video: "生成视频",
-  audio: "生成音频"
+  audio: "生成音频",
+  motion: "生成动作"
 };
 
 /** 已知操作（来自任务种类，不从 prompt 猜测）。 */

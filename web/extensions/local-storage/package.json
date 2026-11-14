@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-local-storage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "本地对象存储后端插件：向 ctx.storage 注册 backendId=local 的本地文件后端（无 presign，缺省主存储）。",

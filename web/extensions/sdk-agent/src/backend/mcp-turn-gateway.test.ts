@@ -140,6 +140,35 @@ describe("每轮 MCP 授权与权威回执", () => {
     } finally { await f.close(); }
   });
 
+  it("一次成功写入里的多条画布命令都记入回执，并忽略其他画布", async () => {
+    const f = await fixture(true, undefined, undefined, (message) => message.method === "tools/call"
+      ? {
+          result: {
+            content: [{ type: "text", text: "done" }],
+            structuredContent: {
+              ok: true,
+              canvasId: "canvas",
+              commandId: "cmd-b",
+              nodeId: "node",
+              revision: 6,
+              commandReceipts: [
+                { canvasId: "canvas", commandId: "cmd-a", nodeId: "node", revision: 5 },
+                { canvasId: "canvas", commandId: "cmd-b", nodeId: "node", revision: 6 },
+                { canvasId: "other", commandId: "cmd-foreign", nodeId: "node", revision: 7 }
+              ]
+            }
+          }
+        }
+      : undefined);
+    try {
+      expect((await f.call("submit_model_script", { script: "model" })).body).toHaveProperty("result");
+      expect(f.gateway.receipts).toEqual([
+        { canvasId: "canvas", nodeId: "node", commandId: "cmd-a", revision: 5 },
+        { canvasId: "canvas", nodeId: "node", commandId: "cmd-b", revision: 6 }
+      ]);
+    } finally { await f.close(); }
+  });
+
   it("上游 JSON-RPC 拒绝保留原始原因且只结算一次", async () => {
     const f = await fixture(true, undefined, undefined, (message) => message.method === "tools/call"
       ? { error: { code: -32000, message: "画布写入被宿主拒绝" } }

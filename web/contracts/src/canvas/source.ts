@@ -23,6 +23,14 @@ import {
 /** 来源能力命名空间前缀：`canvas-source:<sourceId>`。 */
 export const CANVAS_SOURCE_CAPABILITY_PREFIX = "canvas-source:" as const;
 
+/**
+ * `canvas-source:<sourceId>` capability 的形状版本
+ * （change: 2026-11-13-add-extension-capability-abi）。
+ *
+ * 提供者按此版本注册、Application 按此版本解析；`CanvasSourceProvider` 的成员或语义变化时抬高。
+ */
+export const CANVAS_SOURCE_CAPABILITY_VERSION = 1;
+
 export function canvasSourceCapabilityId(sourceId: string): string {
   return `${CANVAS_SOURCE_CAPABILITY_PREFIX}${sourceId}`;
 }

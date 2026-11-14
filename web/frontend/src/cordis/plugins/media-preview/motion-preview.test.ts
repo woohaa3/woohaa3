@@ -1,0 +1,20 @@
+import { expect, it } from 'vitest';
+import { createEmptyWoohaa3ServerCanvas } from '@woohaa3/contracts';
+import { resolveMotionPreview } from './media-preview.js';
+it('仅当前节点自身 ready 动作输出可播放，旧输出与外部 URL 拒绝', () => {
+  const canvas = createEmptyWoohaa3ServerCanvas('c', '2026-11-12T00:00:00Z');
+  canvas.document.nodes.push({ id: 'm', type: 'motion', position: {x:0,y:0} });
+  canvas.nodeData.m = { outputAssetId: 'a' };
+  canvas.assets.push({ id:'a', title:'翻转', mediaKind:'motion', status:'ready', source:'uploaded', createdAt:'2026-11-12T00:00:00Z', url:'/api/media/m.npz', metadata:{storageKey:'m.npz',checksum:'hash',fps:24,motion:{fps:24,frameCount:48,skeletonId:'somaskel77',restPoseId:'kimodo-standard-tpose',formatVersion:'kimodo-soma-v1'}} });
+  expect(resolveMotionPreview(canvas, 'm')).toMatchObject({url:'/api/media/m.npz?canvas=c',fps:24});
+  const canonical = canvas.assets[0]!.metadata!.motion;
+  delete canvas.assets[0]!.metadata!.motion;
+  expect(resolveMotionPreview(canvas, 'm')).toBeNull();
+  canvas.assets[0]!.metadata!.motion = canonical;
+  expect(resolveMotionPreview(canvas, 'm', 'old')).toBeNull();
+  expect(resolveMotionPreview(canvas, 'missing')).toBeNull();
+  canvas.assets[0]!.status = 'generating';
+  expect(resolveMotionPreview(canvas, 'm')).toBeNull();
+  canvas.assets[0]!.status = 'ready'; canvas.assets[0]!.url = 'https://outside.example/m.npz';
+  expect(resolveMotionPreview(canvas, 'm')).toBeNull();
+});

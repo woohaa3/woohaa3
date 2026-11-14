@@ -23,7 +23,7 @@ import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from 
 
 export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
-  inject: ["log", "gateway", "canvas"],
+  inject: ["log", "gateway", "canvas", "task", "media", "storage"],
   apply(ctx, { env }) {
     // 持久 grant registry（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）：
     // 与应用库同目录的独立文件，避免与业务表争锁；没有可用库路径时退回内存。
@@ -126,6 +126,35 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> 
       skillClient,
       skillAvailability: { available: true },
       assistantWorld,
+      authoringContext: grant => ({
+        grant,
+        world: assistantWorld,
+        task: {
+          catalog: () => ctx.task.catalog(),
+          submit: async input => {
+            const result = await ctx.task.port().submit(input as never);
+            return result as unknown as Record<string, unknown>;
+          },
+          status: async key => (await ctx.task.port().status(key)) as unknown as Record<string, unknown> | null,
+          cancel: key => ctx.task.port().cancel(key)
+        },
+        media: {
+          readBytes: async ({ canvasId, storageKey, maxBytes }) => {
+            const bucket = ctx.storage.bucket("media", { canvasId });
+            const stat = await bucket.head(storageKey);
+            if (!stat || stat.size > maxBytes) throw new Error("媒体资源不可读取或超出大小限制");
+            return (await bucket.get(storageKey)).bytes;
+          },
+          writeBytes: async ({ canvasId, bytes, contentType }) => {
+            const metadata = await ctx.media.port().importBytes({ bytesBase64: Buffer.from(bytes).toString("base64"), contentType, canvasId });
+            return metadata as never;
+          },
+          importLocator: async ({ canvasId, locator, contentType, expected }) => {
+            const metadata = await ctx.media.port().importFromLocator({ locator: locator as never, canvasId, contentType, ...(expected ? { expected } : {}) });
+            return metadata as never;
+          }
+        }
+      }),
       extensionTools: createExtensionMcpBridge({
         definitions: () => ctx.get("application")?.definitions ?? [],
         application,

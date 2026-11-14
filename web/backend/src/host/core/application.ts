@@ -1,3 +1,5 @@
+import { createCanvasAgentWorkspacesApi } from "../../api/canvas-agent-workspaces-api.js";
+import { devPrincipalIdFromEnv } from "../base/access.js";
 import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createAgentRuntimeBridge } from "./agent-runtime-bridge.js";
 import { randomBytes } from "node:crypto";
@@ -38,6 +40,7 @@ import type { ApplicationModule, HostContext, HostPlugin } from "../context.js";
 import { ROUTE_ORDER } from "../order.js";
 
 export type ApplicationPluginConfig = {
+  desktopCanvasAgentWorkspace?: { version: 1 };
   env: Record<string, string | undefined>;
   /** 公开挂载路径（已规范化）。 */
   basePath: string;
@@ -82,6 +85,15 @@ function createServicesFactory(
   const { canvas, task, media, toolGrants } = ctx;
   const accessEnforcer = ctx.access.accessEnforcer;
   return (extensionId: string, configVersion = 0): ApplicationExtensionServices => ({
+    ...(ctx.mcp.authoringTools ? {
+      authoringTools: {
+        register: contribution => {
+          if (!contribution.id.startsWith(`${extensionId}/`)) throw new Error("authoring-tool-contribution-owner-mismatch");
+          return ctx.mcp.authoringTools.register(contribution);
+        },
+        list: () => ctx.mcp.authoringTools.list().filter(contribution => contribution.id.startsWith(`${extensionId}/`))
+      }
+    } : {}),
     // storage 槽位的 owner-scoped 文档存储：宿主注册的基础实现按 extensionId 隔离，
     // 缺失时插件 fail closed（不伪造内存实现）。
     ...(foundationStorage?.documents.forExtension(extensionId) ? { documents: foundationStorage.documents.forExtension(extensionId)! } : {}),
@@ -124,6 +136,11 @@ function createServicesFactory(
         }
       },
       toolGrantRegistry: toolGrants,
+      expansionPolicy: (owner, requestId, canvasId, scope) => {
+        const turn = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId });
+        if (!turn?.ok || turn.turn.target.canvasId !== canvasId || turn.turn.target.mode !== "world" || JSON.stringify(turn.turn.target.worldScope) !== JSON.stringify(scope)) return undefined;
+        return turn.turn.target.allowSceneAreaExpansion === true;
+      },
       logger: (event) => ctx.log.scope("authoring")({ extensionId, ...event })
     }),
     ...(secrets ? { secrets: secrets.forExtension(extensionId) } : {})
@@ -190,6 +207,11 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         }
       },
       toolGrantRegistry: ctx.toolGrants,
+      expansionPolicy: (owner, requestId, canvasId, scope) => {
+        const turn = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId });
+        if (!turn?.ok || turn.turn.target.canvasId !== canvasId || turn.turn.target.mode !== "world" || JSON.stringify(turn.turn.target.worldScope) !== JSON.stringify(scope)) return undefined;
+        return turn.turn.target.allowSceneAreaExpansion === true;
+      },
       logger: (event) => ctx.log.scope("agent-role-context")(event)
     });
     const roleContextFor = async (input: { owner: string; canvasId: string; nodeId?: string; action: string; mode?: string }) => {
@@ -363,12 +385,22 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       "api.openai.com", "api.anthropic.com", "api.deepseek.com", "generativelanguage.googleapis.com",
       ...(env.WOOHAA3_SDK_AGENT_ALLOWED_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean),
     ]);
+    ctx.effect(() => ctx.gateway.route(ROUTE_ORDER.settings, createCanvasAgentWorkspacesApi({
+      workspace: () => ctx.get("application")?.service.canvasAgentWorkspaces() ?? null,
+      instanceOwner: devPrincipalIdFromEnv(env),
+      authenticator: ctx.access.authenticator,
+      accessEnforcer: ctx.access.accessEnforcer,
+      authorizeCanvas: async (owner, canvasId) => (await createExtensionCanvasAccessFacade(ctx.canvas).authorize({ subject: owner, canvasId, permission: "write" })).ok
+    })));
     const service = createApplicationService({
       agentRoles,
       // 业务入口的显式角色绑定：文本/图片交付由宿主领域入口执行，角色插件只提供实现。
       roleBindings: { textAuthor: STANDARD_AGENT_ROLE_IDS.textAuthor },
       roleContextFor,
       ...(agentRuntime ? { agentRuntime } : {}),
+      ...(config.desktopCanvasAgentWorkspace?.version === 1 && agentRuntime ? { canvasAgentWorkspace: {
+        authorize: async ({ owner, canvasId }: { owner: string; canvasId: string }) => (await createExtensionCanvasAccessFacade(ctx.canvas).authorize({ subject: owner, canvasId, permission: "write" })).ok
+      } } : {}),
       // The Agent Runtime Supervisor outlives this watched backend.  Preserve
       // unresolved turns while the backend reconnects instead of converting a
       // lost in-process receipt into a terminal failure.
@@ -550,9 +582,9 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
 
     const host = service.host();
     const sourceRegistry = createCanvasSourceRegistry({
-      hasCapability: (id) => host.hasCapability(id),
-      resolveCapability: (id) => host.resolveCapability(id),
-      resolveCapabilityOwner: (id) => host.resolveCapabilityOwner(id),
+      hasCapability: (id, version) => host.hasCapability(id, version),
+      resolveCapability: (id, version) => host.resolveCapability(id, version),
+      resolveCapabilityOwner: (id, version) => host.resolveCapabilityOwner(id, version),
       snapshot: () => host.snapshot()
     });
     const runtime = createBackendRuntime({

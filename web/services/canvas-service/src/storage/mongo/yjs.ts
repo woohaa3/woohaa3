@@ -65,6 +65,7 @@ type YjsCommandDoc = {
   /** Canvas script 首次提交元数据（源码无关）；旧文档缺省。 */
   script?: import("@woohaa3/contracts").CanvasScriptSubmissionMeta;
   modelBatch?: import("@woohaa3/contracts").ModelScriptBatchMeta;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
 };
 
 /** 部署级 writer lock 单文档（`_id` 天然唯一，提供跨进程 CAS）。 */
@@ -234,7 +235,8 @@ export class MongoYjsRepository implements YjsDocumentRepository {
             actorId: commit.command.actorId,
             createdAt: commit.command.createdAt,
             ...(commit.command.script ? { script: commit.command.script } : {}),
-            ...(commit.command.modelBatch ? { modelBatch: commit.command.modelBatch } : {})
+            ...(commit.command.modelBatch ? { modelBatch: commit.command.modelBatch } : {}),
+            ...(commit.command.resourceEdit ? { resourceEdit: commit.command.resourceEdit } : {})
           },
           { session }
         );
@@ -262,8 +264,31 @@ export class MongoYjsRepository implements YjsDocumentRepository {
       actorId: doc.actorId,
       createdAt: doc.createdAt,
       ...(doc.script ? { script: doc.script } : {}),
-      ...(doc.modelBatch ? { modelBatch: doc.modelBatch } : {})
+      ...(doc.modelBatch ? { modelBatch: doc.modelBatch } : {}),
+      ...(doc.resourceEdit ? { resourceEdit: doc.resourceEdit } : {})
     };
+  }
+
+  async findLatestCommand(canvasId: string): Promise<YjsCommandRecord | null> {
+    const rows = await this.commands().find({ canvasId, changed: true }).sort({ revision: -1, _id: -1 }).skip(0).limit(1).toArray();
+    const row = rows[0];
+    return row ? { commandId: row.commandId, payloadHash: row.payloadHash, revision: row.revision, changed: row.changed, actorId: row.actorId, createdAt: row.createdAt, ...(row.resourceEdit ? { resourceEdit: row.resourceEdit } : {}) } : null;
+  }
+
+  async findLatestResourceHistoryCommand(canvasId: string, sourceCommandId: string): Promise<YjsCommandRecord | null> {
+    const rows = await this.commands().find({ canvasId, "resourceEdit.historyReplay.sourceCommandId": sourceCommandId }).sort({ revision: -1, _id: -1 }).skip(0).limit(1).toArray();
+    const row = rows[0];
+    return row ? { commandId: row.commandId, payloadHash: row.payloadHash, revision: row.revision, changed: row.changed, actorId: row.actorId, createdAt: row.createdAt, ...(row.resourceEdit ? { resourceEdit: row.resourceEdit } : {}) } : null;
+  }
+
+  async listResourceEditCommands(canvasId: string, runId: string): Promise<Array<{ commandId: string; revision: number }>> {
+    const rows: YjsCommandDoc[] = [];
+    for (;;) {
+      const page = await this.commands().find({ canvasId, actorId: `assistant-world:${runId}`, changed: true }).sort({ revision: 1, commandId: 1 }).skip(rows.length).limit(1000).toArray();
+      rows.push(...page);
+      if (page.length < 1000) break;
+    }
+    return rows.filter(row => row.resourceEdit?.history && !row.resourceEdit.historyReplay).map(row => ({ commandId: row.commandId, revision: row.revision }));
   }
 
   async replaceCheckpoint(input: {

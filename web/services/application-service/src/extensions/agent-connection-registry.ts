@@ -10,12 +10,13 @@
  * 核心不 import 任何厂商实现（本模块只依赖 contracts 的纯类型与形状校验）。
  */
 import {
+  AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION,
   agentConnectionProviderCapabilityId,
   agentConnectionProviderIdFromCapabilityId,
   isAgentConnectionProviderCapabilityId,
   isAgentConnectionProviderShape,
   type AgentConnectionView,
-  type AgentConnectionProvider
+  type AgentConnectionProvider,
 } from "@woohaa3/contracts";
 
 export type AgentConnectionProviderOwner = {
@@ -35,9 +36,9 @@ export type ResolveAgentConnectionProviderResult =
   | { ok: false; code: "adapter-unavailable"; message: string };
 
 export type AgentConnectionRegistryHost = {
-  hasCapability(id: string): boolean;
-  resolveCapabilityOwner?(id: string): { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
-  resolveCapability(id: string): unknown;
+  hasCapability(id: string, version: number): boolean;
+  resolveCapabilityOwner?(id: string, version: number): { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
+  resolveCapability(id: string, version: number): unknown;
   snapshot?(): Array<{ extensionId: string; capabilities: string[] }>;
 };
 
@@ -56,13 +57,13 @@ export type AgentConnectionRegistry = {
 export function createAgentConnectionRegistry(host: AgentConnectionRegistryHost): AgentConnectionRegistry {
   const resolveById = (providerId: string): ResolveAgentConnectionProviderResult => {
     const capabilityId = agentConnectionProviderCapabilityId(providerId);
-    if (!host.hasCapability(capabilityId)) {
+    if (!host.hasCapability(capabilityId, AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION)) {
       return { ok: false, code: "adapter-unavailable", message: "该连接提供方不可用" };
     }
-    const owner = host.resolveCapabilityOwner?.(capabilityId);
+    const owner = host.resolveCapabilityOwner?.(capabilityId, AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION);
     if (!owner) return { ok: false, code: "adapter-unavailable", message: "该连接提供方不可用" };
     if (owner.mode !== "public") return { ok: false, code: "adapter-unavailable", message: "该连接提供方处于恢复模式" };
-    const value = host.resolveCapability(capabilityId);
+    const value = host.resolveCapability(capabilityId, AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION);
     if (!isAgentConnectionProviderShape(value)) return { ok: false, code: "adapter-unavailable", message: "连接提供方 capability 形态非法" };
     if (value.id !== providerId) return { ok: false, code: "adapter-unavailable", message: "连接提供方身份不一致" };
     return {
@@ -80,7 +81,7 @@ export function createAgentConnectionRegistry(host: AgentConnectionRegistryHost)
     for (const entry of snapshot) {
       for (const capabilityId of entry.capabilities) {
         if (!isAgentConnectionProviderCapabilityId(capabilityId)) continue;
-        const owner = host.resolveCapabilityOwner?.(capabilityId);
+        const owner = host.resolveCapabilityOwner?.(capabilityId, AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION);
         if (!owner || owner.mode !== "public") continue;
         owners.push({
           providerId: agentConnectionProviderIdFromCapabilityId(capabilityId),

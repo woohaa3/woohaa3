@@ -12,9 +12,7 @@
  * by the local host composition. It never contains command mapping, storage or
  * version algorithms.
  */
-import { HUMANOID_RIG_AUTHORING_ENABLED } from "./humanoid-rig.js";
 import type {
-  GroundAabb,
   WorldCameraData,
   WorldCameraProjection,
   WorldCompletion,
@@ -33,7 +31,8 @@ import type { WorldCameraView } from "./world-camera-ui.js";
 import type { WorldAnimationScript } from "./world-animation-script.js";
 import type { WorldAuthoringConflict, WorldAuthoringFailure, WorldAuthoringFailureCode } from "./world-authoring.js";
 import { isBoundedId, isJsonObject } from "../validation.js";
-import { decodeGroundAabb } from "./creation-scope-codec.js";
+
+import { WORLD_RESOURCE_TOOLS, type WorldResourceEdit } from "./world-resource-tools.js";
 
 export const ASSISTANT_WORLD_AUTHORITY_VERSION = "assistant-world-authority-v1" as const;
 
@@ -51,60 +50,39 @@ export function assistantWorldScopeIdentity(scope: AssistantWorldScopeSelection)
 /** Stable tool names shared by MCP registration, grant catalogs and prompts. */
 export const ASSISTANT_WORLD_TOOL = {
   readContext: "get_world_context",
-  readModelRig: "get_world_model_rig",
+  animateHumanoid: "animate_humanoid",
+  animateHumanoidInteraction: "animate_humanoid_interaction",
+  generateHumanoidMotion: "generate_humanoid_motion",
+  getHumanoidMotion: "get_humanoid_motion",
+  applyHumanoidMotion: "apply_humanoid_motion",
   sampleAnimation: "sample_scene_animation",
-  createModel: "create_world_model",
-  replaceModel: "replace_world_model_content",
-  /** Read one director-area model's current script and content version. */
-  readModelScript: "get_world_model_script",
-  /** Append one chunk to an existing model script (skeleton → chunks). */
-  appendModelScript: "append_world_model_script",
-  /** Exact-text patch of one existing model script (`oldString` → `newString`). */
-  patchModelScript: "patch_world_model_script",
-  moveModel: "move_world_model",
-  setAnimation: "set_scene_animation_script",
-  resizeArea: "resize_scene_area",
-  createCamera: "create_world_camera",
-  setCamera: "set_world_camera",
-  completeCamera: "complete_world_camera"
 } as const;
 
-export type AssistantWorldToolName = (typeof ASSISTANT_WORLD_TOOL)[keyof typeof ASSISTANT_WORLD_TOOL];
+export type AssistantWorldToolName = (typeof ASSISTANT_WORLD_TOOL)[keyof typeof ASSISTANT_WORLD_TOOL] | (typeof WORLD_RESOURCE_TOOLS)[keyof typeof WORLD_RESOURCE_TOOLS];
 
 /** Read-only context tools are the only tools a 2D group selection can receive. */
 export const ASSISTANT_WORLD_READ_TOOLS = [ASSISTANT_WORLD_TOOL.readContext] as const;
 
-/** Scene-area write tools. Membership in a 2D group never grants these. */
 export const ASSISTANT_WORLD_WRITE_TOOLS = [
-  ASSISTANT_WORLD_TOOL.createModel,
-  ASSISTANT_WORLD_TOOL.replaceModel,
-  ASSISTANT_WORLD_TOOL.appendModelScript,
-  ASSISTANT_WORLD_TOOL.patchModelScript,
-  ASSISTANT_WORLD_TOOL.moveModel,
-  ASSISTANT_WORLD_TOOL.setAnimation,
-  ASSISTANT_WORLD_TOOL.resizeArea,
-  ASSISTANT_WORLD_TOOL.createCamera,
-  ASSISTANT_WORLD_TOOL.setCamera,
-  ASSISTANT_WORLD_TOOL.completeCamera
+  ASSISTANT_WORLD_TOOL.animateHumanoid,
+  // animate_humanoid_interaction is not registered by the MCP service yet; keep it out of grants until implemented.
+  ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
+  ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
+  WORLD_RESOURCE_TOOLS.model, WORLD_RESOURCE_TOOLS.camera,
+  WORLD_RESOURCE_TOOLS.modelScript, WORLD_RESOURCE_TOOLS.animation
 ] as const;
-
 export const ASSISTANT_WORLD_TOOLS = [
-  ...ASSISTANT_WORLD_READ_TOOLS,
-  ASSISTANT_WORLD_TOOL.readModelScript,
-  ...(HUMANOID_RIG_AUTHORING_ENABLED ? [ASSISTANT_WORLD_TOOL.readModelRig] : []),
-  ASSISTANT_WORLD_TOOL.sampleAnimation,
+  ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read,
+  ASSISTANT_WORLD_TOOL.sampleAnimation, ASSISTANT_WORLD_TOOL.getHumanoidMotion,
   ...ASSISTANT_WORLD_WRITE_TOOLS
 ] as const satisfies readonly AssistantWorldToolName[];
-
 export const ASSISTANT_WORLD_CAMERA_TOOLS = [
-  ASSISTANT_WORLD_TOOL.readContext,
-  ASSISTANT_WORLD_TOOL.setCamera,
-  ASSISTANT_WORLD_TOOL.completeCamera
+  ASSISTANT_WORLD_TOOL.readContext, WORLD_RESOURCE_TOOLS.read, WORLD_RESOURCE_TOOLS.camera
 ] as const;
 
 /** Actual tool catalog for a selected scope. */
-export function assistantWorldToolsForScope(scope: AssistantWorldScopeSelection): readonly AssistantWorldToolName[] {
-  return scope.kind === "world-camera" ? ASSISTANT_WORLD_CAMERA_TOOLS : ASSISTANT_WORLD_TOOLS;
+export function assistantWorldToolsForScope(scope: WorldScopeVersion["scope"]): readonly AssistantWorldToolName[] {
+  return scope.kind === "world-camera" ? ASSISTANT_WORLD_CAMERA_TOOLS : scope.kind === "scene-area" ? ASSISTANT_WORLD_TOOLS : ASSISTANT_WORLD_READ_TOOLS;
 }
 
 /** Per-source capability declaration consumed by the assistant directory. */
@@ -127,7 +105,7 @@ export function assistantWorldSourceCapability(
     version: ASSISTANT_WORLD_AUTHORITY_VERSION,
     targets: [...targets],
     tools: [...tools],
-    completion: tools.includes(ASSISTANT_WORLD_TOOL.completeCamera)
+    completion: tools.includes(WORLD_RESOURCE_TOOLS.camera)
   };
 }
 
@@ -139,6 +117,7 @@ export interface AssistantWorldRunRequest {
   epoch: number;
   executionId: WorldId;
   scope: AssistantWorldScopeSelection;
+  allowSceneAreaExpansion?: boolean;
 }
 
 /** Public run information; it carries no process-local write capability. */
@@ -165,7 +144,6 @@ export interface AssistantWorldIssued {
 
 export type AssistantWorldFailureCode =
   | WorldAuthoringFailureCode
-  | "humanoid-rig-disabled"
   | "target-unavailable"
   | "capability-unsupported"
   | "not-issued"
@@ -176,7 +154,11 @@ export type AssistantWorldFailureCode =
   /** `oldString` occurs more than once; the caller must supply more context. */
   | "patch-ambiguous"
   /** `oldString === newString`; nothing changed and no version advanced. */
-  | "patch-noop";
+  | "patch-noop"
+  | "reference-conflict"
+  | "already-exists"
+  /** Legacy humanoid rig authoring is paused; the write was rejected before any commit. */
+  | "humanoid-rig-disabled";
 
 /** One place a patch `oldString` occurs; `line` is 1-based. */
 export interface AssistantWorldPatchMatch {
@@ -214,6 +196,8 @@ export interface AssistantWorldFailure {
   patchDiagnostic?: AssistantWorldPatchDiagnostic;
   /** Current authoritative version, present on `version-conflict` when it could be read. */
   currentVersion?: WorldVersion;
+  references?: Array<{ nodeId: string; kind: string }>;
+  editIndex?: number;
 }
 
 export type AssistantWorldIssueOutcome = ({ ok: true } & AssistantWorldIssued) | AssistantWorldFailure;
@@ -232,6 +216,7 @@ export interface AssistantWorldModelContent {
 }
 
 export type AssistantWorldWriteOperation =
+  | { kind: "edit-resource"; operationId: string; edit: WorldResourceEdit }
   | {
       kind: "create-model";
       operationId: WorldId;
@@ -278,18 +263,15 @@ export type AssistantWorldWriteOperation =
     }
   | {
       kind: "set-scene-animation-script";
+      /** Trusted host-only stable motion asset, committed atomically with the script. */
+      motionAsset?: import("./domain/index.js").StoredAsset;
+      motionTarget?: {instanceId:WorldId;expectedVersion:WorldVersion;scopeVersion?:WorldVersion;canvasRevision?:number};
+      motionBaseRevision?: number;
       operationId: WorldId;
       /** 导演区统一动画脚本源码（`woohaa-world-animation-js-v2`，位置轨道相对 `animationOrigin`）。 */
       script: string;
       duration: number;
       loop: boolean;
-    }
-  | {
-      kind: "resize-scene-area";
-      operationId: WorldId;
-      /** Canonical area scope version observed in `get_world_context`. */
-      expectedScopeVersion: WorldVersion;
-      bounds: GroundAabb;
     }
   | {
       kind: "set-world-camera";
@@ -342,6 +324,9 @@ export type AssistantWorldWriteOutcome =
        * treating a successful write as a correct framing.
        */
       view?: WorldCameraView;
+      target?: import("./world-resource-tools.js").WorldResourceTarget;
+      sceneArea?: import("./world-resource-tools.js").WorldResourceReceipt["sceneArea"];
+      deleted?: boolean;
     }
   | AssistantWorldFailure;
 
@@ -477,7 +462,7 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     "append-model-script": ["kind", "operationId", "instanceId", "expectedVersion", "chunk"],
     "patch-model-script": ["kind", "operationId", "instanceId", "expectedVersion", "oldString", "newString"],
     "set-model-transform": ["kind", "operationId", "instanceId", "expectedVersion", "transform"],
-    "set-scene-animation-script": ["kind", "operationId", "script", "duration", "loop"],
+    "set-scene-animation-script": ["kind", "operationId", "script", "duration", "loop", "motionAsset", "motionTarget", "motionBaseRevision"],
     "set-world-camera": ["kind", "operationId", "cameraId", "expectedSettingsVersion", "settings"],
     "create-world-camera": ["kind", "operationId", "nodeId", "cameraId", "settings", "cardPosition"]
   };
@@ -573,6 +558,20 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     };
   }
   if (value.kind === "set-scene-animation-script") {
+    if (value.motionTarget !== undefined && (!isJsonObject(value.motionTarget) || Object.keys(value.motionTarget).some(k => !["instanceId","expectedVersion","scopeVersion","canvasRevision"].includes(k)) || !isBoundedId(value.motionTarget.instanceId) || !isBoundedId(value.motionTarget.expectedVersion) || (value.motionTarget.scopeVersion!==undefined&&!isBoundedId(value.motionTarget.scopeVersion)) || (value.motionTarget.canvasRevision!==undefined&&(!Number.isInteger(value.motionTarget.canvasRevision)||(value.motionTarget.canvasRevision as number)<0)))) return {ok:false,code:"invalid-data",message:"动作目标版本无效"};
+    if (value.motionAsset !== undefined && (!Number.isInteger(value.motionBaseRevision) || (value.motionBaseRevision as number)<0)) return {ok:false,code:"invalid-data",message:"动作应用缺少导演区动画版本"};
+    if ((value.motionAsset === undefined) !== (value.motionTarget === undefined)) return {ok:false,code:"invalid-data",message:"动作资产与目标版本必须同时提供"};
+    if (value.motionAsset !== undefined) {
+      const asset = value.motionAsset;
+      if (!isJsonObject(asset) || Object.keys(asset).some(k => !['id','title','mediaKind','source','status','createdAt','metadata','nodeId','providerTaskId','provenance','durationSeconds'].includes(k))
+        || !isBoundedId(asset.id) || typeof asset.title !== 'string' || asset.mediaKind !== 'motion' || asset.source !== 'generated' || asset.status !== 'ready'
+        || typeof asset.createdAt !== 'string' || !Number.isFinite(Date.parse(asset.createdAt)) || !isJsonObject(asset.metadata)
+        || typeof asset.metadata.storageKey !== 'string' || typeof asset.metadata.checksum !== 'string'
+        || !/^[a-f0-9]{64}$/i.test(asset.metadata.checksum)) {
+        return {ok:false,code:'invalid-data',message:'动作资产必须是宿主提供的稳定 ready motion 资产'};
+      }
+    }
+
     if (typeof value.script !== "string" || value.script.trim() === ""
       || !finite(value.duration) || value.duration <= 0 || value.duration > 3600
       || typeof value.loop !== "boolean") {
@@ -580,23 +579,7 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     }
     return {
       ok: true,
-      value: { kind: "set-scene-animation-script", operationId: value.operationId, script: value.script, duration: value.duration, loop: value.loop }
-    };
-  }
-  if (value.kind === "resize-scene-area") {
-    if (!isBoundedId(value.expectedScopeVersion)) {
-      return { ok: false, code: "invalid-data", message: "导演区范围版本无效" };
-    }
-    const bounds = decodeGroundAabb(value.bounds);
-    if (!bounds) return { ok: false, code: "invalid-data", message: "导演区范围边界无效" };
-    return {
-      ok: true,
-      value: {
-        kind: "resize-scene-area",
-        operationId: value.operationId,
-        expectedScopeVersion: value.expectedScopeVersion,
-        bounds
-      }
+      value: { kind: "set-scene-animation-script", operationId: value.operationId, script: value.script, duration: value.duration, loop: value.loop, ...(value.motionBaseRevision === undefined ? {} : {motionBaseRevision:value.motionBaseRevision as number}), ...(value.motionAsset === undefined ? {} : {motionAsset:value.motionAsset as import("./domain/index.js").StoredAsset}), ...(value.motionTarget === undefined ? {} : {motionTarget:value.motionTarget as {instanceId:WorldId;expectedVersion:WorldVersion;scopeVersion?:WorldVersion;canvasRevision?:number}}) }
     };
   }
   if (value.kind === "set-world-camera") {
@@ -943,10 +926,15 @@ export type AssistantWorldContextView = {
   writable: WorldObjectVersion[];
   readOnly: WorldObjectVersion[];
   objects: AssistantWorldObjectSummary[];
+  /** Frozen per-turn policy; older contexts default to false. */
+  allowSceneAreaExpansion?: boolean;
   /** 导演区地面范围；模型创建/移动必须落在该范围内。2D 组没有世界范围。 */
   bounds?: { min: { u: number; v: number }; max: { u: number; v: number } };
   /** Current published animation for this director area. Omitted by older hosts and for 2D groups. */
   sceneArea?: {
+    areaId?: string;
+    title?: string;
+    resourceVersion?: string;
     nodeId: WorldId;
     revision: number;
     /** Canonical scope version the next range write must present. */
@@ -962,11 +950,13 @@ export type AssistantWorldContextView = {
   sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null; animationRig?: WorldModelAnimationRig }>;
   /**
    * Authoritative scripts of the instance identities in this scope (writable plus
-   * read-only references), keyed by instance id. `get_world_model_script` reads
+   * read-only references), keyed by instance id. `read_world_resource` reads
    * `includeSource` from here, so a chunk write can verify its real tail.
    * Omitted by hosts that predate chunked authoring.
    */
   modelScripts?: Record<WorldId, string>;
+  resourceVersions?: Record<string, string>;
+  sceneCameras?: Array<{ nodeId: string; title: string; settings: WorldCameraData }>;
   /** A 2D group has no writable world set and no completion. */
   worldWritable: boolean;
 };

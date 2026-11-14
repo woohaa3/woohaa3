@@ -33,7 +33,7 @@ export function isTaskExecutionState(value: unknown): value is TaskExecutionStat
 }
 
 export function isTaskModelType(value: unknown): value is TaskModelType {
-  return value === "language" || value === "image" || value === "video" || value === "audio";
+  return value === "language" || value === "image" || value === "video" || value === "audio" || value === "motion";
 }
 
 export function isActiveTaskState(state: TaskExecutionState): boolean {
@@ -49,13 +49,39 @@ export function isTaskExecutionSource(value: unknown): value is TaskExecutionSou
   return typeof value === "string" && (TASK_EXECUTION_SOURCES as readonly string[]).includes(value);
 }
 
+export function isSomaMotionMetadata(
+  m: unknown,
+): m is import("./types.js").SomaMotionMetadata {
+  if (
+    !isJsonObject(m) ||
+    m.formatVersion !== "kimodo-soma-v1" ||
+    m.skeletonId !== "somaskel77" ||
+    m.restPoseId !== "kimodo-standard-tpose"
+  )
+    return false;
+  if (
+    !isFiniteNumber(m.fps) ||
+    m.fps <= 0 ||
+    m.fps > 240 ||
+    !isNonNegativeInteger(m.frameCount) ||
+    m.frameCount < 1 ||
+    m.frameCount > 18000 ||
+    (m.jointCount !== undefined && m.jointCount !== 77)
+  )
+    return false;
+  if (m.skinAssetId !== undefined && !isNonEmptyString(m.skinAssetId))
+    return false;
+  return true;
+}
+
 function isTaskResultSummary(value: unknown): value is TaskResultSummary {
   if (!isJsonObject(value)) return false;
   if (
     value.mediaKind !== "text" &&
     value.mediaKind !== "image" &&
     value.mediaKind !== "video" &&
-    value.mediaKind !== "audio"
+    value.mediaKind !== "audio" &&
+    value.mediaKind !== "motion"
   ) {
     return false;
   }
@@ -68,6 +94,8 @@ function isTaskResultSummary(value: unknown): value is TaskResultSummary {
   if (value.size !== undefined && !isNonNegativeInteger(value.size)) return false;
   if (value.checksum !== undefined && typeof value.checksum !== "string") return false;
   if (value.durationSeconds !== undefined && !isFiniteNumber(value.durationSeconds)) return false;
+  if (value.fps !== undefined && (!isFiniteNumber(value.fps) || value.fps <= 0 || value.fps > 240)) return false;
+  if (value.motion !== undefined && (value.mediaKind !== "motion" || !isSomaMotionMetadata(value.motion))) return false;
   if (value.poster !== undefined) {
     if (!isJsonObject(value.poster)) return false;
     if (!isNonEmptyString(value.poster.storageKey)) return false;

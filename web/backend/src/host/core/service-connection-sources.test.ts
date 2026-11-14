@@ -23,7 +23,8 @@ it("excludes models the site policy does not enable from the assistant directory
       { providerModelId: "llm/disabled", modelType: "language" },
       { providerModelId: "llm/absent", modelType: "language" },
       { providerModelId: "llm/tombstoned", modelType: "language" },
-      { providerModelId: "api/image", modelType: "image" }
+      { providerModelId: "api/image", modelType: "image" },
+      { providerModelId: "api/motion", modelType: "motion" }
     ],
     languageCapabilities: () => ({ tools: true, streaming: true }),
     serviceConnectionFactory: { protocols: ["chat-completions"], assistantProtocol: "chat-completions" }
@@ -37,6 +38,8 @@ it("excludes models the site policy does not enable from the assistant directory
   try {
     const adapter = createSiteProviderSource({ providerId: "demo", extensionId: "demo", label: "Demo", prefix: "providers.demo", settings, provider, policy: () => policy });
     const source = (await adapter.get("admin", "demo"))!;
+    expect(source.capabilities.some(capability => capability.modelId === "api/motion")).toBe(false);
+    expect(source.bindings.find(binding => binding.consumer === "provider")?.modelKeys).not.toContain("demo:api/motion");
     const assistant = source.bindings.find(binding => binding.bindingId === "provider-assistant:demo");
     // 只有策略里启用且未 tombstone 的语言模型能当助手；策略里没有该行的模型同样不算启用。
     expect(assistant?.modelKeys).toEqual(["llm/enabled"]);

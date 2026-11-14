@@ -8,7 +8,6 @@
  *
  * 视频编辑能力由 optional `video-capture` Plugin 以 `VIDEO_EDIT_SERVICE` 提供。
  */
-import { Button } from "@woohaa3/ui/primitives";
 import { roleIdForTarget } from "../../services/agent-role-bindings.js";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Plugin } from "@deepseek-ai/cordis";
@@ -48,6 +47,7 @@ import {
   type CanvasPanelRoute
 } from "../../navigation/contracts.js";
 import type { AgentConversationServiceHandle } from "../../services/agent-conversation-service.js";
+import { watchResourceEditHistory } from "./resource-edit-history.js";
 import { AgentConversationPanel } from "./execution-panel/agent-conversation-panel.js";
 // 文本宿主随执行面板定义装配：它只做一次节点类型判定并转交 composer，
 // 单独成 chunk 只会让打开文本面板多一次必然请求（change: 2026-10-27-merge-nonessential-panel-chunks）。
@@ -322,14 +322,6 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
           if (!camera.ok) return null;
           return (
             <ExecutionPanelSurface nodeId={route.nodeId} presentation="compact" runtime={ctx.canvasRuntime}>
-              <Button size="sm" disabled={!writable} onClick={() => {
-                if (!ctx.canvasSession.isWritable() || ctx.canvasRuntime.isFocused() || worldCameraEditorStore.getSnapshot()) return;
-                const latest = workingCanvasOf(woohaa3CanvasStore.getState());
-                const current = decodeWorldCamera(latest?.nodeData[route.nodeId]?.worldCamera);
-                if (latest?.id !== canvasId || !current.ok) return;
-                ctx.canvasRuntime.cancelTransientGesture();
-                worldCameraEditorStore.begin(canvasId, route.nodeId, current.value);
-              }}>机位精调</Button>
               <AuthoringGenerateHost
                 canvasId={canvasId}
                 nodeId={route.nodeId}
@@ -354,6 +346,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
       // 唯一展开状态源是 CanvasNavigation 的类型化 route；只有用户点击详情动作才打开。打开只读
       // 快照、定位确切回合，**不**重新提交；关闭恢复合法来源（由 Nav 保存的轻量来源 route）。
       const agentConversations = ctx.get("agentConversationService" as never) as AgentConversationServiceHandle | undefined;
+      if (agentConversations) ctx.effect(() => watchResourceEditHistory(ctx, canvasId, agentConversations), "task-execution:resource-edit-history");
       // 「返回生成面板」语义的实时来源：订阅选中节点与聚焦变化，供详情面板内部
       // 用 useSyncExternalStore 派生按钮文案（render 本身保持无 hook，便于静态解析）。
       const detailReturnSource = agentConversations

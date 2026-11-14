@@ -55,7 +55,7 @@ function taskHistoryQuery(search: string): AppTaskHistoryQuery {
   const providerId = params.get("providerId");
   if (providerId) history.providerId = providerId;
   const modelType = params.get("modelType");
-  if (modelType === "language" || modelType === "image" || modelType === "video" || modelType === "audio") {
+  if (modelType === "language" || modelType === "image" || modelType === "video" || modelType === "audio" || modelType === "motion") {
     history.modelType = modelType;
   }
   const modelKey = params.get("modelKey");

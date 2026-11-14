@@ -289,6 +289,25 @@ export function createCanvasRemote(options: CanvasRemoteOptions): CanvasRemoteSe
       const { canvasId: _canvasId, ...body } = input;
       return sceneAreaRequest("commit", body, signal) as Promise<import("@woohaa3/contracts").WorldAuthoringExecuteOutcome>;
     },
+    async listResourceEdits(input, signal) {
+      if (input.canvasId !== options.canvasId) return { ok: false, message: "画布不匹配" };
+      try {
+        const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/resource-edit-list`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: input.runId }), signal });
+        const value: unknown = await response.json();
+        if (!response.ok || !record(value) || value.ok !== true || !Array.isArray(value.commands) || !value.commands.every(item => record(item) && typeof item.commandId === "string" && Number.isSafeInteger(item.revision))) return { ok: false, message: "无法读取资源编辑历史" };
+        return { ok: true, commands: value.commands as Array<{ commandId: string; revision: number }> };
+      } catch { return { ok: false, message: "无法读取资源编辑历史" }; }
+    },
+    async replayResourceEdit(input, signal) {
+      if (input.canvasId !== options.canvasId) return { ok: false, message: "画布不匹配" };
+      const { canvasId: _canvasId, ...body } = input;
+      try {
+        const response = await fetchImpl(`${basePath}/${encodeURIComponent(options.canvasId)}/resource-edit-history`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
+        const value: unknown = await response.json();
+        if (!response.ok || !record(value) || value.ok !== true || typeof value.commandId !== "string" || !Number.isSafeInteger(value.revision) || typeof value.duplicate !== "boolean") return { ok: false, message: record(value) && typeof value.message === "string" ? value.message : "无法恢复资源编辑" };
+        return { ok: true, commandId: value.commandId, revision: value.revision as number, duplicate: value.duplicate };
+      } catch { return { ok: false, message: "恢复结果尚未确认，请重试" }; }
+    },
     async historySceneArea(direction, input, signal) {
       if (input.canvasId !== options.canvasId) return { ok: false, code: "invalid-data", message: "画布不匹配" };
       const { canvasId: _canvasId, ...body } = input;

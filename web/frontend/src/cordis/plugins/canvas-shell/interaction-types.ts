@@ -266,6 +266,7 @@ export type InteractionControllerOptions = {
    */
   getAnimationPlayback?: () => import("@woohaa3/contracts").BevyAnimationPlayback | null;
   /** 导演区整对象动画播放头（秒）；缺省不采样。 */
+  getWorldAnimationContext?: () => import("@woohaa3/contracts").WorldAnimationSamplingContext;
   getWorldAnimationTimes?: () => ReadonlyMap<string, number>;
   getWorldAnimationPlayheads?: () => ReadonlyMap<string, number>;
   getWorldAnimationPlayer?: () => { nodeId: string | null; playing: boolean };

@@ -175,7 +175,23 @@ describe("进程内 authoring 适配器", () => {
   await expect(services.tools.issue({ ...request, tools: ["submit_model_script"] })).rejects.toThrow("工具不属于本轮世界范围");
   expect(issue).not.toHaveBeenCalled();
   const grant = await services.tools.issue(request);
-  expect(grant.tools).toEqual(["get_world_context", "set_world_camera", "complete_world_camera"]);
+  expect(grant.tools).toEqual(["get_world_context", "read_world_resource", "edit_world_camera"]);
   expect(grant.world?.scope.scope).toEqual(scope);
   expect(issue).toHaveBeenCalledWith(expect.objectContaining({ scope }));
+});
+
+it('issues expansion only when the host turn ledger authorized it', async () => {
+  const scope = { kind: 'scene-area' as const, areaId: 'area' };
+  const issue = vi.fn(async () => ({ ok: true, context: { contextId: 'context', scope: { scope, scopeVersion: 'scope-v1' } }, completionId: 'completion', run: { runId: 'run', epoch: 0, executionId: 'run' } }));
+  let allowed: boolean | undefined = false;
+  const services = createInProcessAuthoringServices({ canvas: { assistantWorld: { issue } } as unknown as CanvasService, expansionPolicy: () => allowed });
+  const request = { delegation: DELEGATION, workId: 'run', canvasId: 'canvas', nodeId: 'area-node', mode: 'world' as const, worldScope: scope };
+  await expect(services.tools.issue({ ...request, allowSceneAreaExpansion: true })).rejects.toThrow('扩区权限');
+  expect(issue).not.toHaveBeenCalled();
+  allowed = undefined;
+  await expect(services.tools.issue({ ...request, allowSceneAreaExpansion: true })).rejects.toThrow('扩区权限');
+  allowed = true;
+  await expect(services.tools.issue({ ...request, allowSceneAreaExpansion: false })).rejects.toThrow('扩区权限');
+  await services.tools.issue({ ...request, allowSceneAreaExpansion: true });
+  expect(issue).toHaveBeenCalledWith(expect.objectContaining({ allowSceneAreaExpansion: true }));
 });

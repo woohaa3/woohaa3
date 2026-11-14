@@ -47,9 +47,10 @@ export async function createCanvasToolChannel(
     delegation: { subject: input.owner, authLevel: "authenticated" },
     workId: input.requestId,
     canvasId: input.canvasId,
-    nodeId,
-    ...(input.intent.mode ? { mode: input.intent.mode } : {}),
-    ...(input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+    nodeId: nodeId ?? "",
+    ...(input.intent.action !== "discuss" && input.intent.mode ? { mode: input.intent.mode } : {}),
+    ...(input.intent.action !== "discuss" && input.intent.worldScope ? { worldScope: input.intent.worldScope } : {}),
+    ...(input.intent.action !== "discuss" && input.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.intent.allowSceneAreaExpansion === true } : {}),
     tools: prepared.tools,
     ...(input.connection ? { credentialEpoch: input.connection.credentialEpoch } : {}),
   });

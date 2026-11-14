@@ -591,3 +591,10 @@ it.each([false, true])("sets builtin image generation from the prepared capabili
   const config = fake.requests.find(request => request.method === "thread/start")?.params?.config;
   expect(config).toMatchObject({ "features.image_generation": enabled });
 });
+
+it.each([false, true])("Codex App Server uses a writable canvas cwd only when workspace=%s", async workspace => {
+  const fake = fakeStdio();
+  const result = await transport().run({ workspace, configDir: "/tmp/config", workDir: "/canvas/root", loopbackUrl: null, stdio: fake.connection, model: "", prompt: "calculate", allowedTools: [], toolToken: null, mcpEndpoint: null, resumeNativeId: null, signal: new AbortController().signal, onEvent: () => {} });
+  expect(result.ok).toBe(true);
+  expect(fake.requests.find(r => r.method === "thread/start")?.params).toMatchObject({ cwd: "/canvas/root", sandbox: workspace ? "workspace-write" : "read-only", config: { "features.shell_tool": workspace } });
+});

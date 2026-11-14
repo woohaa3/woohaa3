@@ -28,6 +28,7 @@ export type ModelTypePreset = {
 export type PresetModelType = Exclude<CanvasTaskModelType, "language">;
 
 export const MODEL_TYPE_PRESETS: Readonly<Record<PresetModelType, ModelTypePreset>> = {
+  motion: { modelType: "motion", keys: ["prompt", "durationSeconds"], required: ["prompt"], options: { durationSeconds: { default: 3, minimum: 1, maximum: 20 } } },
   image: {
     modelType: "image",
     keys: [

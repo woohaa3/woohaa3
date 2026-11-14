@@ -52,7 +52,7 @@ export const BAILIAN_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: BAILIAN_PLUGIN_ID,
   name: "百炼 Provider",
   description: "阿里云百炼（Model Studio）生图 Provider。填写 DashScope API Key 后可用通义万相与 Qwen-Image 系列做文生图和多图参考编辑。",
-  version: "1.0.0",
+  version: "1.0.1",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "bailian-provider-config", schemaVersion: 1 },

@@ -578,3 +578,66 @@ test("agent 视角演练：改了扩展源码 → 默认命令报告并给出 bu
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 受管预检：能力依赖不相容必须拒绝安装
+// （change: 2026-11-13-add-extension-capability-abi）
+// ---------------------------------------------------------------------------
+
+/** 建一个可打包的受管扩展目录，`engines` 决定依赖声明。 */
+function engineFixture(enginesExtra, id) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-engines-"));
+  fs.mkdirSync(path.join(dir, "backend-dist"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "backend-dist", "entry.mjs"), "export function createDemo() {}\n");
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: `@woohaa3/extension-${id}`, version: "1.0.0", type: "module", exports: { "./backend-dist/entry": "./backend-dist/entry.mjs" } })
+  );
+  fs.writeFileSync(
+    path.join(dir, "extension.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      extensionId: id,
+      version: "1.0.0",
+      engines: { hostAbi: "^1.0.0", sdkAbi: "^1.0.0", protocolVersion: 1, ...enginesExtra },
+      hostPlugin: { module: "./backend-dist/entry", factory: "createDemo" }
+    })
+  );
+  return dir;
+}
+
+test("受管预检：服务面版本高于宿主 → 拒绝安装并指出两侧版本", async () => {
+  const dir = engineFixture({ host: { generation: 2 } }, "demo-eng-a");
+  try {
+    const result = await preflightDirectory(dir, { managed: true });
+    assert.equal(result.ok, false);
+    const hit = result.errors.find((error) => error.code === "MARKETPLACE_ENGINES_INCOMPATIBLE");
+    assert.ok(hit, JSON.stringify(result.errors));
+    assert.match(hit.message, /需要 generation@2，宿主提供 1/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("受管预检：capability 依赖不可解析 → 拒绝安装", async () => {
+  const dir = engineFixture({ capabilities: { "adapter:x": 1 } }, "demo-eng-b");
+  try {
+    const result = await preflightDirectory(dir, { managed: true });
+    assert.equal(result.ok, false);
+    const hit = result.errors.find((error) => error.code === "MARKETPLACE_ENGINES_INCOMPATIBLE");
+    assert.ok(hit, JSON.stringify(result.errors));
+    assert.match(hit.message, /adapter:x@1 在当前宿主解析不到/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("受管预检：依赖相容的包正常通过", async () => {
+  const dir = engineFixture({ host: { generation: 1 } }, "demo-eng-c");
+  try {
+    const result = await preflightDirectory(dir, { managed: true });
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

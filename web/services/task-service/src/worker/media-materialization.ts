@@ -12,6 +12,7 @@ import type { PptaskTaskStore } from "@sdppp/pptask-worker-server";
 import {
   CANVAS_TASK_LIMITS,
   isGenerationStableMediaResult,
+  isSomaMotionMetadata,
   type GenerationStableMediaResult,
   type TaskResultSummary,
   type MediaMetadata
@@ -72,18 +73,19 @@ function safeMediaStatus(error: unknown): number | undefined {
  * 来源之一（N04）。
  */
 export function inferBinaryModelType(record: ExecutionRecord): BinaryModelType | undefined {
-  if (record.modelType === "image" || record.modelType === "video" || record.modelType === "audio") {
+  if (record.modelType === "image" || record.modelType === "video" || record.modelType === "audio" || record.modelType === "motion") {
     return record.modelType;
   }
   const stable = readStableMediaResult(record);
   const stableType = stable?.media.contentType.toLowerCase();
+  if (stableType === "application/x-npz") return "motion";
   if (stableType?.startsWith("video/")) return "video";
   if (stableType?.startsWith("audio/")) return "audio";
   if (stableType?.startsWith("image/")) return "image";
   const output = (record.result?.outputs ?? []).find(
-    (entry) => entry.kind === "image" || entry.kind === "video" || entry.kind === "audio"
+    (entry) => entry.kind === "image" || entry.kind === "video" || entry.kind === "audio" || (entry.kind as string) === "motion"
   );
-  if (output?.kind === "image" || output?.kind === "video" || output?.kind === "audio") return output.kind;
+  if (output?.kind === "image" || output?.kind === "video" || output?.kind === "audio" || (output?.kind as string) === "motion") return output!.kind as BinaryModelType;
   return undefined;
 }
 
@@ -204,6 +206,9 @@ export async function materializeStableMediaResult(
   const canvasId = await readCanvasIdForMaterialization(options, record, association);
   const scope = canvasId ? { canvasId } : {};
   try {
+    if ((modelType === "motion" || media.contentType === "application/x-npz") && (media.contentType !== "application/x-npz" || !isGenerationStableMediaResult({ media }))) {
+      throw Object.assign(new Error("Generated motion requires canonical metadata"), { code: "motion-metadata-invalid" });
+    }
     // 两条采纳路径，按「Provider 给没给 locator」选：
     // - 给了 locator：结果在别的后端（远端托管存储），必须由存储层按 locator 取字节，
     //   媒体层再内容寻址导入；这是唯一能跨后端读的路径。
@@ -233,8 +238,8 @@ export async function materializeStableMediaResult(
       record,
       association,
       resultFromMedia(
-        { ...metadata, mediaKind: metadata.mediaKind ?? modelType },
-        { ...(poster ? { poster } : {}), ...(durationSeconds !== undefined ? { durationSeconds } : {}) }
+        { ...metadata, mediaKind: metadata.mediaKind },
+        { mediaKind: modelType, ...(media.motion ? { motion: media.motion, fps: media.motion.fps } : {}), ...(media.fps !== undefined ? { fps: media.fps } : {}), ...(poster ? { poster } : {}), ...(durationSeconds !== undefined ? { durationSeconds } : {}) }
       ),
       "succeeded"
     );
@@ -281,7 +286,7 @@ async function adoptStableObject(
 
 /** 稳定媒体结果的模型类别（record 缺 modelType 时按图片处理，与 resultFromMedia 缺省一致）。 */
 function stableModelType(record: ExecutionRecord): BinaryModelType {
-  return record.modelType === "video" || record.modelType === "audio" ? record.modelType : "image";
+  return record.modelType === "video" || record.modelType === "audio" || record.modelType === "motion" ? record.modelType : "image";
 }
 
 /** 受控转存 provider 二进制输出（URL 或 bytes）；成功写稳定 metadata，失败写 failed。 */
@@ -291,7 +296,7 @@ export async function materializeBinaryResult(
   association: Partial<TaskAssociation> | undefined,
   input:
     | { kind: "url"; url: string; modelType: BinaryModelType; posterUrl?: string }
-    | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: "image" | "audio" },
+    | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: "image" | "audio" | "motion" },
   durationSeconds?: number
 ): Promise<void> {
   const modelType = input.modelType;
@@ -368,7 +373,7 @@ async function importStoredBytesAfterUrlFailure(
   options: MaterializationContext,
   record: ExecutionRecord,
   association: Partial<TaskAssociation> | undefined,
-  modelType: "image" | "audio",
+  modelType: "image" | "audio" | "motion",
   maxBytes: number,
   scope: { canvasId?: string },
   urlError: unknown
@@ -415,7 +420,7 @@ export async function materializeBinaryBytesFromStore(
   options: MaterializationContext,
   record: ExecutionRecord,
   association: Partial<TaskAssociation> | undefined,
-  modelType: "image" | "audio" | "video"
+  modelType: BinaryModelType
 ): Promise<void> {
   if (modelType === "video") {
     // 视频大对象不允许按字节转存：只接受 URL 路径。provider 只给字节时不伪造成功，
@@ -474,7 +479,7 @@ export type StoredBinarySource =
 async function readStoredBinarySourceWithRetry(
   taskStore: PptaskTaskStore,
   taskKey: string,
-  modelType: "image" | "audio" | "video"
+  modelType: BinaryModelType
 ): Promise<StoredBinarySource | undefined> {
   const deadline = Date.now() + 5_000;
   for (;;) {
@@ -518,7 +523,7 @@ function readStateResult(state: unknown): unknown {
 export async function readRawBinaryBytes(
   taskStore: PptaskTaskStore,
   taskKey: string,
-  modelType: "image" | "audio" | "video"
+  modelType: BinaryModelType
 ): Promise<{ kind: "bytes"; bytesBase64: string; contentType: string; modelType: BinaryModelType } | undefined> {
   const stored = await readStoredBinarySource(taskStore, taskKey, modelType);
   return stored?.kind === "bytes" ? stored : undefined;
@@ -527,7 +532,7 @@ export async function readRawBinaryBytes(
 function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBinarySource | undefined {
   const container = isRecord(result) ? (result as Record<string, unknown>) : undefined;
   if (!container) return undefined;
-  const list = Array.isArray(container.videos)
+  const list = Array.isArray(container.motions) ? container.motions : Array.isArray(container.videos)
     ? container.videos
     : Array.isArray(container.audios)
       ? container.audios
@@ -573,12 +578,14 @@ export function bytesFromBase64Descriptor(value: unknown, maxBytes = Number.POSI
 }
 
 function maxBytesFor(modelType: BinaryModelType): number {
+  if (modelType === "motion") return 32 * 1024 * 1024;
   if (modelType === "audio") return CANVAS_TASK_LIMITS.maxAudioOutputBytes;
   if (modelType === "video") return CANVAS_TASK_LIMITS.maxVideoOutputBytes;
   return CANVAS_TASK_LIMITS.maxImageOutputBytes;
 }
 
 function defaultContentTypeFor(modelType: BinaryModelType): string {
+  if (modelType === "motion") return "application/x-npz";
   if (modelType === "audio") return "audio/mpeg";
   if (modelType === "video") return "video/mp4";
   return "image/png";
@@ -588,11 +595,11 @@ function defaultContentTypeFor(modelType: BinaryModelType): string {
 export function readProviderContentType(raw: unknown, modelType: BinaryModelType): string {
   const container = isRecord(raw) ? (raw as Record<string, unknown>) : undefined;
   const direct = container
-    ? (modelType === "image" ? container.images : modelType === "audio" ? container.audios : container.videos)
+    ? (modelType === "image" ? container.images : modelType === "audio" ? container.audios : modelType === "motion" ? container.motions : container.videos)
     : undefined;
   const directFirst = Array.isArray(direct) ? direct[0] : undefined;
   const directMediaType = isRecord(directFirst) ? directFirst.mediaType : undefined;
-  if (typeof directMediaType === "string" && directMediaType.startsWith(`${modelType}/`)) return directMediaType;
+  if (typeof directMediaType === "string" && (directMediaType.startsWith(`${modelType}/`) || modelType === "motion" && directMediaType === "application/x-npz")) return directMediaType;
   const metadata = isRecord(raw) ? (raw as { providerMetadata?: unknown }).providerMetadata : undefined;
   if (isRecord(metadata)) {
     for (const entry of Object.values(metadata)) {
@@ -638,18 +645,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** 供 submit 路径在 Media import 后写稳定结果 metadata 的辅助。 */
 export function resultFromMedia(
   metadata: MediaMetadata,
-  extras?: { poster?: MediaMetadata; durationSeconds?: number }
+  extras?: { poster?: MediaMetadata; durationSeconds?: number; mediaKind?: BinaryModelType; motion?: TaskResultSummary["motion"]; fps?: number }
 ): TaskResultSummary {
-  const mediaKind =
+  const mediaKind = extras?.mediaKind ?? (metadata.contentType === "application/x-npz" ? "motion" :
     metadata.mediaKind === "video" || metadata.mediaKind === "audio" || metadata.mediaKind === "image"
       ? metadata.mediaKind
-      : "image";
+      : "image");
+  if (mediaKind === "motion" && !isSomaMotionMetadata(extras?.motion)) {
+    throw Object.assign(new Error("Generated motion requires canonical metadata"), { code: "motion-metadata-invalid" });
+  }
   return {
     mediaKind,
     storageKey: metadata.storageKey,
     contentType: metadata.contentType,
     size: metadata.size,
     checksum: metadata.checksum,
+    ...(extras?.motion ? { motion: extras.motion } : {}),
+    ...(extras?.fps !== undefined ? { fps: extras.fps } : {}),
     ...(extras?.durationSeconds !== undefined ? { durationSeconds: extras.durationSeconds } : {}),
     ...(extras?.poster
       ? {

@@ -54,6 +54,8 @@ import type { SettingsService } from "./settings/settings-service.js";
 const PROVISIONING_RESERVATION_GRACE_MS = 60_000;
 
 export type BackendServiceOptions = {
+  /** Only the Tauri-owned launcher supplies this in-process capability. */
+  desktopCanvasAgentWorkspace?: { version: 1 };
   env?: Record<string, string | undefined>;
   /** 模型配置（Task catalog）；缺省从仓库文件读取。 */
   modelsConfig?: ModelsConfig;
@@ -235,6 +237,7 @@ export async function createBackendService(options: BackendServiceOptions = {}):
     }
     track(
       await loadCoreLayer(ctx, {
+        ...(options.desktopCanvasAgentWorkspace?.version === 1 ? { desktopCanvasAgentWorkspace: options.desktopCanvasAgentWorkspace } : {}),
         env,
         basePath,
         logger: sink,

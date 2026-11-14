@@ -26,6 +26,7 @@ describe("panelKindForNodeType", () => {
   it("video / audio 映射到对应面板", () => {
     expect(panelKindForNodeType("video")).toBe("video-generation");
     expect(panelKindForNodeType("audio")).toBe("audio-generation");
+    expect(panelKindForNodeType("motion")).toBe("motion-generation");
   });
 
   it("无选中（null / undefined）时为 null", () => {
@@ -45,10 +46,12 @@ describe("反向映射", () => {
     expect(modelTypeForPanelKind("text-generation")).toBe("language");
     expect(modelTypeForPanelKind("video-generation")).toBe("video");
     expect(modelTypeForPanelKind("audio-generation")).toBe("audio");
+    expect(modelTypeForPanelKind("motion-generation")).toBe("motion");
   });
 
   it("反向映射覆盖四类", () => {
     expect(nodeTypeForPanelKind("video-generation")).toBe("video");
     expect(nodeTypeForPanelKind("audio-generation")).toBe("audio");
+    expect(nodeTypeForPanelKind("motion-generation")).toBe("motion");
   });
 });

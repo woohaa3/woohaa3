@@ -408,6 +408,8 @@ function kindLabel(kind: NodeGenerationHistoryListItem["kind"]): string {
       return "视频";
     case "audio":
       return "音频";
+    case "motion":
+      return "动作";
     case "model":
       return "模型";
   }

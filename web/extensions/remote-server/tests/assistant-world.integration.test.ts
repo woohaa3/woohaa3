@@ -9,6 +9,7 @@
  * 锁定的现场故障：导演区提交后报「助手返回了工具调用文本」，模型把调用写成了
  * `<｜DSML｜invoke>` 这样的文本——它根本没收到 `tools` 声明，因为那一轮被当成了讨论。
  */
+import { preparedTurnHash, stripPreparedHash } from "@woohaa3/contracts";
 import { describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -308,4 +309,17 @@ describe("导演区工具回合（真实 MCP 线格式）", () => {
     mcp.server.close();
     chat.server.close();
   }, 60_000);
+});
+
+
+it("remote API discussion has no local filesystem capability or MCP channel", async () => {
+  const chat = await startChatServer([{ choices: [{ finish_reason: "stop", message: { role: "assistant", content: "回复" } }] }]);
+  const toolChannel = () => { throw new Error("Discussion must not open MCP"); };
+  try {
+    const assistant = createRemoteAssistant({ fetchImpl: fetch, session: async () => ({ serverUrl: chat.baseUrl, token: "model-token" }), toolChannel });
+    const input = worldTurn({ intent: { action: "discuss", canvasId: "canvas-1", prompt: "讨论", model: "m" } });
+    expect(await assistant.adapter.run(input)).toMatchObject({ status: "succeeded" });
+    expect(chat.requests[0]!.tools ?? []).toEqual([]);
+    expect(assistant.adapter.capabilities().workspace).not.toBe(true);
+  } finally { await new Promise<void>(resolve => { chat.server.close(() => resolve()); chat.server.closeAllConnections(); }); }
 });

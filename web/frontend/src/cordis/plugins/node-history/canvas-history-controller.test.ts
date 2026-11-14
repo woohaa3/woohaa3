@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { CanvasGenerationHistoryListItem, NodeHistoryKindCounts } from "@woohaa3/contracts";
 import { CanvasHistoryController, type CanvasHistoryClient } from "./canvas-history-controller.js";
 
-const COUNTS: NodeHistoryKindCounts = { text: 1, image: 1, video: 0, audio: 0, model: 0 };
+const COUNTS: NodeHistoryKindCounts = { text: 1, image: 1, video: 0, audio: 0, motion: 0, model: 0 };
 
 function item(entryId: string, overrides: Partial<CanvasGenerationHistoryListItem> = {}): CanvasGenerationHistoryListItem {
   return {
@@ -45,7 +45,7 @@ describe("CanvasHistoryController", () => {
 
   it("空结果显示空态", async () => {
     const client: CanvasHistoryClient = {
-      listCanvas: async () => ({ ok: true, items: [], nextCursor: null, total: 0, kindCounts: { text: 0, image: 0, video: 0, audio: 0, model: 0 } })
+      listCanvas: async () => ({ ok: true, items: [], nextCursor: null, total: 0, kindCounts: { text: 0, image: 0, video: 0, audio: 0, motion: 0, model: 0 } })
     };
     const controller = new CanvasHistoryController(client);
     await controller.open({ canvasId: "c1" });

@@ -127,8 +127,8 @@ describe("RunningHub 模型发现", () => {
     expect(result.discovered).toBe(1);
     expect(result.liveOnly).toEqual(["seedream-v5-lite"]);
     expect(result.removed).not.toContain("dola-Seedream-5.0-pro");
-    // 其余 26 个（registry 没有、页面也没有、也不是 known-live）移除。
-    expect(result.removed).toHaveLength(26);
+    // 其余（registry 没有、页面也没有、也不是 known-live）移除。
+    expect(result.removed).toHaveLength(base.length - 2);
     expect(result.removed).toContain("bytedance/jimeng-4.6");
     expect(result.catalogChecked).toBe(true);
   });

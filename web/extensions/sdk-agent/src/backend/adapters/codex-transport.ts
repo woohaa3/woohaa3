@@ -48,7 +48,7 @@ export function createCodexTransport(options: CodexTransportOptions): AgentSdkTr
     async run(input): Promise<AgentSdkTransportResult> {
       const key = input.resourceKey ?? connectionKey(input.model + ":" + input.restrictions.workspaceDir);
       const home = path.join(options.configDir, key);
-      const cwd = path.join(options.workspaceDir, key);
+      const cwd = input.restrictions.workspace ? input.restrictions.workspaceDir : path.join(options.workspaceDir, key);
       mkdirSync(home, { recursive: true, mode: 0o700 });
       mkdirSync(cwd, { recursive: true, mode: 0o700 });
 
@@ -61,7 +61,7 @@ export function createCodexTransport(options: CodexTransportOptions): AgentSdkTr
       };
       const config: Record<string, unknown> = {
         web_search: input.restrictions.webSearchMode,
-        "features.shell_tool": false,
+        "features.shell_tool": input.restrictions.workspace,
         "features.multi_agent": false,
         "features.collab": false,
         "features.multi_agent_v2": false,
@@ -71,7 +71,7 @@ export function createCodexTransport(options: CodexTransportOptions): AgentSdkTr
         "features.collaboration_modes": false,
         "tools.experimental_request_user_input.enabled": false,
         "tools.update_plan.enabled": false,
-        "features.apply_patch_freeform": false,
+        "features.apply_patch_freeform": input.restrictions.workspace,
         "features.exec_policy": false,
         "features.js_repl": false,
         "features.apps": false,
@@ -132,7 +132,7 @@ export function createCodexTransport(options: CodexTransportOptions): AgentSdkTr
       try {
         const { events } = await thread.runStreamed(modelInput, { signal: input.signal, ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}) });
         for await (const event of events) {
-          const violation = codexBoundaryViolation(event);
+          const violation = codexBoundaryViolation(event, input.restrictions.workspace);
           if (violation) return { ok: false, code: "capability-unsupported", message: violation };
           if (event.type === "item.completed" && event.item.type === "agent_message") {
             assistantText = event.item.text;
@@ -166,9 +166,10 @@ export function createCodexTransport(options: CodexTransportOptions): AgentSdkTr
   };
 }
 
-/** 受控边界：命令执行/文件变更一律越界（MCP 工具调用是受控工具面）。 */
-export function codexBoundaryViolation(event: ThreadEvent): string | null {
+/** 无可信桌面目录时拒绝原生命令/文件事件；有目录时由 Codex 原生沙箱约束。 */
+export function codexBoundaryViolation(event: ThreadEvent, workspace = false): string | null {
   if (event.type !== "item.completed" && event.type !== "item.started" && event.type !== "item.updated") return null;
+  if (workspace) return null;
   if (event.item.type === "command_execution") return "Codex 尝试执行命令，已被拒绝";
   if (event.item.type === "file_change") return "Codex 尝试修改文件，已被拒绝";
   return null;

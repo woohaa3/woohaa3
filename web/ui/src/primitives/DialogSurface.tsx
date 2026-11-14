@@ -128,6 +128,23 @@ function staticSurface(
   );
 }
 
+/** 命中应用顶部栏（Tauri 窗口横栏或浏览器浮动顶栏）时不得触发弹窗 outside 关停。 */
+function isTopBarTarget(target: unknown, originalEvent?: Event): boolean {
+  if (target instanceof Node) {
+    const element = target instanceof Element ? target : target.parentElement;
+    if (element?.closest?.(".desktop-canvas-bar, .canvas-topbar")) return true;
+  }
+  if (originalEvent && "clientY" in originalEvent && typeof (originalEvent as MouseEvent).clientY === "number") {
+    const clientY = (originalEvent as MouseEvent).clientY;
+    const desktopBar = typeof document !== "undefined" ? document.querySelector(".desktop-canvas-bar") : null;
+    if (desktopBar) {
+      const rect = desktopBar.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 单个弹窗 surface。
  *
@@ -150,7 +167,9 @@ export function DialogSurface(props: DialogSurfaceProps) {
     <DialogPrimitive.Overlay
       className={["dlg__overlay", props.overlayClassName].filter(Boolean).join(" ")}
       data-dialog-instance={props.instanceId}
-      onMouseDown={() => {
+      onMouseDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (isTopBarTarget(event.target, event.nativeEvent)) return;
         // 只有 modal（top）层的遮罩点击算一次 close request；父层由 Host inert 隔离。
         if (context.modal && !dismissBlocked) context.requestClose();
       }}
@@ -173,7 +192,15 @@ export function DialogSurface(props: DialogSurfaceProps) {
           event.preventDefault();
         }}
         onPointerDownOutside={(event) => {
-          if (dismissBlocked || !context.modal) event.preventDefault();
+          if (dismissBlocked || !context.modal) {
+            event.preventDefault();
+            return;
+          }
+          const originalEvent = (event as unknown as { detail?: { originalEvent?: Event } })?.detail?.originalEvent;
+          const originalTarget = (originalEvent as { target?: unknown })?.target;
+          if (isTopBarTarget(originalTarget ?? event.target, originalEvent)) {
+            event.preventDefault();
+          }
         }}
         onEscapeKeyDown={(event) => {
           if (dismissBlocked || !context.modal) event.preventDefault();
@@ -219,7 +246,15 @@ export function AlertDialogSurface(props: DialogSurfaceProps) {
           event.preventDefault();
         }}
         onPointerDownOutside={(event) => {
-          if (!context.dismissible || context.busy || busy) event.preventDefault();
+          if (!context.dismissible || context.busy || busy) {
+            event.preventDefault();
+            return;
+          }
+          const originalEvent = (event as unknown as { detail?: { originalEvent?: Event } })?.detail?.originalEvent;
+          const originalTarget = (originalEvent as { target?: unknown })?.target;
+          if (isTopBarTarget(originalTarget ?? event.target, originalEvent)) {
+            event.preventDefault();
+          }
         }}
         onEscapeKeyDown={(event) => {
           // Host 拥有策略：busy / dismissible=false 时不发 close request；否则只发一次。

@@ -60,6 +60,8 @@ export type WorkingState = {
   nodes: Woohaa3CanvasNode[];
   edges: Woohaa3CanvasEdge[];
   nodeData: Record<string, CanvasNodeData>;
+  /** Versions of model data cleared earlier in the same atomic command batch. */
+  clearedModelContentVersions?: Record<string, unknown>;
   assets: StoredAsset[];
   jobs: StoredJob[];
 };

@@ -121,7 +121,7 @@ async function persistent(canvas: ServerCanvas, read: ReturnType<typeof readFrom
     if (!result.ok) throw new Error(result.message);
     return result.canvas;
   };
-  const issue = () => assistant.issue({ canvasId: canvas.id, requestId: "request-1", runId: "run-1", epoch: 1, executionId: "exec-1", scope: AREA });
+  const issue = (allowSceneAreaExpansion = false) => assistant.issue({ canvasId: canvas.id, requestId: "request-1", runId: "run-1", epoch: 1, executionId: "exec-1", scope: AREA, allowSceneAreaExpansion });
   const upsert = (next: StoredAsset, commandId: string) => room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
     canvasId: canvas.id, commandId, actorId: "asset-import", baseRevision: published().revision,
     commands: [{ type: "asset.upsert", asset: next }] });
@@ -129,6 +129,37 @@ async function persistent(canvas: ServerCanvas, read: ReturnType<typeof readFrom
 }
 
 describe("trusted GLB world authority", () => {
+  it("uses transformed GLB vertices for a tight world footprint", async () => {
+    const bytes = glb(4), canvas = fixture(bytes);
+    const authority = createWorldAuthoringAuthority({ media: { read: readFrom(bytes) } });
+    const content = await authority.prepareContent(canvas.nodeData.model, canvas);
+    const angle = Math.PI / 8;
+    const bounds = content?.footprint?.({ ...pose(0, 0), rotation: [0, 0, Math.sin(angle), Math.cos(angle)] });
+    expect(bounds).toBeTruthy();
+    expect(bounds!.min.u).toBeCloseTo(-2 * Math.SQRT2, 8);
+    expect(bounds!.max.u).toBeCloseTo(Math.SQRT2, 8);
+    expect(bounds!.min.v).toBeCloseTo(-Math.SQRT2, 8);
+    expect(bounds!.max.v).toBeCloseTo(2 * Math.SQRT2, 8);
+  });
+  it.each([false, true])("checks actual GLB geometry when moving an instance (expansion=%s)", async allowed => {
+    const bytes = glb(4), canvas = fixture(bytes), test = await persistent(canvas, readFrom(bytes));
+    const issued = await test.issue(allowed);
+    if (!issued.ok) throw new Error(issued.message);
+    const view = await test.assistant.read({ canvasId: canvas.id, contextId: issued.context.contextId });
+    if (!view.ok) throw new Error(view.message);
+    const edit = { resourceType: "world_model" as const, operation: "update" as const, operationId: "move-glb", target: { instanceId: TARGET.instanceId },
+      expectedVersion: view.view.resourceVersions?.[`world_model:${TARGET.instanceId}`], patch: { transform: { position: { u: 19, v: 2, h: 0 } } } };
+    const result = await test.assistant.write({ contextId: issued.context.contextId, operation: { kind: "edit-resource", operationId: edit.operationId, edit } });
+    if (allowed) {
+      expect(result).toMatchObject({ ok: true, sceneArea: { expanded: true, bounds: { max: { u: 21 } } } });
+      expect(test.published().nodeData.model.sharedWorldInstance).toMatchObject({ transform: { position: { u: 19 } } });
+      expect(await test.assistant.write({ contextId: issued.context.contextId, operation: { kind: "edit-resource", operationId: edit.operationId, edit } })).toEqual({ ...result, duplicate: true });
+    } else {
+      expect(result).toMatchObject({ ok: false, code: "outside-scope", spatialDiagnostic: { outsideAxes: ["u"] } });
+      expect(test.published().nodeData.model.sharedWorldInstance).toMatchObject({ transform: { position: { u: 2 } } });
+      expect(test.published().nodeData.area.sceneArea).toMatchObject({ bounds: { max: { u: 20 } } });
+    }
+  });
   it.each(["local", "http"])("identifies a missing %s GLB outside the area and recovers after its original bytes return", async transport => {
     const bytes = glb(), canvas = fixture(bytes);
     canvas.assets[0].title = "蝠翼拦截机.glb";
@@ -146,9 +177,8 @@ describe("trusted GLB world authority", () => {
     });
     const authority = createWorldAuthoringAuthority({ media: { read } });
     const failed = await authority.prepareCanvas(canvas, AREA);
-    expect(failed).toEqual({ ok: false, code: "not-ready",
-      message: "无法准备场景模型。模型「蝠翼拦截机.glb」（model）：GLB 文件在当前存储中不存在，请恢复原文件或重新导入模型" });
-    expect(authority.cacheFor(canvas.id, { scope: AREA, scopeVersion: "scope-1" })).toBeNull();
+    expect(failed).toMatchObject({ ok: true, snapshot: { writable: [], objects: [{ identity: TARGET, containment: "unknown" }] } });
+    expect(authority.cacheFor(canvas.id, { scope: AREA, scopeVersion: "scope-1" })).not.toBeNull();
     expect(await authority.prepareContent(canvas.nodeData.model, canvas)).toBeNull();
     missing = false;
     const recovered = await authority.prepareCanvas(canvas, AREA);

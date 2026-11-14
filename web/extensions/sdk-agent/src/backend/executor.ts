@@ -26,7 +26,7 @@ export function createExecutor(options: { transports?: Partial<Record<AgentEngin
     const decodeImages = (images: AgentAdapterRunInput["images"]) => images?.map(image => ({ ...image, bytes: Buffer.from(image.bytes as unknown as string, "base64") }));
     const input: AgentAdapterRunInput = { ...payload.input, prepared: turn.prepared, signal: context.signal, emit: event => context.emit("agent-event", event),
       images: decodeImages(payload.input.images), ...(payload.input.candidate ? { candidate: { ...payload.input.candidate, images: decodeImages(payload.input.candidate.images)! } } : {}) };
-    const instance = createSdkAgentConversationAdapter(adapter, { ...payload.deployment, service, ...options,
+    const instance = createSdkAgentConversationAdapter(adapter, { ...payload.deployment, service, ...options, workspace: context.workspace,
       ...(payload.deployment.hasAuthoring ? { authoring: { readNode: () => call("authoring.read") } } : {}),
       ...(payload.deployment.hasTools ? { tools: { issue: (value: unknown) => call<Awaited<ReturnType<NonNullable<SdkAgentRuntimeOptions["tools"]>["issue"]>>>("tools.issue", value), revoke } } : {}) });
     try {

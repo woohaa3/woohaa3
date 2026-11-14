@@ -152,7 +152,7 @@ const OCCUPANCY_KEYS = ["version", "scope", "state", "locks", "reason"] as const
 const OCCUPANCY_LOCK_KEYS = ["target", "runId", "epoch", "state"] as const;
 const SCOPE_VERSION_KEYS = ["scope", "scopeVersion"] as const;
 const CONTEXT_KEYS = [
-  "contextId", "canvasId", "runId", "epoch", "scope", "writableTargets", "readOnlyReferences"
+  "contextId", "canvasId", "runId", "epoch", "scope", "writableTargets", "readOnlyReferences", "allowSceneAreaExpansion"
 ] as const;
 const WRITABLE_TARGET_KEYS = ["target", "lease"] as const;
 const LEASE_KEYS = ["canvasId", "runId", "epoch", "target"] as const;
@@ -755,6 +755,8 @@ function decodeContext(value: unknown): Decode<WorldToolContext> {
   const runId = ownField(value, "runId");
   const epoch = ownField(value, "epoch");
   const scope = decodeScopeVersion(ownField(value, "scope"));
+  const allowSceneAreaExpansion = ownField(value, "allowSceneAreaExpansion");
+  if (allowSceneAreaExpansion !== undefined && typeof allowSceneAreaExpansion !== "boolean") return invalid(value);
   if (!isNonEmptyWorldId(contextId) || !isNonEmptyWorldId(canvasId) || !isNonEmptyWorldId(runId)) {
     return invalid(value);
   }
@@ -782,6 +784,7 @@ function decodeContext(value: unknown): Decode<WorldToolContext> {
     runId,
     epoch,
     scope,
+    ...(allowSceneAreaExpansion === undefined ? {} : { allowSceneAreaExpansion }),
     writableTargets: writableTargets.value,
     readOnlyReferences: readOnlyReferences.value
   });
@@ -1062,7 +1065,9 @@ function decodeGroundPoint(value: unknown): { u: number; v: number } | null {
 /** Optional out-of-scope geometry; a malformed diagnostic never smuggles half-typed bounds. */
 function decodeSpatialDiagnostic(value: unknown): Decode<WorldAuthoringFailure["spatialDiagnostic"]> {
   if (value === undefined) return ok(undefined);
-  if (!recordWithKeys(value, ["actual", "bounds", "anchor", "outsideAxes"])) return invalid(value);
+  if (!recordWithKeys(value, ["areaId", "actual", "bounds", "anchor", "outsideAxes"])) return invalid(value);
+  const areaId = ownField(value, "areaId");
+  if (areaId !== undefined && !isNonEmptyWorldId(areaId)) return invalid(value);
   const actualRaw = ownField(value, "actual");
   const boundsRaw = ownField(value, "bounds");
   const anchorRaw = ownField(value, "anchor");
@@ -1078,6 +1083,7 @@ function decodeSpatialDiagnostic(value: unknown): Decode<WorldAuthoringFailure["
     : decodeList(axesRaw, item => item === "u" || item === "v" ? ok(item as "u" | "v") : invalid<"u" | "v">(item));
   if (outsideAxes && !outsideAxes.ok) return invalid(value);
   const diagnostic: NonNullable<WorldAuthoringFailure["spatialDiagnostic"]> = {
+    ...(typeof areaId === "string" ? { areaId } : {}),
     ...(actual === undefined ? {} : { actual }),
     ...(bounds === undefined ? {} : { bounds }),
     ...(anchor === undefined ? {} : { anchor }),

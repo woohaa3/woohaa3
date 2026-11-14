@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { CanvasRuntimeService } from "../../contract/canvas-runtime.js";
 import type { PointHit } from "../canvas-runtime/bevy-runtime-types.js";
 
@@ -88,7 +88,10 @@ export function installSceneAreaPlayback(runtime: CanvasRuntimeService, canvas: 
   };
 }
 
+const noSubscription = () => () => {};
+const noStatus = () => null;
 export function SceneAreaProgress({ runtime }: { runtime: CanvasRuntimeService }) {
+  const status = useSyncExternalStore(runtime.subscribeWorldAnimationAssets ?? noSubscription, runtime.worldAnimationAssetStatus ?? noStatus);
   useEffect(() => {
     let canvas: HTMLCanvasElement | null = null, dispose: (() => void) | undefined;
     const bind = () => {
@@ -102,5 +105,8 @@ export function SceneAreaProgress({ runtime }: { runtime: CanvasRuntimeService }
     observer.observe(document.body, { childList: true, subtree: true });
     return () => { observer.disconnect(); dispose?.(); };
   }, [runtime]);
-  return null;
+  return status ? <div style={{ position: "absolute", left: 16, bottom: 48, pointerEvents: "auto", padding: "6px 10px", background: "var(--surface, #fff)", borderRadius: 6, fontSize: 12 }}>
+    {status}
+    {status.startsWith("动作加载失败：") && runtime.retryWorldAnimationAssets && <button type="button" style={{ marginLeft: 8 }} onClick={() => runtime.retryWorldAnimationAssets?.()}>重试</button>}
+  </div> : null;
 }

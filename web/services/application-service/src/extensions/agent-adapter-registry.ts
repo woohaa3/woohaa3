@@ -10,13 +10,14 @@
  * 通用面板只经宿主 API 使用会话；本注册表只解析扩展提供的 adapter。
  */
 import {
+  AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
   agentConversationAdapterCapabilityId,
   agentConversationAdapterIdFromCapabilityId,
   isAgentAdapterCapabilities,
   isAgentConversationAdapterCapabilityId,
   isAgentConversationAdapterShape,
   type AgentAdapterCapabilities,
-  type AgentConversationAdapter
+  type AgentConversationAdapter,
 } from "@woohaa3/contracts";
 
 export type AgentAdapterRegistryOwner = {
@@ -37,9 +38,9 @@ export type ResolveAgentAdapterResult =
   | { ok: false; code: "adapter-unavailable"; message: string };
 
 export type AgentAdapterRegistryHost = {
-  hasCapability(id: string): boolean;
-  resolveCapabilityOwner?(id: string): { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
-  resolveCapability(id: string): unknown;
+  hasCapability(id: string, version: number): boolean;
+  resolveCapabilityOwner?(id: string, version: number): { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
+  resolveCapability(id: string, version: number): unknown;
   snapshot?(): Array<{ extensionId: string; capabilities: string[] }>;
 };
 
@@ -57,13 +58,13 @@ export function createAgentAdapterRegistry(
 ): AgentAdapterRegistry {
   const resolveById = (adapterId: string): ResolveAgentAdapterResult => {
     const capabilityId = agentConversationAdapterCapabilityId(adapterId);
-    if (!host.hasCapability(capabilityId)) {
+    if (!host.hasCapability(capabilityId, AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION)) {
       return { ok: false, code: "adapter-unavailable", message: "该 Agent adapter 不可用" };
     }
-    const owner = host.resolveCapabilityOwner?.(capabilityId);
+    const owner = host.resolveCapabilityOwner?.(capabilityId, AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION);
     if (!owner) return { ok: false, code: "adapter-unavailable", message: "该 Agent adapter 不可用" };
     if (owner.mode !== "public") return { ok: false, code: "adapter-unavailable", message: "该 Agent adapter 处于恢复模式" };
-    const value = host.resolveCapability(capabilityId);
+    const value = host.resolveCapability(capabilityId, AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION);
     if (!isAgentConversationAdapterShape(value)) return { ok: false, code: "adapter-unavailable", message: "Agent adapter capability 形态非法" };
     if (value.id !== adapterId) return { ok: false, code: "adapter-unavailable", message: "Agent adapter 身份不一致" };
     let capabilities: AgentAdapterCapabilities;
@@ -92,7 +93,7 @@ export function createAgentAdapterRegistry(
     for (const entry of snapshot) {
       for (const capabilityId of entry.capabilities) {
         if (!isAgentConversationAdapterCapabilityId(capabilityId)) continue;
-        const owner = host.resolveCapabilityOwner?.(capabilityId);
+        const owner = host.resolveCapabilityOwner?.(capabilityId, AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION);
         if (!owner || owner.mode !== "public") continue;
         owners.push({ adapterId: agentConversationAdapterIdFromCapabilityId(capabilityId), extensionId: owner.extensionId, configVersion: owner.configVersion, mode: owner.mode });
       }

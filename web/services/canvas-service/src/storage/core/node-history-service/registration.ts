@@ -4,6 +4,7 @@
  */
 import {
   encodeNodeGenerationIdentity,
+  isSomaMotionMetadata,
   modelContentIdentity,
   modelPlacementSnapshotKey,
   nodeHistoryContentIdentity,
@@ -18,17 +19,17 @@ import {
 } from "@woohaa3/contracts";
 import type { RegisterModelEditInput, RegisterTaskFailureInput } from "./types.js";
 
-export function kindLabel(kind: "image" | "video" | "audio"): string {
-  return kind === "image" ? "图片" : kind === "video" ? "视频" : "音频";
+export function kindLabel(kind: "image" | "video" | "audio" | "motion"): string {
+  return kind === "motion" ? "动作" : kind === "image" ? "图片" : kind === "video" ? "视频" : "音频";
 }
 
 export function mediaPayload(output: {
-  mediaKind: "image" | "video" | "audio";
+  mediaKind: "image" | "video" | "audio" | "motion";
   asset: StoredAsset;
   posterAsset?: StoredAsset;
   durationSeconds?: number;
 }): NodeHistoryMediaPayload {
-  const metadata = output.asset.metadata as { storageKey?: unknown; checksum?: unknown; contentType?: unknown; size?: unknown } | undefined;
+  const metadata = output.asset.metadata as { storageKey?: unknown; checksum?: unknown; contentType?: unknown; size?: unknown; fps?: unknown; motion?: unknown } | undefined;
   const posterMetadata = output.posterAsset?.metadata as { storageKey?: unknown; checksum?: unknown; contentType?: unknown; size?: unknown } | undefined;
   return {
     kind: output.mediaKind,
@@ -36,6 +37,7 @@ export function mediaPayload(output: {
     checksum: String(metadata?.checksum ?? ""),
     contentType: String(metadata?.contentType ?? "application/octet-stream"),
     size: typeof metadata?.size === "number" ? metadata.size : 0,
+    ...(output.mediaKind === "motion" && isSomaMotionMetadata(metadata?.motion) ? { motion: metadata.motion, fps: metadata.motion.fps } : {}),
     ...(output.durationSeconds !== undefined ? { durationSeconds: output.durationSeconds } : {}),
     ...(output.posterAsset && posterMetadata
       ? {
@@ -62,7 +64,7 @@ export function mediaPayload(output: {
  * 缺失即不写，绝不按当前画布状态反填（历史版本必须描述**当时**那次执行）。
  */
 export function taskHistorySource(input: {
-  kind: "text" | "image" | "video" | "audio";
+  kind: "text" | "image" | "video" | "audio" | "motion";
   runId: string;
   taskKey?: string;
   modelId?: string;
@@ -142,7 +144,7 @@ export function buildTaskHistoryEntry(input: {
   /** 该次执行使用的模型身份；写入 source.modelId。 */
   modelKey?: string;
   jobId?: string;
-  kind: "text" | "image" | "video" | "audio";
+  kind: "text" | "image" | "video" | "audio" | "motion";
   createdAt: string;
   payload: NodeHistoryTextPayload | NodeHistoryMediaPayload;
 }): NodeGenerationHistoryEntry {

@@ -3,7 +3,7 @@ import type { FilesV4 } from '@ai-sdk/provider';
 import { createJobs } from './jobs.ts';
 import { registerPptaskJobs } from './registry.ts';
 import { getModelType } from './internal.ts';
-import { createAudioModel, createImageModel, createLanguageModel, createVideoModel } from './model.ts';
+import { createAudioModel, createMotionModel, createImageModel, createLanguageModel, createVideoModel } from './model.ts';
 import { createMemoryJobRepository } from '../stores/index.ts';
 import type {
   CreatePptaskProviderOptions,
@@ -11,6 +11,7 @@ import type {
   PptaskImageModel,
   PptaskLanguageModel,
   PptaskModel,
+  PptaskMotionModel,
   PptaskModelType,
   PptaskProvider,
   PptaskVideoModel,
@@ -35,6 +36,8 @@ export function createPptaskProvider(options: CreatePptaskProviderOptions): Ppta
     return createAudioModel(options.providerId, modelId, options.audioModel(modelId), pollIntervalMs, options.executionReporter);
   });
 
+  const motionModels = lazyModelRecord<PptaskMotionModel>(modelId => options.motionModel ? createMotionModel(options.providerId, modelId, options.motionModel(modelId), pollIntervalMs, options.executionReporter) : undefined);
+
   const sdkProvider = customProvider({
     languageModels,
     imageModels,
@@ -44,6 +47,7 @@ export function createPptaskProvider(options: CreatePptaskProviderOptions): Ppta
   });
 
   const resolveModel = (type: PptaskModelType, modelId: string): PptaskModel => {
+    if (type === 'motion') { const model=motionModels[modelId]; if (!model) throw new Error('Motion model unavailable'); return model; }
     if (type === 'language') return sdkProvider.languageModel(modelId) as PptaskLanguageModel;
     if (type === 'image') return sdkProvider.imageModel(modelId) as PptaskImageModel;
     if (type === 'video') return sdkProvider.videoModel(modelId) as PptaskVideoModel;
@@ -63,6 +67,7 @@ export function createPptaskProvider(options: CreatePptaskProviderOptions): Ppta
   return Object.assign(sdkProvider, {
     providerId: options.providerId,
     jobs,
+    motionModel:(modelId:string)=>resolveModel('motion',modelId) as PptaskMotionModel,
     audioModel: (modelId: string) => sdkProvider.speechModel(modelId) as PptaskAudioModel,
     async describe(model: PptaskModel) {
       const modelType = getModelType(model);

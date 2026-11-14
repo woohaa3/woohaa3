@@ -60,6 +60,8 @@ export class EditJournal {
   private currentBytes = 0;
   /** 仅长操作采纳（外部权威回执）互斥，不再作为用户入口门禁。 */
   private adopting = false;
+  /** Prevent overlapping asynchronous replays from targeting the same cursor. */
+  private replaying = false;
   private generation = 0;
   private connection: JournalConnectionState = "ready";
   private draining = false;
@@ -116,6 +118,7 @@ export class EditJournal {
   recordExternal(input: {
     id: string;
     label: string;
+    revision?: number;
     undo: () => Promise<ExternalJournalOutcome>;
     redo: () => Promise<ExternalJournalOutcome>;
   }): { ok: true; entry: ExternalJournalEntry } | { ok: false; reason: string } {
@@ -127,6 +130,7 @@ export class EditJournal {
       kind: "external",
       id: input.id,
       label: input.label,
+      ...(input.revision !== undefined ? { revision: input.revision } : {}),
       undo: input.undo,
       redo: input.redo,
       state: "committed"
@@ -214,6 +218,7 @@ export class EditJournal {
     modelKey: string;
     before: Record<string, unknown>;
     after: Record<string, unknown>;
+    revision?: number;
   }): void {
     // pending 结构动作尚未确认时不插入本地参数记录：否则参数会排到更早的结构动作之前，
     // 撤销顺序与实际操作顺序相反（旧实现用全局 busy 同样拒绝）。
@@ -224,6 +229,7 @@ export class EditJournal {
       && this.undoCursor === this.entries.length - 1
       && top.nodeId === input.nodeId
       && top.modelKey === input.modelKey
+      && top.revision === input.revision
     ) {
       top.after = { ...input.after };
       this.currentBytes = this.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
@@ -239,6 +245,7 @@ export class EditJournal {
       modelKey: input.modelKey,
       before: { ...input.before },
       after: { ...input.after },
+      ...(input.revision !== undefined ? { revision: input.revision } : {}),
       state: "committed"
     };
     this.pushCommitted(entry);
@@ -255,6 +262,7 @@ export class EditJournal {
    * 不要求全局空闲：drain 正在处理其它命令时也可以入队撤销。
    */
   async undo(handlers: JournalHandlers): Promise<{ ok: true; entry: JournalEntry } | { ok: false; reason: string }> {
+    if (this.replaying) return { ok: false, reason: "撤销或重做尚未确认，请稍候" };
     const lastPending = this.pendingRecords[this.pendingRecords.length - 1];
     if (lastPending) {
       if (lastPending.entry.state === "conflict") {
@@ -282,17 +290,28 @@ export class EditJournal {
       this.scheduleDrain();
       return { ok: true, entry };
     }
-    const result = await handlers.apply(entry, -1);
+    const generation = this.generation;
+    this.replaying = true;
+    let result: Awaited<ReturnType<JournalHandlers["apply"]>>;
+    try {
+      result = await handlers.apply(entry, -1);
+    } finally {
+      if (generation === this.generation) this.replaying = false;
+    }
+    if (generation !== this.generation) return { ok: false, reason: "页面已切换" };
     if (!result.ok) {
       // 指针保持不变；冲突标记由 handler 负责。
       return { ok: false, reason: result.reason };
     }
-    this.undoCursor += -1;
+    const observed = entry.kind === "parameter" ? this.deps.currentRevision?.() : undefined;
+    entry.undoRevision = result.revision ?? (observed === undefined ? undefined : observed + 0.5);
+    this.finishUndo(entry);
     this.notify();
     return { ok: true, entry };
   }
 
   async redo(handlers: JournalHandlers): Promise<{ ok: true; entry: JournalEntry } | { ok: false; reason: string }> {
+    if (this.replaying) return { ok: false, reason: "撤销或重做尚未确认，请稍候" };
     const lastPending = this.pendingRecords[this.pendingRecords.length - 1];
     if (lastPending) {
       if (lastPending.entry.state === "conflict") {
@@ -321,9 +340,18 @@ export class EditJournal {
       this.scheduleDrain();
       return { ok: true, entry };
     }
-    const result = await handlers.apply(entry, 1);
+    const generation = this.generation;
+    this.replaying = true;
+    let result: Awaited<ReturnType<JournalHandlers["apply"]>>;
+    try {
+      result = await handlers.apply(entry, 1);
+    } finally {
+      if (generation === this.generation) this.replaying = false;
+    }
     if (!result.ok) return { ok: false, reason: result.reason };
-    this.undoCursor += 1;
+    if (generation !== this.generation) return { ok: false, reason: "页面已切换" };
+    const observed = entry.kind === "parameter" ? this.deps.currentRevision?.() : undefined;
+    this.finishRedo(entry, result.revision ?? (observed === undefined ? undefined : observed + 0.5));
     this.notify();
     return { ok: true, entry };
   }
@@ -407,6 +435,7 @@ export class EditJournal {
     this.undoCursor = -1;
     this.currentBytes = 0;
     this.adopting = false;
+    this.replaying = false;
     this.activeTask = null;
     this.draining = false;
     this.drainPromise = null;
@@ -655,6 +684,8 @@ export class EditJournal {
         return;
       }
       record.entry.state = "committed";
+      const revision = settled.revision ?? this.deps.committedRevision?.(task.commandId);
+      if (revision !== undefined) record.entry.revision = revision;
       this.removePending(record);
       this.pushCommitted(record.entry);
       this.notify();
@@ -669,8 +700,16 @@ export class EditJournal {
       this.failTask(task, "操作尚未结算");
       return;
     }
-    if (task.direction === "undo") task.entry.undoPending = false;
-    else task.entry.redoPending = false;
+    if (task.direction === "undo") {
+      task.entry.undoPending = false;
+      task.entry.undoRevision = settled.revision ?? this.deps.committedRevision?.(task.commandId);
+    }
+    else {
+      task.entry.redoPending = false;
+      this.finishRedo(task.entry, settled.revision ?? this.deps.committedRevision?.(task.commandId));
+      this.notify();
+      return;
+    }
     this.moveCursor(task);
     this.notify();
   }
@@ -735,10 +774,47 @@ export class EditJournal {
     const index = this.entries.indexOf(task.entry);
     if (index < 0) return;
     if (task.direction === "undo") {
-      if (index <= this.undoCursor) this.undoCursor = index - 1;
+      this.finishUndo(task.entry);
     } else if (index === this.undoCursor + 1) {
       this.undoCursor = index;
     }
+  }
+
+  private finishUndo(entry: JournalEntry): void {
+    const index = this.entries.indexOf(entry);
+    if (index < 0 || index > this.undoCursor) return;
+    // A later edit may have arrived before the undo response. It branches the
+    // history if it actually committed after this undo, even though the undo
+    // entry was still on the applied side when that edit was registered.
+    const branched = this.entries.slice(index + 1, this.undoCursor + 1).some(item =>
+      entry.undoRevision === undefined || item.revision === undefined || item.revision > entry.undoRevision
+    );
+    this.entries.splice(index, 1);
+    this.undoCursor--;
+    if (branched) this.currentBytes -= estimateBytes(entry);
+    else this.entries.splice(this.undoCursor + 1, 0, entry);
+  }
+
+  private finishRedo(entry: JournalEntry, revision: number | undefined): void {
+    const index = this.entries.indexOf(entry);
+    if (index >= 0) {
+      this.entries.splice(index, 1);
+      this.currentBytes -= estimateBytes(entry);
+      if (index <= this.undoCursor) this.undoCursor--;
+    }
+    entry.revision = revision;
+    entry.undoRevision = undefined;
+    if (index < 0) {
+      // A new commit may have discarded the redo while its request was in
+      // flight. The successful replay is itself an authoritative commit.
+      this.pushCommitted(entry);
+      return;
+    }
+    const later = revision === undefined ? -1 : this.entries.findIndex((item, i) => i <= this.undoCursor && item.revision !== undefined && item.revision > revision);
+    this.entries.splice(later < 0 ? this.undoCursor + 1 : later, 0, entry);
+    this.undoCursor++;
+    this.currentBytes += estimateBytes(entry);
+    this.enforceCapacity();
   }
 
   private removePending(record: PendingRecord): void {
@@ -751,6 +827,37 @@ export class EditJournal {
   }
 
   private pushCommitted(entry: JournalEntry): void {
+    if (entry.revision !== undefined && this.undoCursor + 1 < this.entries.length) {
+      // A receipt can arrive after an undo even though its write preceded that
+      // undo. Keep only redo entries whose undo is known to be later than it.
+      const start = this.undoCursor + 1;
+      const cut = this.entries.findIndex((item, index) => index >= start && (item.undoRevision === undefined || item.undoRevision <= entry.revision!));
+      if (cut >= 0) {
+        const removed = this.entries.splice(cut);
+        for (const item of removed) this.currentBytes -= estimateBytes(item);
+      }
+      if (start < this.entries.length) {
+        const laterApplied = this.entries.findIndex((item, index) => index < start && item.revision !== undefined && item.revision > entry.revision!);
+        const index = laterApplied < 0 ? start : laterApplied;
+        this.entries.splice(index, 0, entry);
+        this.currentBytes += estimateBytes(entry);
+        this.undoCursor++;
+        this.enforceCapacity();
+        return;
+      }
+    }
+    // External receipts may arrive after newer commits. Insert them before the
+    // first known later revision instead of making an older edit the undo tip.
+    if (entry.revision !== undefined) {
+      const index = this.entries.findIndex(item => item.revision !== undefined && item.revision > entry.revision!);
+      if (index >= 0) {
+        this.entries.splice(index, 0, entry);
+        this.currentBytes += estimateBytes(entry);
+        if (index <= this.undoCursor + 1) this.undoCursor++;
+        this.enforceCapacity();
+        return;
+      }
+    }
     // 新净修改成功：清空 redo 区。
     if (this.undoCursor + 1 < this.entries.length) {
       const removed = this.entries.splice(this.undoCursor + 1);

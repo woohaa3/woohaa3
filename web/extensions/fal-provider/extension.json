@@ -4,5 +4,11 @@
   "metadata": { "module": "./shared", "export": "FAL_PLUGIN_METADATA", "order": 28 },
   "hostPlugin": { "module": "./backend", "factory": "createFalProviderPlugin", "features": ["provider"], "order": 18 },
   "icon": { "asset": "./assets/icon.png" },
-  "version": "1.0.0"
+  "version": "1.0.1",
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1, "log": 1 }
+  }
 }

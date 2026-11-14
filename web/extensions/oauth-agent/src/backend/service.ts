@@ -104,6 +104,7 @@ export type ChatGptService = {
     outputSchema?: Record<string, unknown>;
     signal?: AbortSignal;
     onStage?: (stage: string) => void;
+    onTool?: (event: import("./codex-adapter.js").CodexRunEvent) => void;
   }) => Promise<{ ok: true; text: string } | { ok: false; code: string; message: string }>;
   close: () => Promise<void>;
 };
@@ -260,6 +261,7 @@ export function createChatGptService(options: ChatGptServiceOptions): ChatGptSer
           { ownerId: input.ownerId, requestId: input.requestId, prepared: input.prepared, model: input.model, ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}), prompt, noTools: true, ...(input.images ? { images: input.images } : {}), ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}), ...(input.signal ? { signal: input.signal } : {}) },
           (event) => {
             if (event.type === "progress") input.onStage?.(event.stage);
+            else if (event.type === "tool" || event.type === "tool-started") input.onTool?.(event);
           }
         );
         return { ok: true as const, text: finalResponse };

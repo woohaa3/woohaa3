@@ -74,4 +74,4 @@ export type TaskRuntime = {
 };
 
 /** 需要 Media 持久化的二进制媒体类型。 */
-export type BinaryModelType = "image" | "audio" | "video";
+export type BinaryModelType = "image" | "audio" | "video" | "motion";

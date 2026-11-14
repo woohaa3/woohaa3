@@ -35,14 +35,14 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     await host.activate({
       extensionId: "task-core",
       activate: (h) => {
-        h.registerCapability({ id: "task-runtime", value: { kind: "runtime" } });
+        h.registerCapability({ id: "task-runtime", version: 1, value: { kind: "runtime" } });
       }
     });
     const definition: ApplicationBackendExtensionDefinition = {
       extensionId: "sample-site-extension",
       requiredDependencies: ["task-runtime"],
       activate: (h) => {
-        h.registerCapability({ id: "sample-cap", value: { kind: "sample" } });
+        h.registerCapability({ id: "sample-cap", version: 1, value: { kind: "sample" } });
         h.registerHandler({
           route: "actions/run",
           auth: "authenticated",
@@ -59,8 +59,8 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     const result = await host.activate(definition);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(host.hasCapability("sample-cap")).toBe(true);
-    expect(host.resolveCapability("sample-cap")).toEqual({ kind: "sample" });
+    expect(host.hasCapability("sample-cap", 1)).toBe(true);
+    expect(host.resolveCapability("sample-cap", 1)).toEqual({ kind: "sample" });
     expect(events).toEqual(["start:ticker"]);
 
     const dispatched = await host.dispatch("actions/run", { body: { x: 1 }, context: { authLevel: "authenticated" } });
@@ -73,7 +73,7 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     await result.handle.dispose();
     // 反序释放：先 stop 已启动的资源，再执行 activation disposer。
     expect(events).toEqual(["start:ticker", "stop:ticker", "dispose"]);
-    expect(host.hasCapability("sample-cap")).toBe(false);
+    expect(host.hasCapability("sample-cap", 1)).toBe(false);
     expect(host.snapshot().map((entry) => entry.extensionId)).toEqual(["task-core"]);
   });
 
@@ -83,14 +83,14 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
       extensionId: "dep-plugin",
       requiredDependencies: ["missing-cap"],
       activate: (h) => {
-        h.registerCapability({ id: "should-not-exist", value: true });
+        h.registerCapability({ id: "should-not-exist", version: 1, value: true });
       }
     };
     const result = await host.activate(definition);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.missingDependencies).toEqual(["missing-cap"]);
-    expect(host.hasCapability("should-not-exist")).toBe(false);
+    expect(host.hasCapability("should-not-exist", 1)).toBe(false);
     expect(host.snapshot()).toEqual([]);
   });
 
@@ -99,14 +99,14 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     await host.activate({
       extensionId: "owner-a",
       activate: (h) => {
-        h.registerCapability({ id: "shared", value: "a" });
+        h.registerCapability({ id: "shared", version: 1, value: "a" });
         h.registerHandler({ route: "a/handle", auth: "public", handle: () => ({ body: null }) });
       }
     });
     const conflicting: ApplicationBackendExtensionDefinition = {
       extensionId: "owner-b",
       activate: (h) => {
-        h.registerCapability({ id: "own-cap", value: "b" });
+        h.registerCapability({ id: "own-cap", version: 1, value: "b" });
         h.registerHandler({ route: "a/handle", auth: "public", handle: () => ({ body: null }) });
         // 同一扩展内重复 route（不同扩展允许同名）→ 稳定拒绝并回滚。
         h.registerHandler({ route: "a/handle", auth: "public", handle: () => ({ body: null }) });
@@ -116,8 +116,8 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("duplicate-handler");
     // owner-b 的自有 capability 必须一并回滚，owner-a 的注册保持有效。
-    expect(host.hasCapability("own-cap")).toBe(false);
-    expect(host.resolveCapability("shared")).toBe("a");
+    expect(host.hasCapability("own-cap", 1)).toBe(false);
+    expect(host.resolveCapability("shared", 1)).toBe("a");
     expect(host.snapshot().map((entry) => entry.extensionId)).toEqual(["owner-a"]);
     // 不同扩展声明同名 route 不冲突：各自按 owner 分派。
     const other = await host.activate({
@@ -169,7 +169,7 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     const definition: ApplicationBackendExtensionDefinition = {
       extensionId: "failing",
       activate: (h) => {
-        h.registerCapability({ id: "failing-cap", value: 1 });
+        h.registerCapability({ id: "failing-cap", version: 1, value: 1 });
         h.registerResource({ id: "r1", start: () => { events.push("start:r1"); }, stop: () => { events.push("stop:r1"); } });
         throw new Error("boom");
       }
@@ -178,7 +178,7 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     expect(result.ok).toBe(false);
     // 资源 start 在 activation 成功之后才执行；中途抛错时未启动，也无遗留注册。
     expect(events).toEqual([]);
-    expect(host.hasCapability("failing-cap")).toBe(false);
+    expect(host.hasCapability("failing-cap", 1)).toBe(false);
     expect(host.snapshot()).toEqual([]);
   });
 
@@ -188,7 +188,7 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     const definition: ApplicationBackendExtensionDefinition = {
       extensionId: "start-fails",
       activate: (h) => {
-        h.registerCapability({ id: "start-cap", value: 1 });
+        h.registerCapability({ id: "start-cap", version: 1, value: 1 });
         h.registerResource({ id: "r1", start: () => { events.push("start:r1"); }, stop: () => { events.push("stop:r1"); } });
         h.registerResource({
           id: "r2",
@@ -205,20 +205,20 @@ describe("Task 后端插件宿主（任务 2.1）", () => {
     if (!result.ok) expect(result.code).toBe("activation-failed");
     // r2 start 失败：已 start 的 r1 反序 stop；r2 自身的 stop 不调用（未成功启动）。
     expect(events).toEqual(["start:r1", "start:r2", "stop:r1"]);
-    expect(host.hasCapability("start-cap")).toBe(false);
+    expect(host.hasCapability("start-cap", 1)).toBe(false);
     expect(host.snapshot()).toEqual([]);
   });
 
   it("一个 optional 插件失败不影响其它插件与宿主核心", async () => {
     const host = createApplicationExtensionHost();
     const results = await host.activateManifest([
-      { extensionId: "ok", activate: (h) => { h.registerCapability({ id: "ok-cap", value: true }); } },
+      { extensionId: "ok", activate: (h) => { h.registerCapability({ id: "ok-cap", version: 1, value: true }); } },
       { extensionId: "broken", requiredDependencies: ["absent"], activate: () => ({}) }
     ]);
     expect(results.map((entry) => entry.result.ok)).toEqual([true, false]);
-    expect(host.hasCapability("ok-cap")).toBe(true);
+    expect(host.hasCapability("ok-cap", 1)).toBe(true);
     // 宿主自身仍可继续激活新插件。
-    expect((await host.activate({ extensionId: "later", activate: (h) => { h.registerCapability({ id: "later-cap", value: 1 }); } })).ok).toBe(true);
+    expect((await host.activate({ extensionId: "later", activate: (h) => { h.registerCapability({ id: "later-cap", version: 1, value: 1 }); } })).ok).toBe(true);
   });
 
   it("未知路由分派抛 handler-not-found", async () => {

@@ -7,7 +7,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { CanvasStorageError } from "../core/index.js";
 
-export const SQLITE_YJS_SCHEMA_VERSION = 7;
+export const SQLITE_YJS_SCHEMA_VERSION = 8;
 
 /** 迁移：建表/删表按版本顺序，记录 applied_at。 */
 export function migrateYjsSchema(db: DatabaseSync, now: () => string): void {
@@ -37,7 +37,8 @@ export function migrateYjsSchema(db: DatabaseSync, now: () => string): void {
     { version: 4, run: migrationV4 },
     { version: 5, run: migrationV5 },
     { version: 6, run: migrationV6 },
-    { version: 7, run: migrationV7 }
+    { version: 7, run: migrationV7 },
+    { version: 8, run: db => db.exec("ALTER TABLE canvas_yjs_commands ADD COLUMN resource_edit_json TEXT") }
   ];
   for (const step of steps) {
     if (current >= step.version) continue;

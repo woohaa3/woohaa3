@@ -1,3 +1,4 @@
+import { DirectorCharacterToolbar } from "../../plugins/task-execution/director-character-toolbar.js";
 import { agentDirectory } from "../../services/assistant-execution/directory.js";
 import { AssistantConfiguration, ReasoningParameters } from "./configuration.js";
 import { roleIdForTarget } from "../../services/agent-role-bindings.js";
@@ -20,7 +21,7 @@ import {
 } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
-import { Button } from "@woohaa3/ui/primitives";
+import { Button, Switch } from "@woohaa3/ui/primitives";
 import { SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
@@ -68,7 +69,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       dataScopeId: service?.getDataScopeId?.() ?? "page",
       canvasId: props.canvasId,
       nodeId: props.nodeId,
-      purpose: props.mode,
+      purpose: props.worldScope?.kind === "scene-area" ? `${props.mode}:${props.worldScope.areaId}` : props.worldScope?.kind === "world-camera" ? `${props.mode}:${props.worldScope.cameraId}` : props.mode,
     },
     { prompt: props.mode === "text" ? "" : (props.initialPrompt ?? "") },
   );
@@ -339,6 +340,7 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
       nodeId: props.nodeId,
       mode: props.mode,
       ...(props.worldScope ? { worldScope: props.worldScope } : {}),
+      ...(props.mode === "world" && props.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: input.draft.allowSceneAreaExpansion === true } : {}),
       roleId: roleIdForTarget({ ...(props.mode ? { mode: props.mode } : {}), ...(props.worldScope ? { worldScope: props.worldScope } : {}) }),
       connectionId,
       ...(selectedConnection?.binding
@@ -389,6 +391,9 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     >
       <AuthoringGenerateLayout
         inspector={inspector}
+        quickActions={props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
+          <DirectorCharacterToolbar canvasId={props.canvasId} nodeId={props.nodeId} areaId={props.worldScope.areaId} writable={props.writable} />
+        ) : undefined}
         presentation={props.presentation === "expanded" ? "expanded" : "dock"}
         requestPresentation={props.requestPresentation}
         onRefresh={() => {
@@ -575,6 +580,16 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
               ) : null}
           </>
         }
+        beforeSubmit={props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
+          <label className="assistant-size-lock">
+            <Switch
+              checked={input.draft.allowSceneAreaExpansion !== true}
+              disabled={locked || !props.writable || Boolean(input.pending)}
+              onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
+            />
+            锁定大小
+          </label>
+        ) : null}
         submit={
           delivery ? (
             delivery.cancel ? (

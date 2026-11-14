@@ -102,3 +102,53 @@ test("改完结果与原文件行数一致（只改值，不重排）", () => {
   const { text: next } = rewriteJsonVersionLiterals(text, { top: "0.1.1" });
   assert.equal(next.split("\n").length, text.split("\n").length, "行数必须不变，说明没有重排");
 });
+
+test("顶层 version 在 site / engines 之后时仍能正确定位（回归）", () => {
+  // 真实故障：带 `site` 段的扩展 bump 全部报「顶层 version 改写后校验失败」——
+  // 定位用的是「最后一次 version 匹配」，命中了 site.version 而不是顶层那个。
+  const text = `{
+  "schemaVersion": 1,
+  "extensionId": "remote-server",
+  "site": {
+    "name": "服务端接入",
+    "version": "1.0.0",
+    "configSchema": { "schemaId": "s", "schemaVersion": 1 }
+  },
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "generation": 1 }
+  },
+  "version": "1.0.0"
+}
+`;
+  const { text: next, changed } = rewriteJsonVersionLiterals(text, { top: "1.0.1", site: "1.0.1" });
+  assert.equal(changed, true);
+  const parsed = JSON.parse(next);
+  assert.equal(parsed.version, "1.0.1", "顶层 version 必须被改");
+  assert.equal(parsed.site.version, "1.0.1", "site.version 必须被改");
+  assert.equal(parsed.site.configSchema.schemaVersion, 1, "嵌套 schemaVersion 不得被改");
+  assert.equal(parsed.engines.protocolVersion, 1, "engines.protocolVersion 不得被改");
+});
+
+test("顶层 version 出现在 site 之前时也正确", () => {
+  const text = `{
+  "version": "1.0.0",
+  "site": { "name": "n", "version": "1.0.0" }
+}
+`;
+  const parsed = JSON.parse(rewriteJsonVersionLiterals(text, { top: "2.0.0", site: "2.0.0" }).text);
+  assert.equal(parsed.version, "2.0.0");
+  assert.equal(parsed.site.version, "2.0.0");
+});
+
+test("字符串内容里的括号不干扰深度判定", () => {
+  const text = `{
+  "description": "包含 { 与 } 以及 \\"version\\" 字样",
+  "version": "1.0.0"
+}
+`;
+  const parsed = JSON.parse(rewriteJsonVersionLiterals(text, { top: "1.0.1" }).text);
+  assert.equal(parsed.version, "1.0.1");
+  assert.match(parsed.description, /包含 \{ 与 \}/);
+});

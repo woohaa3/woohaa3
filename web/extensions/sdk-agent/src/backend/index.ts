@@ -24,7 +24,7 @@ import type {
   ApplicationUserDelegation,
   AgentConnectionProvider
 } from "@woohaa3/contracts";
-import { agentConnectionProviderCapabilityId, agentConversationAdapterCapabilityId } from "@woohaa3/contracts";
+import { AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION, AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION, agentConnectionProviderCapabilityId, agentConversationAdapterCapabilityId } from "@woohaa3/contracts";
 import { createConnectionService, createConnectionProvider, redactEvent } from "@woohaa3/agent-connections";
 import { SDK_AGENT_PLUGIN_ID, readAllowedHostsFromEnv, readAllowHttpFromEnv } from "../shared.js";
 import { createSdkAgentConversationAdapter } from "./execution-client.js";
@@ -137,12 +137,13 @@ export function createSdkAgentExtension(options: SdkAgentExtensionOptions = {}):
         if (!result.ok) throw new Error(result.error.message);
         return result.value;
       };
-      host.registerCapability({ id: agentConnectionProviderCapabilityId(SDK_AGENT_PLUGIN_ID), value: provider });
+      host.registerCapability({ id: agentConnectionProviderCapabilityId(SDK_AGENT_PLUGIN_ID), version: AGENT_CONNECTION_PROVIDER_CAPABILITY_VERSION, value: provider });
 
       for (const adapter of SDK_AGENT_ADAPTERS) {
         const instance = createSdkAgentConversationAdapter(adapter, runtimeOptions);
         host.registerCapability({
           id: agentConversationAdapterCapabilityId(adapter.adapterId),
+          version: AGENT_CONVERSATION_ADAPTER_CAPABILITY_VERSION,
           value: instance
         });
       }

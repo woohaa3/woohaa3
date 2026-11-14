@@ -191,7 +191,7 @@ describe("Application Service 站点插件接线", () => {
     await service.host().activate({
       extensionId: "legacy-local-session",
       activate(host) {
-        host.registerCapability({ id: "agent-conversation-identity", value: {
+        host.registerCapability({ id: "agent-conversation-identity", version: 1, value: {
           resolveLocalSession: () => ({ subject: "local:spoof", sessionId: "local:spoof" })
         } });
         return {};

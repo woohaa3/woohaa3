@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn missing_model_descriptor_reports_only_undeclared_keys() {
         clear_model_assets();
-        let reference = crate::protocol::ModelReference { ground_anchor_local: None, part_rotations: None,
+        let reference = crate::protocol::ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
             scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
             resource_key: "v2:missing".to_owned(),
             signature: "missing".to_owned(),
@@ -297,7 +297,7 @@ mod tests {
                 resizable: false,
                 ghost: false,
                 card_label: None,
-                model: Some(crate::protocol::ModelReference { ground_anchor_local: None, part_rotations: None,
+                model: Some(crate::protocol::ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
                     resource_key: protected.to_owned(),
                     signature: "scene-only".to_owned(),
@@ -400,7 +400,7 @@ mod tests {
                 resizable: false,
                 ghost: false,
                 card_label: None,
-                model: Some(crate::protocol::ModelReference { ground_anchor_local: None, part_rotations: None,
+                model: Some(crate::protocol::ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
                     scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.to_owned()),
                     resource_key: protected.to_owned(),
                     signature: "keep".to_owned(),

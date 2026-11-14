@@ -18,7 +18,8 @@ export function getModelType(model: PptaskModel): PptaskModelType {
     modelType === 'language' ||
     modelType === 'image' ||
     modelType === 'video' ||
-    modelType === 'audio'
+    modelType === 'audio' ||
+    modelType === 'motion'
   ) {
     return modelType;
   }

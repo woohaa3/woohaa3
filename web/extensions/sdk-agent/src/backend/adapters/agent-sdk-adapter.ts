@@ -20,6 +20,7 @@ import { createTurnObserver } from "@woohaa3/agent-connections";
 export type AgentSdkKind = "codex-agent-sdk" | "claude-agent-sdk" | "dsh-agent-sdk" | "gemini-agent-adk";
 
 export type AgentSdkRunInput = {
+  workspace?: { cwd: string };
   images?: readonly import("@woohaa3/contracts").AgentImageInput[];
   outputSchema?: Record<string, unknown>;
   model: string;
@@ -90,7 +91,7 @@ export type AgentSdkTransportInput = {
   reasoningEffort?: import("@woohaa3/contracts").AgentReasoningEffort;
   prompt: string;
   imagePaths: readonly string[];
-  /** 已构建的**执行前限制**配置（内建工具关闭、只允许本轮 MCP 工具、只读工作目录）。 */
+  /** 执行前工具配置；桌面工作目录允许原生文件/shell，MCP 仍按回合收窄。 */
   restrictions: AgentSdkRestrictions;
   /** 讨论回合为 null：不注入任何 MCP server。 */
   mcp: { name: string; url: string; bearerToken: string } | null;
@@ -106,16 +107,18 @@ export type AgentSdkTransportResult =
   | { ok: false; code: string; message: string; nativeId?: string; reasoning?: import("@woohaa3/contracts").AgentReasoningApplication };
 
 export type AgentSdkRestrictions = {
-  /** 只读沙箱（禁止任意文件写）。 */
-  sandboxMode: "read-only";
+  /** Web 为只读；可信桌面工作目录启用 harness workspace-write。 */
+  sandboxMode: "read-only" | "workspace-write";
+  nativeTools: readonly string[];
+  workspace: boolean;
   approvalPolicy: "never";
-  /** 关闭内建 web 搜索/命令执行。 */
+  /** 关闭内建 web 搜索；命令工具由 workspace 配置控制。 */
   webSearchMode: "disabled";
   /** 内建工具黑名单（shell/文件写/外部 MCP 等）。 */
   disallowedTools: readonly string[];
-  /** 仅允许本轮工具（空 = 讨论回合，禁止所有工具）。 */
+  /** 仅本轮允许的领域 MCP 工具；原生工具另由 nativeTools 声明。 */
   allowedTools: readonly string[];
-  /** 只读工作目录。 */
+  /** 本轮实际 cwd；配置目录另行隔离。 */
   workspaceDir: string;
   /** 不加载用户/项目设置（避免带出其他账号的 MCP/skill/凭据）。 */
   settingSources: readonly [];
@@ -144,12 +147,20 @@ export const MCP_RESOURCE_TOOL_NAMES: readonly string[] = ["list_mcp_resources",
  * original host tool name. Normalize that spelling before applying the
  * authorization check so valid calls do not become false violations.
  */
-function canonicalToolName(name: string, allowed: readonly string[]): string {
+function canonicalToolName(name: string, allowed: readonly string[], server?: string): string {
   if (allowed.includes(name) || !name.startsWith("mcp__")) return name;
+  if (!server || !name.startsWith(`mcp__${server}__`)) return name;
   const separator = name.indexOf("__", "mcp__".length);
   if (separator < 0) return name;
   const unqualified = name.slice(separator + 2);
   return allowed.includes(unqualified) ? unqualified : name;
+}
+
+export function nativeWorkspaceTools(kind: AgentSdkKind): readonly string[] {
+  if (kind === "claude-agent-sdk") return ["Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep"];
+  if (kind === "dsh-agent-sdk") return ["bash", "pwsh", "read", "write", "edit", "apply_patch", "read_image", "glob", "grep", "job_output", "job_list", "job_kill"];
+  if (kind === "codex-agent-sdk") return ["shell", "exec", "exec_command", "write_stdin", "apply_patch", "write_file", "read_file"];
+  return [];
 }
 
 export const CODEX_BUILTIN_TOOLS: readonly string[] = ["shell", "exec", "apply_patch", "write_file", "read_file", "web_search"];
@@ -175,13 +186,16 @@ export function buildAgentSdkRestrictions(input: {
   allowedTools: readonly string[];
   /** 覆盖内建名单（按安装版本注入）。 */
   builtinTools?: readonly string[];
+  workspace?: boolean;
 }): AgentSdkRestrictions {
   const builtin = input.builtinTools ?? (input.kind === "codex-agent-sdk" ? CODEX_BUILTIN_TOOLS : CLAUDE_BUILTIN_TOOLS);
   return {
-    sandboxMode: "read-only",
+    sandboxMode: input.workspace ? "workspace-write" : "read-only",
+    workspace: input.workspace === true,
+    nativeTools: input.workspace ? nativeWorkspaceTools(input.kind) : [],
     approvalPolicy: "never",
     webSearchMode: "disabled",
-    disallowedTools: [...builtin],
+    disallowedTools: builtin.filter(tool => !input.workspace || !nativeWorkspaceTools(input.kind).includes(tool)),
     allowedTools: [...input.allowedTools],
     workspaceDir: input.workspaceDir,
     settingSources: [],
@@ -218,8 +232,9 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
     const allowedToolNames = discussion ? [] : input.tools.map((tool) => tool.name);
     // MCP 客户端自带的资源读取工具（只读、不写画布）由运行时注入，不在网关领域工具集里；
     // 模型用它们查看画布资源是合法动作，不能按「越权工具」中止整个回合。
-    const acceptedToolNames = discussion ? [] : [...allowedToolNames, ...MCP_RESOURCE_TOOL_NAMES];
-    const restrictions = buildAgentSdkRestrictions({ kind: options.kind, workspaceDir: options.workspaceDir, allowedTools: allowedToolNames });
+    const restrictions = buildAgentSdkRestrictions({ kind: options.kind, workspaceDir: input.workspace?.cwd ?? options.workspaceDir, allowedTools: allowedToolNames, workspace: input.workspace !== undefined });
+    const acceptedMcpToolNames = discussion ? [] : [...allowedToolNames, ...MCP_RESOURCE_TOOL_NAMES];
+    const acceptedToolNames = [...acceptedMcpToolNames, ...restrictions.nativeTools];
     const mcp =
       !discussion && input.mcpEndpoint && input.toolToken
         ? { name: input.mcpEndpoint.name, url: input.mcpEndpoint.url, bearerToken: input.toolToken }
@@ -264,13 +279,14 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
         if (event.type === "tool-call") {
           // Authorization happens at the MCP gateway before execution, never at this event.
           observation.noteToolCall();
-          const name = canonicalToolName(event.call.name, acceptedToolNames);
+          const name = canonicalToolName(event.call.name, acceptedMcpToolNames, mcp?.name ?? "woohaa");
           if (!acceptedToolNames.includes(name)) {
             toolViolation = event.call.name;
             controller.abort();
             input.onToolResult?.(event.call, { content: "工具不在本轮允许范围", isError: true });
             return;
           }
+          if (restrictions.nativeTools.includes(name)) { input.onStage?.("native-tool", name); return; }
           input.onToolCall?.(name === event.call.name ? event.call : { ...event.call, name });
           return;
         }
@@ -284,7 +300,7 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
 
     const normalizedToolCalls = result.ok
       ? result.toolCalls.map(call => {
-        const name = canonicalToolName(call.name, acceptedToolNames);
+        const name = canonicalToolName(call.name, acceptedMcpToolNames, mcp?.name ?? "woohaa");
         return name === call.name ? call : { ...call, name };
       })
       : [];
@@ -295,7 +311,7 @@ export function createAgentSdkAdapter(options: AgentSdkAdapterOptions) {
       ? { requested: input.reasoningEffort, applied: result.ok }
       : { applied: "provider-default" as const });
     if (!result.ok) return { ok: false, code: result.code, message: result.message, reasoning, ...(result.nativeId ? { nativeId: result.nativeId } : {}) };
-    toolCalls = normalizedToolCalls;
+    toolCalls = normalizedToolCalls.filter(call => !restrictions.nativeTools.includes(call.name));
     return {
       ok: true,
       outcome: { assistantText: result.assistantText || assistantText, toolCalls, finishReason: result.finishReason },

@@ -148,7 +148,7 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
             }
             mesh.insert_indices(Indices::U32(faces.iter().flatten().copied().collect()));
             if !has_normals {
-                mesh.compute_smooth_normals();
+                super::normals::compute_smooth_normals(&mut mesh);
             }
             Some(mesh)
         }
@@ -229,6 +229,21 @@ mod tests {
             colors: None,
         };
         assert_ne!(mesh_key(&geometry), mesh_key(&plain));
+    }
+    #[test]
+    fn metre_scale_mesh_details_get_unit_normals() {
+        let geometry = ModelGeometry::Mesh {
+            vertices: vec![[0., 0., 0.], [0.001, 0., 0.], [0., 0.001, 0.]],
+            faces: vec![[0, 1, 2]], normals: None, uvs: None, colors: None,
+        };
+        let mesh = build_mesh_quality(&geometry, Quality::High).unwrap();
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { panic!("normals") };
+        assert_eq!(normals, &vec![[0., 0., 1.]; 3]);
+        let mut imported = geometry;
+        if let ModelGeometry::Mesh { normals, .. } = &mut imported { *normals = Some(vec![[1., 0., 0.]; 3]); }
+        let mesh = build_mesh_quality(&imported, Quality::High).unwrap();
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { panic!("normals") };
+        assert_eq!(normals, &vec![[1., 0., 0.]; 3]);
     }
     #[test]
     fn invalid_attribute_lengths_are_rejected() {

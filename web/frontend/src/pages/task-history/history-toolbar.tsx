@@ -114,6 +114,7 @@ export function HistoryToolbar(props: HistoryToolbarProps) {
           <option value="image">图片</option>
           <option value="video">视频</option>
           <option value="audio">音频</option>
+          <option value="motion">动作</option>
         </select>
         <select
           aria-label="来源筛选"

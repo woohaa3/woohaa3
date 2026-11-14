@@ -49,6 +49,7 @@ export type YjsCommandRecord = {
   modelBatch?: ModelScriptBatchMeta;
   /** Immutable scene-area authority receipt (T06); written in the same transaction. */
   worldAuthoring?: import("@woohaa3/contracts").WorldAuthoringCommandReceipt;
+  resourceEdit?: import("@woohaa3/contracts").WorldResourceReceipt;
 };
 
 /** 从存储恢复出的完整 Yjs 状态。 */
@@ -98,6 +99,10 @@ export interface YjsDocumentRepository {
 
   /** 查询命令幂等结果。 */
   getCommandRecord(canvasId: string, commandId: string): Promise<YjsCommandRecord | null>;
+
+  findLatestCommand?(canvasId: string): Promise<YjsCommandRecord | null>;
+  findLatestResourceHistoryCommand?(canvasId: string, sourceCommandId: string): Promise<YjsCommandRecord | null>;
+  listResourceEditCommands?(canvasId: string, runId: string): Promise<Array<{ commandId: string; revision: number }>>;
 
   /**
    * Latest scene-area authority command for one operation (T06).

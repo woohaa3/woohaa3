@@ -218,3 +218,16 @@ it("compat-chat 不宣称可恢复 native session", () => {
   expect(capabilitiesFor(findSdkAgentAdapter("compat-chat")!)).toMatchObject({ resume: false });
   expect(capabilitiesFor(findSdkAgentAdapter("openai-responses")!)).toMatchObject({ resume: true });
 });
+
+
+it("desktop discussion uses native workspace tools without opening a MCP gateway", async () => {
+  const f = fixture(), issue = vi.fn(), revoke = vi.fn();
+  f.run.mockImplementation(async turn => {
+    expect(turn.restrictions).toMatchObject({ allowedTools: [], workspace: true, workspaceDir: "/canvas/root", sandboxMode: "workspace-write" });
+    expect(turn.mcp).toBeNull();
+    return { ok: true, assistantText: "完成", toolCalls: [], finishReason: "stop" };
+  });
+  const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, { workspace: { cwd: "/canvas/root" }, service: f.service, allowHttp: false, allowedHosts: ["api.openai.com"], transports: { "codex-agent-sdk": { run: f.run } }, tools: { issue, revoke } });
+  expect(await adapter.run(f.input())).toMatchObject({ status: "succeeded" });
+  expect(issue).not.toHaveBeenCalled();
+});

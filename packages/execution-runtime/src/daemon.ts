@@ -8,6 +8,7 @@
  * 只监听本机 Unix socket / Windows 命名管道，请求必须带 workspace token；不暴露 HTTP。
  */
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import net from "node:net";
 import path from "node:path";
 import { executorEndpoint } from "./endpoints.js";
@@ -24,6 +25,8 @@ import {
 } from "./identity.js";
 import { ExecutorModules, type ExecutorModuleRegistration } from "./modules.js";
 import { TurnStore } from "./turns.js";
+import { CanvasWorkspaces } from "./canvas-workspaces.js";
+import { workspaceRpc } from "./workspace-rpc.js";
 import type {
   Executor,
   ExecutorRequest,
@@ -43,6 +46,9 @@ export type ExecutorDaemonOptions = {
   /** 独立进程形态（CLI daemon）在显式 shutdown 后退出；嵌入式测试保持进程。 */
   exitOnShutdown?: boolean;
   logger?: (event: Record<string, unknown>) => void;
+  /** Supplied only by the desktop bootstrap, never by a browser request. */
+  canvasWorkspaceRoot?: string;
+  canvasWorkspaceProtectedPaths?: string[];
 };
 
 export type ExecutorDaemon = {
@@ -81,6 +87,7 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
   fs.mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
   const processes = new ProcessHost({ stateDir: options.stateDir, workspaceKey: options.workspaceKey, logger: log });
   const turns = new TurnStore({ stateDir: options.stateDir, logger: log });
+
   const executors = options.executors ?? [];
   const modules = new ExecutorModules(options.stateDir);
   const startedAt = Date.now();
@@ -104,6 +111,8 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
     }
   }
 
+  const workspaces = options.canvasWorkspaceRoot ? new CanvasWorkspaces({ stateDir: options.stateDir, defaultRoot: options.canvasWorkspaceRoot, profileKey: options.workspaceKey, protectedPaths: options.canvasWorkspaceProtectedPaths }) : null;
+
   const health = (): HealthInfo => {
     const views = turns.list();
     return {
@@ -126,7 +135,7 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
 
   const reply = (socket: net.Socket, id: number, result: unknown, error?: unknown): void => {
     if (socket.destroyed) return;
-    socket.write(`${JSON.stringify(error ? { id, ok: false, error: errorMessage(error) } : { id, ok: true, result })}\n`);
+    socket.write(`${JSON.stringify(error ? { id, ok: false, error: errorMessage(error), code: (error as { code?: string }).code } : { id, ok: true, result })}\n`);
   };
 
   const dispatch = async (request: ExecutorRequest): Promise<unknown> => {
@@ -134,6 +143,10 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
       throw new Error("Executor 身份校验失败");
     }
     const params = request.params as Record<string, unknown> | undefined;
+    if (request.method.startsWith("workspace.")) {
+      if (!workspaces) throw Object.assign(new Error("当前宿主没有桌面工作目录能力"), { code: "workspace-unavailable" });
+      return workspaceRpc(workspaces, request.method, request.params);
+    }
     switch (request.method) {
       case "ping":
         return { workspaceKey: options.workspaceKey, pid: process.pid, generation: 1, count: processes.list().length };
@@ -179,6 +192,12 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
           stateDir: options.stateDir,
           workspaceKey: options.workspaceKey,
           processes,
+          workspaceFor: input => {
+            const handle = input.prepared?.workspace;
+            if (!handle) return undefined;
+            if (!workspaces || createHash("sha256").update(JSON.stringify([handle.owner, input.requestId])).digest("hex") !== input.turnId || handle.requestId !== input.requestId || handle.canvasId !== input.prepared?.target.canvasId) throw new Error("工作目录与执行回合身份不一致");
+            return workspaces.attachHarness(handle);
+          },
           hostFor: (input) => {
             if (!input.host) return null;
             // 宿主桥断线/超时是通道问题，不能伪装成目标或领域拒绝。
@@ -268,6 +287,7 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
     clearInterval(detachTimer);
     closing = (async () => {
       turns.cancelAll();
+      await workspaces?.close();
       await processes.stopAll();
       await Promise.all(turns.list().map(view => turns.drain(view.turnId)));
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -300,6 +320,8 @@ export async function runDaemonCommand(argv: readonly string[]): Promise<Executo
     socketPath,
     stateDir: runtimeDir,
     token,
-    workspaceKey
+    workspaceKey,
+    ...(flags.has("canvas-workspace-protected-path") ? { canvasWorkspaceProtectedPaths: flags.get("canvas-workspace-protected-path") } : {}),
+    ...(readFlag(flags, "canvas-workspace-root") ? { canvasWorkspaceRoot: readFlag(flags, "canvas-workspace-root") } : {})
   });
 }

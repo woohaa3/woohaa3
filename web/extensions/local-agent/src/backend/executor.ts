@@ -239,9 +239,10 @@ export function createLocalAgentExecutor(options: LocalAgentExecutorOptions = {}
             workId: input.requestId,
             canvasId: payload.canvasId,
             nodeId: payload.intent.nodeId ?? "",
-            mode: payload.intent.mode,
+            ...(payload.intent.action !== "discuss" ? { mode: payload.intent.mode } : {}),
             ...(payload.intent.cameraId ? { cameraId: payload.intent.cameraId } : {}),
-            ...(payload.intent.worldScope ? { worldScope: payload.intent.worldScope } : {}),
+            ...(payload.intent.action !== "discuss" && payload.intent.worldScope ? { worldScope: payload.intent.worldScope } : {}),
+            ...(payload.intent.action !== "discuss" && payload.intent.worldScope?.kind === "scene-area" ? { allowSceneAreaExpansion: payload.intent.allowSceneAreaExpansion === true } : {}),
             tools: toolNames
           });
           toolToken = grant.token;
@@ -289,6 +290,7 @@ export function createLocalAgentExecutor(options: LocalAgentExecutorOptions = {}
         };
         const instance = createLocalAgentConversationAdapter(adapter, {
           service: connectionService(payload),
+          workspace: context.workspace,
           processManager: manager,
           transports: { [adapter.adapterId]: transport },
           argsFor: defaultArgs,

@@ -126,8 +126,8 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     if (options.toolGrants) {
       try {
         const grant = await options.toolGrants.issue({
-          delegation: { subject: input.ownerId, authLevel: "authenticated" },
-          workId: workIds.get(input.requestId) ?? input.requestId,
+          delegation: { subject: input.prepared.workspace?.owner ?? input.ownerId, authLevel: "authenticated" },
+          workId: input.prepared.workspace?.requestId ?? workIds.get(input.requestId) ?? input.requestId,
           canvasId: input.canvasId,
           nodeId: input.nodeId,
           tools: [...input.prepared.tools],
@@ -164,7 +164,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
       record.llmOutput = finalResponse;
     } finally {
       if (options.toolGrants && (grantToken || workIds.has(input.requestId))) {
-        options.toolGrants.revoke(workIds.get(input.requestId) ?? input.requestId);
+        options.toolGrants.revoke(input.prepared.workspace?.requestId ?? workIds.get(input.requestId) ?? input.requestId, input.prepared.workspace ? { subject: input.prepared.workspace.owner, authLevel: "authenticated" } : undefined);
       }
     }
     if (controller.signal.aborted) return fail(record, onProgress, "cancelled", "生成已取消。", 499);

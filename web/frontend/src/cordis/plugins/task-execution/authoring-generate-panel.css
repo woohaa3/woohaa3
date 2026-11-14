@@ -20,6 +20,10 @@
   justify-content: flex-end;
   gap: 6px;
   flex: none;
+  margin-inline-start: auto;
+}
+.authoring-generate__quick-actions {
+  min-width: 0;
 }
 .authoring-generate__header > button {
   flex: none;

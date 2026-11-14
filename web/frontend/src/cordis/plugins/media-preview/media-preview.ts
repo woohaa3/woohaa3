@@ -8,7 +8,7 @@
  */
 import { objectPayload } from "../../services/dialogs/registry.js";
 import type { DialogDefinition } from "../../services/dialogs/types.js";
-import { hasReadyMediaAsset } from "@woohaa3/contracts";
+import { hasReadyMediaAsset, isSomaMotionMetadata } from "@woohaa3/contracts";
 import { isAllowedMediaUrl, isAllowedNodeHistoryPreviewUrl, resolveCanonicalMediaUrl } from "../../services/media-remote.js";
 
 export const MEDIA_PREVIEW_DIALOG_ID = "media-preview";
@@ -18,7 +18,7 @@ export type MediaPreviewPayload = {
   nodeId: string;
   title: string;
   canvasId?: string;
-  kind?: "audio";
+  kind?: "audio" | "motion";
 };
 
 export { isAllowedMediaUrl, isAllowedNodeHistoryPreviewUrl, resolveCanonicalMediaUrl };
@@ -48,10 +48,10 @@ export const mediaPreviewDefinition: DialogDefinition = {
     const title = value.title;
     if (typeof assetId !== "string" || assetId === "") return null;
     if (typeof nodeId !== "string" || nodeId === "") return null;
-    if (value.kind !== undefined && value.kind !== "audio") return null;
-    if (value.kind === "audio" && (typeof value.canvasId !== "string" || !value.canvasId)) return null;
+    if (value.kind !== undefined && value.kind !== "audio" && value.kind !== "motion") return null;
+    if ((value.kind === "audio" || value.kind === "motion") && (typeof value.canvasId !== "string" || !value.canvasId)) return null;
     return {
-      ...(value.kind === "audio" ? { kind: "audio" as const, canvasId: value.canvasId as string } : {}),
+      ...((value.kind === "audio" || value.kind === "motion") ? { kind: value.kind, canvasId: value.canvasId as string } : {}),
       assetId,
       nodeId,
       title: typeof title === "string" ? title : ""
@@ -70,4 +70,20 @@ export function resolveAudioPreview(canvas: import("@woohaa3/contracts").ServerC
   // 试听同样发生在当前画布内，读请求带画布提示。
   const url = resolveCanonicalMediaUrl(asset, canvas.id);
   return url ? { url, assetId: asset.id, title: asset.title || "音频试听", mediaKind: "audio" as const } : null;
+}
+
+/** Re-resolve the current output identity; stale dialogs cannot load a replaced action. */
+export function resolveMotionPreview(canvas: import("@woohaa3/contracts").ServerCanvas | null, nodeId: string, assetId?: string) {
+  const node = canvas?.document.nodes.find(node => node.id === nodeId);
+  if (!canvas || node?.type !== "motion") return null;
+  const outputId = canvas.nodeData[nodeId]?.outputAssetId;
+  if (!outputId || (assetId !== undefined && outputId !== assetId)) return null;
+  const asset = canvas.assets.find(asset => asset.id === outputId);
+  if (!asset || !hasReadyMediaAsset(asset) || asset.mediaKind !== "motion") return null;
+  const url = resolveCanonicalMediaUrl(asset, canvas.id);
+  const metadata = asset.metadata as Record<string, unknown> | undefined;
+  const facts = metadata?.motion;
+  if (!isSomaMotionMetadata(facts)) return null;
+  const fps = facts.fps;
+  return url ? { url, assetId: asset.id, title: asset.title || "动作预览", fps, frameCount: facts.frameCount } : null;
 }

@@ -1,3 +1,4 @@
+import { isSomaMotionMetadata } from "../../task/history/guards.js";
 /**
  * 节点生成历史：条目 → 安全列表项 / 完整详情投影
  * （自 `node-history.ts` 拆出，change: 2026-10-09-refactor-large-source-files-and-remove-compatibility，R06）。
@@ -86,6 +87,11 @@ function buildPreview(
         durationSeconds: payload.durationSeconds ?? null
       };
     }
+    case "motion": {
+      const payload = entry.payload as NodeHistoryMediaPayload;
+      if (!isSomaMotionMetadata(payload.motion)) return { kind: "failure", outcome: "failed", message: "动作缺少有效的采样率或骨架身份" };
+      return { kind: "motion", href: href("preview"), durationSeconds: payload.durationSeconds ?? payload.motion.frameCount / payload.motion.fps, fps: payload.motion.fps, motion: { ...payload.motion } };
+    }
     case "audio":
       return {
         kind: "audio",
@@ -140,6 +146,8 @@ export function toNodeHistoryDetail(entry: NodeGenerationHistoryEntry): NodeGene
         contentType: payload.contentType,
         size: payload.size,
         ...(payload.durationSeconds !== undefined ? { durationSeconds: payload.durationSeconds } : {}),
+        ...(payload.fps !== undefined ? { fps: payload.fps } : {}),
+        ...(payload.motion ? { motion: payload.motion } : {}),
         ...(payload.poster ? { poster: payload.poster } : {}),
         ...(payload.base ? { base: payload.base } : {}),
         ...(payload.imageEdit ? { imageEdit: payload.imageEdit } : {}),

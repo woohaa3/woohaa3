@@ -10,6 +10,7 @@
  * 本模块只依赖 `@woohaa3/contracts`；具体调用由 Backend 的受控来源调用桥落地下游。
  */
 import {
+  CANVAS_SOURCE_CAPABILITY_VERSION,
   canvasSourceCapabilityId,
   isCanvasSourceCapabilityId,
   isCanvasSourceProviderShape,
@@ -36,13 +37,13 @@ export type ResolveCanvasSourceResult =
   | { ok: false; code: "SOURCE_UNAVAILABLE" | "FORBIDDEN"; message: string };
 
 export type CanvasSourceRegistryHost = {
-  hasCapability(id: string): boolean;
+  hasCapability(id: string, version: number): boolean;
   /**
    * 宿主级 capability 拥有者查询（不返回实现），用于在调用时做版本/停用校验。
    * 未提供时回退到 `hasCapability` + `resolveCapability`（测试可用）。
    */
-  resolveCapabilityOwner?(id: string): { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
-  resolveCapability(id: string): unknown;
+  resolveCapabilityOwner?(id: string, version: number): { extensionId: string; configVersion: number; mode: "public" | "recovery" } | null;
+  resolveCapability(id: string, version: number): unknown;
   /** 宿主 owner 摘要（含 capability id 列表）；用于枚举活动来源，不暴露实现。 */
   snapshot?(): Array<{ extensionId: string; capabilities: string[] }>;
 };
@@ -63,13 +64,13 @@ export function createCanvasSourceRegistry(host: CanvasSourceRegistryHost): Canv
     if (!isCanvasSourceCapabilityId(capabilityId)) {
       return { ok: false, code: "SOURCE_UNAVAILABLE", message: "不是受控来源 capability" };
     }
-    if (!host.hasCapability(capabilityId)) {
+    if (!host.hasCapability(capabilityId, CANVAS_SOURCE_CAPABILITY_VERSION)) {
       return { ok: false, code: "SOURCE_UNAVAILABLE", message: "来源不可用" };
     }
-    const owner = host.resolveCapabilityOwner?.(capabilityId);
+    const owner = host.resolveCapabilityOwner?.(capabilityId, CANVAS_SOURCE_CAPABILITY_VERSION);
     if (!owner) return { ok: false, code: "SOURCE_UNAVAILABLE", message: "来源不可用" };
     if (owner.mode !== "public") return { ok: false, code: "SOURCE_UNAVAILABLE", message: "来源处于恢复模式" };
-    const value = host.resolveCapability(capabilityId);
+    const value = host.resolveCapability(capabilityId, CANVAS_SOURCE_CAPABILITY_VERSION);
     if (!isCanvasSourceProviderShape(value)) {
       return { ok: false, code: "SOURCE_UNAVAILABLE", message: "来源 capability 形态非法" };
     }
@@ -90,7 +91,7 @@ export function createCanvasSourceRegistry(host: CanvasSourceRegistryHost): Canv
       for (const entry of snapshot) {
         for (const capabilityId of entry.capabilities) {
           if (!isCanvasSourceCapabilityId(capabilityId)) continue;
-          const owner = host.resolveCapabilityOwner?.(capabilityId);
+          const owner = host.resolveCapabilityOwner?.(capabilityId, CANVAS_SOURCE_CAPABILITY_VERSION);
           if (!owner || owner.mode !== "public") continue;
           owners.push({ sourceId: canvasSourceIdFromCapabilityId(capabilityId), extensionId: owner.extensionId, configVersion: owner.configVersion, mode: owner.mode });
         }
@@ -104,7 +105,7 @@ export function createCanvasSourceRegistry(host: CanvasSourceRegistryHost): Canv
         return { ok: false, code: "FORBIDDEN", message: "调用上下文与来源版本绑定不一致" };
       }
       // 再次校验活动 owner（防止 resolve 与调用之间被停用/升级）。
-      const live = host.resolveCapabilityOwner?.(canvasSourceCapabilityId(handle.owner.sourceId));
+      const live = host.resolveCapabilityOwner?.(canvasSourceCapabilityId(handle.owner.sourceId), CANVAS_SOURCE_CAPABILITY_VERSION);
       if (!live || live.configVersion !== handle.owner.configVersion || live.mode !== "public") {
         return { ok: false, code: "FORBIDDEN", message: "来源已在准备期间停用或升级" };
       }

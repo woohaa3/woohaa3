@@ -219,7 +219,7 @@ export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRec
     if (
       (item.result.mediaKind === "image" ||
         item.result.mediaKind === "video" ||
-        item.result.mediaKind === "audio") &&
+        item.result.mediaKind === "audio" || item.result.mediaKind === "motion") &&
       item.result.storageKey &&
       item.result.checksum
     ) {
@@ -246,6 +246,7 @@ export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRec
           storageKey: item.result.storageKey,
           checksum: item.result.checksum,
           contentType: item.result.contentType ?? defaultContentType(mediaKind),
+          ...(item.result.motion ? {motion:item.result.motion,fps:item.result.motion.fps} : {}),
           size: item.result.size ?? 0
         }
       };
@@ -290,7 +291,8 @@ export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRec
   return base;
 }
 
-function defaultContentType(mediaKind: "image" | "video" | "audio"): string {
+function defaultContentType(mediaKind: "image" | "video" | "audio" | "motion"): string {
+  if (mediaKind === "motion") return "application/x-npz";
   if (mediaKind === "video") return "video/mp4";
   if (mediaKind === "audio") return "audio/mpeg";
   return "image/png";

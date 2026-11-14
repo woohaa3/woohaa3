@@ -9,6 +9,8 @@ import { createRoot } from "react-dom/client";
 import type { NodeHistoryPreview } from "@woohaa3/contracts";
 import { HistoryPreview } from "./preview.js";
 
+vi.mock("../../../shared/soma-motion/player.js", () => ({ SomaMotionPlayer: ({ url }: { url: string }) => <div data-motion-url={url}>动作播放器</div> }));
+
 function mount(preview: NodeHistoryPreview, props: Record<string, unknown> = {}) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -163,4 +165,14 @@ it("视频详情使用真实媒体地址，显式播放，失败可重试且卸�
   act(() => f.root.unmount());
   expect(pause.mock.calls.length).toBeGreaterThan(1);
   load.mockRestore(); pause.mockRestore();
+});
+
+it("动作缩略图保持轻量，展开后使用该历史版本的受控地址", async () => {
+  const preview = { kind: "motion" as const, href: "/api/canvas-node-history/c/n/e/media", durationSeconds: 2, fps: 30, motion: {fps:30, frameCount:60, skeletonId:"somaskel77" as const, restPoseId:"kimodo-standard-tpose" as const, formatVersion:"kimodo-soma-v1" as const} };
+  const { container, root } = mount(preview);
+  expect(container.textContent).toBe("动作");
+  expect(container.querySelector("canvas")).toBeNull();
+  await act(async () => { root.render(<HistoryPreview preview={preview} thumbnail={false} />); });
+  expect(container.querySelector("[data-motion-url]")?.getAttribute("data-motion-url")).toBe(preview.href);
+  await act(async () => root.unmount());
 });

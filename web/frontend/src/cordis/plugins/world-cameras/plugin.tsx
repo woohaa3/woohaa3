@@ -30,7 +30,7 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
         const camera = readWorldCamera(canvas, nodeId);
         if (!camera) return null;
-        return { label: "编辑", icon: "edit", iconOnly: true, tone: "primary", enabled: writable && !worldCameraEditorStore.getSnapshot() };
+        return { label: "机位精调", icon: "edit", tone: "primary", enabled: writable && !worldCameraEditorStore.getSnapshot() };
       },
       activate: ({ nodeId, writable }) => {
         if (!writable || !ctx.canvasSession.isWritable() || ctx.canvasRuntime.isFocused()) return;
@@ -153,6 +153,7 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         const fps = item.fps ?? key.fps;
         let renderFailure: string | undefined;
         try {
+          await runtime.prepareWorldAnimation?.(item.animationNodeId ?? null);
           const frames = async function* (): AsyncGenerator<Uint8Array> {
             const total = worldCaptureDynamicFrameCount(key);
             for (let index = 0; index < total; index += 1) {

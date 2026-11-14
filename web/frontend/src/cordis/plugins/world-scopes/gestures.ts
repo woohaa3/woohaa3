@@ -391,6 +391,7 @@ export type SceneAreaGestureResult =
 export type SceneAreaAdoptedHistory = {
   operationId: string;
   canvasId: string;
+  revision?: number;
   intent: SceneAreaPlanIntent;
   label: string;
   undo: () => Promise<{ ok: true } | { ok: false; reason: string }>;
@@ -508,7 +509,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
   const replayHistory = async (
     direction: "undo" | "redo",
     entry: { canvasId: string; operationId: string }
-  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+  ): Promise<{ ok: true; revision?: number } | { ok: false; reason: string }> => {
     let outcome: WorldAuthoringHistoryOutcome;
     try {
       outcome = await deps.history(direction, { canvasId: entry.canvasId, operationId: entry.operationId });
@@ -521,7 +522,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       || outcome.direction !== direction) {
       return { ok: false, reason: "场景历史回执不匹配" };
     }
-    return { ok: true };
+    return { ok: true, revision: outcome.revision };
   };
 
   const retainHistory = (
@@ -833,6 +834,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     const retained = retainHistory({
       operationId: outcome.operationId,
       canvasId: gesture.canvasId,
+      revision: outcome.revision,
       intent: gesture.intent,
       label: labelFor(gesture.intent)
     });
@@ -901,7 +903,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       setState({ phase: "failed", message: "场景删除回执不匹配" });
       return { ok: false, code: "version-conflict", message: "场景删除回执不匹配" };
     }
-    const retained = retainHistory({ operationId: outcome.operationId, canvasId, intent, label: labelFor(intent) });
+    const retained = retainHistory({ operationId: outcome.operationId, canvasId, intent, label: labelFor(intent), revision: outcome.revision });
     if (!retained.ok) {
       const warning = `场景已删除，但未加入撤销历史（${retained.reason ?? "页面历史忙"}），可继续操作后重试`;
       setState({ phase: "idle", message: warning });
@@ -1001,6 +1003,7 @@ export function installSceneAreaGestures(ctx: Context, canvasId: string | undefi
       const result = ctx.canvasEdit.recordExternal({
         id: `scene-area:${entry.operationId}`,
         label: entry.label,
+        revision: entry.revision,
         undo: entry.undo,
         redo: entry.redo
       });
