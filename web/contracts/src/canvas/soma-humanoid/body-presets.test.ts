@@ -5,6 +5,7 @@ import { SOMA_BODY_MANIFEST } from './body-manifest.js';
 import { SOMA_BODY_MANIFEST_V2 } from './body-manifest-v2.js';
 import { executeModelScriptV2 } from '../model-executor-v2.js';
 import { directorCharacterScript } from '../director-character.js';
+import { validateWorldIdentities } from '../domain/world-identities.js';
 import { somaSkeletonIdentity } from './validation.js';
 import { composeTransform, transformOf, quatRotate, type Transform, type Vec3 } from '../model-transform.js';
 import { v2SceneAabb } from '../scene-ir-v2/bounds.js';
@@ -31,6 +32,32 @@ it('keeps the immutable v1 catalog and exposes the Anny-only v2 matrix', () => {
   expect(executeModelScriptV2('scene.somaHumanoid({style:"humanoid",bodyPreset:"soma-body-v2/male"});').ok).toBe(true);
   expect(executeModelScriptV2('scene.somaHumanoid({style:"humanoid",bodyPreset:"soma-body-v1/male-8-slim"});').ok).toBe(true);
   expect(() => directorCharacterScript('capsule', 'soma-body-v2/male')).toThrow();
+});
+
+it('reads retired v2 baby IDs as newborn bodies without exposing aliases', () => {
+  for (const [legacy, canonical] of Object.entries({
+    'soma-body-v2/male-baby': 'soma-body-v2/male-newborn',
+    'soma-body-v2/female-baby': 'soma-body-v2/female-newborn'
+  })) {
+    expect(SOMA_BODY_PRESETS.some(preset => preset.id === legacy)).toBe(false);
+    expect(resolveSomaBodyPreset(legacy).id).toBe(canonical);
+    const compiled = executeModelScriptV2(`scene.somaHumanoid({style:"humanoid",bodyPreset:${JSON.stringify(legacy)}});`);
+    expect(compiled.ok).toBe(true);
+  }
+  expect(validateWorldIdentities(
+    [{ id: 'character', type: 'model3d' }],
+    {
+      character: {
+        sharedWorldInstance: {
+          kind: 'world-instance', version: 'shared-world-v1', instanceId: 'instance-1',
+          transform: { version: 'shared-world-v1', position: { u: 0, v: 0, h: 0 }, rotation: [0, 0, 0, 1], scale: 1 }
+        },
+        directorCharacterCreation: {
+          areaId: 'area-1', scopeVersion: 'scope-1', kind: 'humanoid', bodyPreset: 'soma-body-v2/female-baby'
+        }
+      }
+    }
+  )).toBeNull();
 });
 
 it('validates every packed body and its versioned skeleton identity', () => {

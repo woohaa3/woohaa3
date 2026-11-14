@@ -3,6 +3,7 @@ import { SOMA_BODY_PACKED as SOMA_BODY_PACKED_V1 } from './body-data.js';
 import { SOMA_BODY_MANIFEST as SOMA_BODY_MANIFEST_V1 } from './body-manifest.js';
 import { SOMA_BODY_PACKED as SOMA_BODY_PACKED_V2 } from './body-data-v2.js';
 import { SOMA_BODY_MANIFEST_V2 } from './body-manifest-v2.js';
+import { canonicalSomaBodyPresetId } from './body-catalog.js';
 import type { Vec3 } from '../model-transform.js';
 
 export const SOMA_BODY_CATALOG_VERSION = 'soma-body-v2';
@@ -35,7 +36,7 @@ export type SomaBodyData = {
 };
 
 export function resolveSomaBodyPreset(id: unknown): SomaBodyPreset {
-  const entry = SOMA_BODY_PRESETS.find(entry => entry.id === id);
+  const entry = SOMA_BODY_PRESETS.find(entry => entry.id === canonicalSomaBodyPresetId(id));
   if (!entry) throw new Error(`Unknown SOMA body preset: ${String(id)}`);
   return entry;
 }
