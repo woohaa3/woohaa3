@@ -15,6 +15,8 @@ import { projectReasoningCapability } from "./adapters/reasoning.js";
 import { ASSISTANT_CANDIDATE_CAPABILITIES } from "@woohaa3/agent-connections";
 
 export type SdkAgentRuntimeOptions = {
+  /** Runtime-resolved canvas cwd, independent of private harness configuration. */
+  workspace?: { cwd: string };
   service: Pick<ConnectionService, "get" | "list" | "readCredential" | "credentialConfigured" | "setRuntimeProbe" | "resolveNativeBinding" | "setNativeBinding" | "setStatus">;
   executor?: import("@woohaa3/contracts").ApplicationExtensionExecutorFacade;
   serviceConnections?: import("@woohaa3/contracts").ApplicationServiceConnectionFacade;
@@ -146,7 +148,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     // 通道只消费宿主准备好的角色回合；缺失即拒绝，不从 mode/用户文字推断业务职责。
     const prepared = input.prepared;
     if (!prepared) return fail("role-not-found", "本回合没有宿主准备的角色请求");
-    const toolNames = input.intent.action === "discuss" && !prepared.workspace ? [] : prepared.tools;
+    const toolNames = input.intent.action === "discuss" ? [] : prepared.tools;
     const preflight = preflightInput({ capabilities: capabilitiesFor(adapter), wantTools: toolNames.length > 0, imageCount: input.intent.references?.filter((ref) => ref.kind === "asset").length ?? 0, wantStructuredResult: false });
     if (!preflight.ok) return fail(preflight.code, preflight.message);
     const source = options.serviceConnections ? await sdkSourceFor(options.serviceConnections, input.owner, record.connectionId, options.service) : null;
@@ -200,11 +202,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
     try {
       relay = await createModelTransport({ apiType: engine.apiType, upstream: baseUrl, apiKey: credential.secret,
         policy: endpointPolicy, valid, signal: controller.signal });
-      if (input.intent.action === "discuss" && toolNames.length > 0) {
-        if (!options.tools || !options.mcpServerUrl) return fail("capability-unsupported", "桌面辅助执行需要受控工具入口");
-        const grant = await options.tools.issue({ delegation: options.ownerDelegation?.(input.owner) ?? { subject: input.owner, authLevel: "authenticated" }, workId: input.requestId, canvasId: input.canvasId, nodeId: "", tools: toolNames });
-        gateway = await createMcpTurnGateway({ input: { ...input, signal: controller.signal }, upstream: options.mcpServerUrl, grant: grant.token, valid });
-      } else if (input.intent.action !== "discuss") {
+      if (input.intent.action !== "discuss") {
         stage = "target";
         if (!options.tools || !options.mcpServerUrl || !input.intent.nodeId) return fail("capability-unsupported", "目标执行需要受控工具与权威目标");
         if (input.intent.mode === "world" || input.intent.mode === "canvas-group") {
@@ -255,7 +253,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
       // 模型自己声明过的工具调用：与网关实际收到的写入次数对比，能区分「模型没写」和「调用没送达」。
       const suggestedTools: string[] = [];
       trace("sdk-start", { engine: engine.engine, engineModel, effort: input.intent.reasoningEffort ?? null, tools: gateway?.tools?.length ?? 0 });
-      const result = await sdk.run({ model: engineModel, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
+      const result = await sdk.run({ workspace: options.workspace, model: engineModel, prompt, onToolCall: (call) => { suggestedTools.push(call.name); }, ...(input.intent.reasoningEffort ? { reasoningEffort: input.intent.reasoningEffort } : {}), signal: controller.signal, tools: gateway?.tools ?? [],
         ...(input.candidate
           ? { images: input.candidate.images, outputSchema: prepared.output.kind === "candidate" ? prepared.output.schema : input.candidate.outputSchema }
           : input.images?.length ? { images: input.images }
@@ -332,7 +330,7 @@ export function createSdkAgentConversationAdapter(adapter: SdkAgentAdapterDescri
   };
   return {
     id: adapter.adapterId,
-    capabilities: () => ({ discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" }),
+    capabilities: () => ({ workspace: sdkEngineForAdapter(adapter.adapterId)?.engine !== "gemini-agent-adk", discussion: true, textDelivery: ASSISTANT_CANDIDATE_CAPABILITIES, candidateGeneration: ASSISTANT_CANDIDATE_CAPABILITIES, targets: ["model3d", "world", "canvas-group"], tools: true, models: "remote" }),
     authorization: async ({ owner }) => {
       const records = (await options.service.list(owner)).filter((record) => record.adapterId === adapter.adapterId);
       for (const record of records) if (await options.service.credentialConfigured({ owner, connectionId: record.connectionId, purpose: "model-api-key" })) return "ready";

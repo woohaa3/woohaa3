@@ -1,9 +1,10 @@
 /** Real daemon -> workspace authorization -> media import -> local asset storage. */
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
-import { preparedTurnHash, type MediaMetadata, type PreparedAgentRoleTurn } from "@woohaa3/contracts";
+import { preparedTurnHash, type PreparedAgentRoleTurn } from "@woohaa3/contracts";
 import { createMediaService } from "@woohaa3/media-service";
 import { startExecutorDaemon } from "../../packages/execution-runtime/src/daemon.js";
 import { CanvasAgentWorkspaceService } from "../services/application-service/src/workspaces/service.js";
@@ -20,7 +21,7 @@ it("an explicitly imported media asset survives cleanup of its real workspace so
   const storage = createStorageRegistry({ settings: { primary: () => "local" } });
   storage.register(createLocalBackend({ root: path.join(root, "assets") }));
   const media = createMediaService({ storage: createMediaStorageFromStorage(storage, undefined), env: {} });
-  const service = new CanvasAgentWorkspaceService({ runtime, store, authorize: async () => true, importArtifact: input => media.port().importBytes(input) });
+  const service = new CanvasAgentWorkspaceService({ runtime, store, authorize: async () => true });
   try {
     const identity = { owner: "owner", canvasId: "canvas", requestId: "request" }, now = new Date().toISOString();
     store.createConversation({ conversationId: "conversation", owner: identity.owner, canvasId: identity.canvasId, adapterId: "test", title: "test", now });
@@ -29,20 +30,11 @@ it("an explicitly imported media asset survives cleanup of its real workspace so
     const prepared = await service.prepare(identity, { ...body, preparedHash: preparedTurnHash(body) }, true);
     store.updateTurn("turn", { preparedJson: JSON.stringify(prepared) }, now);
     store.recordTurnAuthority({ turnId: "turn", requestId: identity.requestId, conversationId: "conversation", owner: identity.owner, canvasId: identity.canvasId, action: "discuss", adapterId: "test", executor: null, connectionId: null, configRevision: null, credentialEpoch: null, targetJson: "{}", preparedHash: prepared.preparedHash, hostMethods: [], toolScope: prepared.tools, createdAt: now, expiresAt: null, revokedAt: null });
-    const grant = { token: "trusted-grant", subject: identity.owner, workId: identity.requestId, canvasIds: [identity.canvasId], nodeIds: [], tools: prepared.tools };
-    const tool = (name: string, args: Record<string, unknown>) => service.tool({ tool: name, arguments: args, grant, principalId: identity.owner });
     const runPath = `runs/${prepared.workspace!.runKey}/pixel.png`;
     const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9S8AAAAASUVORK5CYII=", "base64");
-    // Actual Node writes a binary file into its assigned default cwd.
-    const execution = await tool("workspace_execute", { operationId: "image", command: "node", args: ["-e", `require('fs').writeFileSync('pixel.png',Buffer.from('${bytes.toString("base64")}', 'base64'))`] }) as { executionId: string };
-    let terminal = false;
-    for (let i = 0; i < 100; i++) {
-      const result = await tool("workspace_query", { executionId: execution.executionId }) as { execution: { status: string } };
-      if (result.execution.status === "exited") { terminal = true; break; }
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
-    expect(terminal).toBe(true);
-    const asset = await tool("workspace_import", { path: runPath, contentType: "image/png" }) as MediaMetadata;
+    const cwd = await service.location(identity);
+    execFileSync(process.execPath, ["-e", `require('fs').writeFileSync(${JSON.stringify(runPath)},Buffer.from('${bytes.toString("base64")}', 'base64'))`], { cwd });
+    const asset = await media.port().importBytes({ canvasId: identity.canvasId, bytesBase64: fs.readFileSync(path.join(cwd, runPath)).toString("base64"), contentType: "image/png" });
     expect(asset.storageKey).toMatch(/^generation-outputs\/[a-f0-9]{64}\.png$/); expect(asset.storageKey).not.toContain(prepared.workspace!.runKey);
     store.updateTurn("turn", { status: "succeeded" }, now); await service.reconcile();
     expect((await service.clean(identity)).removed).toContain(prepared.workspace!.runKey);

@@ -1,42 +1,37 @@
 # 助手工作目录
 
-Tauri 桌面版为每个画布提供本机工作目录。同画布的助手共用 `shared/`，每个回合另有 `runs/<回合键>/`。画布、owner 和本机 profile 决定目录身份；改名不改变目录，复制画布取得新目录，其他设备有各自的本机目录。原生引擎会话与凭据继续独立保存。
+Tauri 桌面版为每个画布提供本机工作目录。目录身份由本机 profile、owner 和稳定画布 ID 决定；改名、续聊和更换助手保留目录，复制画布与其他设备各用独立目录。原生会话、引擎配置与凭据继续保存在工作目录之外。
 
-设置 → 助手显示当前根位置，默认在应用数据目录的 `agent-workspaces`。可以选择新位置、打开根目录和当前画布目录、清理已结束回合。选择新位置会迁移全部受管目录；已有助手继续工作，迁移等它们结束。切换前可以取消；迁移完成后的旧副本清理失败不会让根位置退回。
+设置 → 助手显示当前根位置，默认为应用数据目录下的 `agent-workspaces`。可以选择新位置、打开根目录和当前画布目录、清理已结束回合。更换位置会等待已有助手结束，再迁移全部受管目录；切换前可以取消。
 
-## 角色与通道
+## Harness 工作上下文
 
-有工具调用能力、当前画布可写时，宿主给讨论和创作回合合入 `workspace_list/read/write/mkdir/execute/query/stop/import`。角色无需另行声明 Node 或内建终端权限，也不能自行构造 workspace handle、绝对根位置、owner 或 grant。本机、SDK/API、OAuth、桌面主动调用的远端模型通过同一工具面操作本机文件与进程。连接测试、无画布上下文、只读画布、不支持工具的模型及普通浏览器/Web host 不取得此能力。
+宿主给支持本机工作目录的 harness 传入画布目录作为 cwd，保留它内置的文件读写和命令执行工具，不注册 `workspace_*` MCP 工具。角色的画布工具集合保持原样，讨论也能使用 harness 原生工具辅助计算。目录结构为：
 
-例如，一个只回复文本的角色可以保留原有 `output: { kind: "reply" }` 与空内容工具集合，在提示词中要求：“需要计算时，使用宿主本轮实际提供的 workspace 工具；把临时脚本写入本回合目录，读取真实执行输出后再回答。工具缺失时说明缺失，不假装已运行。”辅助工具不授予额外画布/世界写权限，工作文件本身不会变成画布节点。
-
-## 一次辅助计算
-
-以下 `<runKey>` 取自宿主冻结上下文，工具参数中不携带 handle、owner 或绝对路径。
-
-```json
-{"tool":"workspace_write","arguments":{"path":"runs/<runKey>/calculate.cjs","content":"console.log(Array.from({length:100},(_,i)=>i+1).reduce((a,b)=>a+b,0))","expectedHash":null}}
-{"tool":"workspace_execute","arguments":{"operationId":"calculate-v1","command":"node","args":["calculate.cjs"]}}
-{"tool":"workspace_query","arguments":{"executionId":"<execute 返回的 executionId>","after":0}}
+```text
+<根位置>/<画布目录键>/
+  shared/                  # 同画布助手共享资料
+  runs/<回合键>/            # 提示助手将本轮临时文件写到这里
 ```
 
-`execute` 默认 cwd 是本回合目录；显式 cwd 和文件路径相对画布目录，例如 `shared/result.json`。读取接口返回 hash，后续写入可带 `expectedHash` 防止覆盖别人修改的共享文件；`null` 要求文件尚不存在。文本读取上限 4 MiB，较大文件用脚本分片处理。正式媒体使用 `workspace_import` 携带相对路径与真实 `contentType`，导入上限 64 MiB；返回稳定媒体身份后，沿角色原有画布工具提交。清理源文件不影响已导入资产，不会自动创建节点或上传整个目录。
+所有同画布 harness 的 cwd 都是上述画布根目录；`runs/` 是临时文件约定，不是另一套默认 cwd 或文件工具。助手可以用自己的 Read/Write/Edit/Bash、shell 或对应工具读取 `shared/input.json`，在本轮 `runs/` 下编写脚本并执行。运行输出、退出码、工具调用身份及停止行为由 harness 自己管理，宿主不再提供另一套命令工具循环。Python 等依赖按机器实际安装情况使用。
 
-相同回合中，同一 `operationId` 和同输入复用执行，响应丢失后查询原身份；改参数要用新身份。查询按输出 cursor 返回 stdout/stderr、真实退出码和状态；收到一批后把最后 cursor 作为下次 `after`。非零退出与缺失程序如实失败；Node 使用随包版本，Python 等需已安装，不自动安装或改用其他语言。`shell: true` 明确选择平台 shell 语义，普通命令优先分开传 command/args。
+本机 Codex App Server、OpenCode、CodeBuddy，SDK 的 Codex、Claude、DSH，以及 OAuth Codex 支持该接线。纯远端模型循环和当前 Gemini ADK 没有本机文件/终端工具，不获得本机工作目录；不以一套宿主文件 MCP 工具补偿。普通 Web host、浏览器分发、连接探测、无画布上下文和只读画布不启用此能力。
+
+## 画布权限与文件产物
+
+文件和代码只用于辅助目标。正式画布编辑仍经过本轮授权的 Woohaa 领域工具，文件写入和 shell 成功不计为画布交付。媒体产物通过既有受权 Media 导入入口获得稳定资产身份；临时路径本身不是画布资产，删除临时文件不会删除已导入资产。
+
+目录与 cwd 不构成操作系统沙箱；代码以当前用户账号运行。Codex 使用原生 `workspace-write` 模式，Claude、DSH、OpenCode、CodeBuddy 使用各自的工具权限。运行环境和私有配置保持隔离，不把应用 bridge token 注入工具环境，不加载额外用户 MCP 配置。
 
 ## 停止、迁移与恢复
 
-取消回合会撤销后续调用并清理其辅助进程树；关闭设置、切画布、宿主 detach 不结束 daemon 中的任务。daemon 重启不自动重跑命令，也不凭历史 PID 杀进程。无法证明终态的执行记为 `unknown`，保留文件并阻止迁移与清理；先核对真实进程和任务状态，不能把未知改成成功以继续。
+取消回合通过既有 harness 取消路径处理。目录租约另持有 harness 的真实占用，直到执行返回才释放，因此聊天先标记取消也不会提前搬走 cwd。daemon 异常重启后无法证明旧 harness 已退出的占用持久保留为 `unknown`，阻止清理与迁移，不自动重跑代码。
 
-迁移使用 staging copy 和清单/hash 校验，数据落盘后提交根位置 revision/generation。提交前失败保持旧根；提交后旧副本被占用或外部改写则保留副本并显示清理状态。目标有冲突目录时拒绝，目标无关文件保留。外部程序仍可能修改文件，本机进程没有全局磁盘锁。清理只删除当前画布已终态且无活跃/未知执行的受管 runs；shared、未知/运行回合、非受管文件保留，删除画布不自动删除磁盘文件。
+迁移使用 staging copy 和清单/hash 校验，落盘后原子提交 root revision/generation。切换前失败保留旧根，切换后旧副本清理失败保留新根并报告清理状态。下一回合重新解析 cwd。外部程序不受应用磁盘锁控制。
 
-执行代码使用当前用户 OS 账号，可访问该账号有权访问的路径与网络。文件工具拒绝相对路径越界、链接/junction 和伪造身份；这些检查以及 cwd 不构成任意脚本的 OS 沙箱。子进程使用必要环境白名单，不注入应用 bridge token、Provider key 或原生引擎配置。
+清理只删除指定画布已终态且没有原生 harness 活跃/未知占用的受管 runs；shared、非受管文件与其他画布保留。删除画布不自动删除磁盘文件。根位置和工作文件不进入 Y.Doc、远端同步或 `.woohaa` 导出；导入保留当前安装的根位置。
 
-根位置、工作文件与执行器状态不进入 Y.Doc、远端同步或 `.woohaa`；导出界面明确排除助手工作文件，导入保留当前安装的根位置。跨机器迁移工作文件尚无专用打包入口。
+## 验证入口
 
-## 平台验证
-
-Linux 的真实 Node、进程组、跨文件系统迁移、故障恢复及资产导入已由集成测试验证，Rust 桌面壳已通过编译检查。Windows Job Object runner、macOS/Windows 实际安装包的原生 picker/open、随包 Node 和桌面/Pad 视觉仍需在对应平台验收；编译通过不代表这些体验已经验证。
-
-
-开发验收可显式运行 `web/tooling/canvas-workspace-sdk.live.test.ts`。它默认跳过；设置 `WOOHAA_WORKSPACE_LIVE_SDK=1`、`WOOHAA_WORKSPACE_LIVE_MODEL` 与已配置的 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` 后，会使用实际 SDK/CLI 和供应商，通过 MCP 写脚本、执行 Node、查询并核对磁盘结果。请勿把密钥写入脚本、命令行或验收报告。该用例只证明实际运行成功的 SDK 通道，不替代本机、OAuth、远端和真实桌面平台验收。
+运行时测试 `packages/execution-runtime/src/harness-workspace.test.ts` 覆盖真实 Node、跨助手共享、跨画布隔离、身份拒绝及迁移占用；SDK 的 `native-workspace-runtime.test.ts` 使用真实 Claude/DSH harness 与本地可控模型响应：Claude 验证原生 shell 读文件、执行 Node 并写结果，DSH 验证原生读写；若宿主无法运行 DSH 沙箱后端，保留其真实错误，不记为 shell 闭环通过。真实 Provider 验收可显式运行 `web/tooling/canvas-workspace-sdk.live.test.ts`（`WOOHAA_WORKSPACE_LIVE_SDK=1`）。macOS/Windows 实际安装包及各真实 Provider 仍需分别验收。

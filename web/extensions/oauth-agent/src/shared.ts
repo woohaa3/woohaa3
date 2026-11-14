@@ -13,7 +13,7 @@ export const OAUTH_AGENT_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: OAUTH_AGENT_PLUGIN_ID,
   name: "OAuth Agent 来源",
   description: "个人 OAuth 授权与连接；3D 生成面板由宿主内置（design D10）。",
-  version: "1.0.1",
+  version: "1.0.2",
   managementScope: "site",
   defaultEnabled: true,
   host: "backend",

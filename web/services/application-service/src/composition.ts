@@ -96,7 +96,7 @@ export type ApplicationServiceOptions = {
    */
   agentRuntime?: HostRuntimeOptions;
   /** Trusted Tauri bootstrap only. Never derived from frontend or environment flags. */
-  canvasAgentWorkspace?: { importArtifact?: (input: { canvasId: string; bytesBase64: string; contentType: string }) => Promise<MediaMetadata>; authorize: (identity: { owner: string; canvasId: string }) => Promise<boolean> };
+  canvasAgentWorkspace?: { authorize: (identity: { owner: string; canvasId: string }) => Promise<boolean> };
   roleContextFor?: (input: {
     owner: string;
     canvasId: string;
@@ -485,7 +485,7 @@ export function createApplicationService(options: ApplicationServiceOptions = {}
       : handle.adapter
   });
   const canvasAgentWorkspaces = options.canvasAgentWorkspace && options.agentRuntime
-    ? new CanvasAgentWorkspaceService({ runtime: options.agentRuntime, store: conversationStore, authorize: options.canvasAgentWorkspace.authorize, ...(options.canvasAgentWorkspace.importArtifact ? { importArtifact: options.canvasAgentWorkspace.importArtifact } : {}) }) : null;
+    ? new CanvasAgentWorkspaceService({ runtime: options.agentRuntime, store: conversationStore, authorize: options.canvasAgentWorkspace.authorize }) : null;
   const agentConversations = createAgentConversationService({
     ...(canvasAgentWorkspaces ? { canvasAgentWorkspaces } : {}),
     store: conversationStore,

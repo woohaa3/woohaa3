@@ -363,7 +363,7 @@ export function createRemoteAssistant(options: RemoteAssistantOptions): RemoteAs
    */
   const toolChannelFor = async (input: AgentAdapterRunInput): Promise<RemoteToolChannel | null> => {
     if (options.toolChannel === undefined) return null;
-    if (input.intent.action === "discuss" && !input.prepared?.workspace) return null;
+    if (input.intent.action === "discuss") return null;
     const prepared = input.prepared;
     if (!prepared || prepared.tools.length === 0) return null;
     return options.toolChannel(input);

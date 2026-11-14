@@ -283,13 +283,14 @@ export function createLocalAgentExecutor(options: LocalAgentExecutorOptions = {}
           emit: (event: AgentConversationAdapterEvent) => {
             if (event.type === "tool-completed" && toolNames.includes(event.tool)) {
               if (event.ok === false) toolFailure = event.summary ?? "工具执行失败";
-              if (event.ok === true && !event.tool.startsWith("workspace_") && !AGENT_READ_ONLY_TOOLS.includes(event.tool)) successfulWrite = true;
+              if (event.ok === true && !AGENT_READ_ONLY_TOOLS.includes(event.tool)) successfulWrite = true;
             }
             context.emit(event.type, event);
           }
         };
         const instance = createLocalAgentConversationAdapter(adapter, {
           service: connectionService(payload),
+          workspace: context.workspace,
           processManager: manager,
           transports: { [adapter.adapterId]: transport },
           argsFor: defaultArgs,

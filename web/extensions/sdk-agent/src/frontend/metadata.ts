@@ -11,7 +11,7 @@ import { SDK_AGENT_PLUGIN_ID } from "../shared.js";
 
 export const SDK_AGENT_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: SDK_AGENT_PLUGIN_ID,
-  version: "0.1.1",
+  version: "0.1.2",
   label: "SDK Agent 来源",
   description: "配置 Responses / Messages / Chat Completions / Gemini 协议的服务地址和 API Key。",
   icon: "agent",

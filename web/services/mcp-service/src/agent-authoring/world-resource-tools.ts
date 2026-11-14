@@ -121,7 +121,6 @@ export function registerWorldResourceTools(server: McpServer, deps: AgentAuthori
   const update = (target: typeof areaTarget | typeof modelTarget | typeof cameraTarget, patch: z.ZodType) => z.strictObject({ ...mutation, operation: z.literal('update'), target, expectedVersion: id, patch });
   const remove = (target: typeof areaTarget | typeof modelTarget | typeof cameraTarget) => z.strictObject({ ...mutation, operation: z.literal('delete'), target, expectedVersion: id });
   // A director-area grant has no canvas lifecycle authority: do not advertise root create/delete.
-  register(WORLD_RESOURCE_TOOLS.area, 'scene_area', update(areaTarget, z.strictObject({ title: title.trim().min(1) })), '修改导演区名称。当前授权不包含导演区创建、删除或空间调整。');
   register(WORLD_RESOURCE_TOOLS.model, 'world_model', objectInput(z.discriminatedUnion('operation', [
     z.strictObject({ ...mutation, operation: z.literal('create'), areaId: id, title: title.optional(), transform, initialScript: z.string().optional() }),
     update(modelTarget, z.strictObject({ title: title.optional(), transform: z.strictObject({ position: point.optional(), rotation: rotation.optional(), scale: z.number().finite().positive().optional() }).optional() })), remove(modelTarget)

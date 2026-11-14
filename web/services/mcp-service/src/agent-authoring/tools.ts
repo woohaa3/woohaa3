@@ -1,4 +1,3 @@
-import { registerWorkspaceTools } from "./workspace-tools.js";
 /**
  * Agent Canvas authoring MCP 工具面公共入口
  * （change: add-agent-canvas-authoring-mcp，任务 5.1–5.5 / design D2–D10；
@@ -28,7 +27,6 @@ export { runToolPlan } from "./execution.js";
 export { AGENT_CANVAS_GUIDE } from "./graph-tools.js";
 
 export function registerAgentAuthoringTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
-  registerWorkspaceTools(server, deps);
   registerAgentScriptTools(server, deps);
   registerAgentGraphTools(server, deps);
   // Canvas Script 可用时不注册 JSON plan 入口（画布结构写入统一走脚本）；

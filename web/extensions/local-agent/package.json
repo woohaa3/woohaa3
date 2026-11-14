@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-local-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "本机 Agent 生成来源扩展：Codex App Server（stdio JSON-RPC）、OpenCode Server（HTTP+SSE）、CodeBuddy Server（HTTP+ACP）；安装后默认启用。",

@@ -469,7 +469,7 @@ export function createAgentConversationService(options: AgentConversationService
 
     if (prepared && !delivery && !candidate && !adoption && options.canvasAgentWorkspaces) {
       try {
-        prepared = await options.canvasAgentWorkspaces.prepare({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId }, prepared, bound.handle.capabilities.tools);
+        prepared = await options.canvasAgentWorkspaces.prepare({ owner: turn.owner, canvasId: turn.canvasId, requestId: turn.requestId }, prepared, bound.handle.capabilities.workspace === true);
         store.updateTurn(turn.turnId, { preparedJson: safeJson(prepared) }, now());
       } catch (error) {
         finishTurn(turn, { status: "failed", error: { code: (error as { code?: string }).code ?? "workspace-unavailable", message: error instanceof Error ? error.message : String(error) } });

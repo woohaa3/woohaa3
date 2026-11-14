@@ -324,6 +324,8 @@ export type AgentAdapterCapabilities = {
   discussion: boolean;
   targets: readonly AgentTargetMode[];
   tools: boolean;
+  /** Local harness accepts a host-resolved cwd and provides its own file/shell tools. */
+  workspace?: boolean;
   models: "remote" | "none";
   /**
    * 通道真实支持的内建执行能力（change: 2026-11-07-add-pluggable-agent-roles）。
@@ -705,6 +707,7 @@ export function isAgentAdapterCapabilities(value: unknown): value is AgentAdapte
   if (!isJsonObject(value)) return false;
   if (!isBoolean(value.discussion)) return false;
   if (!isBoolean(value.tools)) return false;
+  if (value.workspace !== undefined && !isBoolean(value.workspace)) return false;
   if (value.models !== "remote" && value.models !== "none") return false;
   if (!Array.isArray(value.targets)) return false;
   if (value.textDelivery !== undefined && (!isJsonObject(value.textDelivery) || !isBoolean(value.textDelivery.imageInput) || !Number.isSafeInteger(value.textDelivery.maxImages) || (value.textDelivery.maxImages as number) < 0)) return false;

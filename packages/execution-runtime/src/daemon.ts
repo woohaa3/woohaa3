@@ -8,6 +8,7 @@
  * 只监听本机 Unix socket / Windows 命名管道，请求必须带 workspace token；不暴露 HTTP。
  */
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import net from "node:net";
 import path from "node:path";
 import { executorEndpoint } from "./endpoints.js";
@@ -191,6 +192,12 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
           stateDir: options.stateDir,
           workspaceKey: options.workspaceKey,
           processes,
+          workspaceFor: input => {
+            const handle = input.prepared?.workspace;
+            if (!handle) return undefined;
+            if (!workspaces || createHash("sha256").update(JSON.stringify([handle.owner, input.requestId])).digest("hex") !== input.turnId || handle.requestId !== input.requestId || handle.canvasId !== input.prepared?.target.canvasId) throw new Error("工作目录与执行回合身份不一致");
+            return workspaces.attachHarness(handle);
+          },
           hostFor: (input) => {
             if (!input.host) return null;
             // 宿主桥断线/超时是通道问题，不能伪装成目标或领域拒绝。

@@ -77,7 +77,7 @@ export function createCodeBuddyTransport(options: CodeBuddyTransportOptions = {}
         } else if (message.method && message.id !== undefined) {
           const call = message.params?.toolCall;
           const name = codeBuddyTool(call, input.allowedTools);
-          const allowed = message.method === "session/request_permission" && message.params?.sessionId === sessionId && (input.allowedTools.includes(name) || (name === "ToolSearch" && input.allowedTools.length > 0));
+          const allowed = message.method === "session/request_permission" && message.params?.sessionId === sessionId && (input.allowedTools.includes(name) || (name === "ToolSearch" && (input.workspace || input.allowedTools.length > 0)) || (input.workspace === true && ["Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "NotebookEdit"].includes(name)));
           const option = allowed ? message.params.options?.find((item: { kind: string }) => item.kind === "allow_once") : undefined;
           const response = message.method === "session/request_permission"
             ? { result: { outcome: option ? { outcome: "selected", optionId: option.optionId } : { outcome: "cancelled" } } }

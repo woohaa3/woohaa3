@@ -329,3 +329,20 @@ it("sends OpenCode v2 files as data URIs and denies all tools", async () => {
   expect(mock.requests.find(request => request.path === "/api/session")!.body.permissions).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
   expect(mock.requests.some(request => request.method === "PUT")).toBe(false);
 });
+
+it.each([false, true])("CodeBuddy native filesystem permission follows workspace=%s without a MCP grant", async workspace => {
+  const mock = codebuddyMock([{ title: "Read" }, { title: "Bash" }, { title: "mcp__foreign__Write" }]);
+  expect(await createCodeBuddyTransport(mock).run(input({ workspace, workDir: "/canvas/root", allowedTools: [], toolToken: null, mcpEndpoint: null }))).toMatchObject({ ok: true });
+  expect(mock.requests.find(r => r.method === "session/new")!.params.cwd).toBe("/canvas/root");
+  const replies = mock.requests.filter((r: any) => r.id >= 1000) as any[];
+  expect(replies.map(r => r.result.outcome.outcome)).toEqual(workspace ? ["selected", "selected", "cancelled"] : ["cancelled", "cancelled", "cancelled"]);
+});
+it("OpenCode enables native workspace tools while retaining scoped MCP permissions", async () => {
+  const mock = openCodeMock();
+  expect(await createOpenCodeTransport(mock).run(input({ workspace: true, workDir: "/canvas/root" }))).toMatchObject({ ok: true });
+  const session = mock.requests.find(r => r.path === "/api/session")!.body;
+  expect(session.location.directory).toBe("/canvas/root");
+  expect(session.permissions).toEqual(expect.arrayContaining([
+    { action: "*", resource: "*", effect: "deny" }, { action: "bash", resource: "*", effect: "allow" }, { action: "read", resource: "*", effect: "allow" }, { action: "edit", resource: "*", effect: "allow" }, { action: "woohaa_submit_model_script", resource: "*", effect: "allow" }
+  ]));
+});

@@ -19,8 +19,10 @@ export type LocalAgentTransportInput = {
   outputSchema?: Record<string, unknown>;
   /** 专用进程的配置目录（隔离）。 */
   configDir: string;
-  /** 专用工作目录（只读语义由协议侧保证）。 */
+  /** 本轮 cwd；桌面画布目录或隔离的默认目录。 */
   workDir: string;
+  /** Trusted desktop canvas workspace: use harness-native file/shell tools. */
+  workspace?: boolean;
   /** 回环基地址（HTTP 协议；stdio 为 null）。 */
   loopbackUrl: string | null;
   httpHeaders?: Record<string, string>;

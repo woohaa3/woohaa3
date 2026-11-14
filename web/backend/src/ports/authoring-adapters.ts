@@ -21,7 +21,7 @@ import type {
   ApplicationToolGrant,
   AssistantWorldScopeSelection
 } from "@woohaa3/contracts";
-import { assistantWorldToolsForScope, CANVAS_GROUP_TOOLS, CANVAS_WORKSPACE_TOOLS } from "@woohaa3/contracts";
+import { assistantWorldToolsForScope, CANVAS_GROUP_TOOLS } from "@woohaa3/contracts";
 import { canvasGroupEpoch } from "@woohaa3/canvas-service";
 import type { CanvasService } from "@woohaa3/canvas-service";
 import { randomUUID } from "node:crypto";
@@ -29,7 +29,6 @@ import type { MediaService } from "@woohaa3/media-service";
 
 export type AuthoringAdapterDeps = {
   canvas: CanvasService;
-  workspaceAuthorized?: (identity: { owner: string; canvasId: string; requestId: string }, tools: readonly string[]) => Promise<boolean>;
   /** Media 受限签名（生成稳定媒体引用）；缺失时参考解析拒绝。 */
   mediaSign?: (storageKey: string, expiresSeconds: number) => Promise<{ ok: true; url: string } | { ok: false; message: string }>;
   /** 个人生成模型目录（按 owner token 查询）；由部署/插件注入。 */
@@ -197,10 +196,6 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
   const tools: ApplicationToolDelegationFacade = {
     async issue(request): Promise<ApplicationToolGrant> {
       delegateOrThrow(request.delegation, log);
-      const workspaceTools = (request.tools ?? []).filter(tool => CANVAS_WORKSPACE_TOOLS.includes(tool as never));
-      if (workspaceTools.length && !(await deps.workspaceAuthorized?.({ owner: request.delegation.subject, canvasId: request.canvasId, requestId: request.workId }, workspaceTools))) {
-        throw Object.assign(new Error("本回合未取得桌面工作目录授权"), { code: "workspace-forbidden" });
-      }
       if (request.mode !== undefined && !["model3d", "text", "world", "canvas-group"].includes(request.mode)) throw new Error("unsupported-target-mode");
       if (request.mode === "canvas-group") {
         if (!request.nodeId) throw Object.assign(new Error("2D 组目标缺少根组节点"), { code: "malformed-request" });
@@ -237,7 +232,7 @@ export function createInProcessAuthoringServices(deps: AuthoringAdapterDeps): Ap
         }
         const assistantWorld = deps.canvas.assistantWorld;
         if (!assistantWorld) throw Object.assign(new Error("宿主未装配世界助手权威"), { code: "capability-unsupported" });
-        const allowedTools: readonly string[] = [...workspaceTools, ...(scope.kind === "scene-area" ? ["get_model_api"] : []), ...assistantWorldToolsForScope(scope)];
+        const allowedTools: readonly string[] = [...(scope.kind === "scene-area" ? ["get_model_api"] : []), ...assistantWorldToolsForScope(scope)];
         if (request.tools?.some(tool => !allowedTools.includes(tool))) {
           throw Object.assign(new Error("工具不属于本轮世界范围"), { code: "capability-unsupported" });
         }

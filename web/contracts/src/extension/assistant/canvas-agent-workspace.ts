@@ -1,10 +1,4 @@
 /** Desktop-owned local workspace contracts. Absolute locations are never canvas data. */
-export const CANVAS_WORKSPACE_TOOLS = [
-  "workspace_list", "workspace_read", "workspace_write", "workspace_mkdir",
-  "workspace_execute", "workspace_query", "workspace_stop", "workspace_import"
-] as const;
-export type CanvasWorkspaceTool = typeof CANVAS_WORKSPACE_TOOLS[number];
-
 export type CanvasWorkspaceHandle = {
   schemaVersion: 1;
   owner: string;
@@ -79,12 +73,4 @@ export type CanvasWorkspacePort = {
   execute(handle: CanvasWorkspaceHandle, input: WorkspaceExecuteInput): Promise<WorkspaceExecution>;
   query(handle: CanvasWorkspaceHandle, input: { executionId: string; after?: number }): Promise<{ execution: WorkspaceExecution; events: WorkspaceOutput[] }>;
   stop(handle: CanvasWorkspaceHandle, executionId: string): Promise<WorkspaceExecution>;
-};
-
-/** Trusted MCP transport supplies grant and principal; model supplies arguments only. */
-export type CanvasWorkspaceToolCall = {
-  tool: string;
-  arguments: Record<string, unknown>;
-  grant: import("./authoring.js").ApplicationToolGrant;
-  principalId: string;
 };

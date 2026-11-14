@@ -136,7 +136,6 @@ function createServicesFactory(
         }
       },
       toolGrantRegistry: toolGrants,
-      workspaceAuthorized: async (identity, tools) => (await ctx.get("application")?.service.canvasAgentWorkspaces()?.allows(identity, tools)) ?? false,
       expansionPolicy: (owner, requestId, canvasId, scope) => {
         const turn = ctx.get("application")?.service.agentConversations().queryTurn({ owner, requestId });
         if (!turn?.ok || turn.turn.target.canvasId !== canvasId || turn.turn.target.mode !== "world" || JSON.stringify(turn.turn.target.worldScope) !== JSON.stringify(scope)) return undefined;
@@ -400,7 +399,6 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       roleContextFor,
       ...(agentRuntime ? { agentRuntime } : {}),
       ...(config.desktopCanvasAgentWorkspace?.version === 1 && agentRuntime ? { canvasAgentWorkspace: {
-        importArtifact: input => ctx.media.port().importBytes(input),
         authorize: async ({ owner, canvasId }: { owner: string; canvasId: string }) => (await createExtensionCanvasAccessFacade(ctx.canvas).authorize({ subject: owner, canvasId, permission: "write" })).ok
       } } : {}),
       // The Agent Runtime Supervisor outlives this watched backend.  Preserve

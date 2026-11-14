@@ -199,3 +199,30 @@ describe("Agent SDK 执行前限制（任务 7.3）", () => {
     expect(seen).toEqual(["create_world_model"]);
   });
 });
+
+it.each(["claude-agent-sdk", "dsh-agent-sdk"] as const)("%s uses native tools in a workspace discussion without counting canvas calls", async kind => {
+  const name = kind === "claude-agent-sdk" ? "Bash" : "bash";
+  const onToolCall = vi.fn(), onStage = vi.fn();
+  const { transport: t } = transport({ run: async input => {
+    expect(input.mcp).toBeNull();
+    expect(input.restrictions).toMatchObject({ workspaceDir: "/canvas/root", workspace: true, sandboxMode: "workspace-write", allowedTools: [] });
+    expect(input.restrictions.disallowedTools).not.toContain(name);
+    const call = { id: "native", name, argumentsJson: "{}" };
+    input.onEvent({ type: "tool-call", call });
+    expect(input.signal.aborted).toBe(false);
+    return { ok: true, assistantText: "42", toolCalls: [call], finishReason: "stop" };
+  } });
+  const adapter = createAgentSdkAdapter({ kind, apiKey: "test", configDir: "/private/config", workspaceDir: "/private/work", transport: t, probeRuntime: okRuntime });
+  expect(await adapter.run({ workspace: { cwd: "/canvas/root" }, model: "m", prompt: "calculate", tools: [], signal: new AbortController().signal, onToolCall, onStage })).toMatchObject({ ok: true, outcome: { toolCalls: [] } });
+  expect(onStage).toHaveBeenCalledWith("native-tool", name);
+  expect(onToolCall).not.toHaveBeenCalled();
+});
+it.each(["workspace_write", "mcp__foreign__Bash", "mcp__woohaa__Bash"])("rejects %s even when native workspace tools are enabled", async name => {
+  const { transport: t } = transport({ run: async input => {
+    const call = { id: "bad", name, argumentsJson: "{}" };
+    input.onEvent({ type: "tool-call", call });
+    return { ok: true, assistantText: "", toolCalls: [call], finishReason: "stop" };
+  } });
+  const adapter = createAgentSdkAdapter({ kind: "claude-agent-sdk", apiKey: "test", configDir: "/private/config", workspaceDir: "/private/work", transport: t, probeRuntime: okRuntime });
+  expect(await adapter.run({ workspace: { cwd: "/canvas/root" }, model: "m", prompt: "calculate", tools: [], signal: new AbortController().signal })).toMatchObject({ ok: false, code: "capability-unsupported" });
+});

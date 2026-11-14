@@ -16,7 +16,7 @@ from soma import SOMALayer
 from anny.models.phenotype import PHENOTYPE_VARIATIONS
 
 VERSION = 'soma-body-v1'
-GENERATOR = 'soma-body-generator-v1'
+GENERATOR = 'soma-body-generator-v2'
 SOMA_COMMIT = '01ab5b5c0876058bd27d34b1607d74b2e55e0cf4'
 # SOMA mid topology, external midsagittal underside of chin, not a joint.
 CHIN = 16
@@ -66,25 +66,110 @@ def normalize(v, b, height=1.7):
 
 
 def calibrate(layer, source, target, head_ids):
-    chin = source[CHIN].copy()
-    lo, hi = .4, 1.6
-    for _ in range(22):
-        factor = (lo + hi) / 2
+    """Reach a head ratio by changing body segment lengths, not head size.
+
+    The head is the measuring unit in figure construction. Keep the source
+    chin-to-crown geometry intact, then distribute the height delta between
+    the legs and torso. Long adult figures put a larger share below the pelvis;
+    the final uniform normalization preserves the requested ratio without
+    introducing a separate head scale.
+    """
+    _source_v, source_b = fit(layer, source)
+    names = [str(n) for n in layer.rig_data['joint_names'][1:]]
+    hips_y = float(source_b[names.index('Hips') + 1, 1, 3])
+    chest_y = float(source_b[names.index('Chest') + 1, 1, 3])
+    bottom = float(source[:, 1].min())
+    chin_y = float(source[CHIN, 1])
+    head_height = float(source[head_ids, 1].max() - chin_y)
+    source_height = float(np.ptp(source[:, 1]))
+    leg_length = hips_y - bottom
+    torso_length = chin_y - hips_y
+    # Uniform height normalization makes long figures thinner in world units.
+    # Compensate that predictable loss while keeping seven heads close to a
+    # realistic adult silhouette and giving nine/ten-head game figures enough
+    # torso and limb volume to read as designed characters rather than wires.
+    body_width_factor = .96 if target == 7 else 1.25 if target == 9 else 1.50 if target == 10 else 1.
+    # Korean game figures put more of the added height below the pelvis. The
+    # previous 72/28 split left ten-head figures with a torso that was too long
+    # and legs that read short, even though the measured ratio was correct.
+    leg_share = .72 if target <= 8 else .78 if target == 9 else .82
+    torso_share = 1. - leg_share
+    # Keep the waist narrow while the chest, shoulders and pelvis retain their
+    # game-character mass. This only affects torso-influenced vertices, so the
+    # upper legs do not get pinched along with the waist.
+    waist_factor = 1. if target <= 8 else .90 if target == 9 else .84
+    waist_t = np.clip((hips_y + (chest_y - hips_y) * .3 - hips_y) /
+                      max(chin_y - hips_y, 1e-6), 0, 1)
+    # Korean game figures keep a broad chest, shoulder line and pelvis when
+    # they move from eight to ten heads.  Their arms and legs stay long but
+    # retain mass, while hands, feet and toes taper back down.  Use the skin
+    # regions to apply those three widths instead of one factor to every
+    # vertex; this avoids the wire-like limbs seen after height normalization
+    # without producing oversized gloves or boots.
+    dense_skin = layer.skinning_weights.detach().numpy()[:, 1:]
+    limb_joint_indices = np.asarray([i for i, name in enumerate(names)
+                                     if any(part in name for part in ('Arm', 'ForeArm', 'Leg', 'Shin'))], dtype=int)
+    extremity_joint_indices = np.asarray([i for i, name in enumerate(names)
+                                          if any(part in name for part in ('Hand', 'Foot', 'Toe'))], dtype=int)
+    limb_influence = dense_skin[:, limb_joint_indices].sum(axis=1)
+    extremity_influence = dense_skin[:, extremity_joint_indices].sum(axis=1)
+    limb_width_factor = 1 + (body_width_factor - 1) * (.87 if target >= 9 else 1.)
+    extremity_width_factor = (limb_width_factor if target < 10
+                              else 1 + (body_width_factor - 1) * .65)
+
+    def build(delta):
+        new_leg = leg_length + delta * leg_share
+        new_torso = torso_length + delta * torso_share
+        if min(leg_length, torso_length, new_leg, new_torso) <= 0:
+            raise ValueError(f'Invalid body segment lengths for head ratio {target}')
+        new_hips = bottom + new_leg
+        new_chin = new_hips + new_torso
+
+        def map_y(y):
+            if y <= hips_y:
+                return bottom + (y - bottom) * new_leg / leg_length
+            if y <= chin_y:
+                return new_hips + (y - hips_y) * new_torso / torso_length
+            return new_chin + (y - chin_y)
+
         v = source.copy()
-        # Continuous head/neck deformation; torso and limbs keep Anny's shape.
-        blend = np.clip((v[:, 1] - chin[1] + .07) / .08, 0, 1)
+        v[:, 1] = np.asarray([map_y(y) for y in v[:, 1]], dtype=v.dtype)
+        edge = .06
+        blend = np.clip((v[:, 1] - (new_chin - edge)) / edge, 0, 1)
         blend = blend * blend * (3 - 2 * blend)
-        v[:, [0, 2]] = chin[[0, 2]] + (v[:, [0, 2]] - chin[[0, 2]]) * (1 + (factor-1)*blend[:, None])
-        v[:, 1] += (factor-1) * np.maximum(v[:, 1] - chin[1], 0)
+        body_weight = np.clip(1 - limb_influence - extremity_influence, 0, 1)
+        local_width_factor = (body_width_factor * body_weight
+                              + limb_width_factor * limb_influence
+                              + extremity_width_factor * extremity_influence)
+        torso_t = np.clip((v[:, 1] - new_hips) / max(new_chin - new_hips, 1e-6), 0, 1)
+        waist_pull = np.exp(-((torso_t - waist_t) / .14) ** 2)
+        local_width_factor *= 1 - waist_pull * (1 - waist_factor) * body_weight
+        width = local_width_factor + (1 - local_width_factor) * blend
+        v[:, [0, 2]] *= width[:, None]
         v, b = normalize(*fit(layer, v))
         ratio = float(np.ptp(v[:, 1]) / (v[head_ids, 1].max()-v[CHIN, 1]))
-        if ratio > target:
-            lo = factor
+        return v, b, ratio, new_leg / leg_length, new_torso / torso_length
+
+    # The source mesh is not exactly eight heads tall under the visible-mesh
+    # rule, so solve the requested ratio from the resulting fitted geometry
+    # instead of assuming that zero warp means eight heads.
+    lower = max(-leg_length / leg_share, -torso_length / torso_share) + 1e-4
+    upper = max(head_height, source_height)
+    while build(lower)[2] > target:
+        lower = (lower + max(-leg_length / leg_share, -torso_length / torso_share)) * .5
+    while build(upper)[2] < target:
+        upper *= 2
+    for _ in range(24):
+        middle = (lower + upper) * .5
+        if build(middle)[2] < target:
+            lower = middle
         else:
-            hi = factor
+            upper = middle
+    v, b, ratio, leg_factor, torso_factor = build((lower + upper) * .5)
     if abs(ratio-target) > .05:
         raise ValueError(f'Head ratio calibration failed: {target}: {ratio}')
-    return v.astype('<f4'), b.astype('<f4'), factor, ratio
+    return (v.astype('<f4'), b.astype('<f4'), leg_factor, torso_factor,
+            body_width_factor, ratio, leg_share, waist_factor)
 
 
 def main():
@@ -113,9 +198,17 @@ def main():
     indices = np.argsort(-dense, axis=1, kind='stable')[:, :width].astype('<u4')
     weights = np.take_along_axis(dense, indices, axis=1).astype('<f4')
     assert np.allclose(weights.sum(1), 1, atol=1e-5)
-    excluded = np.unique(np.concatenate([rig[k] for k in ['segment_hair','segment_haircap','segment_eye_bags','segment_mouth_bag']]))
-    head_ids = np.setdiff1d(rig['segment_head'], excluded).astype(int)
-    assert CHIN not in excluded
+    # Measure the visible head from the same skinned mesh that the renderer
+    # displays.  The old segment marker removed hair, haircap and face bags,
+    # which made the calibration unit materially shorter than the visible
+    # head.  A vertex belongs to the head marker when Head/Jaw together carry
+    # at least half of its skin influence; the chin remains the fixed SOMA
+    # topology marker below.
+    head_joint_indices = np.asarray([names.index('Head'), names.index('Jaw')], dtype=int)
+    head_influence_threshold = .5
+    head_influence = dense[:, head_joint_indices].sum(axis=1)
+    head_ids = np.setdiff1d(np.flatnonzero(head_influence >= head_influence_threshold), [CHIN]).astype(int)
+    assert len(head_ids) > 4000
     shared = dict(faces=packed(faces, '<u4'), indices=packed(indices, '<u4'), weights=packed(weights, '<f4'), influenceCount=width)
     entries = []
     payload = {}
@@ -136,7 +229,7 @@ def main():
             layer.prepare_identity(torch.tensor([parameters]), scale_params=scales)
             source = layer._cached_rest_shape[0].numpy().copy()
             if heads is not None:
-                vertices, binds, factor, ratio = calibrate(layer, source, heads, head_ids)
+                vertices, binds, leg_factor, torso_factor, body_width_factor, ratio, leg_share, waist_factor = calibrate(layer, source, heads, head_ids)
             else:
                 vertices, binds = normalize(*fit(layer, source), height=height)
                 vertices, binds = vertices.astype('<f4'), binds.astype('<f4')
@@ -166,7 +259,13 @@ def main():
         assert abs(measurements['height']-height)<.001 and abs(measurements['soleHeight'])<1e-6
         entry = dict(id=f'{VERSION}/{key}', sex=sex, heads=heads, build=build, sha256=digest(geometry),
             skeletonSha256=digest(binds.tobytes()), parameters=dict(zip(['gender','age','muscle','weight','height','proportions'],parameters)),
-            localChanges=local_changes, headScale=factor, measurements=measurements)
+            localChanges=local_changes, headScale=1.,
+            proportionWarp=(dict(legFactor=leg_factor, torsoFactor=torso_factor,
+                                 bodyWidthFactor=body_width_factor, legShare=leg_share,
+                                 waistFactor=waist_factor) if heads is not None else None),
+            measurements=measurements)
+        if heads is None:
+            entry.pop('proportionWarp')
         if age_group:
             entry['ageGroup'] = age_group
         entries.append(entry)
@@ -181,7 +280,10 @@ def main():
     assert len(entries)==21 and len({e['sha256'] for e in entries})==21
     asset_hashes = {str(p.relative_to(args.assets)):digest(p.read_bytes()) for p in [args.assets/'SOMA_neutral.npz',args.assets/'SOMA_template_rig.usda',args.assets/'Anny/base_body.obj',args.assets/'Anny/SOMA_wrap.obj']}
     manifest = dict(version=VERSION,generator=GENERATOR,somaCommit=SOMA_COMMIT,annyVersion='0.2.0',seed=0,
-        measurement=dict(chinVertex=CHIN,headSurfaceVertices=head_ids.tolist(),exclusions=excluded.tolist(),girth='closed horizontal torso surface contour'),
+        measurement=dict(chinVertex=CHIN, headSurfaceVertices=head_ids.tolist(),
+                         headSkinJoints=[str(names[i]) for i in head_joint_indices],
+                         headSkinInfluenceThreshold=head_influence_threshold,
+                         girth='closed horizontal torso surface contour'),
         sourceAssets=asset_hashes,vertexCount=len(vertices),triangleCount=len(faces),influenceCount=width,entries=entries)
     output = '// Generated by client/scripts/soma-body-presets/generate.py; do not edit.\n'
     output += 'export const SOMA_BODY_PACKED = '+json.dumps(dict(shared=shared,bodies=payload), separators=(',',':'))+';\n'

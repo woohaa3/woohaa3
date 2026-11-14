@@ -12,6 +12,9 @@ import { normalizeModelDefinition } from '../model-definition.js';
 it('has exactly the complete Cartesian matrix and rejects unknown or unsupported combinations', () => {
   expect(SOMA_BODY_PRESETS).toHaveLength(21);
   expect(new Set(SOMA_BODY_PRESETS.map(p=>p.sha256)).size).toBe(21);
+  expect(SOMA_BODY_MANIFEST.measurement.headSurfaceVertices.length).toBeGreaterThan(4000);
+  expect(SOMA_BODY_MANIFEST.measurement.headSkinJoints).toEqual(['Head','Jaw']);
+  expect(SOMA_BODY_MANIFEST.measurement.headSkinInfluenceThreshold).toBe(.5);
   for(const sex of ['male','female'] as const)for(const heads of [7,8,9,10] as const)for(const build of ['slim','fat'] as const)
     expect(somaBodyPresetId({sex,heads,build})).toBe(`soma-body-v1/${sex}-${heads}-${build}`);
   for(const preset of SOMA_BODY_PRESETS)expect(preset.parameters.gender).toBe(preset.sex==='neutral'?.5:preset.sex==='male'?0:1);
@@ -70,6 +73,55 @@ describe('exported body surface, binding and identity',()=>{
   expect(first).toEqual(reopened);
   expect(somaBodyData(entry.id)).toBe(body);
  },30000);
+});
+
+it('changes adult head ratios through body segment lengths while preserving head shape',()=>{
+ const CHIN_INDEX=SOMA_BODY_MANIFEST.measurement.chinVertex;
+ for(const sex of ['male','female'] as const)for(const build of ['slim','fat'] as const){
+  const base=somaBodyData(`soma-body-v1/${sex}-8-${build}`),baseChin=base.skin.vertices[CHIN_INDEX]!,baseHeadVertices=SOMA_BODY_MANIFEST.measurement.headSurfaceVertices.filter(i=>base.skin.vertices[i]![1]>=baseChin[1]+.05),baseHeadHeight=Math.max(...SOMA_BODY_MANIFEST.measurement.headSurfaceVertices.map(i=>base.skin.vertices[i]![1]))-baseChin[1];
+  const legLength=(body:ReturnType<typeof somaBodyData>)=>{
+   const point=(name:string)=>body.joints.find(j=>j.name===name)!.bind.slice(0,3).map(row=>row[3]!) as [number,number,number];
+   const a=point('LeftLeg'),b=point('LeftShin'),c=point('LeftFoot');
+   return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2])+Math.hypot(b[0]-c[0],b[1]-c[1],b[2]-c[2]);
+  };
+  const baseLeg=legLength(base);
+  for(const heads of [7,9,10] as const){
+   const body=somaBodyData(`soma-body-v1/${sex}-${heads}-${build}`),chin=body.skin.vertices[CHIN_INDEX]!,headHeight=Math.max(...SOMA_BODY_MANIFEST.measurement.headSurfaceVertices.map(i=>body.skin.vertices[i]![1]))-chin[1];
+   const entry=SOMA_BODY_MANIFEST.entries.find(candidate=>candidate.id===`soma-body-v1/${sex}-${heads}-${build}`)!;
+   expect((entry as { proportionWarp?: { bodyWidthFactor?: number } }).proportionWarp?.bodyWidthFactor).toBe(heads===7?.96:heads===9?1.25:1.5);
+   let maxHeadShapeError=0;
+   for(const i of baseHeadVertices){
+    const a=base.skin.vertices[i]!,b=body.skin.vertices[i]!;
+    for(const axis of [0,1,2] as const)maxHeadShapeError=Math.max(maxHeadShapeError,
+      Math.abs((b[axis]-chin[axis])/headHeight-(a[axis]-baseChin[axis])/baseHeadHeight));
+   }
+   expect(maxHeadShapeError).toBeLessThan(.01);
+   const targetLeg=legLength(body);
+   if(heads<8)expect(targetLeg).toBeLessThan(baseLeg);else expect(targetLeg).toBeGreaterThan(baseLeg);
+  }
+ }
+});
+
+it('keeps ten-head torsos substantial without applying the heroic width to every limb',()=>{
+ for(const sex of ['male','female'] as const){
+  const chest8=SOMA_BODY_MANIFEST.entries.find(e=>e.id===`soma-body-v1/${sex}-8-slim`)!.measurements.chest;
+  const chest10=SOMA_BODY_MANIFEST.entries.find(e=>e.id===`soma-body-v1/${sex}-10-slim`)!.measurements.chest;
+  expect(chest10/chest8).toBeGreaterThan(1.03);
+  expect(chest10/chest8).toBeLessThan(1.15);
+ }
+});
+
+it('gives ten-head figures a longer-leg silhouette and a Korean-game waist taper',()=>{
+ for(const sex of ['male','female'] as const)for(const build of ['slim','fat'] as const){
+  const e8=SOMA_BODY_MANIFEST.entries.find(e=>e.id===`soma-body-v1/${sex}-8-${build}`)!;
+  const e10=SOMA_BODY_MANIFEST.entries.find(e=>e.id===`soma-body-v1/${sex}-10-${build}`)!;
+  const warp=(e10 as { proportionWarp?: { legFactor?: number; legShare?: number; waistFactor?: number } }).proportionWarp!;
+  expect(warp.legShare).toBe(.82);
+  expect(warp.legFactor).toBeGreaterThan(1.48);
+  expect(warp.waistFactor).toBe(.84);
+  expect(e10.measurements.waist).toBeLessThan(e8.measurements.waist*1.06);
+  expect(e10.measurements.waist/e10.measurements.chest).toBeLessThan(build==='slim'?.63:.72);
+ }
 });
 
 it('uses fixed age shapes without adult ratio/build selection',()=>{

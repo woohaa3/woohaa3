@@ -167,8 +167,8 @@ async function ensureInitialized(
 /** 受控工具面：当前 App Server 通过 `config.mcp_servers` 注入，而不是顶层 `mcpServers`。 */
 function threadConfig(input: LocalAgentTransportInput): Record<string, unknown> {
   const config: Record<string, unknown> = {
-    // 只走受控 MCP；不把内建 shell / 网页搜索 / 插件应用当作工具面。
-    "features.shell_tool": false,
+    // 领域工具走受控 MCP；可信桌面目录启用内建 shell，网页搜索与插件应用仍关闭。
+    "features.shell_tool": input.workspace === true,
     "features.js_repl": false,
     "features.apps": false,
     "features.skills": false,
@@ -420,10 +420,10 @@ export function createCodexAppServerTransport(options: CodexAppServerTransportOp
         const model = input.model.trim();
         const threadParams: Record<string, unknown> = {
           ...(model === "" ? {} : { model }),
-          // 只读工作目录 + 无审批；工具面仅经受控 MCP。
+          // 可信桌面 cwd 使用原生 workspace-write；其他回合保持只读，无审批。
           cwd: input.workDir,
           approvalPolicy: "never",
-          sandbox: "read-only",
+          sandbox: input.workspace ? "workspace-write" : "read-only",
           config: threadConfig(input)
         };
         // MCP grant 轮换：活跃订阅下 resume 不更新授权头（实测），因此更换 grant 前先

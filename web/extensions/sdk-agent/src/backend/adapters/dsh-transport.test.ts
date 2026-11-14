@@ -214,3 +214,10 @@ describe("dsh 事件投影", () => {
     })).toBe(false);
   });
 });
+
+it("retains native workspace plugins while keeping other tools and user configuration disabled", () => {
+  const patch = buildDshPatch({ workspace: true, modelBaseUrl: "http://127.0.0.1/v1", model: "test", apiKeyEnv: "TEST_KEY", mcp: null });
+  for (const name of ["tool-bash", "tool-pwsh", "tool-jobs", "tool-fs", "tool-fs-search", "tool-working-directory"]) expect(patch).not.toContain(`- id: ${name}\n  disabled: true`);
+  expect(patch).toContain("- id: tool-plugin-manager\n  disabled: true");
+  expect(patch).toContain("- id: skill\n  disabled: true");
+});

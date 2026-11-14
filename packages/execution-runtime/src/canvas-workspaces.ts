@@ -11,7 +11,7 @@ import type {
   WorkspaceExecution, WorkspaceExecuteInput, WorkspaceMigration, WorkspaceOutput
 } from "@woohaa3/contracts";
 
-type Lease = { handle: CanvasWorkspaceHandle; status: "active" | "terminal" | "unknown" | "cancelled" };
+type Lease = { harnessRunning?: boolean; handle: CanvasWorkspaceHandle; status: "active" | "terminal" | "unknown" | "cancelled" };
 type Execution = WorkspaceExecution & { handle: CanvasWorkspaceHandle; digest: string; pid?: number };
 type MigrationPlan = { inventory: Record<string, string>; published: string[]; identities?: Record<string, { dev: number; ino: number }> };
 type State = {
@@ -35,6 +35,7 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
   private children = new Map<string, { child: ChildProcess; done: Promise<void> }>();
   private migrationWork: Promise<void> | null = null;
   private stopped = false;
+  private readonly harnesses = new Map<string, number>();
 
   constructor(private readonly options: { stateDir: string; defaultRoot: string; profileKey: string; protectedPaths?: string[] }) {
     fs.mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
@@ -49,7 +50,7 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
         e.status = "unknown";
         e.error = "执行器重启，无法证明原进程终态；不会自动重跑";
       }
-      for (const lease of Object.values(this.state.leases)) if (lease.status === "active") lease.status = "unknown";
+      for (const lease of Object.values(this.state.leases)) if (lease.status === "active" || lease.harnessRunning) lease.status = "unknown";
     } else {
       fs.mkdirSync(options.defaultRoot, { recursive: true, mode: 0o700 });
       this.state = { version: 1, rootPath: fs.realpathSync(options.defaultRoot), rootRevision: 1, generation: 1, directories: {}, leases: {}, executions: {}, migrations: {} };
@@ -72,7 +73,7 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
     valid(record(s) && s.version === 1 && typeof s.rootPath === "string" && path.isAbsolute(s.rootPath) && !s.rootPath.includes("\0") && Number.isSafeInteger(s.rootRevision) && s.rootRevision > 0 && Number.isSafeInteger(s.generation) && s.generation > 0);
     valid(record(s.directories) && record(s.leases) && record(s.executions) && record(s.migrations) && (s.plans === undefined || record(s.plans)));
     for (const [directoryKey, d] of Object.entries(s.directories)) valid(key(directoryKey) && record(d) && typeof d.owner === "string" && typeof d.canvasId === "string" && directoryKey === hash(JSON.stringify([this.installation, d.owner, d.canvasId])));
-    for (const [leaseKey, l] of Object.entries(s.leases)) valid(record(l) && decodeCanvasWorkspaceHandle(l.handle) && identity(l.handle) && leaseKey === this.leaseKey(l.handle) && ["active", "terminal", "unknown", "cancelled"].includes(l.status));
+    for (const [leaseKey, l] of Object.entries(s.leases)) valid(record(l) && decodeCanvasWorkspaceHandle(l.handle) && identity(l.handle) && leaseKey === this.leaseKey(l.handle) && ["active", "terminal", "unknown", "cancelled"].includes(l.status) && (l.harnessRunning === undefined || typeof l.harnessRunning === "boolean"));
     for (const [executionId, e] of Object.entries(s.executions)) valid(record(e) && key(executionId) && e.executionId === executionId && key(e.digest) && decodeCanvasWorkspaceHandle(e.handle) && identity(e.handle) && e.requestId === e.handle.requestId && ["queued", "running", "cancel-requested", "exited", "failed", "interrupted", "unknown"].includes(e.status) && Number.isSafeInteger(e.cursor) && e.cursor >= 0);
     for (const [operationId, m] of Object.entries(s.migrations)) valid(record(m) && m.operationId === operationId && typeof m.source === "string" && path.isAbsolute(m.source) && typeof m.target === "string" && path.isAbsolute(m.target) && ["validating", "waiting-for-idle", "copying", "verifying", "switching", "completed", "failed", "recovering", "cancelled"].includes(m.phase) && Number.isSafeInteger(m.expectedRootRevision) && m.expectedRootRevision > 0);
     valid(s.migrationId === undefined || (typeof s.migrationId === "string" && Object.hasOwn(s.migrations, s.migrationId)));
@@ -121,6 +122,27 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
     if (!fs.existsSync(base) || fs.lstatSync(base).isSymbolicLink() || fs.realpathSync(base) !== base) fail("workspace-path-invalid", "画布目录已被替换或指向链接");
     return lease;
   }
+  /** Pins the resolved canvas root until the owning harness has drained. */
+  attachHarness(handle: CanvasWorkspaceHandle): { cwd: string; release(): void } {
+    const lease = this.check(handle);
+    const key = this.leaseKey(handle);
+    if (lease.harnessRunning && !this.harnesses.has(key)) fail("workspace-unavailable", "前次 harness 尚未确认退出");
+    lease.harnessRunning = true;
+    this.persist();
+    this.harnesses.set(key, (this.harnesses.get(key) ?? 0) + 1);
+    let released = false;
+    return { cwd: this.directory(handle), release: () => {
+      if (released) return;
+      released = true;
+      const count = (this.harnesses.get(key) ?? 1) - 1;
+      if (count) this.harnesses.set(key, count); else {
+        this.harnesses.delete(key);
+        delete lease.harnessRunning;
+        this.persist();
+      }
+      this.resumeMigration();
+    } };
+  }
   leases() { return Object.values(this.state.leases).map(({ handle, status }) => ({ owner: handle.owner, canvasId: handle.canvasId, requestId: handle.requestId, status })); }
   lookup(input: { owner: string; canvasId: string; requestId: string }): CanvasWorkspaceHandle {
     const lease = this.state.leases[this.leaseKey(input)];
@@ -135,6 +157,12 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
     if (lease.handle.generation !== this.state.generation) return;
     if (!["terminal", "unknown", "cancelled", "active"].includes(input.outcome)) fail("workspace-forbidden", "回合结算状态非法");
     if (input.outcome === "active" && !["active", "unknown"].includes(lease.status)) fail("workspace-forbidden", "终态回合不可重新授权");
+    // A restarted daemon cannot prove an old native harness/children have exited.
+    if (lease.harnessRunning && !this.harnesses.has(this.leaseKey(lease.handle))) {
+      lease.status = "unknown";
+      this.persist();
+      return;
+    }
     lease.status = input.outcome;
     this.persist();
     if (input.outcome === "cancelled") for (const e of Object.values(this.state.executions)) {
@@ -422,7 +450,7 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
     for (const lease of Object.values(this.state.leases)) {
       const h = lease.handle;
       if (h.owner !== input.owner || h.canvasId !== input.canvasId) continue;
-      if (!["terminal", "cancelled"].includes(lease.status) || Object.values(this.state.executions).some(e => this.leaseKey(e.handle) === this.leaseKey(h) && activeExecution(e))) { retained.push(h.runKey); continue; }
+      if (Object.values(this.state.leases).some(l => l.harnessRunning && l.handle.directoryKey === h.directoryKey) || !["terminal", "cancelled"].includes(lease.status) || Object.values(this.state.executions).some(e => this.leaseKey(e.handle) === this.leaseKey(h) && activeExecution(e))) { retained.push(h.runKey); continue; }
       const target = path.join(directory, "runs", h.runKey);
       if (!fs.existsSync(target)) continue;
       if (fs.lstatSync(target).isSymbolicLink()) { retained.push(h.runKey); continue; }
@@ -463,7 +491,7 @@ export class CanvasWorkspaces implements CanvasWorkspacePort {
     if (["waiting-for-idle", "copying", "verifying", "validating"].includes(m.phase)) { m.phase = "cancelled"; this.persist(); }
     return structuredClone(m);
   }
-  private busy() { return Object.values(this.state.leases).some(l => ["active", "unknown"].includes(l.status)) || Object.values(this.state.executions).some(activeExecution); }
+  private busy() { return this.harnesses.size > 0 || Object.values(this.state.leases).some(l => l.harnessRunning || ["active", "unknown"].includes(l.status)) || Object.values(this.state.executions).some(activeExecution); }
   private resumeMigration(): void {
     const m = this.migration();
     if (this.stopped || this.migrationWork || !m) return;

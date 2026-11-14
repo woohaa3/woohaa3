@@ -57,7 +57,6 @@ export function resolveMcpAgentProfile(
 }
 
 export type McpServiceOptions = {
-  canvasWorkspace?: (input: import("@woohaa3/contracts").CanvasWorkspaceToolCall) => Promise<unknown>;
   /** Trusted plugin tool registration; request identities remain host-owned. */
   registerTools?: ModelMcpHttpOptions["registerTools"];
   extensionTools?: ModelMcpHttpOptions["extensionTools"];
@@ -145,7 +144,6 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
             ? {
                 agentAuthoring: {
                   client: agentClient,
-                  ...(options.canvasWorkspace ? { workspace: options.canvasWorkspace } : {}),
                   ...(options.assistantWorld ? { world: options.assistantWorld } : {}),
                   runAvailability: { available: true },
                   ...(options.skillClient ? { skillClient: options.skillClient } : {}),

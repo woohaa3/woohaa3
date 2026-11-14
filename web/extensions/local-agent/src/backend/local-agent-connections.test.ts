@@ -665,21 +665,22 @@ it.each(LOCAL_AGENT_ADAPTERS)("$adapterId candidate run passes images/schema wit
 });
 
 
-it("desktop discussion receives only frozen auxiliary tools without content write privileges", async () => {
+it("desktop discussion uses native cwd/tools without issuing MCP grants or canvas receipts", async () => {
   const { service } = fakeService([record()]);
   const { manager } = fakeProcessManager({ executable: "/usr/bin/codex" });
   const { facade } = fakeToolFacade(), issue = vi.spyOn(facade, "issue");
   const { transport, inputs } = fakeTransport(input => {
-    input.onEvent({ type: "tool-started", tool: "workspace_execute", callId: "aux" });
-    input.onEvent({ type: "tool-completed", tool: "workspace_execute", callId: "aux", ok: true });
+    input.onEvent({ type: "tool-started", tool: "Bash", callId: "native" });
+    input.onEvent({ type: "tool-completed", tool: "Bash", callId: "native", ok: true });
     return { ok: true, outcome: { status: "succeeded", assistantText: "计算完成" } };
   });
-  const adapter = createLocalAgentConversationAdapter(codexAdapter, { service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
+  const adapter = createLocalAgentConversationAdapter(codexAdapter, { workspace: { cwd: "/canvas/root" }, service, processManager: manager, transports: { "codex-appserver": transport }, argsFor: () => [], tools: facade, mcpEndpoint: MCP_ENDPOINT });
   const input = runInput({ intent: { action: "discuss", canvasId: "canvas-1", prompt: "计算" } });
-  const body = { ...stripPreparedHash(input.prepared!), tools: ["workspace_execute"], workspace: { schemaVersion: 1 as const, owner: "u1", canvasId: "canvas-1", requestId: "req-1", directoryKey: "a".repeat(64), runKey: "b".repeat(64), generation: 1 } };
+  const body = { ...stripPreparedHash(input.prepared!), tools: [], workspace: { schemaVersion: 1 as const, owner: "u1", canvasId: "canvas-1", requestId: "req-1", directoryKey: "a".repeat(64), runKey: "b".repeat(64), generation: 1 } };
   input.prepared = { ...body, preparedHash: preparedTurnHash(body) };
-  expect((await adapter.run(input)).status).toBe("succeeded");
-  expect(inputs[0]!.toolToken).toBe("grant-1"); expect(inputs[0]!.allowedTools).toEqual(["workspace_execute"]);
-  expect(issue).toHaveBeenCalledWith(expect.objectContaining({ workId: "req-1", canvasId: "canvas-1", tools: ["workspace_execute"] }));
-  expect(issue.mock.calls[0]![0]).not.toHaveProperty("mode"); expect(issue.mock.calls[0]![0]).not.toHaveProperty("worldScope");
+  const outcome = await adapter.run(input);
+  expect(outcome.status).toBe("succeeded"); expect(outcome.receipt).toBeUndefined();
+  expect(inputs[0]).toMatchObject({ workDir: "/canvas/root", workspace: true, toolToken: null, allowedTools: [] });
+  expect(inputs[0]!.configDir).not.toContain("/canvas/root");
+  expect(issue).not.toHaveBeenCalled();
 });

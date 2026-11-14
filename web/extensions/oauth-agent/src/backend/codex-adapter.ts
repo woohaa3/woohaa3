@@ -80,6 +80,7 @@ export type CodexRunInput = {
 };
 
 export type CodexAdapterDependencies = {
+  workspace?: { cwd: string };
   codexHomeDir: string;
   workspaceDir: string;
   /** CLI 入口覆盖（测试注入 fake SDK 时不需要）。 */
@@ -216,6 +217,8 @@ export function createCodexAdapter(deps: CodexAdapterDependencies): CodexAdapter
       [CHATGPT_ACCESS_TOKEN_ENV]: token
     };
     const config = buildChatGptProviderConfig();
+    config["features.shell_tool"] = deps.workspace !== undefined;
+    config["features.apply_patch_freeform"] = deps.workspace !== undefined;
     // 无工具回合：不注入 MCP server（design D5；讨论不借用静态 bearer 或服务权限）。
     const mcp = noTools ? null : deps.mcpTools ?? null;
     if (mcp) {
@@ -242,11 +245,11 @@ export function createCodexAdapter(deps: CodexAdapterDependencies): CodexAdapter
     const signal = input.signal ?? controller!.signal;
     if (controller) controllers.set(input.ownerId, controller);
     const codex = await prepare(input.ownerId, input.mcpGrantToken, input.noTools === true, executablePath);
-    const workspaceDir = path.join(deps.workspaceDir, ownerKey(input.ownerId));
+    const workspaceDir = deps.workspace?.cwd ?? path.join(deps.workspaceDir, ownerKey(input.ownerId));
     const thread = codex.startThread({
       model: input.model,
       ...(input.reasoningEffort === undefined ? {} : { modelReasoningEffort: input.reasoningEffort }),
-      sandboxMode: "read-only",
+      sandboxMode: deps.workspace ? "workspace-write" : "read-only",
       approvalPolicy: "never",
       webSearchMode: "disabled",
       workingDirectory: workspaceDir,
@@ -261,7 +264,7 @@ export function createCodexAdapter(deps: CodexAdapterDependencies): CodexAdapter
         { outputSchema: input.outputSchema, signal }
       );
       for await (const event of events) {
-        const guard = assertNoToolExecution(event, input.ownerId);
+        const guard = deps.workspace ? null : assertNoToolExecution(event, input.ownerId);
         if (guard) throw new Error(guard);
         if (event.type === "item.completed" && event.item.type === "agent_message") {
           finalResponse = event.item.text;

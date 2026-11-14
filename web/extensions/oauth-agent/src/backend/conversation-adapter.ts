@@ -79,6 +79,7 @@ export function createChatGptConversationAdapter(
     discussion: true,
     targets: ["model3d", "camera"],
     tools: true,
+    workspace: true,
     models: "remote"
   });
 

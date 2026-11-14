@@ -4,7 +4,7 @@
   "site": {
     "name": "本地 agent",
     "description": "连接运行本应用的电脑上的本地 ChatGPT / 本地 OpenCode / 本地 CodeBuddy。",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "configSchema": {
       "schemaId": "local-agent-config",
       "schemaVersion": 1
@@ -42,5 +42,5 @@
       "export": "createExecutor"
     }
   ],
-  "version": "0.1.1"
+  "version": "0.1.2"
 }

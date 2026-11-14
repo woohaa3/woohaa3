@@ -41,7 +41,7 @@ export async function createCanvasToolChannel(
   const nodeId = input.intent.nodeId;
   // 没有目标节点就没有可写的东西：世界模式的 scope 由 worldScope 表达，仍需 nodeId
   // 作为 scope 载体（宿主签发 grant 时要求它）。
-  if (!prepared || prepared.tools.length === 0 || (!nodeId && !prepared.workspace)) return null;
+  if (!prepared || prepared.tools.length === 0 || !nodeId) return null;
 
   const grant = await options.tools.issue({
     delegation: { subject: input.owner, authLevel: "authenticated" },

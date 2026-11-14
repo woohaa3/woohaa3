@@ -116,7 +116,7 @@ export function createChatGptGenerationService(options: ChatGptGenerationOptions
     onProgress?: GenerationProgress
   ): Promise<GenerationOutcome> => {
     // 写工具 = 角色已准备工具中除去只读工具；角色声明仍是唯一来源。
-    const WRITE_TOOLS = new Set(input.prepared.tools.filter((tool) => !tool.startsWith("workspace_") && !AGENT_READ_ONLY_TOOLS.includes(tool)));
+    const WRITE_TOOLS = new Set(input.prepared.tools.filter((tool) => !AGENT_READ_ONLY_TOOLS.includes(tool)));
     const applied: string[] = [];
     const failed: Array<{ part: string; code: string; message: string }> = [];
     record.receipt = { status: "running", requestId: input.requestId, stage: "reasoning" };

@@ -1,6 +1,3 @@
-import http from "node:http";
-import type { AddressInfo } from "node:net";
-import { preparedTurnHash, stripPreparedHash } from "@woohaa3/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentAdapterRunInput } from "@woohaa3/contracts";
 import type { ConnectionMetadataRecord, ConnectionService } from "@woohaa3/agent-connections";
@@ -223,30 +220,14 @@ it("compat-chat 不宣称可恢复 native session", () => {
 });
 
 
-it("desktop discussion executes through the real MCP gateway without a content target", async () => {
-  const f = fixture(), upstreamCalls: unknown[] = [];
-  const server = http.createServer(async (req, res) => {
-    const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    const message = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    expect(req.headers.authorization).toBe("Bearer upstream-grant");
-    const result = message.method === "tools/list" ? { tools: [{ name: "workspace_execute", inputSchema: { type: "object" } }, { name: "submit_model_script" }] } : { structuredContent: { ok: true, result: { executionId: "execution", status: "running" } } };
-    if (message.method === "tools/call") upstreamCalls.push(message.params);
-    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+it("desktop discussion uses native workspace tools without opening a MCP gateway", async () => {
+  const f = fixture(), issue = vi.fn(), revoke = vi.fn();
+  f.run.mockImplementation(async turn => {
+    expect(turn.restrictions).toMatchObject({ allowedTools: [], workspace: true, workspaceDir: "/canvas/root", sandboxMode: "workspace-write" });
+    expect(turn.mcp).toBeNull();
+    return { ok: true, assistantText: "完成", toolCalls: [], finishReason: "stop" };
   });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const issue = vi.fn(async (request: { workId: string }) => ({ token: "upstream-grant", canvasIds: ["canvas"], nodeIds: [], tools: ["workspace_execute"], workId: request.workId })), revoke = vi.fn();
-  try {
-    const input = f.input(), body = { ...stripPreparedHash(input.prepared!), tools: ["workspace_execute"], workspace: { schemaVersion: 1 as const, owner: "owner", canvasId: "canvas", requestId: "request", directoryKey: "a".repeat(64), runKey: "b".repeat(64), generation: 1 } };
-    input.prepared = { ...body, preparedHash: preparedTurnHash(body) };
-    f.run.mockImplementation(async turn => {
-      expect(turn.restrictions.allowedTools).toEqual(["workspace_execute"]); expect(turn.mcp).not.toBeNull();
-      const response = await fetch(turn.mcp!.url, { method: "POST", headers: { authorization: `Bearer ${turn.mcp!.bearerToken}`, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "aux", method: "tools/call", params: { name: "workspace_execute", arguments: { operationId: "one", command: "node", args: ["script.cjs"] } } }) });
-      expect(await response.json()).toMatchObject({ result: { structuredContent: { ok: true, result: { executionId: "execution" } } } });
-      return { ok: true, assistantText: "完成", toolCalls: [{ id: "aux", name: "workspace_execute", argumentsJson: "{}" }], finishReason: "stop" };
-    });
-    const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, { service: f.service, allowHttp: false, allowedHosts: ["api.openai.com"], transports: { "codex-agent-sdk": { run: f.run } }, tools: { issue, revoke }, mcpServerUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp` });
-    expect(await adapter.run(input)).toMatchObject({ status: "succeeded" });
-    expect(upstreamCalls).toEqual([{ name: "workspace_execute", arguments: { operationId: "one", command: "node", args: ["script.cjs"] } }]);
-    expect(issue.mock.calls[0]![0]).not.toHaveProperty("mode"); expect(revoke).toHaveBeenCalled();
-  } finally { await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }); }
+  const adapter = createSdkAgentConversationAdapter(findSdkAgentAdapter("openai-responses")!, { workspace: { cwd: "/canvas/root" }, service: f.service, allowHttp: false, allowedHosts: ["api.openai.com"], transports: { "codex-agent-sdk": { run: f.run } }, tools: { issue, revoke } });
+  expect(await adapter.run(f.input())).toMatchObject({ status: "succeeded" });
+  expect(issue).not.toHaveBeenCalled();
 });
