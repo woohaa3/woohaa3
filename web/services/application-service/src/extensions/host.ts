@@ -686,10 +686,12 @@ export function createApplicationExtensionHost(options: ApplicationExtensionHost
           availability: (namespacedId) => registerAgentRole.availability(namespacedId)
         }
       : undefined;
+    const authoringTools = services?.authoringTools;
     return {
       ...(webServer ? { webServer } : {}),
       ...(mediaFormats ? { mediaFormats } : {}),
       ...(agentRoles ? { agentRoles } : {}),
+      ...(authoringTools ? { authoringTools } : {}),
       capabilities: {
         register: (registration: { id: string; version: number; value: unknown }) => {
           if (typeof registration.id !== "string" || registration.id === "") {

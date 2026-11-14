@@ -1,6 +1,3 @@
-import {createHumanoidMotionTools} from "./humanoid-motion.js";
-import {composeHumanoidMotionAsset} from '../../ports/humanoid-motion-compose.js';
-import {prepareHumanoidMotionAsset} from "../../ports/humanoid-motion-asset.js";
 import { readRuntimeGeneratedImages } from "@woohaa3/application-service";
 /**
  * 核心层 · mcp：内置 MCP 服务与共享工具授权表。
@@ -24,10 +21,10 @@ import { decodeWorkflowGroupData } from "@woohaa3/contracts";
 import { importCodexGeneratedImage } from "../../ports/import-generated-image.js";
 import { canvasGroupEpoch, currentCanvasGroupScope, withCanvasGroupScope } from "@woohaa3/canvas-service";
 
-export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined>; desktopCanvasAgentWorkspace?: { version: 1 } }> = {
+export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined> }> = {
   name: "mcp",
   inject: ["log", "gateway", "canvas", "task", "media", "storage"],
-  apply(ctx, { env, desktopCanvasAgentWorkspace }) {
+  apply(ctx, { env }) {
     // 持久 grant registry（change: 2026-11-10-split-agent-runtime-lifecycle，任务 2.2）：
     // 与应用库同目录的独立文件，避免与业务表争锁；没有可用库路径时退回内存。
     const storePath = env.WOOHAA3_APPLICATION_STORE_PATH?.trim() || env.WOOHAA3_TASK_STORE_PATH?.trim() || "";
@@ -124,34 +121,40 @@ export const mcpPlugin: HostPlugin<{ env: Record<string, string | undefined>; de
         return world.complete(input);
       }
     };
-    assistantWorld.humanoidMotion = createHumanoidMotionTools({
-      readAsset: async (canvasId,assetId) => {
-        const room=await ctx.canvas.sync?.registry.resolve(canvasId);
-        const snapshot=room?.exportCanvas();
-        return snapshot?.ok?snapshot.canvas.assets.find(asset=>asset.id===assetId):undefined;
-      },
-      compose: (canvasId,walk,wave) => composeHumanoidMotionAsset(ctx.media.port(),canvasId,walk,wave),
-      readBytes: async ({canvasId,storageKey,maxBytes}) => {
-        const bucket=ctx.storage.bucket('media',{canvasId});
-        const stat=await bucket.head(storageKey);
-        if(!stat||stat.size>maxBytes)throw new Error('动作资源不可读取或超出大小限制');
-        return (await bucket.get(storageKey)).bytes;
-      },
-      world: assistantWorld,
-      task: ctx.task.port(),
-      catalog: () => ctx.task.catalog(),
-      materialize: (canvasId, result, createdAt) => prepareHumanoidMotionAsset(ctx.media.port(),canvasId,result,createdAt)
-    });
     const mcp = createMcpService({
-      ...(desktopCanvasAgentWorkspace?.version === 1 ? { canvasWorkspace: async input => {
-        const workspace = application().canvasAgentWorkspaces();
-        if (!workspace) throw Object.assign(new Error("桌面工作目录运行时不可用"), { code: "workspace-unavailable" });
-        return workspace.tool(input);
-      } } : {}),
       env,
       skillClient,
       skillAvailability: { available: true },
       assistantWorld,
+      authoringContext: grant => ({
+        grant,
+        world: assistantWorld,
+        task: {
+          catalog: () => ctx.task.catalog(),
+          submit: async input => {
+            const result = await ctx.task.port().submit(input as never);
+            return result as unknown as Record<string, unknown>;
+          },
+          status: async key => (await ctx.task.port().status(key)) as unknown as Record<string, unknown> | null,
+          cancel: key => ctx.task.port().cancel(key)
+        },
+        media: {
+          readBytes: async ({ canvasId, storageKey, maxBytes }) => {
+            const bucket = ctx.storage.bucket("media", { canvasId });
+            const stat = await bucket.head(storageKey);
+            if (!stat || stat.size > maxBytes) throw new Error("媒体资源不可读取或超出大小限制");
+            return (await bucket.get(storageKey)).bytes;
+          },
+          writeBytes: async ({ canvasId, bytes, contentType }) => {
+            const metadata = await ctx.media.port().importBytes({ bytesBase64: Buffer.from(bytes).toString("base64"), contentType, canvasId });
+            return metadata as never;
+          },
+          importLocator: async ({ canvasId, locator, contentType, expected }) => {
+            const metadata = await ctx.media.port().importFromLocator({ locator: locator as never, canvasId, contentType, ...(expected ? { expected } : {}) });
+            return metadata as never;
+          }
+        }
+      }),
       extensionTools: createExtensionMcpBridge({
         definitions: () => ctx.get("application")?.definitions ?? [],
         application,

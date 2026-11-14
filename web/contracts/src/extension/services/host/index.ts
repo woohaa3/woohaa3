@@ -27,6 +27,7 @@ export * from "./telemetry.js";
 export * from "./marketplace.js";
 export * from "./media-formats.js";
 export * from "./agent-roles.js";
+export * from "./authoring-tools.js";
 export * from "./context.js";
 
 export type { ExtensionExecutorModule, ExtensionExecutorEvent, ExtensionExecutorOutcome, ApplicationExtensionExecutorFacade } from "./executor.js";

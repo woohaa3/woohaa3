@@ -232,6 +232,7 @@ export * from "./canvas/scene-area-plan-contract.js";
 export * from "./canvas/scene-area-operation-plan.js";
 export * from "./canvas/world-authoring.js";
 export * from "./canvas/assistant-world-authority.js";
+export * from "./mcp/authoring-tools.js";
 export * from "./canvas/group-authoring-scope.js";
 export * from "./canvas/world-authoring-response-codec.js";
 

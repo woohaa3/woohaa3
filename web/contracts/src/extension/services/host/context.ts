@@ -20,6 +20,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { HostAgentRoleService } from "./agent-roles.js";
+import type { HostAgentAuthoringToolService } from "./authoring-tools.js";
 import type { HostCapabilityService } from "./capabilities.js";
 import type { ApplicationBackendDiagnostics } from "./diagnostics.js";
 import type { ApplicationExtensionServices } from "./facades.js";
@@ -93,6 +94,8 @@ export type HostExtensionContext = Context & {
    * 注册按实际装载 owner 记账，插件停用/回滚时宿主自动注销；插件不能自报其他扩展身份。
    */
   readonly agentRoles?: HostAgentRoleService;
+  /** Director-area MCP tools contributed by the active extension. */
+  readonly authoringTools?: HostAgentAuthoringToolService;
   /** 宿主诊断缓冲（可选）：只读投影，用于排障面板。 */
   readonly diagnostics?: ApplicationBackendDiagnostics;
 };

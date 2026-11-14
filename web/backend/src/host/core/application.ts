@@ -85,6 +85,15 @@ function createServicesFactory(
   const { canvas, task, media, toolGrants } = ctx;
   const accessEnforcer = ctx.access.accessEnforcer;
   return (extensionId: string, configVersion = 0): ApplicationExtensionServices => ({
+    ...(ctx.mcp.authoringTools ? {
+      authoringTools: {
+        register: contribution => {
+          if (!contribution.id.startsWith(`${extensionId}/`)) throw new Error("authoring-tool-contribution-owner-mismatch");
+          return ctx.mcp.authoringTools.register(contribution);
+        },
+        list: () => ctx.mcp.authoringTools.list().filter(contribution => contribution.id.startsWith(`${extensionId}/`))
+      }
+    } : {}),
     // storage 槽位的 owner-scoped 文档存储：宿主注册的基础实现按 extensionId 隔离，
     // 缺失时插件 fail closed（不伪造内存实现）。
     ...(foundationStorage?.documents.forExtension(extensionId) ? { documents: foundationStorage.documents.forExtension(extensionId)! } : {}),

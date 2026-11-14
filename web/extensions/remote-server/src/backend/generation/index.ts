@@ -82,6 +82,7 @@ export type RemoteGenerationBridge = {
   /** 重新探测并替换目录；并发调用共享同一次往返。 */
   refresh(): Promise<RemoteGenerationStatus>;
   status(): RemoteGenerationStatus;
+  hasModelType(type: string): boolean;
   /**
    * 撤销 Provider 注册。
    *
@@ -362,6 +363,7 @@ export function createRemoteGenerationBridge(options: RemoteGenerationBridgeOpti
     },
 
     status: currentStatus,
+    hasModelType: (type: string) => models.some(model => model.modelType === type && model.executable !== false),
 
     dispose() {
       // 幂等：没注册过、或已经撤过，都是空操作。

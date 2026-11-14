@@ -10,6 +10,7 @@ import { createModelMcpHttpHandler, listModelMcpToolNames, MODEL_MCP_HTTP_PATH, 
 import { createCanvasMcpClient, type CanvasMcpClient } from "./downstream/canvas-client.js";
 import { createAgentCanvasClient, type AgentCanvasClient } from "./downstream/agent-canvas-client.js";
 import type { SkillStepClient } from "./downstream/skill-step-client.js";
+import { createAgentAuthoringToolRegistry, type AgentAuthoringToolRegistry } from "./agent-authoring/contributions.js";
 
 export { MODEL_MCP_HTTP_PATH };
 
@@ -74,6 +75,7 @@ export type McpServiceOptions = {
   skillAvailability?: { available: boolean; reason?: string };
   /** T11a host world-authority client; absent leaves scoped world tools unregistered. */
   assistantWorld?: import("./agent-authoring/world-tools.js").AssistantWorldToolClient;
+  authoringContext?: (grant: import("@woohaa3/contracts").ApplicationToolGrant | null) => import("@woohaa3/contracts").McpToolRegistrationContext;
   enableModelMcp?: boolean;
   /**
    * MCP 工具授权校验（任务 3.6 / design D8）：请求携带 bearer 时校验工具允许集合/目标范围/预算。
@@ -97,6 +99,7 @@ export type McpService = {
   toolCatalog: () => readonly string[];
   close: () => Promise<void>;
   canvasClient: CanvasMcpClient | null;
+  authoringTools: AgentAuthoringToolRegistry;
 };
 
 export function createMcpService(options: McpServiceOptions = {}): McpService {
@@ -133,6 +136,7 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
   // （read 120 / write 30 / run 60 每分钟）已删除；合法 Agent 工作不再因调用频率被应用拒绝。
   const modelMcpOptions: ModelMcpHttpOptions = {
           service: canvasClient!,
+          authoringTools: createAgentAuthoringToolRegistry(),
           registerTools: options.registerTools,
           extensionTools: options.extensionTools,
           ...(options.toolGrant ? { toolGrant: options.toolGrant } : {}),
@@ -164,14 +168,13 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
               }
             : {})
   };
+  const authoringTools = modelMcpOptions.authoringTools!;
+  modelMcpOptions.authoringContext = options.authoringContext;
   const modelMcpHandler: ModelMcpHttpHandler | null =
     modelMcpEnabled && canvasClient ? createModelMcpHttpHandler(modelMcpOptions) : null;
   // 角色工具目录：与真实注册同路径，首次读取后缓存（注册无 I/O）。
-  let toolCatalogCache: readonly string[] | null = null;
   const toolCatalog = (): readonly string[] => {
-    if (toolCatalogCache) return toolCatalogCache;
-    toolCatalogCache = modelMcpHandler ? listModelMcpToolNames(modelMcpOptions) : [];
-    return toolCatalogCache;
+    return modelMcpHandler ? listModelMcpToolNames(modelMcpOptions) : [];
   };
 
   const handle: McpService["handle"] = async (req, res) => {
@@ -182,6 +185,7 @@ export function createMcpService(options: McpServiceOptions = {}): McpService {
   return {
     handle,
     canvasClient,
+    authoringTools,
     toolCatalog,
     readiness: async () => {
       if (!agentProfile.ok) return { ready: false, reason: agentProfile.reason };

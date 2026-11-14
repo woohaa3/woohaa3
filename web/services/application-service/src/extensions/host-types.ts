@@ -29,6 +29,7 @@ export type PluginRegistrationSurface = {
   mediaFormats?: import("@woohaa3/contracts").HostMediaFormatService;
   /** Agent 角色注册面（按实际装载 owner 记账；停用时由宿主自动注销）。 */
   agentRoles?: import("@woohaa3/contracts").HostAgentRoleService;
+  authoringTools?: import("@woohaa3/contracts").HostAgentAuthoringToolService;
   services?: ApplicationExtensionServices;
   diagnostics?: import("@woohaa3/contracts").ApplicationBackendDiagnostics;
   /** 撤销本次注册（幂等）；装载器在插件停用时调用。 */

@@ -12,7 +12,7 @@ import { SCENE_DIRECTOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.j
 export const sceneDirectorRole: AgentRoleImplementation = {
   definition: {
     id: "scene-director",
-    revision: "8",
+    revision: "5",
     title: "导演区作者",
     specialty: "在导演区共享世界中创建、修改模型与镜头，并制作确定性动画",
     instructions: ["你是 Woohaa3 导演区的共享世界创作 Agent。", ...TOOL_COMMON_RULES, ...SCENE_DIRECTOR_FLOW].join("\n"),
@@ -38,8 +38,8 @@ export const sceneDirectorRole: AgentRoleImplementation = {
       );
     }
     lines.push(
-      "仅在直接编写关节动画或程序化行走时，先用 read_world_resource（resourceType=world_model_rig, operation=get） 读取真实部件、参考姿态与行走 profile；profile 为 null 表示不支持程序化walk，不能伪造，也不代表不能编写其他关节动画。常规Kimodo动作直接animate_humanoid，不额外读取骨架。",
-      "直接编写或返修关节脚本后，用 sample_scene_animation 采样关键姿态；warning 需按用户意图处理。Kimodo成功回执不追加无目的采样；只能报告数据验证，未看画面不可宣称视觉验收。"
+      "使用关节动画或行走能力前，先用 read_world_resource（resourceType=world_model_rig, operation=get）读取真实部件、参考姿态与行走 profile；profile 为 null 表示不支持，不能伪造。若动作生成工具未出现在本轮目录，只使用通用动画脚本能力并如实说明。",
+      "用 sample_scene_animation 采样关节与接地诊断，warning 需按用户意图处理；只能报告数据验证，未看画面不可宣称视觉验收。"
     );
     if (expectedContentHash) lines.push(`宿主冻结的内容哈希：${expectedContentHash}；提交前仍以工具读取结果为准。`);
     lines.push(conversationPrompt(input));

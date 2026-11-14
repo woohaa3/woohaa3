@@ -118,6 +118,7 @@ import {
 import { uploadReference } from "./storage/reference-upload.js";
 import { createServerStorageBackend, type ServerStorageBackendOptions } from "./storage/backend.js";
 import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/config.js";
+import { createHumanoidMotionContribution } from "./humanoid/contribution.js";
 
 export type { RemoteSession, RemoteSessionStore };
 export { createMemorySessionStore };
@@ -759,6 +760,10 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       ctx.effect(() => () => generationBridge.dispose());
       // 已有会话（本进程登录过或从文档存储恢复）时立即拉一次目录；没有会话就是安静休眠。
       void generationBridge.refresh().catch(() => undefined);
+      const unregisterHumanoidMotion = ctx.services?.authoringTools?.register(
+        createHumanoidMotionContribution(() => generationBridge.status().available && generationBridge.hasModelType("motion"))
+      );
+      ctx.effect(() => () => unregisterHumanoidMotion?.());
 
       /**
        * 远端助手通路：连接发现 + 会话适配器。

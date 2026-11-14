@@ -5,6 +5,7 @@
  * Canvas Service；本包只经受认证内部协议访问。
  */
 export * from "./composition.js";
+export * from "./agent-authoring/contributions.js";
 export * from "./model-mcp/mcp-http.js";
 export * from "./agent-authoring/index.js";
 export * from "./downstream/canvas-client.js";

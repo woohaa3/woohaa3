@@ -177,6 +177,8 @@ export type ApplicationExtensionNodeFacade = {
 
 /** 公共 Context 暴露给插件的受限服务集合；核心 Context 不属于可关闭插件集合。 */
 export type ApplicationExtensionServices = {
+  /** Director-area MCP tool contribution registry, scoped to the active extension. */
+  authoringTools?: import("./authoring-tools.js").HostAgentAuthoringToolService;
   executor?: import("./executor.js").ApplicationExtensionExecutorFacade;
   serviceConnections?: ApplicationServiceConnectionFacade;
   assistants?: ApplicationExtensionAssistantFacade;
