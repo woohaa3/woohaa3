@@ -63,23 +63,6 @@ export type AssistantWorldToolName = (typeof ASSISTANT_WORLD_TOOL)[keyof typeof 
 /** Read-only context tools are the only tools a 2D group selection can receive. */
 export const ASSISTANT_WORLD_READ_TOOLS = [ASSISTANT_WORLD_TOOL.readContext] as const;
 
-/** Scene-area write tools. Membership in a 2D group never grants these. */
-export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
-  ASSISTANT_WORLD_TOOL.animateHumanoid,
-  ASSISTANT_WORLD_TOOL.animateHumanoidInteraction,
-  ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
-  ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
-  ASSISTANT_WORLD_TOOL.createModel,
-  ASSISTANT_WORLD_TOOL.replaceModel,
-  ASSISTANT_WORLD_TOOL.appendModelScript,
-  ASSISTANT_WORLD_TOOL.patchModelScript,
-  ASSISTANT_WORLD_TOOL.moveModel,
-  ASSISTANT_WORLD_TOOL.setAnimation,
-  ASSISTANT_WORLD_TOOL.resizeArea,
-  ASSISTANT_WORLD_TOOL.createCamera,
-  ASSISTANT_WORLD_TOOL.setCamera,
-  ASSISTANT_WORLD_TOOL.completeCamera
-] as const;
 export const ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.animateHumanoid,
   ASSISTANT_WORLD_TOOL.animateHumanoidInteraction,
