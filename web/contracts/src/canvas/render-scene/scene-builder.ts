@@ -102,7 +102,7 @@ export type CanvasRenderSceneInput = {
    * Transient scene-area ground bounds keyed by area node id (move/resize preview).
    * Presentation only; the canonical `nodeData.sceneArea` is never rewritten here.
    */
-  sceneAreaPreviews?: ReadonlyMap<string, import("../shared-world.js").GroundAabb>;
+  sceneAreaPreviews?: ReadonlyMap<string, import("../shared-world.js").GroundAabb & { moveMembers?: boolean }>;
   /** 导演区整体动画播放头（秒）；缺省不采样。 */
   sceneAnimationTimes?: ReadonlyMap<string, number>;
   sceneAnimationPlayheads?: ReadonlyMap<string, number>;
@@ -164,9 +164,9 @@ export function resolveSceneTheme(input: unknown): AppThemeSnapshot {
  * Area-move previews translate bounds; carry the animation origin by the same
  * delta. Resize previews change an edge, so the stable origin stays put.
  */
-function animationOriginForPreview(area: SceneAreaData, preview: GroundAabb | undefined): GroundPoint {
+function animationOriginForPreview(area: SceneAreaData, preview: (GroundAabb & { moveMembers?: boolean }) | undefined): GroundPoint {
   const origin = sceneAreaAnimationOrigin(area);
-  if (!preview) return origin;
+  if (!preview || preview.moveMembers === false) return origin;
   const u = preview.min.u - area.bounds.min.u;
   const v = preview.min.v - area.bounds.min.v;
   const maxU = preview.max.u - area.bounds.max.u;

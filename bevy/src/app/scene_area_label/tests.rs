@@ -173,10 +173,7 @@ fn check_retained_labels(with_player: bool) {
     for (entity, _) in &visuals {
         assert_eq!(
             *world.get::<RenderLayers>(*entity).unwrap(),
-            RenderLayers::from_layers(&[
-                crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
-                crate::world_camera_preview::EDITOR_GUIDE_LAYER
-            ])
+            RenderLayers::layer(crate::world_camera_preview::DIRECTOR_AREA_LAYER)
         );
         let mesh = world
             .resource::<Assets<Mesh>>()
@@ -223,10 +220,7 @@ fn check_retained_labels(with_player: bool) {
     );
     assert_eq!(
         *world.get::<RenderLayers>(entity).unwrap(),
-        RenderLayers::from_layers(&[
-            crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
-            crate::world_camera_preview::EDITOR_GUIDE_LAYER,
-        ])
+        RenderLayers::layer(crate::world_camera_preview::DIRECTOR_AREA_LAYER)
     );
     world.resource_mut::<CurrentScene>().0.selection.nodes = vec!["area".into()];
     app.update();

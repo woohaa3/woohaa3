@@ -102,6 +102,7 @@ function connectClient(room: CanvasRoom, actorId: string) {
     actorId,
     now: () => 0
   });
+  fake.sendStateVector();
   return { session, fake };
 }
 
@@ -249,6 +250,7 @@ describe("断开与重连（任务 5.7）", () => {
       actorId: "client-a",
       now: () => 0
     });
+    a.fake.sendStateVector();
     void reconnected;
     // 重连后 A 的文档被差量补齐到 revision 2。
     expect(Y.encodeStateVector(a.fake.client).byteLength).toBeGreaterThan(0);

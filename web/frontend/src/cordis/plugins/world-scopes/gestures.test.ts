@@ -286,6 +286,40 @@ describe("scene-area gesture runtime", () => {
     expect(preview).toHaveBeenLastCalledWith("m1", null);
   });
 
+  it("supports moving only the director area while leaving its members in place", async () => {
+    const { deps, execute, preview, previewArea } = runtimeHarness();
+    const port = createSceneAreaGestures(deps);
+    expect(port.begin({
+      point: { x: 500, y: 500 }, areaNodeId: "area", card: true, moveMembers: false
+    })).toEqual({ areaNodeId: "area", intent: "move" });
+    await Promise.resolve();
+    await Promise.resolve();
+    port.update({ x: 700, y: 800 });
+    expect(preview).not.toHaveBeenCalledWith("m1", expect.anything());
+    expect(previewArea).toHaveBeenCalledWith("area", { min: { u: 2, v: 3 }, max: { u: 12, v: 13 } }, false);
+    expect((await port.end()).ok).toBe(true);
+    const input = execute.mock.calls[0]![0] as unknown as { request: { members: { instances: unknown[]; cameras: unknown[] } } };
+    expect(input.request.members).toEqual({ instances: [], cameras: [] });
+  });
+
+  it("can switch to area-only while a drag is already in progress", async () => {
+    const { deps, execute, preview } = runtimeHarness();
+    const port = createSceneAreaGestures(deps);
+    port.begin({ point: { x: 500, y: 500 }, areaNodeId: "area", card: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    port.update({ x: 600, y: 600 });
+    expect(preview).toHaveBeenCalledWith("m1", { u: 1, v: 1 });
+    port.update({ x: 700, y: 700 }, { moveMembers: false });
+    expect(preview).toHaveBeenLastCalledWith("m1", null);
+    port.update({ x: 800, y: 800 }, { moveMembers: true });
+    expect(preview).toHaveBeenLastCalledWith("m1", { u: 3, v: 3 });
+    await port.end();
+    const input = execute.mock.calls[0]![0] as unknown as { request: { members: { instances: unknown[]; cameras: unknown[] } } };
+    expect(input.request.members.instances).toHaveLength(1);
+    expect(input.request.members.cameras).toHaveLength(1);
+  });
+
   it("prepares with the scene-area identity, not the canvas node id", async () => {
     const nodeId = "asset-scene-area-x";
     const areaId = "area-main";
@@ -709,6 +743,7 @@ describe("interaction controller wiring", () => {
   const fakePort = (start: { areaNodeId: string; intent: "move" | "resize"; edge?: { u: -1 | 0 | 1; v: -1 | 0 | 1 } } | null) => ({
     begin: vi.fn(() => start),
     update: vi.fn(() => true),
+    setMoveMembers: vi.fn(() => true),
     end: vi.fn(async () => ({ ok: true as const, noop: true as const })),
     cancel: vi.fn(),
     active: vi.fn(() => false),
@@ -777,6 +812,31 @@ describe("interaction controller wiring", () => {
     dom.fire("pointerup", { clientX: 180, clientY: 140, button: 0 });
     expect(port.end).toHaveBeenCalled();
     expect(submitted).toHaveLength(0);
+    controller.dispose();
+  });
+
+  it("uses a modifier on a director card to move only the area", () => {
+    const port = fakePort({ areaNodeId: "area", intent: "move" });
+    const { dom, controller } = setup({
+      nodes: [areaNode()], nodeData: areaData,
+      pointHit: () => ({ kind: "node", nodeId: "area" }), port
+    });
+    dom.fire("pointerdown", { clientX: 100, clientY: 100, button: 0, altKey: true });
+    expect(port.begin).toHaveBeenCalledWith(expect.objectContaining({ areaNodeId: "area", card: true, moveMembers: false }));
+    controller.dispose();
+  });
+
+  it("switches the director-area mode as soon as Alt is pressed or released", () => {
+    const port = fakePort({ areaNodeId: "area", intent: "move" });
+    const { dom, controller } = setup({
+      nodes: [areaNode()], nodeData: areaData,
+      pointHit: () => ({ kind: "node", nodeId: "area" }), port
+    });
+    dom.fire("pointerdown", { clientX: 100, clientY: 100, button: 0 });
+    dom.fireKey("keydown", { key: "Alt", code: "AltLeft" });
+    expect(port.setMoveMembers).toHaveBeenCalledWith(false);
+    dom.fireKey("keyup", { key: "Alt", code: "AltLeft" });
+    expect(port.setMoveMembers).toHaveBeenLastCalledWith(true);
     controller.dispose();
   });
 

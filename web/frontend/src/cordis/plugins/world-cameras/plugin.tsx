@@ -247,12 +247,22 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         }
       };
       const timer = setInterval(() => void pull(), 1000);
-      const offScene = ctx.canvasRuntime.subscribeScene?.(() => void pull());
+      // 缩放/平移会高频触发 scene 提交；合并为 500ms 节流，避免缩放时向宿主泛洪请求。
+      let scheduledPull: ReturnType<typeof setTimeout> | null = null;
+      const schedulePull = () => {
+        if (scheduledPull !== null) return;
+        scheduledPull = setTimeout(() => {
+          scheduledPull = null;
+          void pull();
+        }, 500);
+      };
+      const offScene = ctx.canvasRuntime.subscribeScene?.(schedulePull);
       void pull();
       return () => {
         disposed = true;
         abort.abort();
         clearInterval(timer);
+        if (scheduledPull !== null) clearTimeout(scheduledPull);
         offScene?.();
         worldCameraShotStore.clear();
       };

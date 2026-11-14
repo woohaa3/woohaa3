@@ -22,6 +22,8 @@
  * changes only the area bounds. Default area deletion removes only the area;
  * explicit delete-with-contents removes exactly the fixed eligible member set and
  * never touches generated media or tasks.
+ * A `move` request with an empty member set is the explicit area-only variant;
+ * supplying the frozen member set preserves the existing move-with-contents behavior.
  *
  * `operationId` is the idempotency intent. The authority compares the persisted
  * operation identity (intent + frozen source versions + frozen members) before

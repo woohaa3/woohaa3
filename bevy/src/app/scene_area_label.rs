@@ -1,4 +1,4 @@
-//! Scene-area nameplates belong to the ground scene, including model depth occlusion.
+//! Scene-area nameplates belong to the director-area chrome layer.
 //! Glyphs reuse Bevy's font layout/atlas; only 3D meshes are submitted for drawing.
 use super::{CurrentScene, SurfaceState};
 use crate::{
@@ -249,10 +249,7 @@ fn spawn_visual(
             GroundScopeLabel,
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
-            RenderLayers::from_layers(&[
-                crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
-                crate::world_camera_preview::EDITOR_GUIDE_LAYER,
-            ]),
+            RenderLayers::layer(crate::world_camera_preview::DIRECTOR_AREA_LAYER),
             NoFrustumCulling,
             NotShadowCaster,
         ))

@@ -29,6 +29,12 @@ export type RoomExecutionHost = {
   readonly verifyAssets: boolean;
   readonly storageSeq: number;
   readonly publishedDoc: Y.Doc;
+  /**
+   * 可复用的 authoring 文档。房间在成功提交后保留它，避免每条命令都把整份 Y.Doc
+   * 编码/解码一遍；提交失败时由 resetAuthoring 丢弃并从 published 重建。
+   */
+  readonly authoringDoc?: Y.Doc;
+  resetAuthoring?(): void;
   nowIso(): string;
   exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; code?: string; message: string };
   /** durable 成功后由 owner 推进 published/revision、按序调用 observer 并广播。 */
@@ -165,11 +171,12 @@ export async function executeCommand(
     if (duplicate) return duplicate;
   }
 
-  // 每个命令从 published 重建 authoring：保证「下一命令基于最后 durable 状态」
-  // （design D6：提交失败时从 published 重建 authoring）。
-  // 每个命令从 published 重建 authoring：保证「下一命令基于最后 durable 状态」，
-  // 也保证提交失败时不需要回滚 published。
-  const authoring = cloneDoc(host.publishedDoc);
+  // 成功提交后复用房间的 authoring 文档。它始终与 published 保持同一内容：命令
+  // 先在 authoring 上形成候选，持久化成功后再把同一 update 应用到 published；失败
+  // 路径调用 resetAuthoring 丢弃候选。旧的注入方没有 authoringDoc 时仍回退到一次性
+  // clone，保持测试与离线调用方的兼容性。
+  const authoring = host.authoringDoc ?? cloneDoc(host.publishedDoc);
+  const resetAuthoring = () => host.resetAuthoring?.();
   const before = host.exportCanvas();
   const groupScope = currentCanvasGroupScope();
   if (groupScope && (!groupScope.valid() || groupScope.canvasId !== host.canvasId)) {
@@ -178,15 +185,23 @@ export async function executeCommand(
   if (groupScope?.authorize && !(await groupScope.authorize("write"))) {
     return { ok: false, status: "rejected", commandId: batch.commandId, code: "write-forbidden", message: "画布写入权限已撤销" };
   }
-  const outcome = await applyCommandTransaction({
-    doc: authoring,
-    batch,
-    mediaStorage: host.mediaStorage,
-    now: host.nowIso(),
-    verifyAssets: host.verifyAssets,
-    content: host.content,
-    lifecycle: host.lifecycle
-  });
+  let outcome;
+  try {
+    outcome = await applyCommandTransaction({
+      doc: authoring,
+      batch,
+      mediaStorage: host.mediaStorage,
+      now: host.nowIso(),
+      verifyAssets: host.verifyAssets,
+      content: host.content,
+      lifecycle: host.lifecycle
+    });
+  } catch (error) {
+    // applyCommandTransaction normally returns a rejection, but an unexpected exception
+    // after mutating authoring must not poison the next queued command.
+    resetAuthoring();
+    throw error;
+  }
   if (!outcome.ok) {
     return {
       ok: false,
@@ -201,6 +216,7 @@ export async function executeCommand(
   if (groupScope) {
     const reason = before.ok ? validateCanvasGroupChange(before.canvas, outcome.canvas, groupScope.rootGroupId) : "画布不可读";
     if (reason || !groupScope.valid()) {
+      resetAuthoring();
       return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-forbidden", message: reason ?? "组创作授权已撤销" };
     }
   }
@@ -220,7 +236,10 @@ export async function executeCommand(
 
   // 无净变化：仍持久化幂等记录，但 update 为空、revision 不变（design D5）。
   const updateForStorage = outcome.update ?? new Uint8Array(0);
-  if (options?.signal?.aborted) return { ok: false, status: "rejected", commandId: batch.commandId, code: "cancelled", message: "提交已取消" };
+  if (options?.signal?.aborted) {
+    resetAuthoring();
+    return { ok: false, status: "rejected", commandId: batch.commandId, code: "cancelled", message: "提交已取消" };
+  }
   const commit = await host.repository.commitYjsCommand({
     spatialContext: options?.spatialContext,
     signal: options?.signal,
@@ -240,6 +259,7 @@ export async function executeCommand(
   });
 
   if (!commit.ok) {
+    resetAuthoring();
     return commitFailure(commit, batch.commandId);
   }
 

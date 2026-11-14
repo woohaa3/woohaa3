@@ -109,7 +109,7 @@ pub(super) fn sync_scene_areas(
                     let mut entity = commands.spawn((
                         Mesh3d(cube.clone()),
                         MeshMaterial3d(if i == 12 { fill.clone() } else { border.clone() }),
-                        RenderLayers::from_layers(&[crate::world_camera::WORLD_CAMERA_GIZMO_LAYER, crate::world_camera_preview::EDITOR_GUIDE_LAYER]),
+                        RenderLayers::layer(crate::world_camera_preview::DIRECTOR_AREA_LAYER),
                         NotShadowCaster,
                     ));
                     if i == 12 {
@@ -255,10 +255,7 @@ fn sync_execution(
                         Visibility::Hidden,
                         SceneAreaExecution,
                         NotShadowCaster,
-                        RenderLayers::from_layers(&[
-                            crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
-                            crate::world_camera_preview::EDITOR_GUIDE_LAYER,
-                        ]),
+                        RenderLayers::layer(crate::world_camera_preview::DIRECTOR_AREA_LAYER),
                     ))
                     .id()
             })

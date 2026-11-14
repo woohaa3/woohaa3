@@ -70,8 +70,12 @@ export function installAppHostConnectivity(input: {
       let wasOnline = session.getStatus().remote.mode === "remote";
       sessionWatch = session.subscribe((status) => {
         const online = status.remote.mode === "remote";
-        // 只在「已连上 → 断线」时上报：页面刚打开还在连接时不算掉线。
-        if (wasOnline && status.remote.mode === "offline") service.reportTransport("closed");
+        // 连线与断开双向通知：瞬断有宽限期，恢复时立即打断待定重连或退避。
+        if (wasOnline && status.remote.mode === "offline") {
+          service.reportTransport("closed");
+        } else if (!wasOnline && online) {
+          service.reportTransport("open");
+        }
         wasOnline = online;
       });
     },

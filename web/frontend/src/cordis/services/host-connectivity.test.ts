@@ -53,7 +53,11 @@ async function flush() {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 }
 
-function harness(probe: () => Promise<HostProbeResult>, pinned: string | null = "r1") {
+function harness(
+  probe: () => Promise<HostProbeResult>,
+  pinned: string | null = "r1",
+  extraOptions: Partial<import("./host-connectivity.js").HostConnectivityOptions> = {}
+) {
   const timers = manualTimers();
   let reopened = 0;
   const service = createHostConnectivityService({
@@ -63,14 +67,20 @@ function harness(probe: () => Promise<HostProbeResult>, pinned: string | null = 
       expect(next.releaseId).toBe("r2");
       reopened += 1;
     },
+    transportGraceMs: extraOptions.transportGraceMs ?? 0,
     setTimer: timers.setTimer,
-    clearTimer: timers.clearTimer
+    clearTimer: timers.clearTimer,
+    ...extraOptions
   });
   return { service, timers, reopened: () => reopened };
 }
 
-function setup(results: HostProbeResult[], pinned: string | null = "r1") {
-  const { service, timers, reopened } = harness(async () => results.shift() ?? { reachable: false }, pinned);
+function setup(
+  results: HostProbeResult[],
+  pinned: string | null = "r1",
+  extraOptions: Partial<import("./host-connectivity.js").HostConnectivityOptions> = {}
+) {
+  const { service, timers, reopened } = harness(async () => results.shift() ?? { reachable: false }, pinned, extraOptions);
   return { service, timers, reopened };
 }
 
@@ -229,6 +239,36 @@ describe("HostConnectivity", () => {
     // 宿主已经在应答（同源轮询成功），立刻探活收尾。
     service.reportHttp(true);
     expect(timers.pending.map((entry) => entry.ms)).toEqual([0]);
+  });
+
+  it("transport 断开在宽限期内恢复：不闪遮罩，保持 online", async () => {
+    const { service, timers } = setup([{ reachable: true, releaseId: "r1" }], "r1", { transportGraceMs: 1500 });
+    service.reportTransport("closed");
+    // 宽限期内仍是 online
+    expect(service.getSnapshot().phase).toBe("online");
+    expect(timers.pending.some((t) => t.ms === 1500)).toBe(true);
+
+    // 几百毫秒内恢复 open，取消宽限计时
+    service.reportTransport("open");
+    expect(service.getSnapshot().phase).toBe("online");
+    expect(timers.pending.some((t) => t.ms === 1500)).toBe(false);
+  });
+
+  it("transport 断开超过宽限期：进入 reconnecting；恢复 open 时立即探活收尾", async () => {
+    const { service, timers } = setup([{ reachable: true, releaseId: "r1" }], "r1", { transportGraceMs: 1500 });
+    service.reportTransport("closed");
+    expect(service.getSnapshot().phase).toBe("online");
+
+    // 推进 1500ms 宽限期
+    await timers.fire();
+    expect(service.getSnapshot().phase).toBe("reconnecting");
+
+    // transport 重建成功通知 open：立即打断退避探活，不必等 1000ms 退避
+    service.reportTransport("open");
+    expect(timers.pending.some((t) => t.ms === 0)).toBe(true);
+
+    await timers.fire();
+    expect(service.getSnapshot().phase).toBe("online");
   });
 });
 

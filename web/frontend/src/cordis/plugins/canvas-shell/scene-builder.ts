@@ -42,7 +42,7 @@ export type SceneBuildInput = {
     rotation: import("@woohaa3/contracts").WorldRotation;
   }>;
   /** 导演区地面范围瞬时预览（搬动/调范围）；只影响呈现，不写规范 nodeData。 */
-  sceneAreaPreviews?: ReadonlyMap<string, import("@woohaa3/contracts").GroundAabb>;
+  sceneAreaPreviews?: ReadonlyMap<string, import("@woohaa3/contracts").GroundAabb & { moveMembers?: boolean }>;
   /** 导演区整体动画播放头（秒）；只影响呈现，不写规范数据。 */
   sceneAnimationTimes?: ReadonlyMap<string, number>;
   viewportPreview: Viewport | null;

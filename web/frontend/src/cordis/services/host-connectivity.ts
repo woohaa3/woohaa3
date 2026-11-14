@@ -46,6 +46,13 @@ export type HostConnectivityOptions = {
   maxBackoffMs?: number;
   /** 单次探测的看门狗（缺省 5s）：宿主重启窗口里请求可能被挂住，超时按不可达处理。 */
   probeTimeoutMs?: number;
+  /**
+   * transport 断开进入 reconnecting 前的宽限时长（毫秒，缺省 1500ms）。
+   *
+   * 会话 transport（WebSocket）抖动或重连通常在百毫秒级完成；先给一段宽限期，
+   * 宽限期内若收到 `reportTransport("open")` 则直接取消重连待定，避免短暂瞬断时全屏闪出遮罩。
+   */
+  transportGraceMs?: number;
   setTimer?: (callback: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
 };
@@ -81,6 +88,7 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
   const initialBackoff = options.initialBackoffMs ?? 1000;
   const maxBackoff = options.maxBackoffMs ?? 15_000;
   const probeTimeout = Math.max(0, options.probeTimeoutMs ?? 5_000);
+  const transportGrace = Math.max(0, options.transportGraceMs ?? 1500);
   const setTimer = options.setTimer ?? ((callback, ms) => globalThis.setTimeout(callback, ms));
   const clearTimer = options.clearTimer ?? ((handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>));
   const listeners = new Set<() => void>();
@@ -89,6 +97,7 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
   let timer: unknown = null;
   /** 当前退避时长，仅用于判断「等待是否已经长到值得打断」。 */
   let timerDelay = 0;
+  let transportGraceTimer: unknown = null;
   let probing = false;
   let disposed = false;
   /** 本次 reconnecting 的代次：迟到的探测结果不覆盖新状态。 */
@@ -218,7 +227,15 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
     }
   };
 
+  const cancelTransportGrace = () => {
+    if (transportGraceTimer !== null) {
+      clearTimer(transportGraceTimer);
+      transportGraceTimer = null;
+    }
+  };
+
   const enterReconnecting = () => {
+    cancelTransportGrace();
     if (disposed || snapshot.phase === "reconnecting") return;
     generation += 1;
     publish({ phase: "reconnecting", attempts: 0, nextReleaseId: null });
@@ -246,10 +263,38 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
       if (consecutiveFailures >= threshold) void verifyReachability();
     },
     reportTransport(status) {
-      // transport 打开不代表 HTTP 面就绪，恢复仍以探测结果为准；断开是强信号，直接进入重连。
-      if (status === "closed") enterReconnecting();
+      if (status === "closed") {
+        if (disposed || snapshot.phase === "reconnecting") return;
+        // 瞬断防抖：百毫秒级重连在宽限期内完成则不弹遮罩；超时仍未重连才进 reconnecting。
+        if (transportGrace === 0) {
+          enterReconnecting();
+          return;
+        }
+        if (transportGraceTimer !== null) return;
+        transportGraceTimer = setTimer(() => {
+          transportGraceTimer = null;
+          enterReconnecting();
+        }, transportGrace);
+        return;
+      }
+      if (status === "open") {
+        cancelTransportGrace();
+        if (disposed) return;
+        // 传输层已重新连通：若正在重连中，立即打断退避探活一次以尽快撤除遮罩。
+        if (snapshot.phase === "reconnecting") {
+          if (timer !== null) {
+            clearTimer(timer);
+            timer = null;
+          }
+          timerDelay = 0;
+          schedule(0);
+        }
+      }
     },
-    expectRestart: enterReconnecting,
+    expectRestart() {
+      cancelTransportGrace();
+      enterReconnecting();
+    },
     blocksSubmissions: () => snapshot.phase === "reconnecting",
     async reopenCanvas() {
       if (snapshot.phase !== "restarted") return;
@@ -267,6 +312,7 @@ export function createHostConnectivityService(options: HostConnectivityOptions):
     },
     dispose() {
       disposed = true;
+      cancelTransportGrace();
       if (timer !== null) clearTimer(timer);
       timer = null;
       listeners.clear();

@@ -215,6 +215,23 @@ describe("scene-area command mapping animation origin", () => {
     expect(worldPosition(sceneArea)).toEqual({ u: 6, v: 6 });
   });
 
+  it("moves only the director area when the plan has no members", () => {
+    const canvas = canvasWithAnimation();
+    const plan = movePlan(canvas);
+    const areaOnly: SceneAreaPlan = {
+      ...plan,
+      source: { ...plan.source, members: { instances: [], cameras: [] } },
+      commands: [plan.commands[0]!],
+      inverse: [plan.inverse[0]!]
+    };
+    const forward = buildForwardCommands(canvas, areaOnly);
+    expect(forward.ok).toBe(true);
+    if (!forward.ok) return;
+    const sceneArea = areaCommand(forward.commands).value.sceneArea!;
+    expect(sceneArea.animationOrigin).toEqual({ u: 5, v: 5 });
+    expect(worldPosition(sceneArea)).toEqual({ u: 6, v: 6 });
+  });
+
   it("carries camera position tracks with the area origin", () => {
     const canvas = canvasWithAnimation();
     const camera = {

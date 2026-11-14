@@ -266,25 +266,27 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }    const hit = hitResult.value;
 
-    // 导演区手势（T07）：区域卡片默认搬场景；地面边缘 / 显式模式只改范围。
+    // 导演区手势（T07）：区域卡片默认搬场景；按住 Alt 只移动导演区本身；
+    // 地面边缘 / 显式模式只改范围。
     // 区域内空白在 `auto` 模式下返回 null，继续走既有 groundClick + 框选，不吞拖动框选。
     const sceneAreaGesture = core.sceneAreaGestures();
     // 显式「搬场景 / 仅调范围」是用户可见承诺：此时导演区优先于世界模型拾取，
     // 文案里的「区域内任意位置」才成立。auto 模式保持模型拾取优先，模型交互不回退。
     const sceneAreaFirst = !!sceneAreaGesture && sceneAreaGesture.mode() !== "auto";
     const trySceneAreaGesture = (): boolean => {
-      // Shift 保留既有加选框选语义；导演区手势不抢占它。
-      if (!sceneAreaGesture || isRight || event.shiftKey) return false;
+      if (!sceneAreaGesture || isRight) return false;
       const hitNodeId = cardHitNodeId(hit);
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
       const hitNode = hitNodeId ? canvasState?.document.nodes.find(node => node.id === hitNodeId) : undefined;
       const areaCardId = hitNode?.type === "scene-area" ? hitNode.id : null;
       if (!areaCardId && hit) return false;
+      const areaOnlyModifier = event.altKey;
       const started = sceneAreaGesture.begin({
         point: { x: event.clientX, y: event.clientY },
         areaNodeId: areaCardId,
         card: !!areaCardId,
         altKey: event.altKey,
+        moveMembers: !areaOnlyModifier,
         preferredAreaNodeId: canvasState?.document.nodes.find(node => state.selected.length === 1 && node.id === state.selected[0] && node.type === "scene-area")?.id ?? null
       });
       if (!started) return false;
@@ -301,6 +303,7 @@ export function create2dInputFamily(core: InteractionCore) {
         pointerId: event.pointerId,
         areaNodeId: started.areaNodeId,
         intent: started.intent,
+        moveMembers: !event.altKey,
         cursor
       };
       setCursor(started.intent === "move" ? "grabbing" : state.gesture.cursor ?? "nwse-resize");
@@ -709,7 +712,13 @@ export function create2dInputFamily(core: InteractionCore) {
     // 移动段的计时起点：一次 pointermove 只读一次时钟，后续分支共用。
     const moveAt = telemetryNow();
     if (state.gesture.kind === "scene-area") {
-      core.sceneAreaGestures()?.update({ x: event.clientX, y: event.clientY });
+      const runtime = core.sceneAreaGestures();
+      if (event.altKey || state.gesture.moveMembers === false) {
+        const moveMembers = !event.altKey;
+        runtime?.update({ x: event.clientX, y: event.clientY }, { moveMembers });
+        state.gesture.moveMembers = moveMembers;
+      }
+      else runtime?.update({ x: event.clientX, y: event.clientY });
       perf.accumulateSince("gesture-move", moveAt);
       schedule();
       return;
@@ -800,7 +809,12 @@ export function create2dInputFamily(core: InteractionCore) {
       // 权威 prepare/commit 是异步的：释放后让运行时完成准备与提交；失败经统一错误出口，
       // 手势本身在 finally 复位，不会卡住输入。
       const runtime = core.sceneAreaGestures();
-      runtime?.update({ x: event.clientX, y: event.clientY });
+      if (event.altKey || state.gesture.moveMembers === false) {
+        const moveMembers = !event.altKey;
+        runtime?.update({ x: event.clientX, y: event.clientY }, { moveMembers });
+        state.gesture.moveMembers = moveMembers;
+      }
+      else runtime?.update({ x: event.clientX, y: event.clientY });
       void runtime?.end().then(result => {
         if (!result.ok) options.onInteractionError?.(new Error(result.message));
       }).catch(error => options.onInteractionError?.(error));

@@ -1,7 +1,7 @@
 /**
  * 导演区手势的可见状态入口（T07 scope gestures）。
  *
- * 画布上只保留手势状态提示（提交失败/冲突时出现）；拖动、边缘调整与框选都走画布手势，
+ * 画布上只保留手势状态提示（移动期间包含修饰键指引，提交失败/冲突时显示详情）；拖动、边缘调整与框选都走画布手势，
  * 撤销/重做使用页面 journal 与全局快捷键。2D 组不弹成员管理面板。
  * 所有写操作仍交给权威场景接口或页面 journal；控件只发请求，不自己计算权限。
  */
@@ -18,21 +18,51 @@ import { bindGroupActions, createGroupActions } from "./group-actions.js";
 export const WORLD_SCOPE_GESTURE_CONTROLS_PLUGIN_ID = "world-scope-gesture-controls";
 
 const panelStyle: CSSProperties = {
-  width: 320,
-  padding: 12,
-  borderRadius: 12,
+  maxWidth: "min(520px, calc(100vw - 32px))",
+  padding: "8px 12px",
+  borderRadius: 10,
   border: "1px solid var(--app-web-border, #e2e8e4)",
-  background: "var(--app-web-panel, #fff)",
+  background: "var(--app-web-elevated, var(--app-web-panel, #fff))",
   color: "var(--app-web-text-primary, #30443a)",
-  boxShadow: "0 14px 34px var(--app-web-shadow, #2d423933)",
+  boxShadow: "0 10px 26px var(--app-web-shadow, #2d423933)",
   fontFamily: "\"Noto Sans SC\", \"Noto Sans\", system-ui, sans-serif",
-  fontSize: 13,
+  fontSize: 12,
   lineHeight: 1.4,
-  display: "grid",
-  gap: 8
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexWrap: "wrap",
+  gap: "6px 10px",
+  textAlign: "left"
 };
 
-const hintStyle: CSSProperties = { fontSize: 12, lineHeight: 1.45, color: "var(--app-web-text-muted, #849188)" };
+const hintStyle: CSSProperties = {
+  color: "var(--app-web-text-muted, #849188)",
+  fontSize: 11,
+  lineHeight: 1.4
+};
+
+const keyStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minWidth: 28,
+  height: 20,
+  padding: "0 6px",
+  boxSizing: "border-box",
+  border: "1px solid var(--app-web-border-strong, #c7d2cc)",
+  borderRadius: 5,
+  background: "var(--app-web-surface, #f4f7f5)",
+  color: "var(--app-web-text-primary, #30443a)",
+  font: "600 11px/1 \"Noto Sans SC\", \"Noto Sans\", system-ui, sans-serif",
+  justifyContent: "center",
+  boxShadow: "0 1px 0 var(--app-web-border, #e2e8e4)"
+};
+
+const modeStyle: CSSProperties = {
+  color: "var(--app-web-text-primary, #30443a)",
+  fontWeight: 600,
+  whiteSpace: "nowrap"
+};
 
 function GestureStatus() {
   const snapshot = useSyncExternalStore(sceneAreaGestureStore.subscribe, sceneAreaGestureStore.getSnapshot, sceneAreaGestureStore.getSnapshot);
@@ -50,16 +80,18 @@ function GestureStatus() {
       aria-live="polite"
       style={{
         ...panelStyle,
-        width: "auto",
-        maxWidth: 460,
-        padding: "8px 14px",
-        borderRadius: 999,
-        background: "var(--app-web-panel, #fff)",
-        justifyItems: "center",
-        textAlign: "center"
+        width: "max-content"
       }}
     >
-      <strong style={{ fontSize: 13 }}>{label}</strong>
+      <strong style={{ fontSize: 12, fontWeight: 650, whiteSpace: "nowrap" }}>{label}</strong>
+      {snapshot.phase !== "committing" && snapshot.intent === "move" ? (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={modeStyle}>{snapshot.moveMembers ? "带动区内模型" : "仅移动导演区"}</span>
+          <span style={hintStyle}>· {snapshot.moveMembers ? "按住" : "松开"}</span>
+          <kbd style={keyStyle}>Alt</kbd>
+          <span style={hintStyle}>{snapshot.moveMembers ? "切换" : "恢复带动"}</span>
+        </span>
+      ) : null}
       {snapshot.message ? <span style={{ ...hintStyle, color: "var(--app-status-danger, #bb5464)" }}>{snapshot.message}</span>
         : reading ? <span style={hintStyle}>{reading}</span> : null}
       {snapshot.conflicts.map(conflict => (

@@ -370,6 +370,23 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
 
   let syncHandler: SyncUpgradeHandler | null = null;
   let worldCapture: WorldCaptureService | null = null;
+  /**
+   * 取景观察会为每个世界镜头重新解析场景内容（当前画布含大量模型脚本），属于
+   * 派生工作，不能阻塞命令的 durable 提交和 WebSocket 回执。短暂合并同一事件循环
+   * 内的连续提交，只保留每张画布最新的规范快照。
+   */
+  let pendingCanonicalObservation: { canvasId: string; canvas: ServerCanvas; startup?: boolean } | null = null;
+  let canonicalObservationTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleCanonicalObservation = (input: { canvasId: string; canvas: ServerCanvas; startup?: boolean }): void => {
+    pendingCanonicalObservation = input;
+    if (canonicalObservationTimer !== null) return;
+    canonicalObservationTimer = setTimeout(() => {
+      canonicalObservationTimer = null;
+      const next = pendingCanonicalObservation;
+      pendingCanonicalObservation = null;
+      if (next) worldCapture?.observeCanonical(next);
+    }, 0);
+  };
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
@@ -425,7 +442,7 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         if (exported.ok) worldCapture?.observeCanonical({ canvasId: exported.canvas.id, canvas: exported.canvas, startup: true });
       },
       onCommitted: (input) => {
-        worldCapture?.observeCanonical({ canvasId: input.canvasId, canvas: input.canvas, startup: false });
+        scheduleCanonicalObservation({ canvasId: input.canvasId, canvas: input.canvas, startup: false });
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion
             ? {

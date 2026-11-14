@@ -402,7 +402,7 @@ export type InteractionController = {
    * 导演区地面范围瞬时预览（搬动/调范围）。只影响本页呈现，松手或取消传 `null` 清除；
    * 不写规范 nodeData，也不代替权威 scene-area 提交。
    */
-  setSceneAreaPreview(nodeId: string, bounds: import("@woohaa3/contracts").GroundAabb | null): boolean;
+  setSceneAreaPreview(nodeId: string, bounds: import("@woohaa3/contracts").GroundAabb | null, moveMembers?: boolean): boolean;
   /** Resolve a client point against the accepted renderer camera's ground plane. */
   queryWorldGround(point: { x: number; y: number }): { u: number; v: number } | null;
   beginWorldGroundPreview(nodeId: string, point: { x: number; y: number }): boolean;
@@ -568,5 +568,6 @@ export type Gesture =
       pointerId: number;
       areaNodeId: string;
       intent: "move" | "resize";
+      moveMembers: boolean;
       cursor?: string;
     };

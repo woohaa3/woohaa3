@@ -67,6 +67,11 @@ export class CanvasRoom {
   private quarantineCode: string | null = null;
   /** 只含已持久化 update 的权威文档。 */
   private published: Y.Doc;
+  /**
+   * 与 published 同步的可写候选文档。命令成功后继续复用，避免每次提交都完整克隆
+   * 当前画布；失败、外部合并或从存储重载时才丢弃并重建。
+   */
+  private authoring: Y.Doc | null = null;
   private storageSeq = 0;
   private revision = 0;
   private epoch: string | null = null;
@@ -157,6 +162,7 @@ export class CanvasRoom {
     });
     if (recovered.ok) {
       this.published = recovered.doc;
+      this.authoring = cloneDoc(this.published);
       this.storageSeq = recovered.state.storageSeq;
       this.revision = recovered.revision;
       this.epoch = recovered.state.roomEpoch;
@@ -212,6 +218,7 @@ export class CanvasRoom {
       createdAt: input.createdAt ?? this.now()
     });
     this.published = doc;
+    this.authoring = cloneDoc(this.published);
     this.storageSeq = 0;
     this.revision = input.canvas.revision;
     this.epoch = input.roomEpoch;
@@ -363,6 +370,7 @@ export class CanvasRoom {
   /** 释放 room（清空内存文档；不影响持久化状态）。 */
   dispose(): void {
     this.published = new Y.Doc();
+    this.authoring = null;
     this.state = "loading";
   }
 
@@ -390,6 +398,12 @@ export class CanvasRoom {
       },
       get publishedDoc() {
         return self.published;
+      },
+      get authoringDoc() {
+        return self.authoring ?? (self.authoring = cloneDoc(self.published));
+      },
+      resetAuthoring: () => {
+        self.authoring = cloneDoc(self.published);
       },
       nowIso: () => self.now(),
       exportCanvas: () => self.exportCanvas(),
@@ -472,6 +486,7 @@ export class CanvasRoom {
     // 旧 published 已知的部分不重发；客户端已经收到过本 room 自己的 update。
     const missing = Y.encodeStateAsUpdate(recovered.doc, known);
     this.published = recovered.doc;
+    this.authoring = cloneDoc(this.published);
     this.storageSeq = recovered.state.storageSeq;
     this.revision = recovered.revision;
     this.epoch = recovered.state.roomEpoch;
@@ -516,6 +531,7 @@ export class CanvasRoom {
       createdAt: this.now()
     });
     this.published = doc;
+    this.authoring = cloneDoc(this.published);
     this.storageSeq = 0;
     this.revision = exported.canvas.revision;
     this.epoch = roomEpoch;
@@ -574,8 +590,16 @@ export class CanvasRoom {
 
     this.storageSeq = commit.storageSeq;
     Y.applyUpdate(this.published, netUpdate);
+    if (this.authoring) Y.applyUpdate(this.authoring, netUpdate);
     this.revision = canvas.revision;
     this.broadcast?.({ room: this, update: netUpdate, revision: canvas.revision, origin: "upstream" });
     return { ok: true, changed: true, revision: canvas.revision };
   }
+}
+
+/** Clone only when the room's reusable authoring document must be rebuilt. */
+function cloneDoc(source: Y.Doc): Y.Doc {
+  const clone = new Y.Doc();
+  Y.applyUpdate(clone, Y.encodeStateAsUpdate(source));
+  return clone;
 }

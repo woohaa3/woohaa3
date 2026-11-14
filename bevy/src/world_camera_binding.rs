@@ -123,7 +123,7 @@ impl WorldCameraBinding {
 }
 
 /// 相机渲染层：绑定实例只看该层，未绑定看整层世界内容 11，缺失/不可用渲染空层。
-/// `editor_guide` 只在编辑取景加上 9 号辅助层，且**不会**带回世界层 0。
+/// `editor_guide` 只在编辑取景加上导演区层，且**不会**带回世界层 0。
 ///
 /// 拍摄主光放在独立层 12：相机必须包含该层，光才对本视图生效；该层没有几何体，
 /// 也不会被主画布相机包含，所以补光不会串到画布。
@@ -141,7 +141,7 @@ pub(crate) fn camera_layers(resolution: &BindingResolution, editor_guide: bool) 
         layers = layers.with(crate::preview_layers::SHOOTING_KEY_LAYER);
     }
     if editor_guide {
-        layers = layers.with(crate::world_camera_preview::EDITOR_GUIDE_LAYER);
+        layers = layers.with(crate::world_camera_preview::DIRECTOR_AREA_LAYER);
     }
     layers
 }
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn editor_guide_layer_never_reintroduces_the_world_layer() {
+    fn director_area_layer_never_reintroduces_the_world_layer() {
         let binding = BindingResolution::Instance {
             node_id: "a".to_owned(),
             layer: 40,
@@ -350,7 +350,7 @@ mod tests {
         let layers = camera_layers(&binding, true);
         assert!(layers.intersects(&RenderLayers::layer(40)));
         assert!(layers.intersects(&RenderLayers::layer(
-            crate::world_camera_preview::EDITOR_GUIDE_LAYER
+            crate::world_camera_preview::DIRECTOR_AREA_LAYER
         )));
         assert!(!layers.intersects(&RenderLayers::layer(0)));
     }

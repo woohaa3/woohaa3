@@ -6,7 +6,7 @@
  * 权限，也不自己改规范画布：
  *
  * - 普通拖动 = `move`，成员集合固定为 prepare 返回的可写实例与区内镜头；高度、旋转、
- *   缩放由 OC04 规划保留。
+ *   缩放由 OC04 规划保留。显式 `moveMembers: false` 时只移动导演区本身。
  * - 边缘拖动 / 显式“仅调整范围” / 修饰键 = `resize`，只改 bounds。
  * - 删除默认只移除范围；显式“连同内容删除”才删除固定可写成员，素材与任务不动。
  *
@@ -53,6 +53,8 @@ export const SCENE_AREA_MIN_SIZE_METERS = 0.25;
 export type SceneAreaGestureSnapshot = {
   phase: SceneAreaGesturePhase;
   intent: SceneAreaPlanIntent | null;
+  /** Whether a move carries the fixed members with the director area. */
+  moveMembers: boolean;
   areaNodeId: string | null;
   delta: GroundPoint | null;
   bounds: GroundAabb | null;
@@ -63,6 +65,7 @@ export type SceneAreaGestureSnapshot = {
 const IDLE_STATE: SceneAreaGestureSnapshot = {
   phase: "idle",
   intent: null,
+  moveMembers: true,
   areaNodeId: null,
   delta: null,
   bounds: null,
@@ -73,6 +76,7 @@ const IDLE_STATE: SceneAreaGestureSnapshot = {
 function sameState(left: SceneAreaGestureSnapshot, right: SceneAreaGestureSnapshot): boolean {
   return left.phase === right.phase
     && left.intent === right.intent
+    && left.moveMembers === right.moveMembers
     && left.areaNodeId === right.areaNodeId
     && left.message === right.message
     && sameGround(left.delta, right.delta)
@@ -322,6 +326,8 @@ export function buildSceneAreaRequest(input: {
   intent: SceneAreaPlanIntent;
   delta?: GroundPoint;
   bounds?: GroundAabb;
+  /** Move the frozen members together with the area; defaults to true. */
+  moveMembers?: boolean;
 }): { ok: true; request: SceneAreaPlanRequest } | { ok: false; reason: string } {
   const { canvasId, operationId, snapshot, intent } = input;
   if (!canvasId || !operationId) return { ok: false, reason: "场景操作身份缺失" };
@@ -331,7 +337,7 @@ export function buildSceneAreaRequest(input: {
     canvasId,
     operationId,
     area: snapshot.area,
-    members: snapshot.members
+    members: input.moveMembers === false ? { instances: [], cameras: [] } : snapshot.members
   } as const;
   if (intent === "move") {
     const delta = input.delta;
@@ -359,6 +365,8 @@ export type SceneAreaGestureBeginInput = {
   /** 指针是否落在区域卡片本体。 */
   card: boolean;
   altKey?: boolean;
+  /** Move the fixed scene members together with the area (defaults to true). */
+  moveMembers?: boolean;
   /** 优先使用的已选区域（重叠时稳定选择）。 */
   preferredAreaNodeId?: string | null;
   mode?: SceneAreaDragMode;
@@ -405,7 +413,7 @@ export type SceneAreaGestureDeps = {
   /** 只预览可写实例的地面位移；相机没有对应的地面预览通道。 */
   preview: (nodeId: string, delta: GroundPoint | null) => void;
   /** 预览导演区地面范围（搬动/调范围），松手或取消传 null。 */
-  previewArea?: (nodeId: string, bounds: GroundAabb | null) => void;
+  previewArea?: (nodeId: string, bounds: GroundAabb | null, moveMembers?: boolean) => void;
   mode?: () => SceneAreaDragMode;
   tolerance?: (point: SceneAreaPoint) => number;
   newOperationId?: (prefix: string) => string;
@@ -415,7 +423,8 @@ export type SceneAreaGestureStart = { areaNodeId: string; intent: SceneAreaGestu
 
 export type SceneAreaGesturePort = {
   begin(input: SceneAreaGestureBeginInput): SceneAreaGestureStart | null;
-  update(point: SceneAreaPoint): boolean;
+  update(point: SceneAreaPoint, options?: { moveMembers?: boolean }): boolean;
+  setMoveMembers(moveMembers: boolean): boolean;
   end(): Promise<SceneAreaGestureResult>;
   cancel(): void;
   active(): boolean;
@@ -445,6 +454,8 @@ type ActiveGesture = {
   snapshot: WorldPreparedAuthoritySnapshot | null;
   prepareMessage: string | null;
   previewed: Set<string>;
+  moveMembers: boolean;
+  lastPoint: SceneAreaPoint;
   ending: boolean;
   committing: boolean;
 };
@@ -536,6 +547,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     sceneAreaGestureStore.set({
       phase: next.phase,
       intent: next.intent ?? null,
+      moveMembers: next.moveMembers ?? true,
       areaNodeId: next.areaNodeId ?? null,
       delta: next.delta ?? null,
       bounds: next.bounds ?? null,
@@ -550,8 +562,13 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     deps.previewArea?.(gesture.areaNodeId, null);
   };
 
+  const clearMemberPreview = (gesture: ActiveGesture): void => {
+    for (const nodeId of gesture.previewed) deps.preview(nodeId, null);
+    gesture.previewed.clear();
+  };
+
   const applyPreview = (gesture: ActiveGesture): void => {
-    if (!gesture.snapshot || gesture.intent !== "move") return;
+    if (!gesture.snapshot || gesture.intent !== "move" || !gesture.moveMembers) return;
     const nodeIdByInstance = instanceNodeIds(gesture.snapshot);
     // The scene builder previews the moved area's origin, which already carries
     // every instance with a position track. Ground-previewing those again would
@@ -595,6 +612,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       areaNodeId: gesture.areaNodeId,
       delta: gesture.delta,
       bounds: gesture.bounds,
+      moveMembers: gesture.moveMembers,
       message: gesture.prepareMessage
     });
   };
@@ -681,6 +699,8 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       snapshot: null,
       prepareMessage: null,
       previewed: new Set(),
+      moveMembers: input.moveMembers !== false,
+      lastPoint: { ...input.point },
       ending: false,
       committing: false
     };
@@ -690,9 +710,14 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
     return { areaNodeId, intent: decision.intent, ...(decision.edge ? { edge: decision.edge } : {}) };
   };
 
-  const update = (point: SceneAreaPoint): boolean => {
+  const update = (point: SceneAreaPoint, options?: { moveMembers?: boolean }): boolean => {
     const gesture = active;
     if (!gesture || gesture.ending) return false;
+    if (options?.moveMembers !== undefined && options.moveMembers !== gesture.moveMembers) {
+      gesture.moveMembers = options.moveMembers;
+      if (!gesture.moveMembers) clearMemberPreview(gesture);
+    }
+    gesture.lastPoint = { ...point };
     const ground = deps.queryGround(point);
     if (!ground) return false;
     const delta = { u: ground.u - gesture.startGround.u, v: ground.v - gesture.startGround.v };
@@ -706,9 +731,27 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       };
       applyPreview(gesture);
     }
-    deps.previewArea?.(gesture.areaNodeId, gesture.bounds);
+    if (gesture.moveMembers) deps.previewArea?.(gesture.areaNodeId, gesture.bounds);
+    else deps.previewArea?.(gesture.areaNodeId, gesture.bounds, false);
     publish(gesture, gesture.intent === "move" ? "moving" : "resizing");
     return true;
+  };
+
+  const setMoveMembers = (moveMembers: boolean): boolean => {
+    const gesture = active;
+    if (!gesture || gesture.ending || gesture.intent !== "move" || gesture.moveMembers === moveMembers) return false;
+    const updated = update(gesture.lastPoint, { moveMembers });
+    // The mode is also a live keyboard hint. Keep the published state in sync even
+    // when the ground query is temporarily unavailable (for example while the
+    // renderer is between accepted frames); the next pointer move will refresh the
+    // exact bounds and member preview.
+    if (!updated) {
+      gesture.moveMembers = moveMembers;
+      if (!moveMembers) clearMemberPreview(gesture);
+      deps.previewArea?.(gesture.areaNodeId, gesture.bounds, moveMembers);
+      publish(gesture, gesture.intent === "move" ? "moving" : "resizing");
+    }
+    return updated;
   };
 
   const finish = (gesture: ActiveGesture): { ok: false; code: string; message: string } => {
@@ -744,6 +787,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
       operationId,
       snapshot: gesture.snapshot,
       intent: gesture.intent,
+      moveMembers: gesture.moveMembers,
       ...(gesture.intent === "move" ? { delta: gesture.delta } : { bounds: gesture.bounds })
     });
     if (!built.ok) {
@@ -899,6 +943,7 @@ export function createSceneAreaGestures(deps: SceneAreaGestureDeps): SceneAreaGe
   return {
     begin,
     update,
+    setMoveMembers,
     end,
     cancel,
     active: () => !!active,
@@ -963,7 +1008,7 @@ export function installSceneAreaGestures(ctx: Context, canvasId: string | undefi
     },
     queryGround: point => ctx.canvasRuntime.controller()?.queryWorldGround(point) ?? null,
     preview: (nodeId, delta) => { ctx.canvasRuntime.controller()?.setWorldGroundPreview(nodeId, delta); },
-    previewArea: (nodeId, bounds) => { ctx.canvasRuntime.controller()?.setSceneAreaPreview(nodeId, bounds); },
+    previewArea: (nodeId, bounds, moveMembers) => { ctx.canvasRuntime.controller()?.setSceneAreaPreview(nodeId, bounds, moveMembers); },
     mode: () => sceneAreaModeStore.getSnapshot(),
     tolerance: point => {
       const controller = ctx.canvasRuntime.controller();

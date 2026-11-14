@@ -168,6 +168,7 @@ function runtimeHarness(overrides: Partial<SceneAreaGestureDeps> = {}) {
 const fakePort = (start: { areaNodeId: string; intent: "move" | "resize" } | null) => ({
   begin: vi.fn(() => start),
   update: vi.fn(() => true),
+  setMoveMembers: vi.fn(() => true),
   end: vi.fn(async () => ({ ok: true as const, noop: true as const })),
   cancel: vi.fn(),
   active: vi.fn(() => false),

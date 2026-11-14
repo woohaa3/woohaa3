@@ -99,6 +99,11 @@ export class CanvasSyncSession {
   private messageTimestamps: number[] = [];
   /** 是否已经完成 state-vector 同步（未完成前不接受命令）。 */
   private synced = false;
+  /**
+   * 客户端 room epoch 过期时，第一次 state-vector 握手必须从空向量开始。
+   * 该标记只作用于本次连接的初始握手，避免后续重发 step1 又重复全量同步。
+   */
+  private forceFullSync = false;
   /** write 复核钩子（任务 4.5/6.2/6.3）；未注入时不传（历史行为不变）。 */
   private readonly authorizeCommand: (() => Promise<boolean>) | undefined;
   private readonly onCommandComplete: SyncSessionContext["onCommandComplete"];
@@ -135,6 +140,7 @@ export class CanvasSyncSession {
     // epoch 不一致：告知客户端必须丢弃本地 cache，但仍允许从头同步。
     const epochMismatch = context.clientRoomEpoch !== null
       && context.clientRoomEpoch !== this.room.roomEpoch;
+    this.forceFullSync = epochMismatch;
 
     this.detachMessage = this.socket.onMessage((data) => this.handleMessage(data));
     this.detachClose = this.socket.onClose(() => this.dispose());
@@ -151,21 +157,9 @@ export class CanvasSyncSession {
     // 2) 发送 sync step1（服务端 state vector），让客户端回差量请求。
     const serverStateVector = this.room.encodeStateVector();
     this.socket.send(encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, serverStateVector));
-    // 3) 直接根据客户端 state vector 计算差量（无论是否 epoch 过期）。
-    //    epoch 过期时用「空 state vector」强制全量，让客户端丢弃本地 cache。
-    const base = epochMismatch ? Y.encodeStateVector(new Y.Doc()) : context.clientStateVector;
-    const diff = this.room.encodeDiff(base);
-    this.socket.send(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, diff));
-    // 4) 差量应用完成后进入 ready。
-    this.synced = true;
-    this.status = "ready";
-    this.socket.send(encodeStatusMessage({
-      status: "synced",
-      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
-      yDocFormatVersion: YJS_CANVAS_FORMAT_VERSION,
-      roomEpoch: this.room.roomEpoch,
-      revision: this.room.currentRevision
-    }));
+    // 3) 等客户端回送自己的 state vector 后再计算差量。
+    //    客户端 provider 收到服务端 step1 后会回送 step1；在这里响应能确保
+    //    每条连接只发送一次初始差量，避免构造函数与回送路径重复发送整份文档。
   }
 
   get sessionStatus(): SyncSessionStatus {
@@ -226,14 +220,23 @@ export class CanvasSyncSession {
     // 递归调用同一条规范化路径，避免 0 字节输入让 Yjs 抛错。
     let diff: Uint8Array;
     try {
-      diff = this.room.encodeDiff(stateVectorBytes);
+      const base = this.forceFullSync
+        ? Y.encodeStateVector(new Y.Doc())
+        : stateVectorBytes;
+      diff = this.room.encodeDiff(base);
     } catch {
       this.fail("malformed-message", "state vector 解析失败");
       return;
     }
+    this.forceFullSync = false;
     this.socket.send(encodeSyncMessage(SYNC_MESSAGE_TYPE.UPDATE, diff));
+    this.synced = true;
+    this.status = "ready";
     this.socket.send(encodeStatusMessage({
       status: "synced",
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      yDocFormatVersion: YJS_CANVAS_FORMAT_VERSION,
+      roomEpoch: this.room.roomEpoch,
       revision: this.room.currentRevision
     }));
   }

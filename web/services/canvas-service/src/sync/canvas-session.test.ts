@@ -124,6 +124,11 @@ describe("CanvasSession 通道隔离（任务 2.2 / 2.5）", () => {
         subscribed = after;
       }
     });
+    // 完成内层 Yjs state-vector 握手后再验证命令通道。
+    fake.receive(encodeSessionFrame(
+      SESSION_CHANNEL.CANVAS_YJS,
+      encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, new Uint8Array(0))
+    ));
     // 订阅 task-activity 通道。
     fake.receive(encodeSessionFrame(SESSION_CHANNEL.TASK_ACTIVITY, encodeTaskActivitySubscribe({ type: "subscribe", after: 5 })));
     expect(subscribed).toBe(5);

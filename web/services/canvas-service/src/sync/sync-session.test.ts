@@ -83,17 +83,20 @@ async function connect(
   overrides: Partial<Omit<SyncSessionContext, "room" | "socket">> = {}
 ) {
   const fake = fakeSocket();
+  const clientStateVector = overrides.clientStateVector ?? new Uint8Array(0);
   const session = new CanvasSyncSession({
     room,
     socket: fake.socket,
     clientProtocolVersion: YJS_SYNC_PROTOCOL_VERSION,
     clientFormatVersion: YJS_CANVAS_FORMAT_VERSION,
     clientRoomEpoch: "epoch-1",
-    clientStateVector: new Uint8Array(0),
+    clientStateVector,
     actorId: "actor",
     now: () => 0,
     ...overrides
   });
+  // 服务端先发 step1，客户端回送自己的 state vector 后才完成初始同步。
+  fake.receive(encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, clientStateVector));
   return { session, fake };
 }
 
@@ -180,7 +183,7 @@ describe("握手闸门（任务 5.2）", () => {
     const { fake, session } = await connect(room);
     expect(session.sessionStatus).toBe("ready");
     expect(fake.sent.some((entry) => entry.kind === "sync" && entry.syncType === SYNC_MESSAGE_TYPE.STEP1)).toBe(true);
-    expect(fake.sent.some((entry) => entry.kind === "sync" && entry.syncType === SYNC_MESSAGE_TYPE.UPDATE)).toBe(true);
+    expect(fake.sent.filter((entry) => entry.kind === "sync" && entry.syncType === SYNC_MESSAGE_TYPE.UPDATE)).toHaveLength(1);
     const status = fake.sent.find((entry) => entry.kind === "status" && entry.status.status === "synced");
     expect(status?.kind === "status" && status.status.status).toBe("synced");
     expect(status?.kind === "status" && status.status.revision).toBe(2);

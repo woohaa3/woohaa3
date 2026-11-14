@@ -2,7 +2,7 @@
 //!
 //! Each world camera owns a `Camera3d` writing into an `Image`, and a 2D sprite placed in
 //! the card content rect. Editing flies from the canvas observer into this lens and
-//! adds a horizontal ground grid and scene-area guides on a separate editor layer.
+//! adds scene-area guides on a separate editor layer.
 //!
 //! This is a *presentation* of the canonical camera pose; it does not capture pixels into
 //! media, does not create history, and does not run generation. The later T09 capture
@@ -22,16 +22,15 @@ use crate::{
     app::{CurrentScene, PreviewLayerPool, SurfaceState},
     canvas_query::layout,
     model3d::ModelVisuals,
-    protocol::{Scene, WorldCamera, world_rotation_to_renderer, world_to_renderer},
+    protocol::{Scene, WorldCamera},
     theme::ThemeResource,
     world_camera_binding::{BindingResolution, WorldCameraBinding},
 };
 
-mod ground_grid;
 mod transition;
 
-/// Ground guides in editing, excluded from ordinary camera cards/captures.
-pub(crate) const EDITOR_GUIDE_LAYER: usize = 9;
+/// Director-area chrome, excluded from ordinary camera cards/captures.
+pub(crate) const DIRECTOR_AREA_LAYER: usize = 9;
 
 const MAX_PREVIEW_EDGE: f32 = 1024.0;
 const PREVIEW_BUCKET: f32 = 64.0;
@@ -43,7 +42,6 @@ pub(crate) struct WorldCameraPreviews {
     cards: HashMap<String, PreviewCard>,
     editor_backdrop: Option<Entity>,
     entry: Option<transition::EntryFlight>,
-    ground: ground_grid::GroundGrid,
     /// Images replaced/removed last frame; dropped after the sprite commands applied.
     retired: Vec<Handle<Image>>,
 }
@@ -63,8 +61,6 @@ struct PreviewCard {
 pub(crate) fn sync(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     scene: Res<CurrentScene>,
     surface: Res<SurfaceState>,
     theme: Res<ThemeResource>,
@@ -117,12 +113,9 @@ pub(crate) fn sync(
         }
     } else {
         previews.entry = None;
-        previews
-            .ground
-            .clear(&mut commands, &mut meshes, &mut materials);
     }
-    // The ordinary grid is a distant screen backdrop, so it belongs only to
-    // the canvas observer while flying. The editing lens gets a real ground grid.
+    // The ordinary grid is a distant screen backdrop. Camera editing does not create
+    // another ground grid; the scene remains readable through the camera's own guides.
     for mut layers in &mut grids {
         *layers = RenderLayers::layer(if edit.is_some() {
             crate::world_camera::WORLD_CAMERA_GIZMO_LAYER
@@ -250,17 +243,6 @@ pub(crate) fn sync(
                 } * crate::protocol::UNITS_PER_METER;
                 lens = entry.lens(lens, display, amount, zoom, height as f32);
             }
-            let mut grid_lens = lens.clone();
-            grid_lens.update(target.x as f32, target.y as f32);
-            previews.ground.sync(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                pose,
-                &grid_lens,
-                (camera.projection.far() * crate::protocol::UNITS_PER_METER) as f32,
-                &theme,
-            );
         }
         let existing = previews.cards.get(&node.id);
         if existing.is_some_and(|card| card.signature == signature) {
@@ -701,7 +683,7 @@ mod tests {
         );
         assert!(previews.editor_backdrop.is_some());
         let layers = app.world().get::<RenderLayers>(card.camera).unwrap();
-        assert!(layers.intersects(&RenderLayers::layer(EDITOR_GUIDE_LAYER)));
+        assert!(layers.intersects(&RenderLayers::layer(DIRECTOR_AREA_LAYER)));
         assert!(!layers.intersects(&RenderLayers::layer(
             crate::world_camera::WORLD_CAMERA_GIZMO_LAYER
         )));
@@ -710,7 +692,7 @@ mod tests {
             &RenderLayers::layer(crate::world_camera::WORLD_CAMERA_GIZMO_LAYER)
         );
         let mesh_count = app.world().resource::<Assets<Mesh>>().len();
-        assert_eq!(mesh_count, 2);
+        assert_eq!(mesh_count, 0, "camera editing no longer creates a helper ground grid");
         assert_eq!(
             app.world().resource::<CurrentScene>().0.nodes[0]
                 .world_camera
@@ -724,12 +706,12 @@ mod tests {
             app.world().resource::<CurrentScene>().0.viewport.x,
             viewport.x
         );
-        // Output inspection only removes the editor guide layer. The canonical
+        // Output inspection only removes the director-area layer. The canonical
         // camera and scene binding remain untouched.
         app.world_mut().resource_mut::<CurrentScene>().0.world_camera_edit.as_mut().unwrap().show_helpers = false;
         app.update();
         let card = &app.world().resource::<WorldCameraPreviews>().cards["camera-node"];
-        assert!(!app.world().get::<RenderLayers>(card.camera).unwrap().intersects(&RenderLayers::layer(EDITOR_GUIDE_LAYER)));
+        assert!(!app.world().get::<RenderLayers>(card.camera).unwrap().intersects(&RenderLayers::layer(DIRECTOR_AREA_LAYER)));
         app.world_mut()
             .resource_mut::<CurrentScene>()
             .0
@@ -742,7 +724,7 @@ mod tests {
             !app.world()
                 .get::<RenderLayers>(card.camera)
                 .unwrap()
-                .intersects(&RenderLayers::layer(EDITOR_GUIDE_LAYER))
+                .intersects(&RenderLayers::layer(DIRECTOR_AREA_LAYER))
         );
         assert_eq!(
             app.world().get::<RenderLayers>(backdrop_grid).unwrap(),

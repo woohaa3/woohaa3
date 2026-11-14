@@ -300,6 +300,23 @@ describe("Canvas Service Yjs room contract（任务 5.2）", () => {
       + `&protocolVersion=${YJS_SYNC_PROTOCOL_VERSION}&formatVersion=${YJS_CANVAS_FORMAT_VERSION}`,
       { headers: { "x-woohaa3-actor": "contract", "x-woohaa3-service-token": token } }
     );
+    // 监听器必须在 open 前挂上：服务端 upgrade 完成后会立即发送 step1，
+    // 客户端回送 state vector 后才进入 synced。
+    let synced = false;
+    ws.on("message", (raw: Buffer) => {
+      const frame = decodeSessionFrame(new Uint8Array(raw));
+      if (frame.channelId === SESSION_CHANNEL.CONTROL) return;
+      const decoded = decodeMessage(frame.payload);
+      if (decoded.type === MESSAGE_TYPE.STATUS
+        && (decoded.status as { status?: string }).status === "synced") {
+        synced = true;
+      } else if (decoded.type === MESSAGE_TYPE.SYNC && decoded.syncType === SYNC_MESSAGE_TYPE.STEP1) {
+        ws.send(encodeSessionFrame(
+          SESSION_CHANNEL.CANVAS_YJS,
+          encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, Y.encodeStateVector(new Y.Doc()))
+        ));
+      }
+    });
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
       ws.once("error", reject);
@@ -307,20 +324,12 @@ describe("Canvas Service Yjs room contract（任务 5.2）", () => {
     // 等初始同步到位（服务端 step1/step2），再发命令。
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 500);
-      ws.on("message", (raw: Buffer) => {
-        const frame = decodeSessionFrame(new Uint8Array(raw));
-        if (frame.channelId === SESSION_CHANNEL.CONTROL) return;
-        const decoded = decodeMessage(frame.payload);
-        if (decoded.type === MESSAGE_TYPE.STATUS) {
-          clearTimeout(timer);
-          resolve();
-        } else if (decoded.type === MESSAGE_TYPE.SYNC && decoded.syncType === SYNC_MESSAGE_TYPE.STEP1) {
-          ws.send(encodeSessionFrame(
-            SESSION_CHANNEL.CANVAS_YJS,
-            encodeSyncMessage(SYNC_MESSAGE_TYPE.STEP1, Y.encodeStateVector(new Y.Doc()))
-          ));
-        }
-      });
+      const poll = setInterval(() => {
+        if (!synced) return;
+        clearTimeout(timer);
+        clearInterval(poll);
+        resolve();
+      }, 10);
     });
     const accepted = await new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => resolve(false), 3_000);

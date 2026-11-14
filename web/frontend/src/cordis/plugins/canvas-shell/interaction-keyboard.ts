@@ -135,6 +135,15 @@ export function createKeyboardShortcuts(core: InteractionCore) {
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.defaultPrevented || core.modalActive()) return;
+    if (state.gesture.kind === "scene-area" && state.gesture.intent === "move"
+      && (event.key === "Alt" || event.code === "AltLeft" || event.code === "AltRight")) {
+      if (!event.repeat) {
+        core.sceneAreaGestures()?.setMoveMembers(false);
+        state.gesture.moveMembers = false;
+        schedule("scene-area-preview");
+      }
+      return;
+    }
     // 画布快捷键在 modal/panel 打开时不参与；但聚焦相机的飞行/退出只被真正 modal 阻断
     // （change: fix-model-focus-navigation-and-camera-parity，design D6）。
     const imageFocused = options.isImageFocused?.() ?? !!options.getImageFocus?.();
@@ -243,6 +252,12 @@ export function createKeyboardShortcuts(core: InteractionCore) {
   };
 
   const onKeyUp = (event: KeyboardEvent) => {
+    if (state.gesture.kind === "scene-area" && state.gesture.intent === "move"
+      && (event.key === "Alt" || event.code === "AltLeft" || event.code === "AltRight")) {
+      core.sceneAreaGestures()?.setMoveMembers(true);
+      state.gesture.moveMembers = true;
+      schedule("scene-area-preview");
+    }
     if (event.code === "Space") state.spacePressed = false;
     if (model.active) model.applyFlyKey(event, false);
     // 拖动粘连 Q/E held 释放（change: add-drag-touch-connections，design D2）。

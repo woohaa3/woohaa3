@@ -227,9 +227,13 @@ export function buildForwardCommands(
         const dv = command.bounds.min.v - currentBounds.min.v;
         const translated = Math.abs(du - (command.bounds.max.u - currentBounds.max.u)) < 1e-9
           && Math.abs(dv - (command.bounds.max.v - currentBounds.max.v)) < 1e-9;
+        // An empty member set is the explicit "move director area only" operation.
+        // Keep authored animation anchored to the old origin in that mode; moving
+        // the area and its members together continues to translate the origin.
+        const moveMembers = plan.source.members.instances.length > 0 || plan.source.members.cameras.length > 0;
         const animationOrigin = rotating
           ? rotateGroundQuarterTurns(origin, { u: (currentBounds.min.u + currentBounds.max.u) / 2, v: (currentBounds.min.v + currentBounds.max.v) / 2 })
-          : translated ? { u: origin.u + du, v: origin.v + dv } : origin;
+          : translated && moveMembers ? { u: origin.u + du, v: origin.v + dv } : origin;
         const animationQuarterTurns = ((typeof frozenArea.animationQuarterTurns === "number" ? frozenArea.animationQuarterTurns : 0) + 1) % 4;
         commands.push(patch(ref, asNodeData({
           ...ref.data,

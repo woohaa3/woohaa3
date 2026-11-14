@@ -142,7 +142,7 @@ export function installInteractionController(options: InteractionControllerOptio
     schedule: (reason) => schedule(reason)
   });
   /** 导演区范围瞬时预览：拖动/调范围时每帧随指针更新，松手或取消后清空。 */
-  const sceneAreaPreviews = new Map<string, GroundAabb>();
+  const sceneAreaPreviews = new Map<string, GroundAabb & { moveMembers?: boolean }>();
   const groundAvailable = () => !disposed && !modalActive() && !options.getModelFocus?.()
     && !options.getImageFocus?.() && !options.getVideoFocus?.() && !options.getFocusTransition?.();
   const groundAt = (point: { x: number; y: number }) => {
@@ -670,14 +670,14 @@ export function installInteractionController(options: InteractionControllerOptio
   const controller: InteractionController = {
     start: () => schedule("start"),
     setWorldGroundPreview: worldGroundPreview.set,
-    setSceneAreaPreview: (nodeId, bounds) => {
+    setSceneAreaPreview: (nodeId, bounds, moveMembers = true) => {
       if (bounds) {
         if (!Number.isFinite(bounds.min.u) || !Number.isFinite(bounds.min.v)
           || !Number.isFinite(bounds.max.u) || !Number.isFinite(bounds.max.v)) return false;
         if (bounds.min.u > bounds.max.u || bounds.min.v > bounds.max.v) return false;
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
         if (!canvas?.nodeData[nodeId]?.sceneArea) return false;
-        sceneAreaPreviews.set(nodeId, { min: { ...bounds.min }, max: { ...bounds.max } });
+        sceneAreaPreviews.set(nodeId, { min: { ...bounds.min }, max: { ...bounds.max }, moveMembers });
       } else {
         sceneAreaPreviews.delete(nodeId);
       }
