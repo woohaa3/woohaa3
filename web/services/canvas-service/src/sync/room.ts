@@ -72,6 +72,8 @@ export class CanvasRoom {
    * 当前画布；失败、外部合并或从存储重载时才丢弃并重建。
    */
   private authoring: Y.Doc | null = null;
+  /** 与 published 同 revision 的规范投影缓存，供命令队列内部只读复用。 */
+  private publishedProjection: ServerCanvas | null = null;
   private storageSeq = 0;
   private revision = 0;
   private epoch: string | null = null;
@@ -145,6 +147,11 @@ export class CanvasRoom {
     return { ok: true, canvas: exported.canvas };
   }
 
+  /** 命令队列内部使用的已发布投影；调用方按只读值消费。 */
+  publishedCanvas(): ServerCanvas | null {
+    return this.publishedProjection;
+  }
+
   /**
    * 加载/恢复 room（任务 4.5）。
    *
@@ -163,6 +170,7 @@ export class CanvasRoom {
     if (recovered.ok) {
       this.published = recovered.doc;
       this.authoring = cloneDoc(this.published);
+      this.publishedProjection = recovered.canvas;
       this.storageSeq = recovered.state.storageSeq;
       this.revision = recovered.revision;
       this.epoch = recovered.state.roomEpoch;
@@ -219,6 +227,7 @@ export class CanvasRoom {
     });
     this.published = doc;
     this.authoring = cloneDoc(this.published);
+    this.publishedProjection = input.canvas;
     this.storageSeq = 0;
     this.revision = input.canvas.revision;
     this.epoch = input.roomEpoch;
@@ -371,6 +380,7 @@ export class CanvasRoom {
   dispose(): void {
     this.published = new Y.Doc();
     this.authoring = null;
+    this.publishedProjection = null;
     this.state = "loading";
   }
 
@@ -399,6 +409,7 @@ export class CanvasRoom {
       get publishedDoc() {
         return self.published;
       },
+      publishedCanvas: () => self.publishedProjection,
       get authoringDoc() {
         return self.authoring ?? (self.authoring = cloneDoc(self.published));
       },
@@ -420,9 +431,14 @@ export class CanvasRoom {
   }): void {
     this.storageSeq = input.storageSeq;
     if (input.update) {
-      const before = this.onDelta ? this.exportCanvas() : null;
+      const before = this.onDelta
+        ? (this.publishedProjection
+          ? { ok: true as const, canvas: this.publishedProjection }
+          : this.exportCanvas())
+        : null;
       Y.applyUpdate(this.published, input.update);
       this.revision = input.revision;
+      this.publishedProjection = input.canvas;
       // 编辑历史观察者：命令已 durable，先留档再广播（失败不影响命令结果）。
       this.onCommitted?.({ canvas: input.canvas, commands: input.commands });
       if (this.onDelta && before?.ok) this.onDelta({ before: before.canvas, after: input.canvas });
@@ -487,6 +503,7 @@ export class CanvasRoom {
     const missing = Y.encodeStateAsUpdate(recovered.doc, known);
     this.published = recovered.doc;
     this.authoring = cloneDoc(this.published);
+    this.publishedProjection = recovered.canvas;
     this.storageSeq = recovered.state.storageSeq;
     this.revision = recovered.revision;
     this.epoch = recovered.state.roomEpoch;
@@ -532,6 +549,7 @@ export class CanvasRoom {
     });
     this.published = doc;
     this.authoring = cloneDoc(this.published);
+    this.publishedProjection = exported.canvas;
     this.storageSeq = 0;
     this.revision = exported.canvas.revision;
     this.epoch = roomEpoch;
@@ -592,6 +610,7 @@ export class CanvasRoom {
     Y.applyUpdate(this.published, netUpdate);
     if (this.authoring) Y.applyUpdate(this.authoring, netUpdate);
     this.revision = canvas.revision;
+    this.publishedProjection = canvas;
     this.broadcast?.({ room: this, update: netUpdate, revision: canvas.revision, origin: "upstream" });
     return { ok: true, changed: true, revision: canvas.revision };
   }

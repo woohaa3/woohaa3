@@ -594,6 +594,7 @@ describe("确认回流只发布一次规范/working 快照", () => {
         const seen: number[] = [];
         const stop = store.subscribe(state => seen.push(state.working!.document.nodes[0]!.position!.x));
         synced(1);
+        await vi.waitFor(() => expect(seen).toEqual([20]));
         stop();
         // The second local edit must not briefly roll back to the first edit.
         expect(seen).toEqual([20]);
@@ -629,7 +630,7 @@ describe("确认回流只发布一次规范/working 快照", () => {
       expect(saves()).toHaveLength(0);
       clock = 610;
       (order === "result-first" ? update : result)();
-      expect(saves()).toEqual([expect.objectContaining({ result: "success", surface: "sync", durationMs: 600 })]);
+      await vi.waitFor(() => expect(saves()).toEqual([expect.objectContaining({ result: "success", surface: "sync", durationMs: 600 })]));
       // 每条画布动作都必须带同一组 canvas / session 属性：管理端的会话与画布聚合
       // 完全依赖它们，漏一个动作就会让时间线缺一步。
       expect(saves()[0]?.attributes).toMatchObject({

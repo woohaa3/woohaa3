@@ -47,6 +47,14 @@ export type ApplyCommandTransactionOptions = {
   lifecycle?: import("@woohaa3/contracts").ManagedNodeLifecycleResolver;
   /** 权威 authoring Y.Doc（应为 published 的可写副本）。 */
   doc: Y.Doc;
+  /**
+   * 与 authoring 文档一致的规范快照。
+   *
+   * CanvasRoom 已经在加载和每次 durable 提交后缓存了 published projection；命令事务
+   * 不需要为同一批次再次把包含大模型脚本的 Y.Doc 全量导出。省略时保留旧的导出回退，
+   * 方便独立调用方和测试继续使用。
+   */
+  current?: ServerCanvas;
   batch: CanvasCommandBatch;
   mediaStorage?: MediaStorage;
   now: string;
@@ -68,12 +76,13 @@ export async function applyCommandTransaction(
 ): Promise<CommandTransactionOutcome> {
   const { doc, batch, now } = options;
 
-  // 1) 从当前 Y.Doc 导出规范聚合。
-  const exported = yDocToServerCanvas(doc, { now });
-  if (!exported.ok) {
-    return { ok: false, code: "canvas-corrupt", message: exported.failure.message };
+  // 1) 复用 room 已确认的规范聚合；没有缓存时才从 Y.Doc 导出。
+  let current = options.current;
+  if (!current) {
+    const exported = yDocToServerCanvas(doc, { now });
+    if (!exported.ok) return { ok: false, code: "canvas-corrupt", message: exported.failure.message };
+    current = exported.canvas;
   }
-  const current = exported.canvas;
 
   // 2) 复用前置 change 的纯 reducer：Yjs 路径与 remote-CAS 路径共享同一命令语义。
   const applied = applyCanvasCommands(current, batch.commands, { now, lifecycle: options.lifecycle, content: options.content });

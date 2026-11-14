@@ -34,6 +34,10 @@ export type CommandHandle = {
   error: string | null;
   /** 等待 committed（accepted 且 derived revision >= result revision）。 */
   settled: Promise<CommandHandle>;
+  /** 等待服务端 durable 回执；不等待本地 canonical 派生。 */
+  durable?: Promise<CommandHandle>;
+  /** 服务端把命令规范化为 no-op 时为 true。 */
+  noop?: boolean;
 };
 
 export type CommandLifecycleEvent = {
@@ -54,6 +58,7 @@ export type CommandLifecycleRegistryOptions = {
 
 type MutableHandle = CommandHandle & {
   resolveSettled: (handle: CommandHandle) => void;
+  resolveDurable: (handle: CommandHandle) => void;
 };
 
 /**
@@ -81,8 +86,12 @@ export class CommandLifecycleRegistry {
   begin(baseRevision: number, commandId?: string): CommandHandle {
     const id = commandId ?? this.generateCommandId();
     let resolveSettled!: (handle: CommandHandle) => void;
+    let resolveDurable!: (handle: CommandHandle) => void;
     const settled = new Promise<CommandHandle>((resolve) => {
       resolveSettled = resolve;
+    });
+    const durable = new Promise<CommandHandle>((resolve) => {
+      resolveDurable = resolve;
     });
     const handle: MutableHandle = {
       commandId: id,
@@ -91,7 +100,9 @@ export class CommandLifecycleRegistry {
       resultRevision: null,
       error: null,
       settled,
-      resolveSettled
+      durable,
+      resolveSettled,
+      resolveDurable
     };
     this.handles.set(id, handle);
     this.emit(handle);
@@ -115,6 +126,7 @@ export class CommandLifecycleRegistry {
     commandId: string;
     status: "accepted" | "duplicate" | "rejected" | "failed";
     revision?: number;
+    noop?: boolean;
     error?: string;
   }): void {
     const handle = this.handles.get(input.commandId);
@@ -124,6 +136,7 @@ export class CommandLifecycleRegistry {
       handle.state = "rejected";
       handle.error = input.error ?? "命令被拒绝";
       this.emit(handle);
+      handle.resolveDurable(handle);
       handle.resolveSettled(handle);
       return;
     }
@@ -132,7 +145,9 @@ export class CommandLifecycleRegistry {
     if (handle.state !== "observed") handle.state = "accepted";
     handle.resultRevision = input.revision ?? handle.baseRevision;
     handle.error = null;
+    handle.noop = input.noop === true;
     this.emit(handle);
+    handle.resolveDurable(handle);
     this.maybeCommit(handle);
   }
 

@@ -132,7 +132,8 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
     hasNetChange: (commandId) => {
       const handle = options.session.commandLifecycle()?.get(commandId);
       // handle 可能已被 prune；提交已 committed 才会到达这里，因此缺失视为已确认。
-      return handle === undefined || handle.state === "committed";
+      return handle === undefined || (handle.noop !== true &&
+        (handle.state === "accepted" || handle.state === "observed" || handle.state === "committed"));
     },
     submitGuarded: (input) => {
       const result = options.session.submitCommands(
@@ -143,12 +144,10 @@ export function createCanvasEditService(options: CanvasEditServiceOptions): Canv
       const handle = result.handle;
       return {
         ok: true,
-        settled: handle.settled.then((settled: { state: string; error: string | null }) =>
-          settled.state === "committed"
-            ? { ok: true as const, committed: true }
-            : settled.state === "rejected"
-              ? { ok: false as const, reason: settled.error ?? "操作被拒绝" }
-              : { ok: true as const, committed: false }
+        settled: (handle.durable ?? handle.settled).then((settled: { state: string; error: string | null; noop?: boolean }) =>
+          settled.state === "rejected"
+            ? { ok: false as const, reason: settled.error ?? "操作被拒绝" }
+            : { ok: true as const, committed: settled.noop !== true }
         )
       };
     },

@@ -589,8 +589,22 @@ function isVec3(value: unknown): boolean {
   );
 }
 
+const contentCanonicalCache = new WeakMap<object, string>();
+const contentCanonicalIdentityCache = new Map<string, string>();
+const CONTENT_CANONICAL_CACHE_LIMIT = 512;
+
 function contentCanonical(content: WorldCaptureModelContent): string {
-  return content.kind === "script"
+  const cached = contentCanonicalCache.get(content);
+  if (cached !== undefined) return cached;
+  const identity = content.kind === "script"
+    ? `script:${content.definition.contentVersion.contentHash}`
+    : `glb:${content.reference.contentVersion.contentHash}`;
+  const identityCached = contentCanonicalIdentityCache.get(identity);
+  if (identityCached !== undefined) {
+    contentCanonicalCache.set(content, identityCached);
+    return identityCached;
+  }
+  const canonical = content.kind === "script"
     ? [
         "script",
         content.definition.modelScriptLanguage,
@@ -600,6 +614,12 @@ function contentCanonical(content: WorldCaptureModelContent): string {
         ...(content.definition.rig ? [humanoidRigCanonical(content.definition.rig.parameters)] : [])
       ].join("\u0000")
     : ["glb", content.reference.assetId, placementKey(content.reference.placement)].join("\u0000");
+  contentCanonicalCache.set(content, canonical);
+  contentCanonicalIdentityCache.set(identity, canonical);
+  if (contentCanonicalIdentityCache.size > CONTENT_CANONICAL_CACHE_LIMIT) {
+    contentCanonicalIdentityCache.delete(contentCanonicalIdentityCache.keys().next().value!);
+  }
+  return canonical;
 }
 
 function isOneOf<const T extends readonly string[]>(

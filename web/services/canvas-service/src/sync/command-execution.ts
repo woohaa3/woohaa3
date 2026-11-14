@@ -37,6 +37,11 @@ export type RoomExecutionHost = {
   resetAuthoring?(): void;
   nowIso(): string;
   exportCanvas(): { ok: true; canvas: ServerCanvas } | { ok: false; code?: string; message: string };
+  /**
+   * 已发布规范投影的只读快照。room 会在 durable revision 前进时更新它，命令路径优先
+   * 复用这份快照，避免同一批次在派生、前置校验和历史观察中重复遍历完整 Y.Doc。
+   */
+  publishedCanvas?(): ServerCanvas | null;
   /** durable 成功后由 owner 推进 published/revision、按序调用 observer 并广播。 */
   finalizeAccepted(input: {
     storageSeq: number;
@@ -119,7 +124,10 @@ export async function executeDerived(
       duplicate: true
     };
   }
-  const exported = host.exportCanvas();
+  const current = host.publishedCanvas?.();
+  const exported = current
+    ? { ok: true as const, canvas: current }
+    : host.exportCanvas();
   if (!exported.ok) {
     return { ok: false, status: "failed", commandId: input.commandId, code: "canvas-unavailable", message: exported.message, retryable: true };
   }
@@ -177,7 +185,10 @@ export async function executeCommand(
   // clone，保持测试与离线调用方的兼容性。
   const authoring = host.authoringDoc ?? cloneDoc(host.publishedDoc);
   const resetAuthoring = () => host.resetAuthoring?.();
-  const before = host.exportCanvas();
+  const beforeSnapshot = host.publishedCanvas?.();
+  const before = beforeSnapshot
+    ? { ok: true as const, canvas: beforeSnapshot }
+    : host.exportCanvas();
   const groupScope = currentCanvasGroupScope();
   if (groupScope && (!groupScope.valid() || groupScope.canvasId !== host.canvasId)) {
     return { ok: false, status: "rejected", commandId: batch.commandId, code: "group-scope-revoked", message: "组创作授权已失效" };
@@ -190,6 +201,7 @@ export async function executeCommand(
     outcome = await applyCommandTransaction({
       doc: authoring,
       batch,
+      current: before.ok ? before.canvas : undefined,
       mediaStorage: host.mediaStorage,
       now: host.nowIso(),
       verifyAssets: host.verifyAssets,

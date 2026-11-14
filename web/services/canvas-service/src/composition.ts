@@ -387,6 +387,54 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
       if (next) worldCapture?.observeCanonical(next);
     }, 0);
   };
+  /**
+   * World capture only depends on cameras and shared-world model content/poses.
+   * Ordinary cards (text, images, edges, titles, task metadata, etc.) must not
+   * cause capture-snapshot to walk every model script in the canvas.
+   *
+   * Keep this signature deliberately shallow: modelContentVersion is the
+   * canonical content identity, while the script bytes themselves are left out
+   * of the hot-path comparison. Valid model writes always advance that identity.
+   */
+  const worldCaptureSignature = (canvas: ServerCanvas): string => {
+    const nodes: unknown[] = [];
+    for (const node of canvas.document.nodes) {
+      const raw = canvas.nodeData[node.id];
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const fields = raw as Record<string, unknown>;
+      if (fields.worldCamera !== undefined) {
+        nodes.push(["camera", node.id, fields.worldCamera]);
+        continue;
+      }
+      if (fields.sharedWorldInstance !== undefined) {
+        nodes.push(["instance", node.id, {
+          sharedWorldInstance: fields.sharedWorldInstance,
+          modelContentVersion: fields.modelContentVersion,
+          modelSourceKind: fields.modelSourceKind,
+          modelAssetId: fields.modelAssetId,
+          modelPlacement: fields.modelPlacement,
+          modelRig: fields.modelRig
+        }]);
+      }
+    }
+    // GLB content is addressed by asset metadata; include only the fields that
+    // can change the referenced bytes, never the media payload itself.
+    const assets = canvas.assets.map((asset) => [
+      asset.id,
+      asset.mediaKind,
+      asset.status,
+      asset.metadata?.storageKey,
+      asset.metadata?.checksum,
+      asset.metadata?.size,
+      asset.metadata?.contentType
+    ]);
+    return JSON.stringify({ nodes, assets });
+  };
+  const worldCaptureChanged = (before: ServerCanvas, after: ServerCanvas): boolean => {
+    const beforeSignature = worldCaptureSignature(before);
+    const afterSignature = worldCaptureSignature(after);
+    return beforeSignature !== afterSignature;
+  };
   const createSyncHandler = (): SyncUpgradeHandler => {
     const verifier = mediaClient ? createMediaVerifierStorage({ client: mediaClient }) : undefined;
     syncHandler ??= createSyncUpgradeHandler({
@@ -442,7 +490,6 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         if (exported.ok) worldCapture?.observeCanonical({ canvasId: exported.canvas.id, canvas: exported.canvas, startup: true });
       },
       onCommitted: (input) => {
-        scheduleCanonicalObservation({ canvasId: input.canvasId, canvas: input.canvas, startup: false });
         void recordModelPlacementHistory(
           nodeHistoryRef && nodeHistoryRef.editCompletion
             ? {
@@ -454,6 +501,9 @@ export async function createCanvasService(options: CanvasServiceOptions = {}): P
         );
       },
       onDelta: (input) => {
+        if (worldCaptureChanged(input.before, input.after)) {
+          scheduleCanonicalObservation({ canvasId: input.after.id, canvas: input.after, startup: false });
+        }
         agentDeltaJournal.record(input.canvasId, input.before, input.after);
       },
       taskClient: () => taskClient,

@@ -64,6 +64,75 @@ type PinnedInstance = {
   content: WorldCaptureModelContent;
 };
 
+// A canvas projection is rebuilt after every durable command, but model source
+// strings usually remain unchanged. Keep the last validated content object for
+// each source string so repeated camera observations do not re-hash multi-MB
+// scripts. The bounded cache avoids retaining an unbounded history of edits.
+const MAX_CONTENT_CACHE_ENTRIES = 256;
+const scriptContentCache = new Map<string, { variant: string; content: WorldCaptureModelContent | null }>();
+const glbContentCache = new Map<string, WorldCaptureModelContent | null>();
+
+function cacheScriptContent(
+  fields: Record<string, unknown>
+): WorldCaptureModelContent | null {
+  if (typeof fields.modelScript !== "string") return null;
+  const variant = JSON.stringify([
+    fields.modelScriptLanguage,
+    fields.modelScriptVersion,
+    fields.modelContentVersion,
+    fields.modelPlacement,
+    fields.modelRig
+  ]);
+  const cached = scriptContentCache.get(fields.modelScript);
+  if (cached?.variant === variant) return cached.content;
+  const definition = decodeModelDefinition({
+    modelScript: fields.modelScript,
+    modelScriptLanguage: fields.modelScriptLanguage,
+    modelScriptVersion: fields.modelScriptVersion,
+    modelContentVersion: fields.modelContentVersion,
+    modelPlacement: fields.modelPlacement,
+    modelRig: fields.modelRig
+  });
+  let content: WorldCaptureModelContent | null = null;
+  if (definition.ok) {
+    const decoded = createWorldCaptureModelContent({
+      version: "world-capture-model-content-v1",
+      kind: "script",
+      definition: definition.value
+    });
+    if (decoded.ok) content = decoded.value;
+  }
+  scriptContentCache.set(fields.modelScript, { variant, content });
+  if (scriptContentCache.size > MAX_CONTENT_CACHE_ENTRIES) {
+    scriptContentCache.delete(scriptContentCache.keys().next().value!);
+  }
+  return content;
+}
+
+function cacheGlbContent(fields: Record<string, unknown>): WorldCaptureModelContent | null {
+  const key = JSON.stringify([
+    fields.modelAssetId,
+    fields.modelContentVersion,
+    fields.modelPlacement
+  ]);
+  if (glbContentCache.has(key)) return glbContentCache.get(key)!;
+  const reference = decodeGlbModelReference(fields);
+  let content: WorldCaptureModelContent | null = null;
+  if (reference.ok) {
+    const decoded = createWorldCaptureModelContent({
+      version: "world-capture-model-content-v1",
+      kind: "glb",
+      reference: reference.value
+    });
+    if (decoded.ok) content = decoded.value;
+  }
+  glbContentCache.set(key, content);
+  if (glbContentCache.size > MAX_CONTENT_CACHE_ENTRIES) {
+    glbContentCache.delete(glbContentCache.keys().next().value!);
+  }
+  return content;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -107,32 +176,13 @@ function readPinnedInstance(canvas: ServerCanvas, nodeId: string): PinnedInstanc
   const instance = decodeWorldInstanceData(fields.sharedWorldInstance);
   if (!instance.ok) return null;
   if (isGlbModelNodeData(fields)) {
-    const reference = decodeGlbModelReference(fields);
-    if (!reference.ok) return null;
-    const content = createWorldCaptureModelContent({
-      version: "world-capture-model-content-v1",
-      kind: "glb",
-      reference: reference.value
-    });
-    if (!content.ok) return null;
-    return { instanceId: instance.value.instanceId, instance: instance.value, content: content.value };
+    const content = cacheGlbContent(fields);
+    if (!content) return null;
+    return { instanceId: instance.value.instanceId, instance: instance.value, content };
   }
-  const definition = decodeModelDefinition({
-    modelScript: fields.modelScript,
-    modelScriptLanguage: fields.modelScriptLanguage,
-    modelScriptVersion: fields.modelScriptVersion,
-    modelContentVersion: fields.modelContentVersion,
-    modelPlacement: fields.modelPlacement,
-    modelRig: fields.modelRig
-  });
-  if (!definition.ok) return null;
-  const content = createWorldCaptureModelContent({
-    version: "world-capture-model-content-v1",
-    kind: "script",
-    definition: definition.value
-  });
-  if (!content.ok) return null;
-  return { instanceId: instance.value.instanceId, instance: instance.value, content: content.value };
+  const content = cacheScriptContent(fields);
+  if (!content) return null;
+  return { instanceId: instance.value.instanceId, instance: instance.value, content };
 }
 
 function collectInstances(canvas: ServerCanvas): PinnedInstance[] | null {

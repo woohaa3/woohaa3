@@ -335,6 +335,14 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   /** 会话内 working projection：canonical + 有序 pending batches，仅内存。 */
   const projection = new WorkingProjectionStore(options.lifecycle, options.getContent);
   /**
+   * 右下角只显示尚未得到服务端 durable 回执的批次。
+   *
+   * accepted 批次仍会暂留在 working projection，直到 canonical revision 覆盖它；这是
+   * 为了保证本地规范投影收敛，不应继续把它显示成「待保存」。
+   */
+  const unconfirmedPendingCount = (): number =>
+    projection.pendingBatches.filter((batch) => batch.state !== "accepted").length;
+  /**
    * 规范投影复用缓存（change: 2026-10-23-scale-canvas-media-residency，design D7 / 任务 8.1）。
    *
    * provider 的状态通知远多于内容变化；同一 doc/epoch/revision/doc版本 连续到达时直接复用
@@ -348,6 +356,8 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   let offlineListener: (() => void) | undefined;
   let onlineListener: (() => void) | undefined;
   let disposed = false;
+  /** 延后一次昂贵的 canonical 派生，让同一 WebSocket 中的 command result 先被处理。 */
+  let deferredCanonicalTimer: ReturnType<typeof setTimeout> | null = null;
   /** 显式重连等待上限：连接迟迟不恢复时不谎称已连接。 */
   const reconnectTimeoutMs = options.reconnectTimeoutMs ?? 8_000;
   /** 进行中的显式重连（幂等：并发调用共享同一次重建，不叠加连接）。 */
@@ -384,6 +394,10 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
 
   const detach = () => {
     for (const commandId of saveStarts.keys()) settleSave(commandId, "cancelled");
+    if (deferredCanonicalTimer !== null) {
+      clearTimeout(deferredCanonicalTimer);
+      deferredCanonicalTimer = null;
+    }
     yjsProvider?.dispose();
     yjsProvider = undefined;
     yjsLifecycle = undefined;
@@ -437,6 +451,37 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
    * 断网门禁：浏览器 `offline` 期间即使底层 socket 尚未关闭，也必须按只读处理。
    */
   const applyYjsProviderState = (state: ReadonlyProviderState, lifecycle: CommandLifecycleRegistry) => {
+    const previousRevision = status.remote.confirmedRevision ?? -1;
+    const nextRevision = state.revision ?? -1;
+    const deferCanonicalDerive = state.phase === "ready"
+      && projection.pendingBatches.length > 0
+      && nextRevision > previousRevision;
+    if (deferCanonicalDerive) {
+      if (deferredCanonicalTimer === null) {
+        deferredCanonicalTimer = setTimeout(() => {
+          deferredCanonicalTimer = null;
+          if (!disposed) applyYjsProviderState(yjsProvider?.providerState ?? state, lifecycle);
+        }, 0);
+      }
+      // 先发布连接与服务端 revision；command result 会在下一条 WebSocket 消息中结算
+      // durable 状态，完整 canonical 派生由上面的异步回调继续完成。
+      publish({
+        phase: "ready",
+        error: state.error,
+        remote: {
+          ...status.remote,
+          mode: "remote",
+          phase: "synced",
+          confirmedRevision: state.revision,
+          pendingCount: unconfirmedPendingCount(),
+          error: state.error,
+          offlineReason: null,
+          reconnecting
+        }
+      });
+      notifyProviderPhaseChanged();
+      return;
+    }
     const offline = isBrowserOffline();
     const effectivePhase = offline && state.phase === "ready" ? "offline-readonly" : state.phase;
     const derived = deriveCanvas();
@@ -478,7 +523,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         mode: readyPhase ? "remote" : "offline",
         phase: readyPhase ? "synced" : effectivePhase === "offline-readonly" ? "offline" : "syncing",
         confirmedRevision: state.revision,
-        pendingCount: projection.pendingBatches.length,
+        pendingCount: unconfirmedPendingCount(),
         error: offline ? offlineMessage : state.error,
         // 权限只读与链路状态正交：链路正常也可能只读（viewer/只读链接/非参与者）。
         readOnly,
@@ -500,7 +545,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         mode: "offline",
         phase: "offline",
         confirmedRevision: status.remote.confirmedRevision,
-        pendingCount: projection.pendingBatches.length,
+        pendingCount: unconfirmedPendingCount(),
         error: offlineMessage,
         // 这是浏览器整机断网（不是画布服务关闭连接）：
         // 恢复入口的文案与状态气泡的措辞据此区分。
@@ -616,6 +661,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
           commandId: result.commandId,
           status: result.status,
           revision: result.revision,
+          noop: result.noop,
           error: result.error
         });
         // result 驱动 working projection 结算（accepted 保留效果直到 canonical 覆盖；
@@ -631,7 +677,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         publish({
           remote: {
             ...status.remote,
-            pendingCount: projection.pendingBatches.length
+            pendingCount: unconfirmedPendingCount()
           }
         });
       },
@@ -759,7 +805,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
     if (disposed) return;
     projection.refreshContent();
     woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
-    publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
+    publish({ remote: { ...status.remote, pendingCount: unconfirmedPendingCount() } });
   });
   const session: CanvasSession = {
     getStatus: () => status,
@@ -831,7 +877,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         projection.rejectBatch(commandId, sent.reason);
         yjsLifecycle!.applyResult({ commandId, status: "rejected", error: sent.reason });
         woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
-        publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
+        publish({ remote: { ...status.remote, pendingCount: unconfirmedPendingCount() } });
         recordTelemetry({
           name: "canvas.edit",
           result: "failure",
@@ -843,7 +889,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
         return { ok: false, reason: sent.reason, code };
       }
       woohaa3CanvasStore.getState().applyWorkingCanvas(projection.workingCanvas);
-      publish({ remote: { ...status.remote, pendingCount: projection.pendingBatches.length } });
+      publish({ remote: { ...status.remote, pendingCount: unconfirmedPendingCount() } });
       // 已交给 wire（本地接受）：这是编辑路径可观测的成功终态；服务端确认另有 lifecycle 事实。
       recordTelemetry({
         name: "canvas.edit",
@@ -860,6 +906,10 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
       settleSync("cancelled");
       settleOpen("cancelled");
       disposed = true;
+      if (deferredCanonicalTimer !== null) {
+        clearTimeout(deferredCanonicalTimer);
+        deferredCanonicalTimer = null;
+      }
       stopContent?.();
       stopContent = undefined;
       detach();
