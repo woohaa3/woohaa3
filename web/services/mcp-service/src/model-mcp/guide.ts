@@ -41,7 +41,7 @@ ${methods}
 - 人物/机甲的一句话提示词应直接转为模板外观参数；保留用户指定颜色。不要仅返回解释或创建外部GLB链接。
 - 返回 const human = scene.somaHumanoid(...)；human.root 是根组，human.joint("RightHand") / human.joint("LeftHand") 可用于附加装备的 parent，坐标相对官方关节绑定坐标轴。不要把 handle 命名为 rig，也不要混用旧 rig.joint。
 - 模板固定骨架、绑定姿态和骨长；当前机甲装甲是绑定到关节的刚性可编辑部件，不宣称是官方白模的平滑蒙皮。SOMA兼容不表示已经接好Kimodo或导演区播放。
-- 体型预设：scene.somaHumanoid({id:"actor",style:"humanoid",bodyPreset:"soma-body-v1/female-8-slim"}); 性别 male/female、头身比 7/8/9/10、体型 slim/fat 共16种成人，身高1.70米；另有 soma-body-v1/baby（婴儿0.70米）、soma-body-v1/{male|female}-child（男女童1.15米）和 soma-body-v1/{male|female}-teen（男女少年1.50米），年龄预设不分头身比或胖瘦。全部脚底Y=0，不能用于mecha。未指定bodyPreset保留旧标准白模/机甲。保存版本化ID，不改写已有作品。animate_humanoid 会核对真实目标绑定帧并适配源动作，源Kimodo资产与目标预设身份分别保留。
+- 体型预设：scene.somaHumanoid({id:"actor",style:"humanoid",bodyPreset:"soma-body-v2/female"}); Anny 官方参数直接提供男/女两种青年基础体型，muscle/weight 固定为官方平均锚点，身高按年龄段固定；另有 soma-body-v2/{male|female}-newborn（新生儿0.52米）、soma-body-v2/{male|female}-child（男女童1.15米）和 soma-body-v2/{male|female}-old（男女老人1.68米）。快速预设不再使用头身比或腿/躯干/腰部手工变形，也暂不暴露身高和体型控制；旧 soma-body-v1 ID 继续可读。全部脚底Y=0，不能用于mecha。未指定bodyPreset保留旧标准白模/机甲。保存版本化ID，不改写已有作品。animate_humanoid 会核对真实目标绑定帧并适配源动作，源Kimodo资产与目标预设身份分别保留。
 - 新建完整最小脚本：scene.somaHumanoid({id:"pilot",style:"mecha"}); 使用 submit_model_script 提交，画布和原生渲染器均通过普通Scene IR渲染。
 - 修改已有SOMA模型时保留模板调用与id，在原脚本上修改外观参数或增加装备；禁止退化成无骨架散件。
 

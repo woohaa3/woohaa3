@@ -1,4 +1,4 @@
-import { resolveSomaBodyPreset } from "../soma-humanoid/body-presets.js";
+import { resolveSomaBodyPreset } from "../soma-humanoid/body-catalog.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
 import { decodeWorldCamera } from "../world-camera-codec.js";

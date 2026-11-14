@@ -64,12 +64,8 @@ export function DirectorCharacterToolbar(props: { canvasId: string; nodeId: stri
         align="start" side="top" className="director-body-picker" trigger={
           <Button size="sm" disabled={unavailable}>骨架人 <ChevronDownIcon size={12} /></Button>
         }>
-        {row("年龄", "age", [["adult", "成人"], ["baby", "婴儿"], ["child", "儿童"], ["teen", "少年"]])}
-        {selection.age !== "baby" && row("性别", "sex", [["male", "男"], ["female", "女"]])}
-        {(!selection.age || selection.age === "adult") && <>
-          {row("头身比", "heads", [[7, "7"], [8, "8"], [9, "9"], [10, "10"]])}
-          {row("体型", "build", [["slim", "瘦"], ["fat", "胖"]])}
-        </>}
+        {row("年龄", "age", [["adult", "青年"], ["newborn", "新生儿"], ["child", "儿童"], ["old", "老人"]])}
+        {row("性别", "sex", [["male", "男"], ["female", "女"]])}
         {error ? <p className="node-execution-dock__error">{error}</p> : null}
         <div className="director-body-picker__footer">
           <Button size="sm" tone="primary" disabled={unavailable || busy} onClick={() => void create("humanoid", somaBodyPresetId(selection))}>{busy ? "创建中…" : "创建"}</Button>

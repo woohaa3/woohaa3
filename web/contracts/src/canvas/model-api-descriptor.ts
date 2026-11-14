@@ -73,7 +73,7 @@ const V2 = MODEL_SCRIPT_V2_VERSION;
 
 /** V2 场景方法集合。 */
 export const MODEL_API_METHODS: readonly ModelApiMethod[] = [
-  { name: "somaHumanoid", signature: "scene.somaHumanoid({ id?, style?: 'mecha'|'humanoid', bodyPreset?: 'soma-body-v1/{male|female}-{7|8|9|10}-{slim|fat}' | 'soma-body-v1/baby' | 'soma-body-v1/{male|female}-{child|teen}' (humanoid only), armorColor?, jointColor?, accentColor?, lightColor? }) => { root, joint(officialSomaName) }; versioned SOMA77 bind skeleton; omitted bodyPreset retains Kimodo standard; colors #rrggbb", versions: [V2] },
+  { name: "somaHumanoid", signature: "scene.somaHumanoid({ id?, style?: 'mecha'|'humanoid', bodyPreset?: 'soma-body-v2/{male|female}' | 'soma-body-v2/{male|female}-{newborn|child|old}' (humanoid only), armorColor?, jointColor?, accentColor?, lightColor? }) => { root, joint(officialSomaName) }; versioned SOMA77 bind skeleton; omitted bodyPreset retains Kimodo standard; colors #rrggbb", versions: [V2] },
   { name: "material", signature: "scene.material({ id?, baseColor?, roughness?, metallic?, emissive?, emissiveStrength?, alphaMode?: 'opaque'|'blend', doubleSided?, unlit?: boolean, opacity?: 0..1 }) => materialId", versions: [V2] },
   { name: "group", signature: "scene.group({ id?, parent?, position?, rotation?, scale? }) => id", versions: [V2] },
   { name: "box", signature: "scene.box({ id?, parent?, size: [x,y,z], position?, rotation?, scale?, color? | material? }) => id", versions: [V2] },
