@@ -4,7 +4,6 @@ import type { WorldCameraSettings, WorldCameraSettingsPatch } from './node-histo
 
 export const WORLD_RESOURCE_TOOLS = {
   read: 'read_world_resource',
-  area: 'edit_scene_area',
   model: 'edit_world_model',
   camera: 'edit_world_camera',
   modelScript: 'edit_world_model_script',
@@ -38,10 +37,10 @@ type WorldResourceEditBase = {
   duration?: number;
   loop?: boolean;
 };
-export type WorldResourceEdit = WorldResourceEditBase & (
-  | { resourceType: 'scene_area'; operation: 'update'; patch: { title: string; transform?: never; settings?: never; duration?: never; loop?: never } }
-  | { resourceType: Exclude<WorldResourceType, 'scene_area'>; patch?: WorldResourcePatch }
-);
+export type WorldResourceEdit = WorldResourceEditBase & {
+  resourceType: Exclude<WorldResourceType, 'scene_area'>;
+  patch?: WorldResourcePatch;
+};
 
 /** Frozen business response stored atomically with the canonical command. */
 export type WorldResourceReceipt = {

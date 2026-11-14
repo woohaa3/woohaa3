@@ -138,9 +138,6 @@ it('advertises exactly nine current tools, excludes legacy names, validates oper
   expect(writes[0]).toMatchObject({ contextId: 'ctx-1', operation: { kind: 'edit-resource', edit: { resourceType: 'world_model_script', operation: 'patch' } } });
   await callTool(base, WORLD_RESOURCE_TOOLS.modelScript, { operation: 'patch', operationId: 'bad', target: { instanceId: 'instance-1' }, expectedVersion: 'v1', chunk: 'wrong field' }, issued.token);
   await callTool(base, WORLD_RESOURCE_TOOLS.model, { operation: 'delete', operationId: 'bad-delete', target: { instanceId: 'instance-1' }, expectedVersion: 'v1', patch: { title: 'not allowed' } }, issued.token);
-  for (const patch of [{ bounds: { min: { u: 0, v: 0 }, max: { u: 2, v: 2 } } }, { moveBy: { u: 1, v: 0 } }, { rotateClockwise: true }, { title: '' }, { title: 'ok', unknown: true }]) {
-    await callTool(base, WORLD_RESOURCE_TOOLS.area, { operation: 'update', operationId: 'invalid-area', target: { areaId: 'area-1' }, expectedVersion: 'v1', patch }, issued.token);
-  }
   expect(writes).toHaveLength(1);
 });
 
@@ -168,12 +165,12 @@ it('narrows camera-only schema and denies lifecycle/root writes', async () => {
   expect(writes).toBe(0);
 });
 
-it('does not allow an old director-area grant to bypass the resource edit policy', async () => {
-  const issued = scopeGrant([...assistantWorldToolsForScope({ kind: 'scene-area', areaId: 'area-1' }), 'set_scene_animation_script']);
+it('does not allow retired standalone director tools', async () => {
+  const issued = scopeGrant();
   let writes = 0;
   const base = await start({ read: async () => ({ ok: true, view: contextView() }), write: async () => { writes++; return { ok: false, code: 'not-ready', message: 'not used' }; }, complete: async () => ({ ok: false, code: 'not-ready', message: 'not used' }) }, issued);
-  const result = await callTool(base, 'set_scene_animation_script', { script: 'motion.instance.tween("a", { property: "scale", startTime: 0, endTime: 1, from: [1], to: [2] });', duration: 1, loop: false }, issued.token);
-  expect(result.result?.structuredContent).toMatchObject({ ok: false, code: 'capability-unsupported' });
+  const result = await callTool(base, 'set_scene_animation_script', { script: 'retired' }, issued.token);
+  expect(result.error?.code).toBe(-32602);
   expect(writes).toBe(0);
 });
 

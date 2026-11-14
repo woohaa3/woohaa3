@@ -158,6 +158,7 @@ export function buildDshPatch(input: {
   maxTokens?: number;
   contextWindow?: number;
   reasoningEffort?: AgentReasoningEffort;
+  workspace?: boolean;
   mcp: { name: string; url: string; bearerToken: string } | null;
 }): string {
   const mapping = input.reasoningEffort ? resolveReasoningEffort("dsh-agent-sdk", input.reasoningEffort) : null;
@@ -187,7 +188,11 @@ export function buildDshPatch(input: {
     ] : []),
     `            maxTokens: ${input.maxTokens ?? DSH_DEFAULT_MAX_OUTPUT_TOKENS}`
   ];
-  for (const id of DSH_DISABLED_PLUGINS) lines.push(`- id: ${id}`, "  disabled: true");
+  const native = new Set(["tool-bash", "tool-pwsh", "tool-jobs", "tool-fs", "tool-fs-search", "tool-working-directory"]);
+  for (const id of DSH_DISABLED_PLUGINS) {
+    if (input.workspace && native.has(id)) continue;
+    lines.push(`- id: ${id}`, "  disabled: true");
+  }
   if (input.mcp) {
     lines.push(
       "- insert:",
@@ -395,7 +400,7 @@ export function shouldContinueAfterReadOnlyTurn(projected: ReturnType<typeof pro
 const READ_ONLY_CONTINUATION_PROMPT = [
   "继续完成用户刚才要求的画布创作。",
   "你上一轮已经成功读取了权威上下文和模型 API；读取只是准备阶段，不能结束目标回合。",
-  "现在必须立即调用至少一个本轮已授权的写工具（例如 create_world_model、replace_world_model_content、move_world_model、create_world_camera、set_world_camera 或 set_scene_animation_script），并等待工具成功回执。",
+  "现在必须立即调用至少一个本轮已授权的写工具（例如 edit_world_model、edit_world_model_script、edit_world_camera 或 edit_scene_animation_script），并等待工具成功回执。",
   "不要再次只发送计划、确认或说明文字；如果确实缺少一个关键字段，可以读取一次后立刻写入。"
 ].join("\n");
 
@@ -412,9 +417,9 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
       if (active.has(key)) return { ok: false, code: "capability-unsupported", message: "前轮尚未排空" };
       active.add(key);
       const appliedReasoning = (applied: boolean) => input.reasoningEffort ? { requested: input.reasoningEffort, applied } : { applied: "provider-default" as const };
-      // 每轮独立 home/work：配置、凭据与 MCP grant 都不跨轮保留。
+      // 每轮独立 home；可信画布 cwd 跨轮保留，配置、凭据与 MCP grant 不跨轮保留。
       const home = path.join(options.configDir, key);
-      const work = path.join(options.workspaceDir, key);
+      const work = input.restrictions.workspace ? input.restrictions.workspaceDir : path.join(options.workspaceDir, key);
       const launcher = path.join(home, "dsh-launcher.mjs");
       const patchPath = path.join(home, "woohaa.patch.yml");
       const runtimeEntry = options.runtimeEntry ?? dshRuntimeEntry();
@@ -426,7 +431,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
         const credentialEnv = input.restrictions.credentialEnvVar;
         // 完整替换子进程环境：不继承宿主已有的模型 Key / provider 选择。
         const env: NodeJS.ProcessEnv = {
-          PATH: path.dirname(process.execPath),
+          PATH: input.restrictions.workspace ? [path.dirname(process.execPath), process.env.PATH].filter(Boolean).join(path.delimiter) : path.dirname(process.execPath),
           HOME: home,
           ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
           ...(nativeModules ? { NODE_PATH: nativeModules } : {}),
@@ -441,7 +446,8 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
           maxTokens: readDshMaxOutputTokens(),
           contextWindow: readDshContextWindow(),
           ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
-          mcp: input.mcp
+          mcp: input.mcp,
+          workspace: input.restrictions.workspace
         }), { mode: 0o600 });
 
         const { DeepSeekHarness } = await import("@deepseek-ai/dsh-sdk-client");
@@ -547,7 +553,7 @@ export function createDshTransport(options: { configDir: string; workspaceDir: s
         // 不保留短期 MCP grant 与模型 token。
         await Promise.all([
           rm(home, { recursive: true, force: true }),
-          rm(work, { recursive: true, force: true })
+          ...(input.restrictions.workspace ? [] : [rm(work, { recursive: true, force: true })])
         ]);
         active.delete(key);
       }

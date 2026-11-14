@@ -154,10 +154,9 @@ export function worldGrant(deps: AgentAuthoringToolDeps) {
     read: input => original.read(input),
     complete: input => original.complete(input),
     write: input => {
-      // Legacy director-area writers cannot enforce the grouped edit's full
-      // geometry/lease transaction. Keep the old resize receipt path, but do not
-      // let an old persisted grant bypass the new content boundary.
-      if (grant.world?.scope.scope.kind === "scene-area" && input.operation.kind !== "edit-resource" && input.operation.kind !== "resize-scene-area") return Promise.resolve({ ok: false, code: "capability-unsupported", message: "旧世界写工具已停用，请重新提交命令使用资源编辑工具" });
+      // Director-area writes all use the grouped resource transaction. Legacy
+      // standalone world writers are deliberately not accepted through grants.
+      if (grant.world?.scope.scope.kind === "scene-area" && input.operation.kind !== "edit-resource") return Promise.resolve({ ok: false, code: "capability-unsupported", message: "旧世界写工具已停用，请重新提交命令使用资源编辑工具" });
       return original.write(input);
     }
   };

@@ -7,27 +7,20 @@ it('routes single-character motion to explicit motion tasks and truthful complet
 
 
 import {sceneDirectorRole} from '../src/backend/roles/scene-director.js';
-it('guides end-user director sessions through capability-gated fallback and simple per-actor choreography',()=>{
+it('guides end-user director sessions through capability-gated motion tools',()=>{
  const instructions=sceneDirectorRole.definition.instructions;
- expect(instructions).toContain('fallback.allowed');
- expect(instructions).toContain('taskSubmitted');
- expect(instructions).toContain('joint-animation');
- expect(instructions).toContain('startTime');
- expect(instructions).toContain('generationId');
- expect(instructions).toContain('[0,0,1,0]');
- expect(instructions).toContain('不要擅自省略');
- expect(instructions).toContain('头部');
- expect(instructions).toContain('捂脸');
+ expect(instructions).toContain('animate_humanoid');
+ expect(instructions).toContain('动作工具不可用');
+ expect(instructions).toContain('edit_scene_animation_script');
  const prepared=sceneDirectorRole.prepare({input:{prompt:'让两个人互动',action:'generate'},context:{},target:{canvasId:'canvas',nodeId:'area',mode:'world'},requestId:'test',nativeCapabilities:[]});
  const text=prepared.messages.map(m=>m.content).join('\n');
- expect(text).toContain('仅在直接编写关节动画');
+ expect(text).toContain('read_world_resource');
  expect(text).not.toContain('为模型做骨骼/关节动画或行走前');
 });
 
-it('distinguishes source events from timeline starts and inspects interaction timing before replacement',()=>{
+it('keeps motion guidance on the canonical resource tools',()=>{
  const text=sceneDirectorRole.definition.instructions;
- expect(text).toContain('inspectTiming:true');expect(text).toContain('sourceStartTime');expect(text).toContain('blendInDuration');
- expect(text).toContain('片内');expect(text).toContain('不证明接触');expect(text).toContain('负 startTime');
+ expect(text).toContain('motion');expect(text).toContain('world_model_rig');
 });
 
 it('keeps motion guidance compatible with resource-only world authoring',()=>{

@@ -1089,7 +1089,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       const stillIssued = resolve(input.contextId);
       if ("ok" in stillIssued) return stillIssued;
     }
-    // Authoritative scripts for chunked authoring: `get_world_model_script` serves
+    // Authoritative scripts for chunked authoring: `read_world_resource` serves
     // `includeSource` from here so a caller can verify the real tail before appending.
     {
       const modelScripts: Record<string, string> = {};
@@ -1146,23 +1146,13 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       // After a process restart no write capability is reissued. An active
       // durable lease can nevertheless identify and replay an already committed
       // resource receipt; it never authorizes a new edit.
-      if (operation.kind !== "edit-resource" && operation.kind !== "resize-scene-area") return resolved;
+      if (operation.kind !== "edit-resource") return resolved;
       const pending = await deps.pending();
       const record = pending.find(entry => entry.state === "active" && entry.intent.contextId === input.contextId);
       if (!record) return resolved;
       const intent = record.intent;
       const inspected = await inspect(intent.canvasId);
       if (!inspected.ok) return inspected;
-      if (operation.kind === "resize-scene-area") {
-        if (intent.scope.scope.kind !== "scene-area") return resolved;
-        const commandId = intentCommandId("assistant-world-resize-area", operation);
-        const saved = await inspected.room.lookupCommand(commandId);
-        if (!saved || saved.actorId !== `assistant-world:${intent.runId}`) return resolved;
-        const stillActive = (await deps.pending()).some(entry => entry.state === "active" && entry.intent.contextId === input.contextId && entry.intent.runId === intent.runId && entry.intent.epoch === intent.epoch && entry.intent.executionId === intent.executionId);
-        if (!stillActive) return failure("cancelled", "原运行授权已撤销");
-        return { ok: true, canvasId: intent.canvasId, commandId, revision: saved.revision, duplicate: true, noop: !saved.changed,
-          version: nextSceneAreaScopeVersion(intent.scope.scope.areaId, operation.bounds) };
-      }
       const commandId = `assistant-resource:${stableAuthorityVersion("resource-operation", { runId: intent.runId, operationId: operation.edit.operationId })}`;
       const saved = await inspected.room.lookupCommand(commandId);
       const receipt = saved?.resourceEdit;
@@ -1222,9 +1212,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     if (operation.kind === "set-scene-animation-script") {
       return setSceneAnimationScript(ledger, context, operation, inspected);
     }
-    if (operation.kind === "resize-scene-area") {
-      return resizeSceneArea(ledger, context, capability, operation, inspected);
-    }
     if (operation.kind === "create-world-camera") {
       return createCamera(ledger, context, capability, operation, inspected);
     }
@@ -1262,11 +1249,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         } else if (scope.kind === "world-camera" && deps.authority.prepareCamera) {
           const prepared = await deps.authority.prepareCamera(canvas, scope.cameraId);
           if (!prepared.ok) return reject(failure(prepared.code, prepared.message));
-        }
-        // No canvas lifecycle grant is minted by a director-area turn.
-        if (edit.resourceType === "scene_area") {
-          if ((edit.operation as string) !== "update") return reject(failure("outside-scope", "创建或删除导演区需要画布生命周期授权"));
-          if (Object.keys(edit).some(key => !["resourceType", "operation", "operationId", "target", "expectedVersion", "patch"].includes(key)) || !record(edit.target) || Object.keys(edit.target).length !== 1 || typeof (edit.target as Record<string, unknown>).areaId !== "string") return reject(failure("invalid-data", "导演区编辑包含未知字段"));
         }
         const areaId = isArea ? scope.areaId : "";
         const area = isArea ? findArea(canvas, areaId) : null;
@@ -1356,12 +1338,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
             if ("ok" in planned) return reject(failure("invalid-data", planned.message));
             fields = { worldCamera: planned, ...((edit.title ?? edit.patch?.title) !== undefined ? { title: edit.title ?? edit.patch?.title } : {}) };
           }
-        } else if (edit.resourceType === "scene_area") {
-          const changes = edit.patch;
-          if (!changes || Object.keys(changes).some(key => key !== "title") || typeof changes.title !== "string" || !changes.title.trim() || changes.title.length > 200) {
-            return reject(failure("invalid-data", "导演区只允许修改非空名称"));
-          }
-          fields = { title: changes.title };
         } else if (edit.resourceType === "scene_animation_script") {
           const old = area!.area.animationScript;
           if (old) {
@@ -1548,7 +1524,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       const current = findArea(after.canvas, context.scope.scope.areaId);
       if (current) deps.worldAuthoring.refreshContextScope({ canvasId: ledger.canvasId, contextId: ledger.contextId, scope: { scope: context.scope.scope, scopeVersion: current.area.scopeVersion } });
     }
-    if (receipt.cameras?.length || edit.resourceType === "scene_area") {
+    if (receipt.cameras?.length) {
       const targets = [...context.writableTargets].flatMap(entry => {
         const version = worldObjectVersion(after.canvas, entry.target);
         return version ? [{ ...entry.target, version }] : [];
@@ -1629,7 +1605,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
         const rig=model ? await animationRigOf(model.fields) : null;
         const instance=decodeWorldInstanceData(model?.fields.sharedWorldInstance);
         const actual=rig?.walkProfile;
-        if(!actual||stableStringify(actual)!==stableStringify(track.profile))return {code:"invalid-data" as const,message:"行走参数与模型实际骨架或脚底几何不匹配；请重新 get_world_model_rig"};
+        if(!actual||stableStringify(actual)!==stableStringify(track.profile))return {code:"invalid-data" as const,message:"行走参数与模型实际骨架或脚底几何不匹配；请重新 read_world_resource 查询 world_model_rig"};
         if(!instance.ok)return {code:"invalid-data" as const,message:"行走模型变换不可用"};
         const transform=instance.value.transform,q=transform.rotation;
         const yaw=2*Math.atan2(q[2],q[3])*180/Math.PI;
@@ -1696,33 +1672,6 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
       noop: result.noop === true,
       version: located.area.scopeVersion
     };
-  }
-
-  /**
-   * Explicit director-area range change. It only patches the area bounds (and the
-   * derived scope version); models and cameras are never moved or scaled by this
-   * operation. Shrinking may leave objects outside the range, which makes them
-   * read-only for later writes — the author asked for that range.
-   */
-  async function resizeSceneArea(
-    ledger: RunLedger,
-    context: WorldToolContext,
-    capability: SpatialWriteContext,
-    operation: Extract<AssistantWorldWriteOperation, { kind: "resize-scene-area" }>,
-    inspected: { ok: true; room: CanvasRoom; canvas: ServerCanvas }
-  ): Promise<AssistantWorldWriteOutcome> {
-    // submitDerived first checks the durable command receipt, so already committed
-    // legacy operations can still be replayed without allowing a new resize.
-    const commandId = intentCommandId("assistant-world-resize-area", operation);
-    const result = await inspected.room.submitDerived({
-      commandId,
-      async derive() {
-        return { ok: false as const, code: "capability-unsupported", message: "助手不能直接调整导演区范围" };
-      }
-    }, { spatialContext: capability });
-    if (!result.ok) return commandFailure(result);
-    return { ok: true, canvasId: ledger.canvasId, commandId, revision: result.revision,
-      duplicate: result.duplicate === true, noop: result.noop === true, version: context.scope.scope.kind === "scene-area" ? nextSceneAreaScopeVersion(context.scope.scope.areaId, operation.bounds) : operation.expectedScopeVersion };
   }
 
   async function createModel(
@@ -1889,7 +1838,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
   function versionConflict(current: string | null): AssistantWorldFailure {
     return failure("version-conflict", current
       ? `模型内容版本已变化（当前 ${current}），请使用该版本重试，不要复用旧版本`
-      : "模型内容版本已变化；请重新 get_world_model_script 取真实版本后重试",
+      : "模型内容版本已变化；请重新 read_world_resource 取真实版本后重试",
     current ? { currentVersion: current } : {});
   }
 

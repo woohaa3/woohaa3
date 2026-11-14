@@ -13,7 +13,6 @@
  * version algorithms.
  */
 import type {
-  GroundAabb,
   WorldCameraData,
   WorldCameraProjection,
   WorldCompletion,
@@ -32,7 +31,6 @@ import type { WorldCameraView } from "./world-camera-ui.js";
 import type { WorldAnimationScript } from "./world-animation-script.js";
 import type { WorldAuthoringConflict, WorldAuthoringFailure, WorldAuthoringFailureCode } from "./world-authoring.js";
 import { isBoundedId, isJsonObject } from "../validation.js";
-import { decodeGroundAabb } from "./creation-scope-codec.js";
 
 import { WORLD_RESOURCE_TOOLS, type WorldResourceEdit } from "./world-resource-tools.js";
 
@@ -57,22 +55,7 @@ export const ASSISTANT_WORLD_TOOL = {
   generateHumanoidMotion: "generate_humanoid_motion",
   getHumanoidMotion: "get_humanoid_motion",
   applyHumanoidMotion: "apply_humanoid_motion",
-  readModelRig: "get_world_model_rig",
   sampleAnimation: "sample_scene_animation",
-  createModel: "create_world_model",
-  replaceModel: "replace_world_model_content",
-  /** Read one director-area model's current script and content version. */
-  readModelScript: "get_world_model_script",
-  /** Append one chunk to an existing model script (skeleton → chunks). */
-  appendModelScript: "append_world_model_script",
-  /** Exact-text patch of one existing model script (`oldString` → `newString`). */
-  patchModelScript: "patch_world_model_script",
-  moveModel: "move_world_model",
-  setAnimation: "set_scene_animation_script",
-  resizeArea: "resize_scene_area",
-  createCamera: "create_world_camera",
-  setCamera: "set_world_camera",
-  completeCamera: "complete_world_camera"
 } as const;
 
 export type AssistantWorldToolName = (typeof ASSISTANT_WORLD_TOOL)[keyof typeof ASSISTANT_WORLD_TOOL] | (typeof WORLD_RESOURCE_TOOLS)[keyof typeof WORLD_RESOURCE_TOOLS];
@@ -97,13 +80,12 @@ export const LEGACY_ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.setCamera,
   ASSISTANT_WORLD_TOOL.completeCamera
 ] as const;
-
 export const ASSISTANT_WORLD_WRITE_TOOLS = [
   ASSISTANT_WORLD_TOOL.animateHumanoid,
   ASSISTANT_WORLD_TOOL.animateHumanoidInteraction,
   ASSISTANT_WORLD_TOOL.generateHumanoidMotion,
   ASSISTANT_WORLD_TOOL.applyHumanoidMotion,
-  WORLD_RESOURCE_TOOLS.area, WORLD_RESOURCE_TOOLS.model, WORLD_RESOURCE_TOOLS.camera,
+  WORLD_RESOURCE_TOOLS.model, WORLD_RESOURCE_TOOLS.camera,
   WORLD_RESOURCE_TOOLS.modelScript, WORLD_RESOURCE_TOOLS.animation
 ] as const;
 export const ASSISTANT_WORLD_TOOLS = [
@@ -140,7 +122,7 @@ export function assistantWorldSourceCapability(
     version: ASSISTANT_WORLD_AUTHORITY_VERSION,
     targets: [...targets],
     tools: [...tools],
-    completion: tools.includes(ASSISTANT_WORLD_TOOL.completeCamera) || tools.includes(WORLD_RESOURCE_TOOLS.camera)
+    completion: tools.includes(WORLD_RESOURCE_TOOLS.camera)
   };
 }
 
@@ -305,13 +287,6 @@ export type AssistantWorldWriteOperation =
       script: string;
       duration: number;
       loop: boolean;
-    }
-  | {
-      kind: "resize-scene-area";
-      operationId: WorldId;
-      /** Canonical area scope version observed in `get_world_context`. */
-      expectedScopeVersion: WorldVersion;
-      bounds: GroundAabb;
     }
   | {
       kind: "set-world-camera";
@@ -620,22 +595,6 @@ export function decodeAssistantWorldWriteOperation(value: unknown): { ok: true; 
     return {
       ok: true,
       value: { kind: "set-scene-animation-script", operationId: value.operationId, script: value.script, duration: value.duration, loop: value.loop, ...(value.motionBaseRevision === undefined ? {} : {motionBaseRevision:value.motionBaseRevision as number}), ...(value.motionAsset === undefined ? {} : {motionAsset:value.motionAsset as import("./domain/index.js").StoredAsset}), ...(value.motionTarget === undefined ? {} : {motionTarget:value.motionTarget as {instanceId:WorldId;expectedVersion:WorldVersion;scopeVersion?:WorldVersion;canvasRevision?:number}}) }
-    };
-  }
-  if (value.kind === "resize-scene-area") {
-    if (!isBoundedId(value.expectedScopeVersion)) {
-      return { ok: false, code: "invalid-data", message: "导演区范围版本无效" };
-    }
-    const bounds = decodeGroundAabb(value.bounds);
-    if (!bounds) return { ok: false, code: "invalid-data", message: "导演区范围边界无效" };
-    return {
-      ok: true,
-      value: {
-        kind: "resize-scene-area",
-        operationId: value.operationId,
-        expectedScopeVersion: value.expectedScopeVersion,
-        bounds
-      }
     };
   }
   if (value.kind === "set-world-camera") {
@@ -1006,7 +965,7 @@ export type AssistantWorldContextView = {
   sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null; animationRig?: WorldModelAnimationRig }>;
   /**
    * Authoritative scripts of the instance identities in this scope (writable plus
-   * read-only references), keyed by instance id. `get_world_model_script` reads
+   * read-only references), keyed by instance id. `read_world_resource` reads
    * `includeSource` from here, so a chunk write can verify its real tail.
    * Omitted by hosts that predate chunked authoring.
    */

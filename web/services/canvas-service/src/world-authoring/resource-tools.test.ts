@@ -3,11 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { createEmptyWoohaa3ServerCanvas, normalizeGlbModelReference, type WorldResourceEdit, type CanvasNodeData } from '@woohaa3/contracts';
-import { YJS_SYNC_PROTOCOL_VERSION } from '@woohaa3/contracts/canvas-yjs';
 import { CanvasRoom } from '../sync/room.js';
 import { SqliteYjsRepository } from '../storage/sqlite/yjs.js';
 import { loadNodeSqlite } from '../storage/sqlite/sqlite-loader.js';
-import { createWorldAuthoringAuthority, nextSceneAreaScopeVersion, stableAuthorityVersion } from './authority.js';
+import { createWorldAuthoringAuthority } from './authority.js';
 import { createWorldAuthoringService } from './scene-area-service.js';
 import { createAssistantWorldService } from './assistant-service.js';
 import { createWorldCameraSettingsService } from './camera-service.js';
@@ -180,28 +179,6 @@ it('atomically edits animation source/config, refuses referenced deletion, suppo
   const deleted = await f.edit({ resourceType: 'scene_animation_script', operation: 'delete', operationId: 'clear-animation', target, expectedVersion: replaced.version });
   expect(deleted).toMatchObject({ ok: true, deleted: true });
   expect((await f.read()).sceneArea?.animationScript).toBeNull();
-});
-
-it('renames an area and rejects explicit spatial edits', async () => {
-  const f = await fixture();
-  const original = await f.read();
-  const target = { areaId: 'area-1' };
-  const edit = { resourceType: 'scene_area' as const, operation: 'update' as const, target, expectedVersion: original.sceneArea?.resourceVersion };
-  for (const [index, patch] of [{ bounds: original.bounds }, { moveBy: { u: 1, v: 0 } }, { rotateClockwise: true }, { unknown: true }].entries()) {
-    expect(await f.edit({ ...edit, operationId: `invalid-${index}`, patch } as never)).toMatchObject({ ok: false, code: 'invalid-data' });
-  }
-  const renamed = await f.edit({ ...edit, operationId: 'rename', patch: { title: '新区域' } });
-  expect(renamed).toMatchObject({ ok: true });
-  const after = await f.read();
-  expect(after.sceneArea?.title).toBe('新区域');
-  expect(after.bounds).toEqual(original.bounds);
-  expect(after.sceneArea?.scopeVersion).toEqual(original.sceneArea?.scopeVersion);
-  expect(after.sceneArea?.animationOrigin).toEqual(original.sceneArea?.animationOrigin);
-  expect(await f.edit({ ...edit, operationId: 'stale', patch: { title: '旧版本' } })).toMatchObject({ ok: false, code: 'version-conflict' });
-  expect(await f.edit({ ...edit, operation: 'delete', operationId: 'delete-root' } as never)).toMatchObject({ ok: false, code: 'outside-scope' });
-  expect(await f.edit({ ...edit, operation: 'create', operationId: 'create-root' } as never)).toMatchObject({ ok: false, code: 'outside-scope' });
-  expect(await f.edit({ ...edit, operationId: 'unknown-top', patch: { title: 'x' }, extra: true } as never)).toMatchObject({ ok: false, code: 'invalid-data' });
-  expect(await f.edit({ ...edit, operationId: 'unknown-target', target: { ...target, extra: true }, patch: { title: 'x' } } as never)).toMatchObject({ ok: false, code: 'invalid-data' });
 });
 
 it('keeps camera edits and retries current, deletes without completion ghosts, and settles automatically', async () => {
@@ -736,35 +713,4 @@ it('does not enlarge a rotated sphere to its rotated bounding cube', async () =>
   expect(result.sceneArea.bounds.max.u).toBeCloseTo(11, 8);
   expect(result.sceneArea.bounds.min.v).toBe(-10);
   expect(result.sceneArea.bounds.max.v).toBe(10);
-});
-
-it('rejects new legacy area resizes regardless of the frozen policy', async () => {
-  for (const allowed of [false, true]) {
-    const f = await fixture(allowed);
-    const before = await f.read();
-    const result = await f.assistant.write({ contextId: f.contextId, operation: { kind: 'resize-scene-area', operationId: `legacy-${allowed}`, expectedScopeVersion: before.sceneArea!.scopeVersion, bounds: { min: { u: -30, v: -30 }, max: { u: 30, v: 30 } } } });
-    expect(result).toMatchObject({ ok: false, code: 'capability-unsupported' });
-    expect((await f.read()).bounds).toEqual(before.bounds);
-  }
-});
-
-it('recovers a previously committed legacy resize after reopening the lease store', async () => {
-  const f = await fixture();
-  const operation = { kind: 'resize-scene-area' as const, operationId: 'old-resize', expectedScopeVersion: 'scope-1', bounds: { min: { u: -11, v: -10 }, max: { u: 11, v: 10 } } };
-  const { operationId, ...intent } = operation;
-  const commandId = `assistant-world-resize-area:${operationId}:${stableAuthorityVersion('assistant-world-intent', intent)}`;
-  const access = f.worldAuthoring.resolveCapability('canvas', f.contextId);
-  if ('ok' in access) throw Error(JSON.stringify(access));
-  const version = nextSceneAreaScopeVersion('area-1', operation.bounds);
-  const committed = await f.room.submitDerived({ commandId, derive(canvas) {
-    const area = canvas.nodeData.area.sceneArea as Record<string, unknown>;
-    return { ok: true as const, batch: { protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: 'canvas', commandId, actorId: 'assistant-world:run', baseRevision: canvas.revision,
-      commands: [{ type: 'nodeData.patch' as const, nodeId: 'area', value: { sceneArea: { ...area, bounds: operation.bounds, scopeVersion: version, animationOrigin: { u: 0, v: 0 } } } as CanvasNodeData }] } };
-  } }, { spatialContext: access.capability });
-  if (!committed.ok) throw Error(JSON.stringify(committed));
-  const recovered = f.restartForReceipt();
-  const result = await recovered.write({ contextId: f.contextId, operation });
-  expect(result).toMatchObject({ ok: true, duplicate: true, commandId, revision: committed.revision, version });
-  expect(await recovered.write({ contextId: f.contextId, operation: { ...operation, bounds: { ...operation.bounds, max: { u: 12, v: 10 } } } })).toMatchObject({ ok: false });
-  expect(f.room.currentRevision).toBe(committed.revision);
 });

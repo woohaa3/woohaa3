@@ -95,9 +95,8 @@ describe("standard-agent-roles", () => {
     expect(director).toContain("默认 4×4 米");
     expect(director).toContain("读取工具只是准备阶段，不是完成结果");
     expect(director).toContain("至少一个写工具");
-    expect(director).toContain("edit_scene_area");
-    expect(director).toContain("allowSceneAreaExpansion");
-    expect(director).toContain("edit_scene_area 只允许修改名称");
+    expect(director).toContain("锁定大小策略");
+    expect(director).not.toContain("edit_scene_area");
     for (const term of ["outside-scope", "version-conflict", "version-unknown", "不要伪造版本"]) {
       expect(director, term).toContain(term);
     }
