@@ -495,11 +495,13 @@ describe("受保护编辑 edit.apply 的服务端原子性（任务 1.2）", () 
     expect(Array.from(Y.encodeStateAsUpdate(doc))).toEqual(before);
   });
 
-  it("进行中任务的节点删除被原子拒绝", async () => {
+  it("进行中任务的节点可删除，任务账本保留", async () => {
+    // 行为随 `fix(canvas): allow deleting nodes during generation`（8cdde9e3）变更：
+    // 生成任务独立于节点生命周期，删除后由 projector 结算 job，不回写节点。
     const doc = await seedNode();
     const running = await applyCommandTransaction({
       doc,
-      batch: batch({ commandId: "run", commands: [{ type: "nodeData.patch", nodeId: "n1", value: { taskStatus: "processing" } }] }),
+      batch: batch({ commandId: "run", commands: [{ type: "nodeData.patch", nodeId: "n1", value: { taskStatus: "processing", activeRunId: "run-1" } }] }),
       mediaStorage: mediaStorage(),
       now: FIXTURE_NOW
     });
@@ -510,9 +512,14 @@ describe("受保护编辑 edit.apply 的服务端原子性（任务 1.2）", () 
       mediaStorage: mediaStorage(),
       now: FIXTURE_NOW
     });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.code).toBe("edit-active-run");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const exported = yDocToServerCanvas(doc, { now: FIXTURE_NOW });
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.canvas.document.nodes).toHaveLength(0);
+    // 删除必须清掉 nodeData：否则 Y.Doc 出现悬空引用，整张画布再也导不出来。
+    expect(exported.canvas.nodeData).toEqual({});
   });
 
   it("同 commandId 同 payload 幂等，不重复应用", async () => {
