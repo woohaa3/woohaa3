@@ -671,13 +671,18 @@ describe("AgentConversationPanel · 续聊目标身份", () => {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "继续讨论这个场景");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
-      const option = el.querySelector<HTMLButtonElement>('.assistant-size-lock .ui-switch');
+      const options = el.querySelector<HTMLButtonElement>('button[aria-label="生成选项"]');
+      let option: HTMLInputElement | null = null;
       if (worldScope.kind === "scene-area") {
-        expect(option?.getAttribute("data-state")).toBe("checked");
-        expect(option?.closest(".assistant-toolbar__before-submit")).not.toBeNull();
+        expect(options?.previousElementSibling?.textContent).toBe("发送并修改");
+        expect(options?.parentElement?.className).toBe("assistant-size-lock-button");
+        await act(async () => options!.click());
+        expect(accept).not.toHaveBeenCalled();
+        option = document.querySelector<HTMLInputElement>('.assistant-size-lock input[type="checkbox"]');
+        expect(option?.checked).toBe(true);
         await act(async () => option!.click());
-        expect(option?.getAttribute("data-state")).toBe("unchecked");
-      } else expect(option).toBeNull();
+        expect(option?.checked).toBe(false);
+      } else expect(options).toBeNull();
       const form = el.querySelector<HTMLFormElement>(".agent-detail__reply")!;
       await act(async () => {
         form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -685,7 +690,7 @@ describe("AgentConversationPanel · 续聊目标身份", () => {
       await act(async () => undefined);
       expect(accept).toHaveBeenCalledTimes(1);
       expect(accept.mock.calls[0]![1].entry).toMatchObject({ action: "modify", mode: "world", worldScope, ...(worldScope.kind === "scene-area" ? { allowSceneAreaExpansion: true } : {}) });
-      if (option) expect(option.getAttribute("data-state")).toBe("checked");
+      if (option) expect(option.checked).toBe(true);
       expect(el.querySelector(".agent-detail__reply-error")).toBeNull();
     } finally { await act(async () => { root.unmount(); }); el.remove(); }
   });

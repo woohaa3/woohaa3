@@ -633,11 +633,18 @@ describe("统一 Agent 创作入口", () => {
       mode: "world",
       worldScope: { kind: "scene-area", areaId: "area-1" },
     });
-    const sizeLock = el.querySelector<HTMLButtonElement>('.assistant-size-lock .ui-switch')!;
-    expect(sizeLock.getAttribute("data-state")).toBe("checked");
-    expect(sizeLock.closest(".assistant-toolbar__before-submit")).not.toBeNull();
+    expect(document.querySelector('.assistant-size-lock')).toBeNull();
+    const options = el.querySelector<HTMLButtonElement>('button[aria-label="生成选项"]')!;
+    expect(options.previousElementSibling?.textContent).toBe("生成");
+    expect(options.parentElement?.className).toBe("assistant-size-lock-button");
+    expect(options.classList.contains("ui-button--primary")).toBe(true);
+    await act(async () => options.click());
+    expect(submitTurn).not.toHaveBeenCalled();
+    const sizeLock = document.querySelector<HTMLInputElement>('.assistant-size-lock input[type="checkbox"]')!;
+    expect(sizeLock.closest("label")?.textContent).toBe("锁定大小范围");
+    expect(sizeLock.checked).toBe(true);
     await act(async () => sizeLock.click());
-    expect(sizeLock.getAttribute("data-state")).toBe("unchecked");
+    expect(sizeLock.checked).toBe(false);
     await input("textarea", "把桌子移到左边");
     const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
       (entry) => entry.textContent === "生成",
@@ -652,7 +659,7 @@ describe("统一 Agent 创作入口", () => {
       allowSceneAreaExpansion: true,
       prompt: "把桌子移到左边",
     });
-    expect(sizeLock.getAttribute("data-state")).toBe("checked");
+    expect(sizeLock.checked).toBe(true);
   });
 
   it("镜头生成面板提交所选镜头，保持调整用途和用户输入", async () => {

@@ -21,7 +21,8 @@ import {
 } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
-import { Button, IconButton, Switch } from "@woohaa3/ui/primitives";
+import { Button, IconButton } from "@woohaa3/ui/primitives";
+import { SizeLockOptions } from "./size-lock-options.js";
 import { LocateIcon, SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
@@ -584,18 +585,14 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
               ) : null}
           </>
         }
-        beforeSubmit={props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
-          <label className="assistant-size-lock">
-            <Switch
-              checked={input.draft.allowSceneAreaExpansion !== true}
-              disabled={locked || !props.writable || Boolean(input.pending)}
-              onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
-            />
-            锁定大小
-          </label>
-        ) : null}
-        submit={
-          delivery ? (
+        submit={<SizeLockOptions
+          available={props.mode === "world" && props.worldScope?.kind === "scene-area"}
+          tone={delivery?.cancel ? "neutral" : "primary"}
+          checked={input.draft.allowSceneAreaExpansion !== true}
+          disabled={locked || !props.writable || Boolean(input.pending)}
+          onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
+        >
+          {delivery ? (
             delivery.cancel ? (
               <Button
                 tone="neutral"
@@ -640,8 +637,8 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
                   ? "执行中"
                   : target.action}
             </Button>
-          )
-        }
+          )}
+        </SizeLockOptions>}
       />
       {delivery ? (
         <>

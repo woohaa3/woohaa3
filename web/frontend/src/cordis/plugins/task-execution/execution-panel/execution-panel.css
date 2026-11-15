@@ -2079,15 +2079,3 @@
 }
 
 .mc-panel__model-section { padding: 6px 8px; color: var(--app-web-text-muted); font-size: 12px; }
-
-.assistant-size-lock {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  font-size: 12px;
-  color: var(--app-web-text-secondary);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.assistant-size-lock:has(.ui-switch:disabled) { opacity: .55; cursor: default; }

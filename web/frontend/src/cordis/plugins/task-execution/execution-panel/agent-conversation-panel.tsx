@@ -31,7 +31,8 @@ import { assistantConversationPort } from "../../../services/assistant-execution
 import type { AgentConversationSubmitInput, AgentConversationSubmitResult } from "../../../contract/agent-conversation.js";
 import { AssistantComposer } from "@woohaa3/ui/assistant";
 import { AssistantToolbar } from "@woohaa3/ui/assistant";
-import { Button, Switch } from "@woohaa3/ui/primitives";
+import { Button } from "@woohaa3/ui/primitives";
+import { SizeLockOptions } from "../../../ui/assistant-execution/size-lock-options.js";
 import { AssistantConfiguration, ReasoningParameters } from "../../../ui/assistant-execution/configuration.js";
 import { agentDirectory } from "../../../services/assistant-execution/directory.js";
 import { agentDirectoryModels, agentModelSelection, assistantSelectionMemory, rememberAssistantPreference } from "../../../services/assistant-execution/selection.js";
@@ -527,17 +528,14 @@ export function AgentConversationPanel(props: AgentConversationPanelProps) {
           parameters={<ReasoningParameters value={replyEffort} options={modelSelection.supportedEfforts} open={selector === "model"} onOpenChange={open => setSelector(open ? "model" : null)} disabled={input.busy || turnActive || Boolean(input.pending)}
             onChange={effort => { controller.edit({ efforts: { ...input.draft.efforts, [effortKey]: effort as typeof replyEffort } }); rememberReply(replyModel, effort as typeof replyEffort); }} />}
 
-          beforeSubmit={continuationMode === "world" && continuationWorldScope?.kind === "scene-area" ? (
-            <label className="assistant-size-lock">
-              <Switch
-                checked={input.draft.allowSceneAreaExpansion !== true}
-                disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)}
-                onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
-              />
-              锁定大小
-            </label>
-          ) : null}
-          submit={<Button type="submit" tone="primary" disabled={input.busy || draft.trim() === "" || turnActive || (!modifying && turn?.target.mode !== "text") || Boolean(selectionReason && !input.pending)}>发送并修改</Button>} />
+          submit={<SizeLockOptions
+            available={continuationMode === "world" && continuationWorldScope?.kind === "scene-area"}
+            checked={input.draft.allowSceneAreaExpansion !== true}
+            disabled={input.busy || switchingConnection || turnActive || Boolean(input.pending)}
+            onCheckedChange={checked => controller.edit({ allowSceneAreaExpansion: !checked })}
+          >
+            <Button type="submit" tone="primary" disabled={input.busy || draft.trim() === "" || turnActive || (!modifying && turn?.target.mode !== "text") || Boolean(selectionReason && !input.pending)}>发送并修改</Button>
+          </SizeLockOptions>} />
         {selectionReason ? <p className="agent-detail__reply-error">{selectionReason}</p> : null}
         {input.pending ? <button type="button" disabled={input.busy} onClick={() => void controller.query(port)}>核对原请求</button> : null}
         {input.notice ? <p className="agent-detail__reply-error">{input.notice}</p> : null}

@@ -1,0 +1,22 @@
+.assistant-size-lock-button { display: inline-flex; flex: 0 0 auto; align-items: stretch; }
+.assistant-toolbar .assistant-size-lock-button > .ui-button { height: 32px; min-height: 32px; min-width: 0; white-space: nowrap; }
+.assistant-size-lock-button > .ui-button:first-child { padding-inline: 10px; border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+.assistant-size-lock-button > .ui-button.assistant-size-lock-button__arrow {
+  width: 24px;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+.ui-popover.assistant-size-lock-options { padding: 10px 12px; }
+.assistant-size-lock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-web-text-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.assistant-size-lock input { width: 14px; height: 14px; margin: 0; accent-color: var(--app-interaction-accent); cursor: inherit; }
+.assistant-size-lock:has(input:disabled) { opacity: .55; cursor: default; }
