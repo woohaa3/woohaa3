@@ -58,7 +58,7 @@ export function findActiveRunNode(work: WorkingState, nodeIds: readonly string[]
 
 export function isNodeTaskActive(data: CanvasNodeData): boolean {
   // 任务终态投影只把 taskStatus 置为 successed/failed/cancelled，**不清除** activeRunId
-  // （latest-run-wins 仍需保留最近 run 身份）。因此能否删除只看任务状态，而不是 activeRunId 是否存在。
+  // （latest-run-wins 仍需保留最近 run 身份）。因此运行态前置条件只看任务状态，而不是 activeRunId 是否存在。
   return data.taskStatus === "pending" || data.taskStatus === "processing";
 }
 

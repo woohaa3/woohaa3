@@ -6,13 +6,12 @@
  * 1. 先解码形状（含白名单/有界/非递归），非法直接拒绝；
  * 2. 在**当前工作副本**（即权威状态）上评估全部前置条件，任一不成立整批拒绝；
  * 3. 顺序应用白名单操作，复用既有 node/edge 结构校验；任一失败整批拒绝；
- * 4. 删除（含级联）额外保护 active run：涉及 queued/pending/running 任务的目标拒绝，
- *    不隐式取消任务（与 run-service / task-projector 的 latest-run-wins 一致）。
+ * 4. 删除允许包含排队/生成中的节点；任务独立结算，迟到结果不恢复已删除节点。
  */
 import type { EditApplyCommand, EditOperation, EditPrecondition, EditNodeDataGuardField } from "../edit-command.js";
 import { decodeEditApplyCommand } from "../edit-command.js";
 import { equalEditJson } from "../edit-json.js";
-import { collectWoohaa3CanvasRemovalIds, type CanvasNodeData, type Woohaa3CanvasNode } from "../domain/index.js";
+import type { CanvasNodeData, Woohaa3CanvasNode } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
 import { findActiveRunNode } from "./working-state.js";
 import {
@@ -34,12 +33,6 @@ export function applyEditCommand(work: WorkingState, command: EditApplyCommand):
 
   const failed = evaluateEditPreconditions(work, decoded.preconditions);
   if (failed) return failed;
-
-  // 单次删除保护：扩展为完整级联闭包后校验 active run。
-  for (const operation of decoded.operations) {
-    const activeRunRejection = validateEditOperationActiveRun(work, operation);
-    if (activeRunRejection) return activeRunRejection;
-  }
 
   for (const operation of decoded.operations) {
     const result = applyEditOperation(work, operation);
@@ -204,26 +197,6 @@ export function matchNodeDataField(
   if (!present) return false;
   if (field !== "sharedWorldInstance" && field !== "modelPlacement") return raw === snapshot.value;
   return equalEditJson(raw, snapshot.value);
-}
-
-/**
- * 删除操作（含级联）的 active run 保护。
- *
- * 与 reducer 的实际删除闭包一致：先算 `collectWoohaa3CanvasRemovalIds` 的实际删除集合，
- * 再检查其中任何节点是否有进行中任务，避免「检查目标通过但后代仍在生成」的竞态。
- */
-export function validateEditOperationActiveRun(
-  work: WorkingState,
-  operation: EditOperation
-): CommandApplyResult | null {
-  if (operation.kind !== "node-remove") return null;
-  if (operation.nodeIds.length === 0) return null;
-  const removed = collectWoohaa3CanvasRemovalIds(work.nodes, operation.nodeIds, work.nodeData);
-  const active = findActiveRunNode(work, [...removed]);
-  if (active) {
-    return reject("edit-active-run", `作品 ${active} 正在生成，请先取消任务或等待结束`);
-  }
-  return null;
 }
 
 /** 应用单条白名单操行；复用既有结构校验，语义与对应原生命令一致。 */

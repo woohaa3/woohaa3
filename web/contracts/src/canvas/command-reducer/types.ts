@@ -34,8 +34,9 @@ export type CanvasCommandRejectionCode =
   | "edit-precondition-failed"
   /** `edit.apply` 内部操作失败或结构非法。 */
   | "edit-operation-invalid"
-  /** 删除/恢复涉及排队或进行中任务，或恢复所需资产不可用。 */
+  /** 显式 no-active-run 前置条件未满足。 */
   | "edit-active-run"
+  /** 恢复所需资产不可用。 */
   | "edit-asset-missing"
   /** 内容命令的 extensionId 未注册，或 kind 不属于该 owner。 */
   | "content-owner-unavailable"

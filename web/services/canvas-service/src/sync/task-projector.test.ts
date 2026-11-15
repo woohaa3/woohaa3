@@ -357,30 +357,66 @@ describe("latest-run-wins（任务 7.7）", () => {
     expect(retry.status).toBe("duplicate");
   });
 
-  it("节点已删除时跳过并记 receipt", async () => {
-    const { room, projector, receipts } = await setupRoom();
-    // 删除保护：先结束进行中任务，再删除节点（change: 2026-10-09，任务 1.2）。
-    await room.submit({
-      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
-      canvasId: CANVAS,
-      commandId: "finish",
-      baseRevision: room.currentRevision,
-      actorId: "web",
-      commands: [{ type: "nodeData.patch", nodeId: "n1", value: { taskStatus: "cancelled" } }]
+  it("终态投影期间删除节点，队列内复核阻止旧快照恢复节点", async () => {
+    const { room, receipts } = await setupRoom();
+    let removed = false;
+    const projector = new CanvasTaskProjector({
+      resolveRoom: async () => room, receipts, now: () => NOW,
+      registerHistory: async () => {
+        if (removed) return;
+        removed = true;
+        const result = await room.submit({
+          protocolVersion: YJS_SYNC_PROTOCOL_VERSION, canvasId: CANVAS,
+          commandId: "remove-during-projection", baseRevision: room.currentRevision,
+          actorId: "web", commands: [{ type: "node.remove", nodeIds: ["n1"] }]
+        });
+        expect(result.ok).toBe(true);
+      }
     });
-    await room.submit({
+    expect(await projector.project(record())).toEqual({ status: "skipped", reason: "unknown-node" });
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.canvas.document.nodes).toEqual([]);
+    expect(exported.canvas.nodeData.n1).toBeUndefined();
+    expect(exported.canvas.assets).toEqual([]);
+    expect(receipts.size).toBe(1);
+  });
+
+  it.each(["succeeded", "failed", "cancelled"] as const)("生成中删除节点后 %s 只归档并结算任务，不恢复节点", async (status) => {
+    const { room, receipts } = await setupRoom();
+    const archived: string[] = [];
+    const projector = new CanvasTaskProjector({
+      resolveRoom: async () => room, receipts, now: () => NOW,
+      registerHistory: async entry => { archived.push(entry.runId); },
+      registerFailure: async entry => { archived.push(entry.runId); }
+    });
+    const removed = await room.submit({
       protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
       canvasId: CANVAS,
       commandId: "remove",
       baseRevision: room.currentRevision,
       actorId: "web",
-      commands: [{ type: "node.remove", nodeIds: ["n1"] }]
+      commands: [
+        { type: "job.upsert", job: { id: "job-1", nodeId: "n1", taskId: "run-1", runId: "run-1", status: "running", updatedAt: NOW } },
+        { type: "node.remove", nodeIds: ["n1"] }
+      ]
     });
-    const outcome = await projector.project(record());
-    expect(outcome.status).toBe("skipped");
-    if (outcome.status !== "skipped") return;
-    expect(outcome.reason).toBe("unknown-node");
+    expect(removed.ok).toBe(true);
+    const terminal = record({ status, ...(status === "succeeded" ? {} : { output: undefined, error: "任务终止" }) });
+    const outcome = await projector.project(terminal);
+    expect(outcome).toEqual({ status: "skipped", reason: "unknown-node" });
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.canvas.document.nodes).toEqual([]);
+    expect(exported.canvas.nodeData.n1).toBeUndefined();
+    expect(exported.canvas.assets).toEqual([]);
+    expect(exported.canvas.jobs[0].status).toBe(status === "succeeded" ? "success" : "failed");
+    expect(archived).toEqual(["run-1"]);
     expect(receipts.size).toBe(1);
+    expect((await projector.project(terminal)).status).toBe("duplicate");
+    expect(archived).toEqual(["run-1"]);
   });
 });
 

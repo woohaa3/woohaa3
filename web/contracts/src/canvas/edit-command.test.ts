@@ -4,7 +4,7 @@ import { applyCanvasCommands } from "../../../test-support/managed-shot-commands
  * （change: 2026-10-09-improve-canvas-workflow，任务 1.1）。
  *
  * 覆盖：结构校验与有界、确定性载荷哈希、字段缺失/null 精确区分、无关变化放行、
- * 同字段/关系变化整批拒绝、删除级联 active run 保护、恢复顺序与幂等。
+ * 同字段/关系变化整批拒绝、生成中删除与级联、恢复顺序与幂等。
  */
 import { describe, expect, it } from "vitest";
 import { createEmptyWoohaa3ServerCanvas, type ServerCanvas, type StoredAsset } from "./domain/index.js";
@@ -215,7 +215,7 @@ describe("edit.apply 缺省字段精确恢复", () => {
 });
 
 describe("edit.apply 删除保护与恢复", () => {
-  it("进行中任务的节点删除被整批拒绝", () => {
+  it("显式 no-active-run 前置条件仍拒绝进行中任务", () => {
     const canvas = withNodes();
     canvas.nodeData.b = { activeRunId: "run-1", taskStatus: "processing" };
     const result = applyCanvasCommands(canvas, [
@@ -230,13 +230,16 @@ describe("edit.apply 删除保护与恢复", () => {
     expect(result.rejection.code).toBe("edit-active-run");
   });
 
-  it("原生 node.remove 也对进行中任务原子拒绝", () => {
+  it.each(["pending", "processing"] as const)("原生 node.remove 允许删除 %s 节点并保留任务账本", (taskStatus) => {
     const canvas = withNodes();
-    canvas.nodeData.b = { taskStatus: "processing" };
+    canvas.nodeData.b = { activeRunId: "run-1", taskStatus };
+    canvas.jobs = [{ id: "job-1", nodeId: "b", runId: "run-1", taskId: "run-1", status: "running", updatedAt: NOW }];
     const result = applyCanvasCommands(canvas, [{ type: "node.remove", nodeIds: ["b"] }], { now: NOW });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection.code).toBe("edit-active-run");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.canvas.document.nodes.map(node => node.id)).toEqual(["a", "c"]);
+    expect(result.canvas.nodeData.b).toBeUndefined();
+    expect(result.canvas.jobs).toEqual(canvas.jobs);
   });
 
   it("已终态（仅保留 activeRunId）的节点可以删除", () => {
@@ -246,7 +249,7 @@ describe("edit.apply 删除保护与恢复", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("级联后代中隐藏的进行中任务同样被拒绝", () => {
+  it("级联删除允许包含进行中的后代", () => {
     const canvas = base();
     canvas.document.nodes = [
       { id: "g", type: "composite-asset", position: { x: 0, y: 0 }, width: 300, height: 300 },
@@ -256,7 +259,10 @@ describe("edit.apply 删除保护与恢复", () => {
     const result = applyCanvasCommands(canvas, [
       { type: "edit.apply", preconditions: [], operations: [{ kind: "node-remove", nodeIds: ["g"] }] }
     ], { now: NOW });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.canvas.document.nodes).toEqual([]);
+    expect(result.canvas.nodeData.child).toBeUndefined();
   });
 
   it("级联删除后按稳定 ID 完整恢复（父先于子、节点先于边）", () => {

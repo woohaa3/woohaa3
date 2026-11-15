@@ -353,9 +353,9 @@ export class CanvasTaskProjector {
 
     const built = buildProjectionCommands({ record, currentCanvas: exported.canvas });
     if (!built.ok) {
-      // Each accepted run owns its job even when a newer run owns the node output.
+      // Each accepted run settles its job even when the node was deleted or has a newer run.
       const job = exported.canvas.jobs.find(job => job.id === record.jobId && job.nodeId === record.nodeId && job.runId === record.runId);
-      if (built.reason === "stale-run" && job && job.status === "running") {
+      if (job && (job.status === "draft" || job.status === "queued" || job.status === "running")) {
         const settled = await room.submit({ protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
           canvasId: record.canvasId, commandId: `${projectionId}:job`, baseRevision: exported.canvas.revision,
           actorId: "task-projector", commands: [{ type: "job.upsert", job: { ...job,

@@ -18,7 +18,7 @@ import {
   type Woohaa3CanvasNode
 } from "../domain/index.js";
 import { OK, reject, type CommandApplyResult, type WorkingState } from "./types.js";
-import { findActiveRunNode, isModelDefinitionNode } from "./working-state.js";
+import { isModelDefinitionNode } from "./working-state.js";
 import { decodeManagedNodeRelation, managedNodeRelationOf } from "../managed-node.js";
 import { decodeWorldInstanceData } from "../shared-world-codec.js";
 import {
@@ -238,13 +238,7 @@ export function removeNodes(work: WorkingState, nodeIds: readonly string[]): Com
     return relation && !removed.has(relation.ownerNodeId);
   });
   if (invalidManagedRemoval) return reject("invalid-command", `托管节点 ${invalidManagedRemoval} 的 owner 仍存在，不能随分组删除`);
-  // 任务边界保护（change: 2026-10-09-improve-canvas-workflow，任务 1.2 / design D5.2）：
-  // 涉及 queued/pending/running 任务的目标或级联节点一律原子拒绝，不隐式取消任务。
-  // 所有删除写入口（原生 node.remove、撤销/恢复 edit.apply、容器移入）复用同一门禁。
-  const activeNode = findActiveRunNode(work, [...removed]);
-  if (activeNode) {
-    return reject("edit-active-run", `作品 ${activeNode} 正在生成，请先取消任务或等待结束`);
-  }
+  // 生成任务独立于节点生命周期；删除后由 projector 结算 job，不回写节点。
   work.nodes = work.nodes.filter((node) => !removed.has(node.id));
   work.edges = work.edges.filter(
     (edge) => !removed.has(edge.source) && !removed.has(edge.target)

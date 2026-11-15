@@ -79,6 +79,28 @@ describe("planner 移动往返", () => {
 });
 
 describe("planner 创建与删除往返", () => {
+  it.each(["pending", "processing"] as const)("%s 节点可以批量删除、撤销和重做", (taskStatus) => {
+    const canvas = withNodes();
+    canvas.nodeData.b = { activeRunId: "run-1", taskStatus };
+    const plan = planCanvasEdit(canvas, [{ type: "node.remove", nodeIds: ["a", "b"] }]);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const deleted = applyEdit(canvas, plan.forward);
+    expect(deleted.document.nodes).toEqual([]);
+    const restored = applyEdit(deleted, plan.inverse);
+    expect(restored.nodeData.b).toEqual(canvas.nodeData.b);
+    expect(applyEdit(restored, plan.forward).document.nodes).toEqual([]);
+  });
+
+  it("撤销创建时允许删除已经开始生成的节点", () => {
+    const canvas = base();
+    const plan = planCanvasEdit(canvas, [{ type: "node.add", node: { id: "n", type: "image", position: { x: 0, y: 0 } } }]);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const created = applyEdit(canvas, plan.forward);
+    created.nodeData.n = { activeRunId: "run-1", taskStatus: "processing" };
+    expect(applyEdit(created, plan.inverse).document.nodes).toEqual([]);
+  });
 
   it("删除后父 ID 被复用，恢复被拒绝", () => {
     const canvas = withNodes();

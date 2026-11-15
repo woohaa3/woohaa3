@@ -158,7 +158,6 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   forwardPre.push(...dataPlan.forwardPre);
   inversePre.push(...dataPlan.inversePre);
 
-  const removedNodesOrdered = orderChildrenFirst(removedNodes);
   for (const edge of addedEdges) {
     forwardOps.push(edgeAddOperation(edge));
     forwardPre.push({ kind: "edge-missing", edgeId: edge.id });
@@ -166,9 +165,6 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   for (const edge of removedEdges) {
     forwardOps.push({ kind: "edge-remove", edgeId: edge.id });
     forwardPre.push({ kind: "edge-present", edgeId: edge.id });
-  }
-  for (const node of removedNodesOrdered) {
-    forwardPre.push({ kind: "no-active-run", nodeIds: [node.id] });
   }
   if (removedNodes.length > 0) {
     forwardOps.push({ kind: "node-remove", nodeIds: removedNodes.map((node) => node.id) });
@@ -179,7 +175,6 @@ export function diffPlan(before: ServerCanvas, after: ServerCanvas): EditPlanRes
   const inverseRemoveAdded = orderChildrenFirst(addedNodes);
   for (const node of inverseRemoveAdded) {
     inverseOps.push({ kind: "node-remove", nodeIds: [node.id] });
-    inversePre.push({ kind: "no-active-run", nodeIds: [node.id] });
     inversePre.push({
       kind: "incident-edge-ids",
       nodeId: node.id,
