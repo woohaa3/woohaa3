@@ -267,6 +267,28 @@ describe("RunningHub API 模型执行（任务 4.2 / design D1b）", () => {
     expect(impl.doCancel).toBeUndefined();
   });
 
+  it("Seedream 5.5 的 9:16 会进入实际 API 请求体", async () => {
+    const { startedBody } = await runModel({
+      modelType: "image",
+      logicalId: "seedream-v5.5",
+      routeEndpoint: "seedream-v5.5/text-to-image",
+      parameters: {
+        model: "runninghub:api/seedream-v5.5",
+        resolution: "2K",
+        aspectRatio: "9:16",
+        outputFormat: "jpeg"
+      }
+    });
+    expect(startedBody).toMatchObject({
+      prompt: "a cat",
+      resolution: "2K",
+      outputFormat: "jpeg",
+      width: 1600,
+      height: 2848
+    });
+    expect(startedBody).not.toHaveProperty("aspectRatio");
+  });
+
   it("API 视频模型：payload 用 video 字段并走 /query 轮询", async () => {
     const { startedUrl, startedBody } = await runModel({
       modelType: "video",

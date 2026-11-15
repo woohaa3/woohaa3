@@ -71,6 +71,7 @@ const CARD_IDS: Readonly<Record<string, string>> = {
   "seedream-v4.5": "seedream-4.5",
   "seedream-v5-lite": "seedream-5.0-lite",
   "seedream-v5-pro": "seedream-5.0-pro",
+  "seedream-v5.5": "seedream-5.0-pro",
   "dola-Seedream-5.0-pro": "seedream-5.0-pro",
   // Dola Seedream 5.5 沿用 5.0 Pro 的比例 / 分辨率 / 输出格式语义。
   "dola-Seedream-5.5": "seedream-5.0-pro",
