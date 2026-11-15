@@ -57,7 +57,7 @@ export function createPayload(resourceRoot, output) {
   const excludes = ['--exclude=./node', '--exclude=./data', '--exclude=./.sea-build', '--exclude=./.sea-build/*', '--exclude=*.tar.gz'];
   execFileSync(tar, systemTarArgs(tar, ['-czf', output, ...excludes, '-C', root, '.'], process.platform), {
     stdio: 'inherit',
-    env: { ...process.env, COPYFILE_DISABLE: '1' }
+    env: { ...process.env, COPYFILE_DISABLE: '1', GZIP: '-9' }
   });
   return {
     path: output,
