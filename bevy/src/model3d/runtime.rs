@@ -81,6 +81,7 @@ pub(crate) fn sync_editor_scope_opacity(
 /// Model roots remain visible in the ECS so world-camera preview/capture cameras can
 /// continue rendering them from their own layers. The main observer is the only consumer
 /// that should react to the browser-local editor scope.
+#[cfg(feature = "canvas-core")]
 pub(crate) fn sync_editor_scope_visibility(
     mut camera: Query<
         &mut bevy::camera::visibility::RenderLayers,

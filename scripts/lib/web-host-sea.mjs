@@ -57,7 +57,7 @@ export function createPayload(resourceRoot, output) {
   const excludes = ['--exclude=./node', '--exclude=./data', '--exclude=./.sea-build', '--exclude=./.sea-build/*', '--exclude=*.tar.gz'];
   execFileSync(tar, systemTarArgs(tar, ['-czf', output, ...excludes, '-C', root, '.'], process.platform), {
     stdio: 'inherit',
-    env: { ...process.env, COPYFILE_DISABLE: '1' }
+    env: { ...process.env, COPYFILE_DISABLE: '1', GZIP: '-9' }
   });
   return {
     path: output,
@@ -82,7 +82,7 @@ export function seaConfig({ main, payload, output }) {
  * 把 SEA blob 注入到 Node 可执行文件，产出单文件。
  *
  * `postject` 是官方文档给出的注入工具。本仓没有把它列进依赖，所以按需通过
- * `npx --yes postject` 拉取——它只做 ELF/PE/Mach-O 的段注入，不参与运行期。
+ * `npx --yes postject@1.0.0-alpha.6` 拉取——它只做 ELF/PE/Mach-O 的段注入，不参与运行期。
  * `WOOHAA_POSTJECT` 可指向本地已安装的 postject 入口以避免联网。
  */
 export function injectSeaBlob({ nodeBinary, blob, output, platform = process.platform }) {
@@ -94,7 +94,7 @@ export function injectSeaBlob({ nodeBinary, blob, output, platform = process.pla
   const command = explicit ? process.execPath : 'npx';
   const args = explicit
     ? [explicit, output, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', fuse]
-    : ['--yes', 'postject', output, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', fuse];
+    : ['--yes', 'postject@1.0.0-alpha.6', output, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', fuse];
   if (platform === 'darwin') {
     // macOS 需要先去掉签名再注入，否则内核会拒绝运行被改过的二进制。
     try {
@@ -104,7 +104,23 @@ export function injectSeaBlob({ nodeBinary, blob, output, platform = process.pla
     }
     args.push('--macho-segment-name', 'NODE_SEA');
   }
-  execFileSync(command, args, { stdio: 'inherit' });
+  const retries = Math.max(1, Number.parseInt(process.env.WOOHAA_POSTJECT_RETRIES ?? '2', 10) || 2);
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    if (attempt > 1) {
+      fs.copyFileSync(nodeBinary, output);
+      fs.chmodSync(output, 0o755);
+    }
+    try {
+      execFileSync(command, args, { stdio: 'inherit' });
+      lastError = undefined;
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === retries) throw error;
+    }
+  }
+  if (lastError) throw lastError;
   if (platform === 'darwin') {
     execFileSync('codesign', ['--sign', '-', output], { stdio: 'inherit' });
   }
