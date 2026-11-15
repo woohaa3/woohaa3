@@ -87,7 +87,9 @@ export function createCatalogRuntime(options: CatalogRuntimeOptions): CatalogRun
         .join("+");
       // Provider 的 catalogRevision 参与签名：远端 Provider 只改 schema/能力、不改模型 id 集合时，
       // 目录也要失效重算（否则已打开的画布看不到新描述）。
-      return `${entry.providerId}:${entry.available}:${entry.catalogRevision ?? ""}:${models}`;
+      // credentialEpoch 参与签名：换凭据不改模型集合，但执行实例必须重建，否则缓存里那个
+      // 持旧 key 的 provider 会一直用到进程重启（2026-11-16 现场）。
+      return `${entry.providerId}:${entry.available}:${entry.catalogRevision ?? ""}:${entry.credentialEpoch ?? ""}:${models}`;
     }).sort().join(",");
   };
   const registry = (): TaskProviderRegistry => {

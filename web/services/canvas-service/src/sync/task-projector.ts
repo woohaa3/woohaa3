@@ -55,8 +55,27 @@ export type ProjectionOutcome =
   | { status: "projected"; revision: number; noop: boolean }
   | { status: "duplicate"; revision: number }
   | { status: "skipped"; reason: "stale-run" | "unknown-node" }
-  /** `permanent`：重试不可能成功（例如画布文档已不存在），消费方应直接放弃而不是退避重试。 */
+  /** `permanent`：重试不可能成功（例如画布文档已不存在或已损坏），消费方应直接放弃而不是退避重试。 */
   | { status: "failed"; code: string; message: string; permanent?: boolean };
+
+/**
+ * 「这份画布文档重试多少次都一样」的失败码。
+ *
+ * `yDocToServerCanvas` 对悬空引用/格式不识别是**拒绝**而不是修剪（spec：Y.Doc 是权威状态，
+ * 出现悬空引用说明文档已损坏，必须隔离而不是静默修剪）。这类失败按画布隔离，不能让它们
+ * 把全局投影水位钉死。
+ */
+const CORRUPT_DOCUMENT_CODES: ReadonlySet<string> = new Set([
+  "corrupt-document",
+  "unsupported-format",
+  "orphan-node-data",
+  "dangling-edge-endpoint",
+  "dangling-parent",
+  "node-id-mismatch",
+  "duplicate-job-id",
+  "missing-meta-id",
+  "invalid-revision"
+]);
 
 /** receipt 查询/记录：由注入的实现持久化（运维补偿用）。 */
 export type ProjectionReceiptStore = {
@@ -347,6 +366,13 @@ export class CanvasTaskProjector {
     if (!exported || !exported.ok) {
       if (exported?.code === "not-found") {
         return { status: "failed", code: "canvas-not-found", message: exported.message, permanent: true };
+      }
+      // 文档损坏（悬空引用等）不是「room 尚未装载」那类暂时问题：同一份 Y.Doc 重试多少次
+      // 结果都一样。标成 permanent，让消费方按画布隔离而不是无限退避——否则单个损坏画布
+      // 会把全局水位钉死，所有画布的任务回调一起停摆（2026-11-16 现场）。
+      // 注意：这里**不**丢弃任务；画布修好后仍然需要投影，隔离范围由调用方决定。
+      if (CORRUPT_DOCUMENT_CODES.has(exported?.code ?? "")) {
+        return { status: "failed", code: exported!.code!, message: exported!.message, permanent: true };
       }
       return { status: "failed", code: "canvas-unavailable", message: exported?.message ?? "画布不可读" };
     }

@@ -143,7 +143,9 @@ export class CanvasRoom {
       };
     }
     const exported = yDocToServerCanvas(this.published, { now: this.now() });
-    if (!exported.ok) return { ok: false, message: exported.failure.message };
+    // 失败码必须原样带出：`task-projector` 靠它区分「等 room 就绪的重试」与「文档已损坏、
+    // 重试永远不会成功」；丢掉 code 会让损坏画布被当成暂时性问题无限退避重试。
+    if (!exported.ok) return { ok: false, code: exported.failure.code, message: exported.failure.message };
     return { ok: true, canvas: exported.canvas };
   }
 

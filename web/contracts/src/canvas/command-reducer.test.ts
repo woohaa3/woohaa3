@@ -416,3 +416,38 @@ describe("旧卡片模型只读诊断（change: 2026-11-10-remove-legacy-model-c
     expect(upgraded.ok).toBe(true);
   });
 });
+
+describe("引用完整性防线（change: 2026-11-16-repair-generation-callback-stalls，缺陷 1）", () => {
+  it("直接校验：孤儿 nodeData 被识别为损坏，健康画布通过", async () => {
+    // 真实缺陷：孤儿 nodeData 一旦进入权威 Y.Doc，这张画布就再也导不出来
+    // （导出对悬空引用是拒绝而非修剪），进而让该画布的终态投影永久失败。
+    const { findReferentialIntegrityViolation } = await import("./domain/core/referential-integrity.js");
+
+    const healthy = { nodes: [{ id: "n1" }], edges: [], nodeData: { n1: {} }, jobs: [{ id: "j1" }] };
+    expect(findReferentialIntegrityViolation(healthy)).toBeNull();
+
+    expect(findReferentialIntegrityViolation({ ...healthy, nodeData: { n1: {}, ghost: {} } }))
+      .toEqual({ code: "orphan-node-data", message: "nodeData 指向不存在的节点 ghost" });
+
+    expect(findReferentialIntegrityViolation({ ...healthy, edges: [{ id: "e1", source: "n1", target: "ghost" }] }))
+      .toMatchObject({ code: "dangling-edge-endpoint" });
+
+    expect(findReferentialIntegrityViolation({ ...healthy, nodes: [{ id: "n1", parentId: "ghost" }] }))
+      .toMatchObject({ code: "dangling-parent" });
+
+    expect(findReferentialIntegrityViolation({ ...healthy, jobs: [{ id: "j1" }, { id: "j1" }] }))
+      .toMatchObject({ code: "duplicate-job-id" });
+  });
+
+  it("命令批次产出的画布必须通过同一道校验", () => {
+    // 把防线接进 applyCanvasCommands 的目的是：任何命令族（含扩展命令与内容归属钩子）
+    // 都无法写出 Y.Doc 导出时才炸的文档。
+    const result = applyCanvasCommands(base(), [
+      { type: "node.add", node: { id: "n1", type: "custom", position: { x: 0, y: 0 } } }
+    ], { now: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const nodeIds = new Set(result.canvas.document.nodes.map((node) => node.id));
+    for (const key of Object.keys(result.canvas.nodeData)) expect(nodeIds.has(key)).toBe(true);
+  });
+});

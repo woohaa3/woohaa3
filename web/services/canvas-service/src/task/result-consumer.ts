@@ -60,6 +60,17 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
   const retries = new Map<string, { attempts: number; dueAt: number; revision: number }>();
   /** 已判定为终态失败的投影（画布已删除）：本进程内直接跳过，避免每轮重新投影、重复计数与刷日志。 */
   const dropped = new Set<string>();
+  /**
+   * 画布级隔离（change: 2026-11-16-repair-generation-callback-stalls，缺陷 2）。
+   *
+   * 画布文档损坏（悬空引用等）时，同一份 Y.Doc 重试多少次都一样。若继续按「失败不推进水位」
+   * 处理，一条坏记录就会把全局 cursor 钉死，**所有画布**的任务回调一起停摆（2026-11-16 现场：
+   * 1 个画布 2 条孤儿 nodeData 让 200 条记录全失败，两个健康画布的终态再也投不进去）。
+   *
+   * 因此永久性失败按**画布**隔离：该画布的记录先记下并放行水位，其余画布照常推进；隔离只
+   * 影响本轮进程，画布修好（或进程重启）后自然重投——不会把任务彻底丢掉。
+   */
+  const quarantined = new Map<string, { code: string; message: string; firstSeenAt: number; taskCount: number }>();
 
   const reconcileOnce = async () => {
     if (running) return { projected: 0, duplicate: 0, skipped: 0, failed: 0, dropped: 0 };
@@ -114,12 +125,23 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
               retries.delete(projectionId);
               break;
             }
-            // 画布文档已经不存在（画布被删、任务还留在库里）：重试永远不会成功，直接放弃并
-            // 推进水位；否则每一轮退避都会把同一批任务重新打一遍日志。
+            // 永久性失败分两种：
+            // - 画布已删除（canvas-not-found）：这条记录永远不可能投影，直接丢弃并放行水位；
+            // - 画布文档损坏（corrupt-document 等）：画布还在，修好后需要重投，因此按**画布**隔离
+            //   并放行水位，只影响本轮进程。绝不能让它把全局 cursor 钉死（2026-11-16 现场）。
             if (outcome.permanent) {
               summary.dropped += 1;
               retries.delete(projectionId);
               dropped.add(projectionId);
+              if (outcome.code !== "canvas-not-found") {
+                const existing = quarantined.get(record.canvasId);
+                quarantined.set(record.canvasId, {
+                  code: outcome.code,
+                  message: outcome.message,
+                  firstSeenAt: existing?.firstSeenAt ?? now,
+                  taskCount: (existing?.taskCount ?? 0) + 1
+                });
+              }
               if (droppedSamples.length < 3) {
                 droppedSamples.push({ taskKey: record.taskKey, canvasId: record.canvasId, code: outcome.code });
               }
@@ -153,7 +175,10 @@ export function createTaskResultConsumer(options: TaskResultConsumerOptions): Ta
           count: pending.length,
           ...summary,
           ...(failedSamples.length > 0 ? { failedSamples } : {}),
-          ...(droppedSamples.length > 0 ? { droppedSamples } : {})
+          ...(droppedSamples.length > 0 ? { droppedSamples } : {}),
+          // 被隔离的画布必须显式暴露：它们是「任务看起来没回调」的真实原因，藏在
+          // dropped 计数里会让排障重新回到「只能看数据库」。
+          ...(quarantined.size > 0 ? { quarantinedCanvases: [...quarantined.entries()].map(([canvasId, entry]) => ({ canvasId, ...entry })) } : {})
         });
       }
       return summary;

@@ -17,6 +17,7 @@
  */
 import { stableStringify } from "./canvas-script/planner/hash.js";
 import { validateWorldIdentities } from "./domain/world-identities.js";
+import { findReferentialIntegrityViolation } from "./domain/core/referential-integrity.js";
 import { InvalidWorldIdentitiesError } from "./domain/normalization.js";
 import type { CanvasCommand } from "./commands.js";
 import type { ServerCanvas } from "./domain/index.js";
@@ -76,6 +77,15 @@ export function applyCanvasCommands(
 
   const worldError = validateWorldIdentities(work.nodes, work.nodeData);
   if (worldError) return reject("invalid-command", worldError);
+  // 引用完整性防线：必须与写命令同批执行，不能等 Y.Doc 导出时才发现——那张画布届时
+  // 已经损坏（导出被拒绝 → 任务投影永久失败）。详见 referential-integrity.ts。
+  const integrityViolation = findReferentialIntegrityViolation({
+    nodes: work.nodes,
+    edges: work.edges,
+    nodeData: work.nodeData,
+    jobs: work.jobs
+  });
+  if (integrityViolation) return reject("invalid-command", integrityViolation.message);
   let result: ApplyCanvasCommandsResult;
   try {
     result = finalize(canvas, work, now);

@@ -21,6 +21,7 @@ export * from "./web-server.js";
 export * from "./diagnostics.js";
 export * from "./facades.js";
 export * from "./generation.js";
+export * from "./credential-epoch.js";
 export * from "./storage.js";
 export * from "./exposer.js";
 export * from "./telemetry.js";

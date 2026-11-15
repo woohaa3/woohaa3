@@ -63,6 +63,51 @@ afterEach(() => {
 });
 
 describe("createTaskResultConsumer 补偿重试", () => {
+  it("损坏画布按画布隔离，不钉死全局水位（2026-11-16 现场）", async () => {
+    // 真实缺陷：一个画布的 Y.Doc 有悬空 nodeData，导出被拒绝；旧实现把它当成可重试失败，
+    // 于是 cursor 永久停在最早那批记录之前，**所有画布**的终态都投不进去。
+    const broken = { ...historyRecord(5), canvasId: "canvas-broken" };
+    const healthy = { ...historyRecord(8), taskKey: "run-2", runId: "run-2", canvasId: "canvas-healthy" };
+    const outcomes: ProjectionOutcome[] = [
+      { status: "failed", code: "corrupt-document", message: "nodeData 指向不存在的节点 x", permanent: true },
+      { status: "projected", revision: 1, noop: false }
+    ];
+    const projections: string[] = [];
+    const afterCalls: number[] = [];
+    const projector = {
+      async project(record: { taskKey: string }) {
+        projections.push(record.taskKey);
+        return outcomes.shift() ?? { status: "duplicate", revision: -1 };
+      }
+    } as unknown as CanvasTaskProjector;
+    const taskClient = {
+      async history(query: { after?: number }) {
+        const after = query.after ?? 0;
+        afterCalls.push(after);
+        return { items: [broken, healthy].filter((item) => item.recordRevision > after), cursor: 10 };
+      }
+    } as unknown as CanvasTaskClient;
+    const events: Array<Record<string, unknown>> = [];
+    const consumer = createTaskResultConsumer({
+      projector,
+      taskClient,
+      receipts: {} as ProjectionReceiptStore,
+      logger: (event) => events.push(event)
+    });
+
+    expect(await consumer.reconcileOnce()).toMatchObject({ projected: 1, dropped: 1 });
+
+    // 水位必须推进到快照高水位：损坏画布不阻塞其它画布。
+    await consumer.reconcileOnce();
+    expect(afterCalls.at(-1)).toBe(10);
+
+    // 隔离状态要出现在汇总行里，否则排障只能回去翻数据库。
+    const summary = events.find((event) => event.event === "task-reconcile");
+    expect(summary?.quarantinedCanvases).toEqual([
+      expect.objectContaining({ canvasId: "canvas-broken", code: "corrupt-document" })
+    ]);
+  });
+
   it("投影失败不推进水位，按退避重试并在成功后推进", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-20T12:00:00Z"));

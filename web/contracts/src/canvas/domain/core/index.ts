@@ -27,6 +27,7 @@ export * from "./mention-token";
 
 export * from "./node-factory";
 export * from "./node-removal";
+export * from "./referential-integrity";
 export * from "./node-z-index";
 export * from "./serialization";
 export * from "./viewport-zoom";

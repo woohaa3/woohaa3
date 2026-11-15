@@ -120,6 +120,17 @@ export type GenerationProvider = {
    * 生成签名，使 catalog 失效重算；缺省不参与。
    */
   catalogRevision?: number;
+  /**
+   * 凭据修订（可选，单调；只放不可逆摘要，绝不放明文密钥）。
+   *
+   * Task 侧 registry 按签名缓存 provider 实例，签名只含模型/能力事实时，**换 key 不会失效**：
+   * 任务继续用缓存里那个持旧 key 的实例，配置显示已保存、`testConnection` 也通过（它现读配置），
+   * 但真实生成持续失败，只有重启进程才恢复（2026-11-16 现场：RunningHub 同 key 重启前后
+   * 一失败一成功，中间从未换过 key）。把凭据修订纳入签名即可让换 key 立刻重建实例。
+   *
+   * 缺省不参与签名（从不换凭据的 Provider 无需实现）。
+   */
+  credentialEpoch?: number;
   /** 不透明执行句柄。 */
   provider: GenerationProviderHandle;
   /** 模型注册表 + 静态描述（describe 不发网络请求）。 */
