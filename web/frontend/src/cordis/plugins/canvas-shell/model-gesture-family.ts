@@ -17,6 +17,7 @@ import { createFocusNavigation } from "./model-focus-navigation.js";
 import { createFocusLifecycle } from "./model-focus-lifecycle.js";
 import { isDomConsumingInputTarget } from "./input/shortcuts.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import type { InteractionControllerOptions } from "./interaction-types.js";
 
 /** 模型 family 依赖的共享能力（由 controller 注入；不含事件监听所有权）。 */
@@ -106,6 +107,7 @@ export function createModelGestureFamily(ctx: ModelGestureContext) {
    */
   const placementEditable = (): boolean => {
     if (!focus.active) return false;
+    if (canvasEditScopeStore.getSnapshot()["3d"] !== "edit") return false;
     if (!writable()) return false;
     const nodeId = focus.nodeId;
     if (nodeId === null) return false;

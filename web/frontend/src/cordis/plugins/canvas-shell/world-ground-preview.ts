@@ -53,6 +53,7 @@ export function createWorldGroundPreviewState(input: {
   };
 
   const begin = (nodeId: string, point: { x: number; y: number }): boolean => {
+    if (!input.available()) return false;
     const instance = input.getCanvas()?.nodeData[nodeId]?.sharedWorldInstance;
     const start = input.groundAt(point);
     if (!instance || !start) return false;

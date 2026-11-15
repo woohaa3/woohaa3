@@ -10,9 +10,10 @@ import type { HitTarget } from "./hit-test.js";
 import type { InteractionQuery, InteractionState } from "./interaction-core.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { hoverNodeStore } from "../../services/hover-store.js";
-import { builtinNodeCapabilityResolver, type NodeCapabilityResolver } from "@woohaa3/contracts";
+import { builtinNodeCapabilityResolver, canvasEditScopeCategoryOf, canvasEditScopeHidden, type NodeCapabilityResolver } from "@woohaa3/contracts";
 import type { VideoFrameSessions } from "../canvas-runtime/video-frame-session.js";
 import { resolveWorldCameraVideoSource } from "../canvas-runtime/video-source.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 
 export type HoverTrackerDeps = {
   nodeCapabilities?: NodeCapabilityResolver;
@@ -92,6 +93,17 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     deps.videoSessions?.setHovered(null);
   };
 
+  const blockedByEditScope = (hit: HitTarget | null): boolean => {
+    if (!hit) return false;
+    const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    if (!canvas || !("nodeId" in hit)) return false;
+    const node = canvas.document.nodes.find(entry => entry.id === hit.nodeId);
+    if (!node) return false;
+    const category = canvasEditScopeCategoryOf(node, canvas.nodeData[node.id]);
+    const mode = canvasEditScopeStore.getSnapshot()[category];
+    return mode === "locked" || mode === "hidden";
+  };
+
   const updateHoveredVideo = (hit: HitTarget | null) => {
     const sessions = deps.videoSessions;
     if (!sessions) return;
@@ -105,6 +117,11 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
     if (hit && hit.kind === "node") {
       const canvasState = woohaa3CanvasStore.getState().canvas;
       const entry = canvasState?.document.nodes.find((candidate) => candidate.id === hit.nodeId);
+      if (entry && canvasState) {
+        const category = canvasEditScopeCategoryOf(entry, canvasState.nodeData[entry.id]);
+        const mode = canvasEditScopeStore.getSnapshot()[category];
+        if (canvasEditScopeHidden(canvasEditScopeStore.getSnapshot(), category) || mode === "locked") return suspendVideo();
+      }
       if (entry?.type === "video" || (entry?.type === "world-camera" && canvasState
         && resolveWorldCameraVideoSource(canvasState, hit.nodeId))) next = hit.nodeId;
     }
@@ -125,6 +142,7 @@ export function createHoverTracker(deps: HoverTrackerDeps) {
       clearHover();
       return;
     }
+    if (blockedByEditScope(hit)) hit = null;
     const nextNodeId = hit && "nodeId" in hit ? hit.nodeId : null;
     const nextPort = hit && hit.kind === "port" ? hit.side : null;
     const nextEdgeId = hit && (hit.kind === "edge" || hit.kind === "edge-delete") ? hit.edgeId : null;

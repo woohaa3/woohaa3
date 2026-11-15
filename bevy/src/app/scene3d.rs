@@ -417,11 +417,12 @@ pub(super) fn drive_observer_from_shot(
         // sync_surface owns the DOM-aligned viewport. Clearing it here stretches
         // 3D content over the native window (including chrome), while picking
         // and director-area resize handles still use canvas-local CSS pixels.
-        *layers = bevy::camera::visibility::RenderLayers::from_layers(&[
-            0,
-            crate::preview_layers::GRID_LAYER,
-            crate::world_camera::WORLD_CAMERA_GIZMO_LAYER,
-        ]);
+        let show_models = !scene
+            .0
+            .edit_scope
+            .as_ref()
+            .is_some_and(|scope| scope.three_d == "hidden");
+        *layers = model3d::grid::canvas_camera_layers(show_models);
     }
 }
 

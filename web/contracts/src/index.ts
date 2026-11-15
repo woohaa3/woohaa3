@@ -131,6 +131,7 @@ export * from "./canvas/world-animation-verification.js";
 export * from "./canvas/humanoid-motion-reference.js";
 export * from "./canvas/scene-footprint.js";
 export * from "./canvas/creation-scopes-ui.js";
+export * from "./canvas/edit-scope.js";
 export {
   SharedWorldCodecError,
   decodeWorldInstanceData,

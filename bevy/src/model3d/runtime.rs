@@ -21,6 +21,84 @@ pub(crate) type ModelAssets = HashMap<String, Arc<ModelSnapshot>>;
 #[derive(Component)]
 pub(crate) struct ModelAnchor;
 
+/// Presentation marker for a browser-local locked 3D edit scope.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub(crate) struct EditorScopeLocked;
+
+#[derive(Component, Clone)]
+pub(crate) struct EditorScopeOpacity {
+    original: Handle<StandardMaterial>,
+    instance: Handle<StandardMaterial>,
+}
+
+/// Apply the fixed editor lock opacity without touching capture/export scenes.
+/// The marker is written by `sync_models`; this system owns the short-lived
+/// per-entity material clones and restores them when the scope is editable again.
+pub(crate) fn sync_editor_scope_opacity(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: Query<(
+        Entity,
+        &MeshMaterial3d<StandardMaterial>,
+        Option<&EditorScopeOpacity>,
+        Has<EditorScopeLocked>,
+    )>,
+) {
+    for (entity, mesh, record, locked) in &mut meshes {
+        if locked {
+            let needs_new = record.is_none_or(|entry| entry.instance != mesh.0);
+            if needs_new {
+                if let Some(entry) = record {
+                    commands.entity(entity).insert(MeshMaterial3d(entry.original.clone()));
+                    let _ = materials.remove(entry.instance.id());
+                }
+                let Some(source) = materials.get(&mesh.0).cloned() else { continue };
+                let original = mesh.0.clone();
+                let mut instance = source;
+                instance.alpha_mode = bevy::prelude::AlphaMode::Blend;
+                instance.base_color.set_alpha(instance.base_color.alpha() * 0.6);
+                let handle = materials.add(instance);
+                commands.entity(entity).insert((
+                    MeshMaterial3d(handle.clone()),
+                    EditorScopeOpacity { original, instance: handle },
+                ));
+            } else if let Some(entry) = record {
+                if let Some(mut material) = materials.get_mut(&entry.instance) {
+                    let alpha = material.base_color.alpha().min(0.6);
+                    material.base_color.set_alpha(alpha);
+                    material.alpha_mode = bevy::prelude::AlphaMode::Blend;
+                }
+            }
+        } else if let Some(entry) = record {
+            commands.entity(entity).insert(MeshMaterial3d(entry.original.clone())).remove::<EditorScopeOpacity>();
+            let _ = materials.remove(entry.instance.id());
+        }
+    }
+}
+
+/// Apply the 3D hidden scope to the main canvas camera only.
+///
+/// Model roots remain visible in the ECS so world-camera preview/capture cameras can
+/// continue rendering them from their own layers. The main observer is the only consumer
+/// that should react to the browser-local editor scope.
+pub(crate) fn sync_editor_scope_visibility(
+    mut camera: Query<
+        &mut bevy::camera::visibility::RenderLayers,
+        With<super::grid::ModelCanvasCamera>,
+    >,
+    scene: Res<crate::app::CurrentScene>,
+) {
+    let show_models = !scene
+        .0
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.three_d == "hidden");
+    let layers = super::grid::canvas_camera_layers(show_models);
+    for mut current in &mut camera {
+        *current = layers.clone();
+    }
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct ModelVisuals {
     pub(super) batching_strategy: super::batch_strategy::BatchStrategy,
@@ -240,11 +318,20 @@ pub(crate) fn sync_models(
     // resources 由调用方共享；本帧解析出的资源用 `Arc` 保活，避免注册表淘汰后
     // 已建实体持有的 mesh 引用失去来源（change: optimize-model-scene-snapshot-hot-path）。
     let mut desired = HashMap::new();
+    let all_three_d_hidden = scene
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.three_d == "hidden");
     for node in &scene.nodes {
+        let hidden_by_scope = all_three_d_hidden
+            || node
+                .edit_scope
+                .as_ref()
+                .is_some_and(|scope| scope.category == "3d" && scope.mode == "hidden");
         if models
             .demand
             .as_ref()
-            .is_some_and(|d| !d.contains(&node.id))
+            .is_some_and(|d| !d.contains(&node.id) && !hidden_by_scope)
         {
             continue;
         }
@@ -257,6 +344,12 @@ pub(crate) fn sync_models(
         };
         // 场景校验已在边界保证 key 存在；这里防御性跳过未知资源。
         let Some(resource) = resources.get(&reference.resource_key) else {
+            // A hidden world node may temporarily lose its payload lease. Keep
+            // its existing ECS root alive so toggling visibility back on does
+            // not discard the already-built model hierarchy.
+            if hidden_by_scope && models.roots.contains_key(&node.id) {
+                desired.insert(node.id.as_str(), reference);
+            }
             continue;
         };
         desired.insert(node.id.as_str(), reference);
@@ -338,6 +431,26 @@ pub(crate) fn sync_models(
             // 内容 signature 不变，但 placement 可能变化：刷新根 transform，保持资源引用。
             root.resource = resource.clone();
             apply_root_transform(commands, &root.layout, node);
+        }
+        if let Some(root) = models.roots.get(&node.id) {
+            let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && scope.mode == "locked");
+            for entity in &root.entities {
+                if locked { commands.entity(*entity).insert(EditorScopeLocked); }
+                else { commands.entity(*entity).remove::<EditorScopeLocked>(); }
+            }
+        }
+        if let Some(root) = models.roots.get(&node.id) {
+            let locked = node
+                .edit_scope
+                .as_ref()
+                .is_some_and(|scope| scope.category == "3d" && scope.mode == "locked");
+            for entity in &root.entities {
+                if locked {
+                    commands.entity(*entity).insert(EditorScopeLocked);
+                } else {
+                    commands.entity(*entity).remove::<EditorScopeLocked>();
+                }
+            }
         }
     }
     if let Some(playback) = &scene.animation_playback {
@@ -438,8 +551,8 @@ impl ModelVisuals {
         let mut skips = 0u64;
         for (id, root) in &self.roots {
             // 普通画布始终可见；聚焦/编辑/捕获集合内的模型额外保留。
-        let visible = focus_node.is_none_or(|selected| selected == id)
-            || crate::canvas_query::focus_context::contains(scene, id);
+            let visible = focus_node.is_none_or(|selected| selected == id)
+                || crate::canvas_query::focus_context::contains(scene, id);
             let visibility = if visible {
                 Visibility::Inherited
             } else {

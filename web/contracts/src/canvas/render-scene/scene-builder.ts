@@ -9,6 +9,7 @@ import { projectSomaRootTranslation } from "../soma-motion/clip.js";
 import { quatMul } from "../model-transform.js";
 import { sceneAreaAnimationOrigin, type GroundAabb, type GroundPoint, type SceneAreaData, type WorldPoint, type WorldRotation } from "../shared-world.js";
 import { decodeSceneAreaData, decodeWorkflowGroupData } from "../creation-scope-codec.js";
+import { canvasEditScopeCategoryOf, canvasEditScopeHidden, type CanvasEditScope, DEFAULT_CANVAS_EDIT_SCOPE } from "../edit-scope.js";
 import { executeWorldAnimationScript, sampleWorldAnimationInArea, type SampledCameraMotion, type SampledInstanceMotion, type WorldAnimationIr, type WorldAnimationScript } from "../world-animation-script.js";
 import type { NodeCapabilityResolver } from "../node-capabilities.js";
 /**
@@ -69,6 +70,8 @@ export type CanvasRenderSceneInput = {
   /** 扩展内容贡献。缺省时空解析器，不改变现有场景。 */
   content?: ContentContributionResolver;
   canvas: ServerCanvas;
+  /** Browser-local category filter. Capture/export callers omit this field. */
+  editScope?: CanvasEditScope;
   nodeCapabilities?: NodeCapabilityResolver;
   selection?: { nodes?: readonly string[]; edge?: string | null };
   draft?: BevyRenderDraft | null;
@@ -185,6 +188,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const nodeData = canvas.nodeData as Record<string, CanvasNodeData | undefined>;
   const assets = new Map<string, StoredAsset>(canvas.assets.map((asset) => [asset.id, asset]));
   const selectedIds = new Set(input.selection?.nodes ?? []);
+  const editScope = input.editScope ?? DEFAULT_CANVAS_EDIT_SCOPE;
 
   // 导演区是 h=0 的地面范围，不是画布卡片：只通过 `sceneAreas` 投影，节点列表不再
   // 生成通用卡片。2D 组保留节点身份（命中/选择/动作）但以 `frame` chrome 绘制包围框。
@@ -199,6 +203,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const animationNodes = [...canvas.document.nodes].sort((a, b) => priority(a.id) - priority(b.id));
     for (const node of animationNodes) {
       const area = decodeSceneAreaData(nodeData[node.id]?.sceneArea);
+      if (area.ok && canvasEditScopeHidden(editScope, "3d")) continue;
       const script = area.ok ? area.value.animationScript : undefined;
       if (!area.ok || !script) continue;
       const ir = compiledWorldAnimation(script);
@@ -222,7 +227,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   }
   let sceneAreaCount = 0;
   for (const node of canvas.document.nodes) {
-    if (decodeSceneAreaData(nodeData[node.id]?.sceneArea).ok) {
+    if (decodeSceneAreaData(nodeData[node.id]?.sceneArea).ok && !canvasEditScopeHidden(editScope, "3d")) {
       sceneAreaCount += 1;
       sceneAreaOrdinals.set(node.id, sceneAreaCount);
     }
@@ -258,6 +263,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     if (camera && !camera.ok) throw new Error(`Invalid shared world camera: ${camera.code}`);
     const area = decodeSceneAreaData(data?.sceneArea);
     if (area.ok) {
+      if (canvasEditScopeHidden(editScope, "3d")) return [];
       sceneAreaNodeIds.add(node.id);
       return [];
     }
@@ -266,6 +272,10 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     const worldInput = data?.sharedWorldInstance;
     const world = worldInput === undefined ? undefined : decodeWorldInstanceData(worldInput);
     if (world && !world.ok) throw new Error(`Invalid shared world instance: ${world.code}`);
+    const category = canvasEditScopeCategoryOf(node, data);
+    // Keep hidden 3D nodes in the snapshot so Bevy can hide their existing
+    // world entities without destroying/recreating model resources.
+    if (category === "2d" && canvasEditScopeHidden(editScope, category)) return [];
     const groundPreview = input.worldGroundPreviews?.get(node.id);
     if (groundPreview && (!Number.isFinite(groundPreview.u) || !Number.isFinite(groundPreview.v))) {
       throw new Error("Invalid shared world ground preview");
@@ -316,6 +326,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
       : null;
     const rendered: BevyRenderNode = {
       id: node.id,
+      ...(input.editScope ? { editScope: { category, mode: editScope[category] } } : {}),
       type: kind,
       x,
       y,
@@ -368,6 +379,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   // 同 id 的真实节点已存在时跳过（working projection 接管，避免重复绘制）。
   const realIds = new Set(canvas.document.nodes.map((node) => node.id));
   for (const ghost of input.ghostNodes ?? []) {
+    if (canvasEditScopeHidden(editScope, "2d")) continue;
     if (realIds.has(ghost.id)) continue;
     const kind = bevyKindForNodeType(ghost.nodeType);
     const size = bevyNodeSize(kind);
@@ -395,10 +407,14 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
   const endpointlessNodeIds = new Set(
     canvas.document.nodes.filter((node) => capabilitiesOf(node).connections?.endpoints({ canvas, node, data: nodeData[node.id] }) === "none").map((node) => node.id)
   );
+  const hiddenNodeIds = new Set(
+    canvas.document.nodes.filter((node) => canvasEditScopeHidden(editScope, canvasEditScopeCategoryOf(node, nodeData[node.id]))).map(node => node.id)
+  );
   // 导演区节点不出现在节点列表里；指向它的旧连线不能留下悬空端点。
   for (const nodeId of sceneAreaNodeIds) endpointlessNodeIds.add(nodeId);
   const edges = canvas.document.edges
-    .filter((edge) => !endpointlessNodeIds.has(edge.source) && !endpointlessNodeIds.has(edge.target))
+    .filter((edge) => !endpointlessNodeIds.has(edge.source) && !endpointlessNodeIds.has(edge.target)
+      && !hiddenNodeIds.has(edge.source) && !hiddenNodeIds.has(edge.target))
     .map((edge) => ({
       id: edge.id,
       source: edge.source,
@@ -407,6 +423,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     }));
 
   return {
+    ...(input.editScope ? { editScope } : {}),
     version: CANVAS_RENDER_SCENE_VERSION,
     canvasId: canvas.id,
     revision: canvas.revision,
@@ -414,6 +431,7 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
     sceneAreas: canvas.document.nodes.flatMap(node => {
       const area = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
       if (!area.ok) return [];
+      if (canvasEditScopeHidden(editScope, "3d")) return [];
       const data = canvas.nodeData[node.id] as { title?: unknown } | undefined;
       const resolved = resolveNodeDisplayName({ type: node.type, explicitName: data?.title });
       const title = resolved.nameSource === "default"
@@ -427,12 +445,12 @@ export function buildCanvasRenderScene(input: CanvasRenderSceneInput): CanvasRen
         playing: input.sceneAnimationPlayer?.nodeId === node.id && input.sceneAnimationPlayer.playing,
         loop: input.sceneAnimationLoop?.(node.id) ?? script.loop
       } : undefined;
-      if (!preview) return [{ nodeId: node.id, title, bounds: area.value.bounds, ...(playback ? { playback } : {}) }];
+      if (!preview) return [{ nodeId: node.id, title, ...(input.editScope ? { editScope: { category: "3d" as const, mode: editScope["3d"] } } : {}), bounds: area.value.bounds, ...(playback ? { playback } : {}) }];
       if (![preview.min.u, preview.min.v, preview.max.u, preview.max.v].every(Number.isFinite)
         || preview.min.u > preview.max.u || preview.min.v > preview.max.v) {
         throw new Error("Invalid scene area bounds preview");
       }
-      return [{ nodeId: node.id, title, bounds: { min: { ...preview.min }, max: { ...preview.max } }, ...(playback ? { playback } : {}) }];
+      return [{ nodeId: node.id, title, ...(input.editScope ? { editScope: { category: "3d" as const, mode: editScope["3d"] } } : {}), bounds: { min: { ...preview.min }, max: { ...preview.max } }, ...(playback ? { playback } : {}) }];
     }),
     edges,
     selection: {
@@ -486,6 +504,7 @@ export function renderSceneEquals(left: CanvasRenderScene | null, right: CanvasR
 export function renderSceneFingerprint(scene: CanvasRenderScene): string {
   const parts: string[] = [
     scene.version,
+    `editScope=${scene.editScope?.["2d"] ?? "edit"},${scene.editScope?.["3d"] ?? "edit"}`,
     `cameraEdit=${JSON.stringify(scene.worldCameraEdit ?? null)}`,
     `rev=${scene.revision}`,
     `sel=${scene.selection.nodes.join(",")}|${scene.selection.edge ?? ""}`,

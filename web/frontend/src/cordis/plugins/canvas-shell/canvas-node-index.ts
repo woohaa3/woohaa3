@@ -18,6 +18,8 @@ import {
 } from "@woohaa3/contracts";
 import type { DropRect } from "./hit-test.js";
 import { modelSceneStore } from "../model-scene/model-scene-store.js";
+import { canvasEditScopeCategoryOf, canvasEditScopeHidden } from "@woohaa3/contracts";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 
 /** 结构/位置索引（丢弃后可重建，不持有规范事实副本）。 */
 export type CanvasNodeIndex = {
@@ -72,7 +74,10 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     positions.set(id, position);
     return position;
   };
+  const editScope = canvasEditScopeStore.getSnapshot();
+  const hiddenNodeIds = new Set(nodes.filter(node => canvasEditScopeHidden(editScope, canvasEditScopeCategoryOf(node, canvas.nodeData[node.id]))).map(node => node.id));
   const workingBounds = nodes.flatMap(node => {
+    if (hiddenNodeIds.has(node.id)) return [];
     const position = absolutePosition(node.id);
     if (!position) return [];
     const size = indexNodeSize(node);
@@ -81,6 +86,7 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
   // 合并候选按类型分桶：只收可合并的节点，保持文档顺序（同距离时后者优先）。
   const mergeRectsByType = new Map<string, MergeTargetCandidate[]>();
   for (const node of nodes) {
+    if (hiddenNodeIds.has(node.id)) continue;
     if (!isMergeEligibleNode({ node, data: canvas.nodeData[node.id] })) continue;
     const position = absolutePosition(node.id);
     if (!position) continue;
@@ -102,8 +108,8 @@ export function createCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIn
     byId,
     children: new Map(),
     documentOrder,
-    liveIds: new Set(byId.keys()),
-    hiddenNodeIds: new Set(),
+    liveIds: new Set([...byId.keys()].filter(id => !hiddenNodeIds.has(id))),
+    hiddenNodeIds,
     workingBounds,
     mergeRectsByType,
     queryWorkingAabb: (rect) => {
@@ -128,14 +134,17 @@ export function indexNodeSize(node: ServerCanvas["document"]["nodes"][number]): 
 /** 单槽 memo：working canvas 对象身份 + prepared 模型修订号。 */
 let memoSource: ServerCanvas | null = null;
 let memoRevision = -1;
+let memoScopeRevision = -1;
 let memoIndex: CanvasNodeIndex | null = null;
 
 /** 返回与来源身份匹配的共享索引；身份或模型资源变化时重建（丢弃旧索引）。 */
 export function sharedCanvasNodeIndex(canvas: ServerCanvas | null): CanvasNodeIndex | null {
   const revision = modelSceneStore.getRevision();
-  if (canvas === memoSource && revision === memoRevision) return memoIndex;
+  const scopeRevision = canvasEditScopeStore.getRevision();
+  if (canvas === memoSource && revision === memoRevision && scopeRevision === memoScopeRevision) return memoIndex;
   memoSource = canvas;
   memoRevision = revision;
+  memoScopeRevision = scopeRevision;
   memoIndex = createCanvasNodeIndex(canvas);
   return memoIndex;
 }

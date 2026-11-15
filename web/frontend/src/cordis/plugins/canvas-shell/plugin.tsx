@@ -4,7 +4,8 @@
  *   change: 2026-09-28-split-frontend-god-plugins，task 2）。
  *
  * 只拥有画布壳：DOM canvas 挂载（由 CanvasHost 调用 `canvasRuntime.attach`）、右下角
- * 缩放控件与模型聚焦返回按钮等 canvas.toolbar/canvas.overlay slot 贡献，以及画布输入门禁。
+ * 缩放控件、概览区编辑范围按钮与模型聚焦返回按钮等 canvas.toolbar/canvas.minimap-top/canvas.overlay
+ * slot 贡献，以及画布输入门禁。
  * 页面级运行时（Bevy、controller、纹理同步）由 required `canvas-runtime` Plugin 持有；
  * 模型编辑能力由 optional `model-editor` Plugin 持有。
  */
@@ -16,11 +17,13 @@ import { CanvasSearchPanel } from "../../ui/CanvasSearchPanel.js";
 import { submitNodeRename } from "../../services/node-rename.js";
 import { CanvasUndoControls } from "./canvas-undo-controls.js";
 import { CanvasEditStatus } from "./canvas-edit-status.js";
+import { CanvasEditScopeControl } from "./canvas-edit-scope-control.js";
 import { CanvasUndoToast } from "./canvas-undo-toast.js";
 import { SearchIcon } from "@woohaa3/ui/icons";
 import { canvasSearchStore } from "../../services/canvas-search-store.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { definePlugin } from "../../plugin.js";
 import { NodeDownloadService } from "../../services/node-download.js";
@@ -195,6 +198,15 @@ export function canvasShellExtension(): Plugin.Function<void> {
         render: () => <CanvasEditStatus edit={ctx.canvasEdit} />
       });
       ctx.effect(() => () => removeEditStatus(), "canvas-shell-edit-status");
+
+      const removeEditScope = ctx.slots.register("canvas.minimap-top", {
+        id: "canvas-edit-scope",
+        owner: CANVAS_SHELL_PLUGIN_ID,
+        priority: 0,
+        render: () => <CanvasEditScopeControl />
+      });
+      ctx.effect(() => () => removeEditScope(), "canvas-shell-edit-scope");
+      ctx.effect(() => () => canvasEditScopeStore.reset(), "canvas-shell-edit-scope-reset");
 
       // 「查找作品」入口（change: 2026-10-09-improve-canvas-workflow，任务 4.2）：
       // 除 Ctrl/⌘+F 外提供可见图标入口（触屏/首次用户可发现）。

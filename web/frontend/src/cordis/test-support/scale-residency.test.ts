@@ -115,7 +115,7 @@ describe("千卡片 fixture 的形状", () => {
 });
 
 describe("固定可见需求下重资源数量不随文档规模增长", () => {
-  it("100 与 3000 节点的准入集合都由同一预算约束", () => {
+  it("100 与 3000 节点的准入集合仍由视口需求决定", () => {
     const small = createScaleFixture({ count: 100 });
     const large = createScaleFixture({ count: 3000 });
     const counts: number[] = [];
@@ -132,22 +132,21 @@ describe("固定可见需求下重资源数量不随文档规模增长", () => {
     expect(counts[1]).toBeLessThan(100);
   });
 
-  it("密集总览受页 GPU 估算预算约束，而不是被预览槽截断", () => {
+  it("密集总览不再受页 GPU 估算预算裁剪", () => {
     const coordinator = new CanvasResourceCoordinator();
     const fixture = createScaleFixture({ count: 3000, demand: "dense" });
     const { project } = scope(fixture, coordinator);
     project();
     const admitted = coordinator.admittedNodeIds().length;
     expect(admitted).toBeGreaterThan(0);
-    // 密集总览全是图片卡，由全页 GPU 估算预算收敛；不能沿用单一类别数量
-    // （否则超过该数量的卡片只能 hover 才加载）。
-    expect(admitted).toBeGreaterThan(16);
+    // 密集总览全是图片卡，所有视口内需求都进入准入集合；异步工作仍由通道预算分批推进。
+    expect(admitted).toBe(3000);
     const diagnostics = coordinator.diagnostics();
     expect(diagnostics.demands).toBe(admitted);
-    expect(diagnostics.deferred).toBeGreaterThan(0);
-    // GPU/CPU 都只是估算值，但仍必须存在且被统计（design D3）。
+    expect(diagnostics.deferred).toBe(0);
+    // GPU/CPU 只是估算值，超过历史页预算时仍完整统计，不参与裁剪。
     expect(diagnostics.estimatedGpuBytes).toBeGreaterThan(0);
-    expect(diagnostics.estimatedGpuBytes).toBeLessThanOrEqual(coordinator.getPolicy().gpuDerivedBytes);
+    expect(diagnostics.estimatedGpuBytes).toBeGreaterThan(coordinator.getPolicy().gpuDerivedBytes);
     expect(diagnostics.estimatedCpuBytes).toBe(diagnostics.estimatedGpuBytes);
     coordinator.dispose();
   });

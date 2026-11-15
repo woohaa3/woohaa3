@@ -17,6 +17,7 @@ import {
 } from "./world-ground-drag.js";
 import type { InteractionCore } from "./interaction-core.js";
 import { confirmWorldUnbind } from "./world-unbind-confirm.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 
 export type WorldGroundGestureFamily = {
   /**
@@ -51,7 +52,7 @@ export function createWorldGroundGestureFamily(core: InteractionCore): WorldGrou
   };
 
   const begin = (event: PointerEvent, nodeId: string) => {
-    if (!writable()) return null;
+    if (!writable() || canvasEditScopeStore.getSnapshot()["3d"] !== "edit") return null;
     const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
     // 点击已在选区内的世界模型时，整个选区的世界实例一起移动；未选中则只选/拖这一个。
     const selected = state.selected.includes(nodeId) ? state.selected : [nodeId];

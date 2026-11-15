@@ -576,6 +576,7 @@ export function CanvasControlStatus({
  * （动作图标 + 视图控件 + 状态）。内容为空时不渲染。
  */
 export function CanvasControlPanel({
+  className,
   overview,
   collapsedBar,
   actions = [],
@@ -584,6 +585,7 @@ export function CanvasControlPanel({
   statusContent,
   onReconnect
 }: {
+  className?: string;
   actions?: readonly ControlPanelAction[];
   /** 概览区（`canvas.minimap` 与 `canvas.minimap-side` 贡献）；缺省不占高度。 */
   overview?: ReactNode;
@@ -599,7 +601,7 @@ export function CanvasControlPanel({
 }) {
   if (!overview && !collapsedBar && actions.length === 0 && !tools && !status && !statusContent) return null;
   return (
-    <div className="canvas-control-panel" role="toolbar" aria-label="画布控件">
+    <div className={["canvas-control-panel", className].filter(Boolean).join(" ")} role="toolbar" aria-label="画布控件">
       {overview ? <div className="canvas-control-panel__overview">{overview}</div> : null}
       {collapsedBar ? <div className="canvas-control-panel__collapsed-bar">{collapsedBar}</div> : null}
       {actions.length > 0 || tools || status || statusContent ? (
@@ -647,6 +649,7 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
   const faults = useExtensionFaults();
   const toolbars = useSlot("canvas.toolbar");
   const minimaps = useSlot("canvas.minimap");
+  const minimapTops = useSlot("canvas.minimap-top");
   const minimapSides = useSlot("canvas.minimap-side");
   const actions = useSlot("canvas.toolbar-action");
   const statusReadouts = useSlot("canvas.toolbar-status");
@@ -688,6 +691,14 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
       {side("right")}
     </>
   ) : null;
+  const overviewTop = minimapTops.length > 0 ? (
+    <>
+      {minimapTops.map((entry) => {
+        const Component = entry.render;
+        return <Guard key={entry.id} entry={entry} slot="canvas.minimap-top"><Component {...props} /></Guard>;
+      })}
+    </>
+  ) : null;
   const collapsedBar = hasOverview && !overviewOpen ? (
     <>
       {minimapSides.length > 0 ? (
@@ -709,7 +720,7 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
       </Tooltip>
     </>
   ) : null;
-  return (
+  const panel = (
     <CanvasControlPanel
       overview={overview}
       collapsedBar={collapsedBar}
@@ -720,6 +731,12 @@ export function CanvasToolbarHost(props: CanvasSlotProps) {
       {...(readout === undefined ? {} : { statusContent: readout && !statusReadout?.wrapsStatus ? renderStatus(readout) : readout })}
     />
   );
+  return overviewTop ? (
+    <div className="canvas-control-panel-cluster">
+      <div className="canvas-control-panel-cluster__top">{overviewTop}</div>
+      {panel}
+    </div>
+  ) : panel;
 }
 
 /** 合并 `canvas.context-menu` contributions 的菜单项，并按 section/order 规范化分隔线。 */

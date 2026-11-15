@@ -73,6 +73,34 @@ it("projects scene areas only as ground bounds, never as a content card", () => 
   expect(scene.selection.nodes).toEqual(["area"]);
 });
 
+it("filters hidden categories while keeping the other category renderable", () => {
+  const canvas = fixture();
+  canvas.document.edges.push(
+    { id: "member-camera", source: "member", target: "camera", sourceHandle: null, targetHandle: null, data: {} },
+    { id: "member-group", source: "member", target: "group", sourceHandle: null, targetHandle: null, data: {} }
+  );
+  const scene = buildCanvasRenderScene({ canvas, editScope: { "2d": "edit", "3d": "hidden" } });
+  // Hidden 3D nodes stay in the snapshot so the renderer can hide their
+  // existing resources in place; the camera card is 2D and remains visible.
+  expect(scene.nodes.map(node => node.id)).toEqual(["group", "model", "camera", "member"]);
+  expect(scene.nodes.find(node => node.id === "model")?.editScope).toEqual({ category: "3d", mode: "hidden" });
+  expect(scene.nodes.find(node => node.id === "camera")?.editScope).toEqual({ category: "2d", mode: "edit" });
+  expect(scene.sceneAreas).toHaveLength(0);
+  expect(scene.edges.map(edge => edge.id)).toEqual(["member-camera", "member-group"]);
+  expect(scene.editScope).toEqual({ "2d": "edit", "3d": "hidden" });
+});
+
+it("keeps locked presentation markers local to editor snapshots", () => {
+  const canvas = fixture();
+  const scene = buildCanvasRenderScene({ canvas, editScope: { "2d": "locked", "3d": "locked" } });
+  expect(scene.nodes.find(node => node.id === "member")?.editScope).toEqual({ category: "2d", mode: "locked" });
+  expect(scene.nodes.find(node => node.id === "model")?.editScope).toEqual({ category: "3d", mode: "locked" });
+  expect(scene.sceneAreas?.[0]?.editScope).toEqual({ category: "3d", mode: "locked" });
+  const capture = buildCanvasRenderScene({ canvas });
+  expect(capture.editScope).toBeUndefined();
+  expect(capture.nodes.find(node => node.id === "model")?.editScope).toBeUndefined();
+});
+
 it("renders 2D groups as member frames and shared-world models without a card", () => {
   const scene = buildCanvasRenderScene({ canvas: fixture() });
   const group = scene.nodes.find(node => node.id === "group")!;

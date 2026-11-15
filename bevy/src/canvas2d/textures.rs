@@ -22,6 +22,18 @@ use crate::canvas_ecs::components::{CanvasNodeId, CanvasTextureSprite};
 use super::TextureStore;
 use super::texture_store::TextureAction;
 
+fn locked_color(node: &crate::protocol::GraphNode, color: Color) -> Color {
+    if node
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.mode == "locked")
+    {
+        color.with_alpha(color.alpha() * 0.6)
+    } else {
+        color
+    }
+}
+
 /// 消费本帧 keyed 纹理批次并回收不再挂载的 Sprite。
 pub(crate) fn sync_textures(
     mut commands: Commands,
@@ -129,6 +141,7 @@ pub(crate) fn sync_textures(
         };
         let (custom_size, center, color, z) =
             super::image_focus::sprite_layout(&overlay, &display, texture_px, index);
+        let color = locked_color(node, color);
         match existing {
             Some((entity, _, _)) => {
                 commands.entity(entity).insert(visibility);
@@ -208,6 +221,7 @@ pub(crate) fn sync_textures(
         let texture_px = Vec2::new(image.width() as f32, image.height() as f32);
         let (custom_size, center, color, z) =
             super::image_focus::sprite_layout(&overlay, &display, texture_px, node_index);
+        let color = locked_color(node, color);
         let translation = Vec3::new(center.x, -center.y, z);
         let visibility = if shown {
             Visibility::Inherited

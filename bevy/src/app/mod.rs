@@ -195,6 +195,11 @@ fn configure_canvas(app: &mut App) {
                         // 门禁结算（含 hover stop/reset/start）与模型 spawn 同一系统，且在动画求值前
                         // 完成（change: play-model-animations-on-hover，design D4）。
                         scene3d::sync_models.in_set(model3d::TransformAnimationSet::Playback),
+                        (
+                            model3d::sync_editor_scope_opacity,
+                            model3d::sync_editor_scope_visibility,
+                        )
+                            .chain(),
                         // 世界对象的空模型锚点/选择指示：不依赖卡片，排在模型根同步之后。
                         scene3d::sync_world_presence,
                         // 共享世界镜头的视锥/机位：与模型、导演区同帧呈现。

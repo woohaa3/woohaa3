@@ -3,8 +3,8 @@
  * （change: 2026-10-23-scale-canvas-media-residency，design D1/D3/D5）。
  *
  * 都是「逻辑正确但语义错位」的缺陷，单测只断言了硬上限所以漏过：
- * 1. 全页 GPU 估算预算是唯一准入上限：不能按离屏预览相机数量把普通媒体卡截断，否则视口内
- *    超过该数量的卡片永不加载，只能 hover 变 interactive 才显示（真实故障：整屏卡片
+ * 1. 页面需求按可见性完整准入：不能按离屏预览相机数量或页 GPU 估算把普通媒体卡截断，否则
+ *    视口内超过该数量的卡片永不加载，只能 hover 变 interactive 才显示（真实故障：整屏卡片
  *    「hover 才能加载」）。
  * 2. 内容身份（模型 prepared resource key）是异步就绪的，画布对象不变。候选表只按画布对象
  *    memo 时，首次投影早于资源就绪会让模型候选永久 `eligible: false`，payload lease 永远
@@ -40,6 +40,7 @@ function project(options: {
   coordinator: CanvasResourceCoordinator;
   candidatesFor: ReturnType<typeof createResidencyCandidateCache>;
   contentVersion?: () => number;
+  zoom?: number;
   onAdmittedContent?: (contentKeys: readonly string[], revision: number) => void;
 }) {
   return createResidencyProjector({
@@ -48,7 +49,7 @@ function project(options: {
     candidatesFor: options.candidatesFor,
     ...(options.contentVersion ? { contentVersion: options.contentVersion } : {}),
     ...(options.onAdmittedContent ? { onAdmittedContent: options.onAdmittedContent } : {}),
-    viewport: () => ({ x: 0, y: 0, zoom: 1 }),
+    viewport: () => ({ x: 0, y: 0, zoom: options.zoom ?? 1 }),
     surface: () => ({ width: 4000, height: 1000, pixelRatio: 1 }),
     interactive: () => [],
     pins: () => [],
@@ -76,7 +77,7 @@ describe("全页预算只按 GPU 估算收敛", () => {
     const candidatesFor = createResidencyCandidateCache(createContentIdentity({}));
     project({ canvas, coordinator, candidatesFor })();
 
-    // 30 张图片都在视口内：卡片贴图只受全页 GPU 估算预算约束。
+    // 30 张图片都在视口内：卡片贴图全部准入，GPU 估算不参与裁剪。
     expect(coordinator.admittedNodeIds()).toHaveLength(30);
     coordinator.dispose();
   });
@@ -108,6 +109,27 @@ describe("全页预算只按 GPU 估算收敛", () => {
     // 静止帧复用准入集合，不重复提交或丢失世界资源 lease。
     projectOnce();
     expect(onAdmittedContent).toHaveBeenCalledTimes(1);
+    coordinator.dispose();
+  });
+
+  it("放大到高档位后共享世界模型仍全部保留", () => {
+    const worldIds = Array.from({ length: 95 }, (_, index) => `world-${index}`);
+    const canvas = canvasWith(worldIds.map((id, index) => ({ id, type: "model3d", x: index * 300, y: 0 })));
+    for (const id of worldIds) {
+      canvas.nodeData[id] = { sharedWorldInstance: newWorldInstance(`instance-${id}`, { x: 0, y: 0 }) };
+    }
+    const coordinator = new CanvasResourceCoordinator();
+    const candidatesFor = createResidencyCandidateCache(
+      createContentIdentity({ modelResourceKey: nodeId => `rk-${nodeId}` })
+    );
+    const projectOnce = project({ canvas, coordinator, candidatesFor, zoom: 12 });
+
+    projectOnce();
+
+    expect(coordinator.admittedNodeIds()).toHaveLength(worldIds.length);
+    expect(coordinator.diagnostics().deferred).toBe(0);
+    expect(coordinator.diagnostics().estimatedGpuBytes)
+      .toBeGreaterThan(coordinator.getPolicy().gpuDerivedBytes);
     coordinator.dispose();
   });
 });

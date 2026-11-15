@@ -68,6 +68,10 @@ impl NodeChrome {
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct GraphNode {
+    /// Browser-local editor category/mode. Hidden nodes are normally filtered by
+    /// the frontend; locked remains renderable for future visual variants.
+    #[serde(default, rename = "editScope")]
+    pub(crate) edit_scope: Option<EditScopePresentation>,
     #[serde(default, rename = "sharedWorldInstance", deserialize_with = "super::shared_world::deserialize_instance")]
     pub(crate) shared_world_instance: Option<super::shared_world::WorldInstance>,
     /// Shared-world camera pose/projection (Render Scene v39). The node keeps its card
@@ -126,6 +130,13 @@ pub(crate) struct GraphNode {
     /// 缺失即不绘制（group / 复合资产 / 无记录）。
     #[serde(default, rename = "historyStrip")]
     pub(crate) history_strip: Option<HistoryStripPresentation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EditScopePresentation {
+    pub(crate) category: String,
+    pub(crate) mode: String,
 }
 
 /// 历史条圆点状态（change: 2026-10-12-unify-generation-history-strip）。
@@ -239,6 +250,8 @@ impl Default for Viewport {
 /// Bevy 渲染的唯一输入快照（最新覆盖旧值）。
 #[derive(Clone, Default, Deserialize)]
 pub(crate) struct Scene {
+    #[serde(default, rename = "editScope")]
+    pub(crate) edit_scope: Option<EditScopeState>,
     /// Live assistant execution, never canonical or derived from history selection.
     #[serde(default, rename = "executingScopes")]
     pub(crate) executing_scopes: Vec<String>,
@@ -334,10 +347,20 @@ pub(crate) struct Scene {
     pub(crate) node_actions: std::collections::HashMap<String, NodeActions>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub(crate) struct EditScopeState {
+    #[serde(rename = "2d")]
+    pub(crate) two_d: String,
+    #[serde(rename = "3d")]
+    pub(crate) three_d: String,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SceneArea {
     pub(crate) node_id: String,
+    #[serde(default, rename = "editScope")]
+    pub(crate) edit_scope: Option<EditScopePresentation>,
     /// Display name resolved by the web scene builder (explicit title or “导演区 N”).
     #[serde(default)]
     pub(crate) title: String,

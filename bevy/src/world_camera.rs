@@ -236,6 +236,16 @@ fn segment_region(start: Vec3, end: Vec3, pad: f32) -> CameraPickRegion {
 fn presentation_key(scene: &Scene, theme: &ThemeResource) -> String {
     let mut key = String::new();
     let _ = write!(key, "t{};", theme.fingerprint());
+    key.push_str(
+        scene
+            .edit_scope
+            .as_ref()
+            .map_or("3d-edit;", |scope| match scope.three_d.as_str() {
+                "hidden" => "3d-hidden;",
+                "locked" => "3d-locked;",
+                _ => "3d-edit;",
+            }),
+    );
     for node in &scene.nodes {
         let Some(camera) = &node.world_camera else {
             continue;
@@ -257,6 +267,11 @@ fn presentation_key(scene: &Scene, theme: &ThemeResource) -> String {
             camera.rotation[1],
             camera.rotation[2],
             camera.rotation[3],
+        );
+        key.push_str(
+            node.edit_scope
+                .as_ref()
+                .map_or("edit;", |scope| scope.mode.as_str()),
         );
         match &camera.projection {
             WorldCameraProjection::Isometric {
@@ -318,6 +333,14 @@ pub(crate) fn sync(
     if !scene.0.nodes.iter().any(|node| node.world_camera.is_some()) {
         return;
     }
+    if scene
+        .0
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.three_d != "edit")
+    {
+        return;
+    }
     let cube = presence.assets.cube(&mut meshes);
     for node in &scene.0.nodes {
         let Some(camera) = &node.world_camera else {
@@ -339,6 +362,15 @@ pub(crate) fn sync(
             theme.token_u32("interactionAccentHover")
         } else {
             theme.token_u32("canvasPortDefault")
+        };
+        let color = if node
+            .edit_scope
+            .as_ref()
+            .is_some_and(|scope| scope.mode == "locked")
+        {
+            crate::scope_visual::muted_color(color)
+        } else {
+            color
         };
         spawn_camera(
             &mut commands,

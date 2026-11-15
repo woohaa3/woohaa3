@@ -21,6 +21,14 @@ pub(super) fn draw_frame(
     index: usize,
     style: crate::scope_visual::ScopeStyle,
 ) -> Vec<Label> {
+    let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.mode == "locked");
+    let mut style = style;
+    if locked {
+        style.border = crate::scope_visual::muted_color(style.border);
+        style.label_fill = crate::scope_visual::muted_color(style.label_fill);
+        style.label_text = crate::scope_visual::muted_color(style.label_text);
+        style.tint *= 0.5;
+    }
     let path = crate::scope_visual::rounded_path(
         node.x,
         node.y,
@@ -28,12 +36,18 @@ pub(super) fn draw_frame(
         node.height,
         crate::scope_visual::FRAME_RADIUS,
     );
-    geometry.polygon_alpha(&path, 9.9, theme.token_u32("canvasNodeSurface"), 0.35);
+    let surface = if style.locked { crate::scope_visual::muted_color(theme.token_u32("canvasNodeSurface")) } else { theme.token_u32("canvasNodeSurface") };
+    geometry.polygon_alpha(&path, 9.9, surface, 0.35);
     if style.tint > 0.0 {
+        let accent = if style.locked {
+            crate::scope_visual::muted_color(theme.token_u32("interactionAccent"))
+        } else {
+            theme.token_u32("interactionAccent")
+        };
         geometry.polygon_alpha(
             &path,
             9.901,
-            theme.token_u32("interactionAccent"),
+            accent,
             style.tint,
         );
     }

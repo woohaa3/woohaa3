@@ -17,7 +17,7 @@ import {
 export type AttachedMedia = {
   textureSync: ReturnType<typeof createTextureSync>;
   videoSessions: ReturnType<typeof createVideoFrameSessions>;
-  /** 页面级资源需求与预算 owner（change: 2026-10-23，design D1）。 */
+  /** 页面级资源需求与调度 owner（change: 2026-10-23，design D1）。 */
   residency: CanvasResourceCoordinator;
   /** 每帧投影需求（必须先于各媒体 owner 的 `sync()`）。 */
   projectResidency: () => string[];

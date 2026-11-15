@@ -13,6 +13,7 @@ import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state
 import type { InteractionCore } from "./interaction-core.js";
 import { builtinNodeCapabilityResolver } from "@woohaa3/contracts";
 import { shouldSuppressDoubleClickFocus } from "./input/selection/sequence.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 
 export function createDoubleClickHandler(core: InteractionCore) {
   const { options, canvas, model, setSelection, activeViewport, surfaceSize } = core;
@@ -83,6 +84,11 @@ export function createDoubleClickHandler(core: InteractionCore) {
         : undefined;
       const canonical = resolved !== null && canonicalType !== undefined && !!focusKind(resolved.nodeId);
       if (resolved && canonical && canonicalType !== undefined) {
+        const resolvedData = canvasState.nodeData[resolved.nodeId] as Record<string, unknown> | undefined;
+        if (resolvedData?.sharedWorldInstance !== undefined && canvasEditScopeStore.getSnapshot()["3d"] !== "edit") {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         setSelection([resolved.nodeId]);
         // 这次双击如果是在“选入”模型（双击开始时它还没被选中），只完成选择，

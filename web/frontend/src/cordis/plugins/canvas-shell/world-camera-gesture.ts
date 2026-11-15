@@ -21,6 +21,7 @@ import {
 } from "./world-camera-drag.js";
 import type { InteractionCore } from "./interaction-core.js";
 import { confirmWorldUnbind } from "./world-unbind-confirm.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 
 export type WorldCameraGestureFamily = {
   /** 尝试开始镜头拖动；聚焦/过渡/模态、无人可写或镜头不合法时返回 `null`。 */
@@ -111,7 +112,7 @@ export function createWorldCameraGestureFamily(
   };
 
   const begin = (event: PointerEvent, nodeId: string, mode: WorldCameraDragMode) => {
-    if (!writable()) return null;
+    if (!writable() || canvasEditScopeStore.getSnapshot()["3d"] !== "edit") return null;
     const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
     const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
     const baseStart = beginWorldCameraDrag(canvas, nodeId, ground, mode);

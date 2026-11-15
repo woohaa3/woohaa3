@@ -7,7 +7,8 @@ mod lifecycle;
 mod plan;
 
 pub(crate) use lifecycle::{
-    ModelCanvasCamera, setup, setup_camera, sync_camera, sync_target, sync_theme,
+    ModelCanvasCamera, canvas_camera_layers, setup, setup_camera, sync_camera, sync_target,
+    sync_theme,
 };
 #[cfg(test)]
 pub(crate) use plan::grid_view;

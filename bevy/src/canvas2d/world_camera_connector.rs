@@ -42,7 +42,8 @@ pub(crate) fn sync(
         return;
     }
     state.key = Some(key);
-    let has_camera = scene.0.nodes.iter().any(|node| node.world_camera.is_some());
+    let three_d_editable = scene.0.edit_scope.as_ref().is_none_or(|scope| scope.three_d == "edit");
+    let has_camera = three_d_editable && scene.0.nodes.iter().any(|node| node.world_camera.is_some());
     let mut geometry = Geometry::default();
     if has_camera {
         let color = theme.token_u32("canvasPortDefault");
@@ -111,6 +112,12 @@ pub(crate) fn sync(
 fn presentation_key(scene: &crate::protocol::Scene, theme: &ThemeResource) -> String {
     let mut key = String::new();
     key.push_str(theme.fingerprint());
+    key.push_str(
+        scene
+            .edit_scope
+            .as_ref()
+            .map_or("3d-edit;", |scope| scope.three_d.as_str()),
+    );
     for node in &scene.nodes {
         let Some(camera) = &node.world_camera else {
             continue;

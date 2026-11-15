@@ -3,7 +3,7 @@
 //! 纯投影/规划测试已随实现迁到 `isometric_grid::plan`；这里只保留 Canvas adapter 的兼容
 //! 断言：协议 Viewport ↔ IsometricGridView 转换与朝向约定不变。
 
-use bevy::prelude::*;
+use bevy::{camera::visibility::RenderLayers, prelude::*};
 
 use super::*;
 use crate::protocol::Viewport;
@@ -83,4 +83,16 @@ fn screen_to_ground_matches_inverse_projection() {
     let view = grid_view(&viewport(0.0, 0.0, 1.0));
     let ground = crate::isometric_grid::plan::screen_to_ground(&view, Vec2::new(0.0, 0.0));
     assert!(ground.is_finite());
+}
+
+#[test]
+fn hidden_canvas_scope_only_removes_main_model_layer() {
+    let visible = canvas_camera_layers(true);
+    let hidden = canvas_camera_layers(false);
+    assert!(visible.intersects(&RenderLayers::layer(0)));
+    assert!(!hidden.intersects(&RenderLayers::layer(0)));
+    assert!(hidden.intersects(&RenderLayers::layer(crate::preview_layers::GRID_LAYER)));
+    assert!(hidden.intersects(&RenderLayers::layer(
+        crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER
+    )));
 }

@@ -20,6 +20,21 @@ use crate::theme::ThemeResource;
 #[derive(Component)]
 pub(crate) struct ModelCanvasCamera;
 
+/// 主画布观察相机的渲染层。
+///
+/// 3D 编辑范围隐藏时只移除模型层 0，模型实体本身继续保留在共享世界层（11）和
+/// 捕获层（7），因此镜头卡片与页面捕获相机仍可看到同一批模型。
+pub(crate) fn canvas_camera_layers(show_models: bool) -> RenderLayers {
+    let mut layers = RenderLayers::from_layers(&[
+        crate::preview_layers::GRID_LAYER,
+        crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER,
+    ]);
+    if show_models {
+        layers = layers.with(0);
+    }
+    layers
+}
+
 /// 网格 line 实体标记（截图时隐藏 chrome 用）。
 #[derive(Component)]
 pub(crate) struct ModelGrid;
@@ -30,11 +45,7 @@ pub(crate) fn setup_camera(commands: &mut Commands) -> Entity {
         .spawn((
             Camera3d::default(),
             ModelCanvasCamera,
-            RenderLayers::from_layers(&[
-                0,
-                crate::preview_layers::GRID_LAYER,
-                crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER,
-            ]),
+            canvas_camera_layers(true),
             Projection::Orthographic(canvas_camera_projection()),
             crate::isometric_grid::canvas_camera_transform(Vec2::ZERO),
             Tonemapping::None,

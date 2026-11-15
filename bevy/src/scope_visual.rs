@@ -15,6 +15,15 @@ pub(crate) const LABEL_PADDING: f32 = 8.0;
 /// Shared world height for scene-area outlines and their nameplates.
 pub(crate) const GROUND_SCOPE_HEIGHT: f32 = 0.025;
 
+/// Muted lock-state paint used by 2D scope/card producers. It changes only the
+/// presentation color and never touches canonical node data or theme tokens.
+pub(crate) fn muted_color(color: u32) -> u32 {
+    let r = ((color >> 16) & 0xff) as u32;
+    let g = ((color >> 8) & 0xff) as u32;
+    let b = (color & 0xff) as u32;
+    ((r * 3 / 5) << 16) | ((g * 3 / 5) << 8) | (b * 3 / 5)
+}
+
 /// Shared rounded path; painting and hit geometry use exactly the same corners.
 pub(crate) fn rounded_path(x: f32, y: f32, width: f32, height: f32, radius: f32) -> Vec<Vec2> {
     let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
@@ -43,14 +52,27 @@ pub(crate) struct ScopeStyle {
     pub(crate) tint: f32,
     pub(crate) label_fill: u32,
     pub(crate) label_text: u32,
+    pub(crate) locked: bool,
 }
 
 impl ScopeStyle {
     pub(crate) fn for_node(scene: &Scene, theme: &ThemeResource, id: &str) -> Self {
-        Self::resolve(
+        let locked = scene
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .and_then(|node| node.edit_scope.as_ref())
+            .is_some_and(|scope| scope.mode == "locked")
+            || scene
+                .scene_areas
+                .iter()
+                .find(|area| area.node_id == id)
+                .and_then(|area| area.edit_scope.as_ref())
+                .is_some_and(|scope| scope.mode == "locked");
+        let mut style = Self::resolve(
             theme,
-            scene.selection.nodes.iter().any(|selected| selected == id),
-            if scene
+            !locked && scene.selection.nodes.iter().any(|selected| selected == id),
+            if !locked && scene
                 .hover
                 .as_ref()
                 .and_then(|hover| hover.node_id.as_deref())
@@ -60,7 +82,15 @@ impl ScopeStyle {
             } else {
                 0.0
             },
-        )
+        );
+        style.locked = locked;
+        if locked {
+            style.border = muted_color(style.border);
+            style.label_fill = muted_color(style.label_fill);
+            style.label_text = muted_color(style.label_text);
+            style.tint *= 0.5;
+        }
+        style
     }
 
     pub(crate) fn resolve(theme: &ThemeResource, selected: bool, hover: f32) -> Self {
@@ -90,6 +120,7 @@ impl ScopeStyle {
                     hover,
                 )
             },
+            locked: false,
         }
     }
 }
@@ -256,7 +287,28 @@ pub(crate) fn sync(
             == Some(id.as_str());
         let fade = visuals.hover.entry(id.clone()).or_default();
         fade.advance(if hovered { 1.0 } else { 0.0 }, time.delta_secs());
-        let style = ScopeStyle::resolve(&theme, selected, fade.value);
+        let locked = scene
+            .0
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .and_then(|node| node.edit_scope.as_ref())
+            .is_some_and(|scope| scope.mode == "locked")
+            || scene
+                .0
+                .scene_areas
+                .iter()
+                .find(|area| area.node_id == id)
+                .and_then(|area| area.edit_scope.as_ref())
+                .is_some_and(|scope| scope.mode == "locked");
+        let mut style = ScopeStyle::resolve(&theme, !locked && selected, if locked { 0.0 } else { fade.value });
+        style.locked = locked;
+        if locked {
+            style.border = muted_color(style.border);
+            style.label_fill = muted_color(style.label_fill);
+            style.label_text = muted_color(style.label_text);
+            style.tint *= 0.5;
+        }
         changed |= visuals.styles.insert(id, style) != Some(style);
     }
     if changed {

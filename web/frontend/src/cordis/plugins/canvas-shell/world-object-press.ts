@@ -7,6 +7,7 @@
  * 选择规则与 2D 卡片共用 `selection/press.ts`；这里只保留世界对象自己的手势分流。
  */
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import { commitPressSelection } from "./input/selection/apply.js";
 import { resolvePressSelection } from "./input/selection/press.js";
 import type { PressSelectionPlan } from "./input/selection/types.js";
@@ -26,6 +27,17 @@ export function createWorldObjectPress(deps: {
 }) {
   return (event: PointerEvent, nodeId: string, preset?: PressSelectionPlan): void => {
     const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    // Every target entering this handler came from a 3D world hit. A camera's
+    // 2D card is handled by the ordinary card path, while its world gizmo
+    // remains governed by the 3D scope.
+    const category = "3d" as const;
+    // A world hit must be rejected before resolving/committing selection. The old
+    // order left locked models selected even though their drag gesture was blocked.
+    if (canvasEditScopeStore.getSnapshot()[category] !== "edit") {
+      deps.schedule();
+      event.preventDefault();
+      return;
+    }
     const plan = preset ?? resolvePressSelection({
       canvas,
       nodeId,
@@ -46,9 +58,9 @@ export function createWorldObjectPress(deps: {
       event.preventDefault();
       return;
     }
-    const started = isWorldCameraTarget(canvas, nodeId)
+    const started = (isWorldCameraTarget(canvas, nodeId)
       ? deps.worldCamera.begin(event, nodeId, event.altKey ? "rotate" : "move")
-      : deps.worldGround.begin(event, nodeId);
+      : deps.worldGround.begin(event, nodeId));
     if (started) {
       deps.beginGesture();
       deps.beginPerfGesture("drag");

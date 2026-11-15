@@ -7,6 +7,7 @@ import { Dialog } from "@woohaa3/ui/dialogs";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { readWorldCamera, submitWorldCameraSave, worldCameraUiFailureText } from "../../services/world-camera-ui.js";
 import { worldCameraEditorStore, type WorldCameraEditSession } from "../../services/world-camera-editor-store.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import { adoptCameraTimeline } from "./camera-timeline.js";
 import { attachCameraFlightInput, captureCameraPointer, releaseCameraPointer } from "./flight-input.js";
 import { defaultOrbitCenter, type CompositionTool } from "./composition-motion.js";
@@ -28,9 +29,10 @@ export function CameraEditor({ ctx, session, writable }: { ctx: Context; session
   const [savedWarning, setSavedWarning] = useState(false);
   const receipt = useRef<{ settingsVersion: string; revision: number } | null>(null);
   const canvas = useSyncExternalStore(woohaa3CanvasStore.subscribe, () => workingCanvasOf(woohaa3CanvasStore.getState()), () => null);
+  const editScope = useSyncExternalStore(canvasEditScopeStore.subscribe, canvasEditScopeStore.getSnapshot, canvasEditScopeStore.getSnapshot);
   const current = canvas?.id === session.canvasId ? readWorldCamera(canvas, session.nodeId) : null;
   const conflict = !!current && current.settingsVersion !== session.source.settingsVersion && !receipt.current;
-  const unavailable = !writable || !current || conflict;
+  const unavailable = !writable || editScope["3d"] !== "edit" || !current || conflict;
   const live = useRef({ unavailable });
   live.current = { unavailable };
 

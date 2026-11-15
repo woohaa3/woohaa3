@@ -27,6 +27,9 @@ struct HistoryKey {
 struct DrawKey {
     id: String,
     kind: String,
+    /// Locked presentation changes every painted primitive; include it so the
+    /// retained mesh is rebuilt when switching back to edit.
+    scope_mode: String,
     /// 0 card / 1 frame / 2 none；外壳变化必须重建几何分块。
     chrome: u8,
     visual: crate::canvas_ecs::components::CardGeometryInput,
@@ -59,6 +62,10 @@ impl DrawKey {
         Self {
             id: node.id.clone(),
             kind: node.kind.clone(),
+            scope_mode: node
+                .edit_scope
+                .as_ref()
+                .map_or_else(|| "edit".to_owned(), |scope| scope.mode.clone()),
             chrome: match &node.chrome {
                 crate::protocol::NodeChrome::Card => 0,
                 crate::protocol::NodeChrome::Frame { .. } => 1,
@@ -82,7 +89,7 @@ pub(super) struct Block {
     /// 上一帧提交给 `LabelRequests` 的文案；块命中时原样重提，避免 `begin` 清空后闪失。
     labels: Vec<LabelRequest>,
     /// Label-only inputs are tracked independently so a rename does not rebuild mesh geometry.
-    label_keys: Vec<(Entity, String, String, String, Option<String>)>,
+    label_keys: Vec<(Entity, String, String, String, Option<String>, String)>,
 }
 
 #[derive(Resource, Default)]
@@ -165,6 +172,10 @@ pub(super) fn sync(
                     card.node.type_label.clone(),
                     card.node.body.clone(),
                     card.node.card_label.clone(),
+                    card.node
+                        .edit_scope
+                        .as_ref()
+                        .map_or_else(|| "edit".to_owned(), |scope| scope.mode.clone()),
                 )
             })
             .collect();

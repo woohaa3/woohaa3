@@ -80,7 +80,7 @@ pub(crate) use grid::{setup as setup_grid, setup_camera};
 
 pub(crate) use runtime::{
     FocusVisuals, ModelAssets, ModelVisuals, apply_animation_playback, apply_motion_playback,
-    sync_models, sync_quality, sync_quality_with_demand,
+    sync_editor_scope_opacity, sync_editor_scope_visibility, sync_models, sync_quality, sync_quality_with_demand,
 };
 #[cfg(test)]
 pub(crate) use runtime::ModelAnchor;

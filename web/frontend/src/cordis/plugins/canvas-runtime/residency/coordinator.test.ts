@@ -398,8 +398,8 @@ describe("CanvasResourceCoordinator", () => {
     coordinator.dispose();
   });
 
-  it("ranks the prefetch margin below visible cards instead of one flat tier", () => {
-    // 只够两张 200×200 卡片的 GPU 估算预算：预热余量里的节点必须让位。
+  it("keeps the prefetch purpose while admitting it without a page GPU cutoff", () => {
+    // 预热余量仍然低于 visible 的 purpose，但不再因页级 GPU 估算预算被裁掉。
     const coordinator = new CanvasResourceCoordinator({ policy: { prefetchMarginFactor: 1, gpuDerivedBytes: 600_000 } });
     const at = (nodeId: string, x: number) => ({
       nodeId, contentKey: `k-${nodeId}`, x, y: 0, width: 200, height: 200, eligible: true
@@ -413,10 +413,10 @@ describe("CanvasResourceCoordinator", () => {
       pins: [],
       candidates: [at("visible-a", 0), at("visible-b", 400), at("prefetch-a", 1000)]
     });
-    // 预算只够两张视口内卡片：预热余量里的节点让位（design D1「预热首先让位」）。
+    // 预热节点仍被分类为 prefetch，需求准入不再由页级 GPU 预算截断。
     expect(coordinator.isAdmitted("visible-a")).toBe(true);
     expect(coordinator.isAdmitted("visible-b")).toBe(true);
-    expect(coordinator.isAdmitted("prefetch-a")).toBe(false);
+    expect(coordinator.isAdmitted("prefetch-a")).toBe(true);
     expect(coordinator.purposeOf("visible-a")).toBe("visible");
     // 余量内的节点确实进入了需求分类（不是被当成视口外丢弃），只是优先级更低。
     coordinator.project({

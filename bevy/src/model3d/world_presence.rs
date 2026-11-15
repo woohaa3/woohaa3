@@ -71,8 +71,22 @@ impl PresenceAssets {
 fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<String, std::sync::Arc<crate::protocol::ModelSnapshot>>) -> String {
     let mut key = String::new();
     let _ = write!(key, "t{};", theme.fingerprint());
+    let three_d_hidden = scene
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.three_d == "hidden");
+    let three_d_locked = scene
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.three_d == "locked");
+    if three_d_hidden || three_d_locked {
+        return key + if three_d_hidden { "hidden;" } else { "locked;" };
+    }
     for node in &scene.nodes {
         if node.shared_world_instance.is_none() || !node.chrome.is_none() {
+            continue;
+        }
+        if node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")) {
             continue;
         }
         let _ = write!(
@@ -85,6 +99,11 @@ fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<St
                 .as_ref()
                 .and_then(|hover| hover.node_id.as_deref())
                 == Some(node.id.as_str())
+        );
+        key.push_str(
+            node.edit_scope
+                .as_ref()
+                .map_or("edit:", |scope| scope.mode.as_str()),
         );
         if let Some(transform) = layout::world_instance_transform(node) {
             let _ = write!(
@@ -138,10 +157,20 @@ pub(crate) fn sync(
         commands.entity(entity).try_despawn();
     }
     let mut active_anchors = std::collections::HashSet::new();
+    if scene
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| matches!(scope.three_d.as_str(), "hidden" | "locked"))
+    {
+        return;
+    }
     let cube = presence.assets.cube(meshes);
     let focus = scene.model_focus.as_ref().map(|focus| focus.node_id.as_str());
     for node in &scene.nodes {
         if node.shared_world_instance.is_none() || !node.chrome.is_none() {
+            continue;
+        }
+        if node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")) {
             continue;
         }
         // 聚焦时只保留目标对象；其他世界对象由模型可见性系统隐藏。
@@ -186,6 +215,15 @@ pub(crate) fn sync(
                     theme.token_u32("canvasNodeBorderSelected")
                 } else {
                     theme.token_u32("canvasPortDefault")
+                };
+                let color = if node
+                    .edit_scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.mode == "locked")
+                {
+                    crate::scope_visual::muted_color(color)
+                } else {
+                    color
                 };
                 // Bounds outline plus a restrained selected-only ground anchor.
                 spawn_aabb_edges(commands, presence, &cube, materials, color, min, max);

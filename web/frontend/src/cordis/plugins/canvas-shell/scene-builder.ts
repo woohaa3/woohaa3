@@ -21,6 +21,7 @@ import { applyRunStateProjection, executingScopeIds } from "./run-state-projecti
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { sceneDiagnostics } from "../canvas-runtime/scene-diagnostics.js";
 import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import type { InteractionControllerOptions } from "./interaction-types.js";
 import type { Viewport } from "./interaction-core.js";
 import { applyNodeResourceLoading } from "../../services/node-resource-loading.js";
@@ -76,6 +77,7 @@ export function buildSceneWithResources(
   const source = projectWorldRotationPreview(workingCanvasOf(woohaa3CanvasStore.getState()));
   const working = options.projectHistoryCanvas?.(source) ?? source;
   if (!working) return null;
+  canvasEditScopeStore.bindCanvas(working.id);
   // Provider-backed media resolves asynchronously. Project the ready runtime asset into
   // this render snapshot so the canonical scene can expose `texture: true` immediately,
   // before the persistence command writes outputAssetId back to nodeData.
@@ -115,6 +117,7 @@ export function buildSceneWithResources(
   const contentRight = Math.max(0, options.getContentRect?.().right ?? 0);
   const scene = buildCanvasRenderScene({
     canvas: canvasState,
+    editScope: canvasEditScopeStore.getSnapshot(),
     nodeCapabilities: options.nodeCapabilities,
     selection: { nodes: [...input.selected], edge: input.selectedEdgeId ?? null },
     draft: input.draft,

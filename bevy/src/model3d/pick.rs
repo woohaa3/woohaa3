@@ -52,13 +52,25 @@ pub(crate) fn remember_scene(scene: &Scene) {
 pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSnapshot>>) {
     SHARED_SCENE.with(|slot| {
         if let Some(scene) = slot.borrow().as_ref() {
+            let three_d_hidden = scene
+                .edit_scope
+                .as_ref()
+                .is_some_and(|scope| scope.three_d == "hidden");
+            let three_d_editable = scene
+                .edit_scope
+                .as_ref()
+                .is_none_or(|scope| scope.three_d == "edit");
             CACHE.with(|cache| {
                 let mut old = std::mem::take(&mut *cache.borrow_mut());
                 let mut next = Vec::new();
                 let mut published = Vec::new();
                 MOTION.with(|motion| {
                 let motion = motion.borrow();
-                for node in scene.nodes.iter().filter(|n| n.shared_world_instance.is_some()) {
+                for node in scene.nodes.iter().filter(|n| {
+                    n.shared_world_instance.is_some()
+                        && !three_d_hidden
+                        && !n.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked"))
+                }) {
                     let reference = node.model.as_ref();
                     let Some(model) = reference.and_then(|reference| lookup(&reference.resource_key)) else {
                         // 空模型/资源未就绪：以真实世界锚点作为可选中的标记候选。
@@ -122,17 +134,22 @@ pub(crate) fn refresh_shared_models(lookup: impl Fn(&str) -> Option<Arc<ModelSna
                 // pickable even though they have no model payload. Frustum lines use
                 // oriented surfaces so their AABB corners do not steal model clicks.
                 #[cfg(feature = "canvas-core")]
-                for node in &scene.nodes {
-                    let Some(camera) = &node.world_camera else { continue };
-                    for region in crate::world_camera::pick_regions(camera) {
-                        published.push(ModelCandidate {
-                            node_id: node.id.clone(),
-                            shared_world: true,
-                            empty_marker: true,
-                            min: region.min,
-                            max: region.max,
-                            triangles: region.triangles.map(Arc::new),
-                        });
+                if three_d_editable {
+                    for node in &scene.nodes {
+                        if node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")) {
+                            continue;
+                        }
+                        let Some(camera) = &node.world_camera else { continue };
+                        for region in crate::world_camera::pick_regions(camera) {
+                            published.push(ModelCandidate {
+                                node_id: node.id.clone(),
+                                shared_world: true,
+                                empty_marker: true,
+                                min: region.min,
+                                max: region.max,
+                                triangles: region.triangles.map(Arc::new),
+                            });
+                        }
                     }
                 }
                 crate::canvas_query::model_pick::replace_shared_models(published);
@@ -147,8 +164,18 @@ pub(crate) fn model_candidates(
     scene: &Scene,
     lookup: impl Fn(&str) -> Option<Arc<ModelSnapshot>>,
 ) -> Vec<ModelCandidate> {
+    if scene
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.three_d != "edit")
+    {
+        return Vec::new();
+    }
     let mut candidates = Vec::new();
     for node in &scene.nodes {
+        if node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")) {
+            continue;
+        }
         if node.shared_world_instance.is_some() {
             let surface = node
                 .model
@@ -305,6 +332,22 @@ mod tests {
         assert_eq!(candidates[0].node_id, "w");
         assert!(candidates[0].shared_world);
         assert!(candidates[0].min[0] < candidates[0].max[0]);
+    }
+
+    #[test]
+    fn edit_scope_removes_locked_and_hidden_world_candidates() {
+        let asset = Arc::new(snapshot());
+        let world = node(r#"{"id":"w","type":"model3d","x":0,"y":0,"width":260,"height":195,"editScope":{"category":"3d","mode":"locked"},"model":{"resourceKey":"v:sig"},
+            "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"instance",
+            "transform":{"version":"shared-world-v1","position":{"u":1,"v":2,"h":3},"rotation":[0,0,0,1],"scale":1}}}"#);
+        let locked = Scene { nodes: vec![world.clone()], ..Scene::default() };
+        assert!(model_candidates(&locked, |_| Some(asset.clone())).is_empty());
+        let mut hidden = locked.clone();
+        hidden.edit_scope = Some(crate::protocol::EditScopeState {
+            two_d: "edit".into(),
+            three_d: "hidden".into(),
+        });
+        assert!(model_candidates(&hidden, |_| Some(asset.clone())).is_empty());
     }
 
     #[test]

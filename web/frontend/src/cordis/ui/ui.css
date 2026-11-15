@@ -61,6 +61,33 @@
 	gap: 8px;
 }
 
+/* 独立概览控件（例如场景编辑）位于小地图面板正上方。 */
+.canvas-control-panel-cluster {
+	position: fixed;
+	right: max(18px, env(safe-area-inset-right));
+	bottom: max(16px, env(safe-area-inset-bottom));
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
+	z-index: 20;
+}
+
+.canvas-control-panel-cluster__top {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	padding: 6px 8px;
+	border: 1px solid var(--app-web-border);
+	border-radius: 12px;
+	background: var(--app-web-panel);
+	box-shadow: 0 10px 26px var(--app-web-shadow);
+}
+
+.canvas-control-panel-cluster > .canvas-control-panel {
+	position: static;
+}
+
 .canvas-control-panel__overview-side {
 	display: flex;
 	flex-direction: column;

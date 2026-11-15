@@ -6,7 +6,7 @@ import { sceneDiagnostics, noteFrameStep } from "../canvas-runtime/scene-diagnos
  * 2D 手势、视口和模型编辑各由独立模块处理，不在此重建命中几何。
  * （change: replace-godot-canvas-runtime-with-bevy / split-frontend-god-plugins）
  */
-import { bevyNodeHistoryStripDot, decodeSceneAreaData, decodeWorldCamera, decodeWorldInstanceData, worldToCanvasPoint, worldToRendererPosition, type CanvasRenderScene, type GroundAabb } from "@woohaa3/contracts";
+import { bevyNodeHistoryStripDot, canvasEditScopeCategoryOf, canvasEditScopeHidden, decodeSceneAreaData, decodeWorldCamera, decodeWorldInstanceData, worldToCanvasPoint, worldToRendererPosition, type CanvasRenderScene, type GroundAabb } from "@woohaa3/contracts";
 import { createSurfaceMetrics } from "./canvas-surface-metrics.js";
 import { createModelGestureFamily } from "./model-gesture-family.js";
 import { buildSceneWithResources as buildSceneWithResourcesModule } from "./scene-builder.js";
@@ -39,6 +39,7 @@ import { createWorldGroundPreviewState } from "./world-ground-preview.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
 import { nodeSelectionStore } from "../../services/selection-store.js";
 import { canvasAppearanceStore } from "../../services/canvas-appearance.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
 import type { InteractionCore, InteractionState, Viewport } from "./interaction-core.js";
 import type { AlignmentSnapPolicy } from "./alignment-snap.js";
@@ -143,7 +144,7 @@ export function installInteractionController(options: InteractionControllerOptio
   });
   /** 导演区范围瞬时预览：拖动/调范围时每帧随指针更新，松手或取消后清空。 */
   const sceneAreaPreviews = new Map<string, GroundAabb & { moveMembers?: boolean }>();
-  const groundAvailable = () => !disposed && !modalActive() && !options.getModelFocus?.()
+  const groundAvailable = () => !disposed && canvasEditScopeStore.getSnapshot()["3d"] === "edit" && !modalActive() && !options.getModelFocus?.()
     && !options.getImageFocus?.() && !options.getVideoFocus?.() && !options.getFocusTransition?.();
   const groundAt = (point: { x: number; y: number }) => {
     if (!groundAvailable()) return null;
@@ -399,9 +400,40 @@ export function installInteractionController(options: InteractionControllerOptio
    * 与错误恢复：宿主显式刷新、首次 generation=0 查询引导、单帧失败后下一帧重试。
    */
   let lastHoverOwner = "";
+  let appliedScopeRevision = -1;
+  let appliedScope = canvasEditScopeStore.getSnapshot();
+  const reconcileEditScope = () => {
+    const revision = canvasEditScopeStore.getRevision();
+    if (revision === appliedScopeRevision) return;
+    appliedScopeRevision = revision;
+    const scope = canvasEditScopeStore.getSnapshot();
+    const scopeChanged = scope["2d"] !== appliedScope["2d"] || scope["3d"] !== appliedScope["3d"];
+    appliedScope = scope;
+    // Binding the first canvas increments the store revision even when the
+    // effective default scope stays the same; it must not cancel a viewport pan.
+    if (!scopeChanged) return;
+    const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+    if (!canvasState) return;
+    // A scope switch invalidates every in-flight spatial preview. Hidden and
+    // locked targets also lose selection and hover; restoring the category
+    // never resurrects a stale selection.
+    cancelTransientGesture();
+    input.cancelDragGesture();
+    input.cancelAggregateConnect();
+    clearHover();
+    const visible = state.selected.filter(id => {
+      const node = canvasState.document.nodes.find(entry => entry.id === id);
+      if (!node) return false;
+      const category = canvasEditScopeCategoryOf(node, canvasState.nodeData[id]);
+      return !canvasEditScopeHidden(scope, category) && scope[category] !== "locked";
+    });
+    if (visible.length !== state.selected.length) setSelection(visible);
+    schedule("edit-scope");
+  };
   const performFrame = (force: boolean) => {
     // dispose 后不得继续构建或提交（含无 rAF 环境下的同步 flush/invalidate）。
     if (disposed) return;
+    reconcileEditScope();
     frameLoop.step("viewport-notify", notifyViewport, undefined);
     // 节点屏幕投影通知（节点顶部操作横条锚定）：视口/拖动/改尺寸帧级变化在此随唯一帧结算。
     frameLoop.step("projection-notify", notifyProjection, undefined);
@@ -654,6 +686,7 @@ export function installInteractionController(options: InteractionControllerOptio
     if (state.gesture.kind === "resize") cancelTransientGesture();
     schedule("node-capabilities");
   });
+  const unsubscribeScope = canvasEditScopeStore.subscribe(() => schedule("edit-scope"));
   const unsubscribeAppearance = canvasAppearanceStore.subscribe(() => schedule("canvas-appearance"));
   const unsubscribeCameraEditor = worldCameraEditorStore.subscribe(() => schedule("world-camera-editor"));
   const disposeDiagnostics = installCanvasDiagnostics({ core, target, state, activeViewport, setSelection, model,
@@ -700,6 +733,7 @@ export function installInteractionController(options: InteractionControllerOptio
      * keep the owner until the authoritative prepare/commit settles.
      */
     beginSceneAreaGesture: (input) => {
+      if (canvasEditScopeStore.getSnapshot()["3d"] !== "edit") return null;
       const port = sceneArea();
       if (!port) return null;
       const started = port.begin(input);
@@ -844,6 +878,7 @@ export function installInteractionController(options: InteractionControllerOptio
       hoverNodeStore.invalidatePlayback();
       frameLoop.dispose();
       unsubscribeCapabilities?.();
+      unsubscribeScope();
       unsubscribeAppearance();
       unsubscribeCameraEditor();
       viewportTransition.cancel();

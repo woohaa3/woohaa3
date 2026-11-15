@@ -448,6 +448,10 @@ export type SlotContributionMap = {
   "canvas.minimap": {
     render: ComponentType<CanvasSlotProps & { onCollapse?: () => void }>;
   };
+  /** 小地图面板上方的独立概览控件。 */
+  "canvas.minimap-top": {
+    render: ComponentType<CanvasSlotProps>;
+  };
   /**
    * 小地图两侧的紧凑内容（2026-10-26），例如右侧的缩放条。
    *

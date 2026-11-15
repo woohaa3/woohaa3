@@ -8,7 +8,7 @@ import { createHistoryClick } from "./input/history-click.js";
  * 从 `interaction-controller` 拆出的基础 2D 手势：拖拽、尺寸、连线、框选、平移、视口滚轮、
  * 右键菜单、双击预览。只通过 `InteractionCore` 访问共享坐标系、调度与提交，不自建监听。
  */
-import { bevyKindForNodeType, effectiveCanvasNodeSize, builtinNodeCapabilityResolver, decodeWorkflowGroupData, explainWoohaa3CanvasConnectionBlock } from "@woohaa3/contracts";
+import { bevyKindForNodeType, effectiveCanvasNodeSize, builtinNodeCapabilityResolver, decodeWorkflowGroupData, explainWoohaa3CanvasConnectionBlock, canvasEditScopeCategoryOf } from "@woohaa3/contracts";
 import { nodeSize, cardHitNodeId, type Point } from "./hit-test.js";
 import { planConnectEdge, planResizeNode } from "../../../extension-api/command-planner.js";
 import { woohaa3CanvasStore, workingCanvasOf } from "../../services/canvas-state/index.js";
@@ -32,6 +32,7 @@ import { createWheelEntryHandler } from "./input/wheel-entry.js";
 import { createPerfInputRecorder, type PerfMoment } from "./input/perf-interaction.js";
 import { telemetryNow } from "../../services/telemetry-primitives.js";
 import { sceneAreaCursorTargets, sceneAreaEdgeCursor, workflowGroupCursor, workflowGroupInteraction, resizeCursorForEdge, type FrameEdge } from "./scene-area-cursor.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 /** 右键位移阈值：小于它视为短点击（开菜单），达到则进入平移并抑制菜单。 */
 const RIGHT_CLICK_PAN_THRESHOLD_PX = 10;
 
@@ -64,6 +65,35 @@ export function create2dInputFamily(core: InteractionCore) {
   const aggregate = createAggregateConnectFamily(core);
   const history = createHistoryClick(core);
   let groundClick: { pointerId: number; x: number; y: number; candidates: string[] } | null = null;
+  const canEditNode = (canvasState: ReturnType<typeof workingCanvasOf>, nodeId: string): boolean => {
+    const node = canvasState?.document.nodes.find(entry => entry.id === nodeId);
+    if (!node) return false;
+    const category = canvasEditScopeCategoryOf(node, canvasState?.nodeData[nodeId]);
+    return canvasEditScopeStore.getSnapshot()[category] === "edit";
+  };
+  const canSelectNode = (canvasState: ReturnType<typeof workingCanvasOf>, nodeId: string): boolean => {
+    const node = canvasState?.document.nodes.find(entry => entry.id === nodeId);
+    if (!node) return false;
+    const mode = canvasEditScopeStore.getSnapshot()[canvasEditScopeCategoryOf(node, canvasState?.nodeData[nodeId])];
+    return mode !== "locked" && mode !== "hidden";
+  };
+  const canSelectWorldPick = (canvasState: ReturnType<typeof workingCanvasOf>, nodeId: string): boolean => {
+    if (!canvasState) return false;
+    const data = canvasState.nodeData[nodeId] as Record<string, unknown> | undefined;
+    if (data?.worldCamera !== undefined) {
+      const mode = canvasEditScopeStore.getSnapshot()["3d"];
+      return mode !== "locked" && mode !== "hidden";
+    }
+    return canSelectNode(canvasState, nodeId);
+  };
+  const blockedByEditScope = (canvasState: ReturnType<typeof workingCanvasOf>, hit: import("./hit-test.js").HitTarget | null): boolean => {
+    if (!canvasState || !hit || !("nodeId" in hit)) return false;
+    const node = canvasState.document.nodes.find(entry => entry.id === hit.nodeId);
+    if (!node) return false;
+    const category = canvasEditScopeCategoryOf(node, canvasState.nodeData[node.id]);
+    const mode = canvasEditScopeStore.getSnapshot()[category];
+    return mode === "locked" || mode === "hidden";
+  };
 
   // 导演区边缘 hover：指针反馈不是手势，不进入 state；只在画布元素上设 CSS cursor。
   const setCursor = (next: string) => {
@@ -73,18 +103,27 @@ export function create2dInputFamily(core: InteractionCore) {
     if (style.cursor !== next) style.cursor = next;
   };
   let cursorCanvas: ReturnType<typeof workingCanvasOf> = null;
+  let cursorScopeRevision = -1;
   let cursorAreas: ReturnType<typeof sceneAreaCursorTargets> = [];
   let cursorGroups = new Map<string, { x: number; y: number; width: number; height: number }>();
   const sceneAreaTargets = () => {
     const current = workingCanvasOf(woohaa3CanvasStore.getState());
-    if (current !== cursorCanvas) {
+    const scopeRevision = canvasEditScopeStore.getRevision();
+    if (current !== cursorCanvas || scopeRevision !== cursorScopeRevision) {
       cursorCanvas = current;
-      cursorAreas = current ? sceneAreaCursorTargets(current) : [];
+      cursorScopeRevision = scopeRevision;
+      cursorAreas = current && canvasEditScopeStore.getSnapshot()["3d"] === "edit"
+        ? sceneAreaCursorTargets(current).filter(area => {
+            const node = current.document.nodes.find(entry => entry.id === area.nodeId);
+            return !!node && canvasEditScopeCategoryOf(node, current.nodeData[node.id]) === "3d";
+          })
+        : [];
       cursorGroups = new Map();
       if (current) {
         const index = sharedCanvasNodeIndex(current);
         for (const node of current.document.nodes) {
           if (node.type !== "workflow-group-2d") continue;
+          if (canvasEditScopeStore.getSnapshot()["2d"] === "hidden") continue;
           const position = index?.absolutePosition(node.id);
           if (position) cursorGroups.set(node.id, { ...position, ...effectiveCanvasNodeSize(node) });
         }
@@ -264,7 +303,14 @@ export function create2dInputFamily(core: InteractionCore) {
     if (!hitResult.ok) {
       // 几何不可用/过期：不开始新手势（design D3）。
       return;
-    }    const hit = hitResult.value;
+    }
+    const hit = hitResult.value;
+    const hitCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    if (blockedByEditScope(hitCanvas, hit)) {
+      core.clearHover();
+      event.preventDefault();
+      return;
+    }
 
     // 导演区手势（T07）：区域卡片默认搬场景；按住 Alt 只移动导演区本身；
     // 地面边缘 / 显式模式只改范围。
@@ -279,17 +325,25 @@ export function create2dInputFamily(core: InteractionCore) {
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
       const hitNode = hitNodeId ? canvasState?.document.nodes.find(node => node.id === hitNodeId) : undefined;
       const areaCardId = hitNode?.type === "scene-area" ? hitNode.id : null;
+      if (areaCardId && (!canSelectNode(canvasState, areaCardId) || !canEditNode(canvasState, areaCardId))) return false;
       if (!areaCardId && hit) return false;
       const areaOnlyModifier = event.altKey;
+      const preferredAreaNodeId = canvasState?.document.nodes.find(node => state.selected.length === 1 && node.id === state.selected[0] && node.type === "scene-area")?.id ?? null;
+      if (preferredAreaNodeId && !canSelectNode(canvasState, preferredAreaNodeId)) return false;
+      if (preferredAreaNodeId && !canEditNode(canvasState, preferredAreaNodeId)) return false;
       const started = sceneAreaGesture.begin({
         point: { x: event.clientX, y: event.clientY },
         areaNodeId: areaCardId,
         card: !!areaCardId,
         altKey: event.altKey,
         moveMembers: !areaOnlyModifier,
-        preferredAreaNodeId: canvasState?.document.nodes.find(node => state.selected.length === 1 && node.id === state.selected[0] && node.type === "scene-area")?.id ?? null
+        preferredAreaNodeId
       });
       if (!started) return false;
+      if (!canSelectNode(canvasState, started.areaNodeId) || !canEditNode(canvasState, started.areaNodeId)) {
+        sceneAreaGesture.cancel();
+        return false;
+      }
       core.claimSceneAreaGesture("pointer");
       beginGesture();
       beginPerfGesture(started.intent === "move" ? "drag" : "resize");
@@ -325,6 +379,10 @@ export function create2dInputFamily(core: InteractionCore) {
     const pressedCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
     const cardTarget = cardPointerTarget(pressedCanvas, hit);
     const cardNodeId = cardTarget?.nodeId ?? null;
+    if (!isRight && cardTarget && !canSelectNode(pressedCanvas, cardTarget.nodeId)) {
+      event.preventDefault();
+      return;
+    }
     const cardPlan = !isRight && cardTarget
       ? resolvePressSelection({
           canvas: pressedCanvas,
@@ -338,6 +396,10 @@ export function create2dInputFamily(core: InteractionCore) {
     // 点击进入容器：组/导演区尚未被选中时，第一次点击先选中容器；容器已进入
     // （自身已选或同区已有兄弟）时直接落到子元素。
     if (cardTarget && cardPlan?.gesture === "scope") {
+      if (!canSelectNode(pressedCanvas, cardPlan.scopeId ?? cardTarget.nodeId)) {
+        event.preventDefault();
+        return;
+      }
       commitPressSelection({
         state,
         nodeId: cardTarget.nodeId,
@@ -353,6 +415,32 @@ export function create2dInputFamily(core: InteractionCore) {
     // 共享世界模型没有内容卡片（`chrome.kind === "none"`）；命中到的卡片矩形可能是迁移
     // 前的残留。只要节点是世界实例，就按世界模型处理：选中并可直接沿地面拖动。
     if (!isRight && cardTarget?.kind === "world-object") {
+      // A camera keeps a normal 2D card even when the 3D director scope is
+      // locked/hidden. Selecting that card follows the 2D scope; only its
+      // world gizmo is governed by the 3D gate.
+      if (cardTarget.via === "card" && pressedCanvas?.nodeData[cardTarget.nodeId]?.worldCamera !== undefined) {
+        commitPressSelection({
+          state,
+          nodeId: cardTarget.nodeId,
+          plan: cardPlan ?? resolvePressSelection({
+            canvas: pressedCanvas,
+            nodeId: cardTarget.nodeId,
+            selected: state.selected,
+            additive: event.shiftKey,
+            via: cardTarget.via,
+            scopeId: cardTarget.scopeId
+          }),
+          setSelection,
+          x: event.clientX,
+          y: event.clientY
+        });
+        event.preventDefault();
+        return;
+      }
+      if (!canEditNode(pressedCanvas, cardTarget.nodeId)) {
+        event.preventDefault();
+        return;
+      }
       beginWorldObjectPress(event, cardTarget.nodeId, cardPlan ?? undefined);
       return;
     }
@@ -399,6 +487,14 @@ export function create2dInputFamily(core: InteractionCore) {
           event.preventDefault();
           return;
         }
+        if (!canSelectWorldPick(pressedCanvas, pickedNodeId)) {
+          event.preventDefault();
+          return;
+        }
+        if (!canEditNode(pressedCanvas, pickedNodeId)) {
+          event.preventDefault();
+          return;
+        }
         // Shift 由世界对象按下统一处理：只切换选择，不开始拖动。
         beginWorldObjectPress(event, pickedNodeId, plan);
         return;
@@ -410,15 +506,24 @@ export function create2dInputFamily(core: InteractionCore) {
 
     if (!hit && !isRight && !event.shiftKey) {
       const ground = core.queryWorldGround({ x: event.clientX, y: event.clientY });
-      const candidates = groundAreaCandidates(workingCanvasOf(woohaa3CanvasStore.getState()), ground);
+      const candidateCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
+      const candidates = groundAreaCandidates(candidateCanvas, ground).filter(nodeId => {
+        const node = candidateCanvas?.document.nodes.find(entry => entry.id === nodeId);
+        return !!node && canSelectNode(candidateCanvas, nodeId) && canEditNode(candidateCanvas, nodeId);
+      });
       if (candidates.length) groundClick = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, candidates };
     }
 
     if (isRight) {
       const nodeId = hit && "nodeId" in hit ? hit.nodeId : null;
       if (nodeId) {
+        const contextCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
+        if (!canSelectNode(contextCanvas, nodeId)) {
+          event.preventDefault();
+          return;
+        }
         const plan = resolveContextSelection({
-          canvas: workingCanvasOf(woohaa3CanvasStore.getState()),
+          canvas: contextCanvas,
           nodeId,
           selected: state.selected
         });
@@ -469,6 +574,7 @@ export function create2dInputFamily(core: InteractionCore) {
     }
 
     if (hit && hit.kind === "port") {
+      if (!canEditNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId)) return;
       beginGesture();
       beginPerfGesture("connect");
       state.gesture = { kind: "connect", pointerId: event.pointerId, source: hit.nodeId, side: hit.side };
@@ -483,10 +589,14 @@ export function create2dInputFamily(core: InteractionCore) {
     const groupPart = workflowGroupInteraction(cursorGroups, hit, world, core.activeViewport().zoom);
     if (!isRight && hit && "nodeId" in hit && !writable()
       && (cursorGroups.has(hit.nodeId) || cursorAreas.some(area => area.nodeId === hit.nodeId))) {
-      if (!event.shiftKey) setSelection([hit.nodeId]);
+      if (canSelectNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId) && !event.shiftKey) setSelection([hit.nodeId]);
       return;
     }
     if (!isRight && !event.shiftKey && groupPart?.intent === "resize" && hit && "nodeId" in hit) {
+      if (!canSelectNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId)
+        || !canEditNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId)) {
+        return;
+      }
       const bounds = cursorGroups.get(hit.nodeId)!;
       beginGesture();
       beginPerfGesture("resize");
@@ -500,12 +610,20 @@ export function create2dInputFamily(core: InteractionCore) {
       return;
     }
     if (!isRight && hit?.kind === "node" && cursorGroups.has(hit.nodeId) && groupPart?.intent !== "move") {
-      if (!event.shiftKey) setSelection([hit.nodeId]);
+      if (canSelectNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId) && !event.shiftKey) setSelection([hit.nodeId]);
+      return;
+    }
+    if (!isRight && hit?.kind === "node" && cursorGroups.has(hit.nodeId) && groupPart?.intent === "move"
+      && !canEditNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId)) {
+      if (canSelectNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId) && !event.shiftKey) setSelection([hit.nodeId]);
       return;
     }
 
     if (hit && hit.kind === "resize") {
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+      if (!canSelectNode(canvasState, hit.nodeId) || !canEditNode(canvasState, hit.nodeId)) {
+        return;
+      }
       const entry = canvasState?.document.nodes.find((node) => node.id === hit.nodeId);
       if (entry && canvasState && (options.nodeCapabilities ?? builtinNodeCapabilityResolver).resolve({ canvas: canvasState, node: entry, data: canvasState.nodeData[entry.id] }).resize) {
         const scene2 = core.buildScene();
@@ -541,6 +659,10 @@ export function create2dInputFamily(core: InteractionCore) {
     if (cardTarget && cardTarget.kind === "card") {
       const hitNodeId = cardTarget.nodeId;
       const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
+      if (!canSelectNode(canvasState, hitNodeId)) {
+        event.preventDefault();
+        return;
+      }
       commitPressSelection({
         state,
         nodeId: hitNodeId,
@@ -556,6 +678,10 @@ export function create2dInputFamily(core: InteractionCore) {
         x: event.clientX,
         y: event.clientY
       });
+      if (!canEditNode(canvasState, hitNodeId)) {
+        event.preventDefault();
+        return;
+      }
       // 结构/位置索引按 working 身份缓存（design D5）：selection/pan 不失效，pending/远端
       // 结构与位置变化会产生新对象并重建。避免每次按下复制带 data 的整表节点数组。
       const index = sharedCanvasNodeIndex(canvasState);

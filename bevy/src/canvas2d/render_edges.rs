@@ -39,15 +39,25 @@ pub(super) fn draw_block(
             layouts.get(edge.target.as_str()),
         ) {
             let selected = scene.selection.edge.as_ref() == Some(&edge.id);
+            let locked = scene.nodes.iter().any(|node| {
+                (node.id == edge.source || node.id == edge.target)
+                    && node
+                        .edit_scope
+                        .as_ref()
+                        .is_some_and(|scope| scope.mode == "locked")
+            });
+            let paint = |color: u32| {
+                if locked { crate::scope_visual::muted_color(color) } else { color }
+            };
             geometry.curve(
                 source.port(true),
                 target.port(false),
                 if selected { 3.0 } else { 2.0 },
                 1.0 + depth_offset,
                 if selected {
-                    theme.token_u32("canvasEdgeSelected")
+                    paint(theme.token_u32("canvasEdgeSelected"))
                 } else {
-                    theme.token_u32("canvasEdgeDefault")
+                    paint(theme.token_u32("canvasEdgeDefault"))
                 },
                 false,
             );
@@ -61,13 +71,13 @@ pub(super) fn draw_block(
                     EDGE_LABEL_HEIGHT,
                     4.,
                     2. + depth_offset,
-                    theme.token_u32("canvasEdgeLabelBackground"),
+                    paint(theme.token_u32("canvasEdgeLabelBackground")),
                 );
                 labels.push((
                     edge_label_text(&edge.label),
                     mid,
                     EDGE_LABEL_FONT,
-                    theme.token_u32("canvasEdgeLabelText"),
+                    paint(theme.token_u32("canvasEdgeLabelText")),
                 ));
             }
             // Selection arms deletion; hover places the control on the nearest curve point.
@@ -88,13 +98,13 @@ pub(super) fn draw_block(
                         edge_delete_center(source.port(true), target.port(false), label_width)
                     });
                 let radius = EDGE_DELETE_BUTTON_SIZE / 2.0;
-                let accent = theme.token_u32("canvasEdgeSelected");
+                let accent = paint(theme.token_u32("canvasEdgeSelected"));
                 // 圆面 + 描边环 + 叉号；z 高于所有卡片与标签，保证可点。
                 geometry.circle(
                     center,
                     radius,
                     overlay_z + depth_offset,
-                    theme.token_u32("canvasNodeSurface"),
+                    paint(theme.token_u32("canvasNodeSurface")),
                     20,
                 );
                 geometry.ring(

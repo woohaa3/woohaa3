@@ -118,11 +118,10 @@ describe("千卡片媒体准入", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     sync.sync();
     // 同一资产：只解码一次，但每个**准入**节点各自绑定并上传一次纹理（nodeId 只绑定展示实例）。
-    // 图片卡不占离屏预览槽，准入集合由页 GPU 估算预算收敛（不是 16/256 的槽位数量）。
+    // 图片卡不占离屏预览槽，页 GPU 估算只用于诊断（不是准入裁剪或 16/256 的槽位数量）。
     const admitted = coordinator.admittedNodeIds().length;
     expect(admitted).toBeGreaterThan(0);
-    expect(coordinator.diagnostics().estimatedGpuBytes)
-      .toBeLessThanOrEqual(coordinator.getPolicy().gpuDerivedBytes);
+    expect(coordinator.diagnostics().estimatedGpuBytes).toBeGreaterThan(0);
     expect(loads).toBe(1);
     expect(coordinator.channelSnapshot("image").started).toBe(1);
     // 逐帧上传 staging 预算（design D3）会把全部纹理分摊到多帧：

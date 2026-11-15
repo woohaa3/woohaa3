@@ -109,6 +109,8 @@ export type BevyNodeChrome =
 
 /** 与 Rust `GraphNode` 对应。 */
 export type BevyRenderNode = {
+  /** Browser-local category/mode used for editor filtering and lock visuals. */
+  editScope?: { category: import("../edit-scope.js").CanvasEditScopeCategory; mode: import("../edit-scope.js").CanvasScopeMode };
   sharedWorldInstance?: import("../shared-world.js").WorldInstanceData;
   /**
    * 共享世界镜头的真实位姿与投影参数（shared-world v1）。
@@ -317,10 +319,12 @@ export type GhostRenderNode = {
 
 /** 与 Rust `Scene` 对应；这是发给 Bevy `set_scene` 的唯一快照。 */
 export type CanvasRenderScene = {
+  /** Presentation-only editor state; capture/export scenes omit it. */
+  editScope?: import("../edit-scope.js").CanvasEditScope;
   /** Live assistant edits on scope boundaries; presentation only. */
   executingScopes?: string[];
   worldCameraEdit?: { nodeId: string; camera: import("../shared-world.js").WorldCameraData; showHelpers?: boolean };
-  sceneAreas?: Array<{ nodeId: string; title?: string; bounds: { min: { u: number; v: number }; max: { u: number; v: number } };
+  sceneAreas?: Array<{ nodeId: string; title?: string; editScope?: { category: "3d"; mode: import("../edit-scope.js").CanvasScopeMode }; bounds: { min: { u: number; v: number }; max: { u: number; v: number } };
     playback?: { time: number; duration: number; playing: boolean; loop: boolean } }>;
   version: typeof CANVAS_RENDER_SCENE_VERSION;
   /**

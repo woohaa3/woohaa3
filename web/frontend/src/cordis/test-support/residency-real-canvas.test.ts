@@ -76,9 +76,9 @@ describe("真实画布形状下的准入", () => {
     console.log("admitted", admitted.length, "byPurpose", JSON.stringify(snap.byPurpose),
       "gpu MiB", (snap.estimatedGpuBytes / 1048576).toFixed(2), "deferred", snap.deferred);
 
-    // 视口内的媒体卡由全页 GPU 估算预算准入，不按单一类别槽位截断。
+    // 视口内的媒体卡完整准入，不按页 GPU 估算或单一类别槽位截断。
     expect(admitted.length).toBeGreaterThan(16);
-    expect(snap.estimatedGpuBytes).toBeLessThanOrEqual(snap.policy.gpuDerivedBytes);
+    expect(snap.estimatedGpuBytes).toBeGreaterThan(0);
     // 内容身份都非空（模型/复合资产取 resourceKey，图片取 storageKey）。
     expect(coordinator.admittedContentKeys().filter(Boolean).length).toBe(admitted.length);
     coordinator.dispose();

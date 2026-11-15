@@ -24,7 +24,11 @@ pub(super) fn draw_static(
         }
         NodeChrome::None => return Vec::new(),
     }
+    let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.mode == "locked");
+    let paint = |color: u32| if locked { crate::scope_visual::muted_color(color) } else { color };
     let (accent, tint, category) = theme.node_palette(&node.kind);
+    let accent = paint(accent);
+    let tint = paint(tint);
     let (x, y, z) = (node.x, node.y, 10.0 + index as f32 * 0.1);
     let (width, height) = (node.width, node.height);
     let show_content = shows_content(node);
@@ -35,7 +39,7 @@ pub(super) fn draw_static(
         height,
         8.,
         z + 0.001,
-        theme.token_u32("canvasNodeShadow"),
+        paint(theme.token_u32("canvasNodeShadow")),
     );
     geometry.rounded_rect(
         x,
@@ -44,7 +48,7 @@ pub(super) fn draw_static(
         height,
         8.,
         z + 0.002,
-        theme.token_u32("canvasNodeBorder"),
+        paint(theme.token_u32("canvasNodeBorder")),
     );
     let border = 1.0;
     geometry.rounded_rect(
@@ -54,7 +58,7 @@ pub(super) fn draw_static(
         height - border * 2.,
         7.,
         z + 0.003,
-        theme.token_u32("canvasNodeSurface"),
+        paint(theme.token_u32("canvasNodeSurface")),
     );
     geometry.rounded_rect(x + 14., y + 12., 28., 28., 6., z + 0.004, tint);
     geometry.icon(&node.kind, Vec2::new(x + 28., y + 26.), z + 0.005, accent);
@@ -73,7 +77,7 @@ pub(super) fn draw_static(
             ch,
             3.,
             z + 0.004,
-            theme.token_u32("canvasNodeContent"),
+            paint(theme.token_u32("canvasNodeContent")),
         );
         // 运行中节点的进度环由 `generation::sync_generation` 每帧绘制在内容面上；
         // 这里不再画底部状态行、进度条或静态进度环。
@@ -103,7 +107,7 @@ pub(super) fn draw_static(
             shortened(&node.type_label, width - 112., 10.),
             Vec2::new(x + 50., y + 34.),
             10.,
-            theme.token_u32("canvasCloseIcon"),
+            paint(theme.token_u32("canvasCloseIcon")),
         ));
     }
     // 正文优先用满预览区宽度换行，行数由卡片实际高度派生；只有超出预算才在末行省略。
@@ -123,7 +127,7 @@ pub(super) fn draw_static(
             body_lines.get(i).cloned().unwrap_or_default(),
             Vec2::new(x + 24., y + 56. + i as f32 * 18.),
             12.,
-            theme.token_u32("canvasBodyText"),
+            paint(theme.token_u32("canvasBodyText")),
         ));
     }
     labels

@@ -4,6 +4,7 @@ import { definePlugin } from "../../plugin.js";
 import { workingCanvasOf, woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import { readWorldCamera } from "../../services/world-camera-ui.js";
 import { worldCameraEditorStore } from "../../services/world-camera-editor-store.js";
+import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 import { worldCameraShotStore } from "../../services/world-camera-shot-store.js";
 import { worldCameraShotContext, worldCaptureDynamicFrameCount, worldCaptureFrameTime } from "@woohaa3/contracts";
 import { encodeWorldCameraVideo } from "./world-camera-video-recorder.js";
@@ -30,10 +31,10 @@ export function worldCamerasExtension(options: { canvasId?: string } = {}): Plug
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
         const camera = readWorldCamera(canvas, nodeId);
         if (!camera) return null;
-        return { label: "机位精调", icon: "edit", tone: "primary", enabled: writable && !worldCameraEditorStore.getSnapshot() };
+        return { label: "机位精调", icon: "edit", tone: "primary", enabled: writable && canvasEditScopeStore.getSnapshot()["3d"] === "edit" && !worldCameraEditorStore.getSnapshot() };
       },
       activate: ({ nodeId, writable }) => {
-        if (!writable || !ctx.canvasSession.isWritable() || ctx.canvasRuntime.isFocused()) return;
+        if (!writable || !ctx.canvasSession.isWritable() || canvasEditScopeStore.getSnapshot()["3d"] !== "edit" || ctx.canvasRuntime.isFocused()) return;
         const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
         const camera = readWorldCamera(canvas, nodeId);
         if (!canvas || !camera || (options.canvasId && canvas.id !== options.canvasId)) return;
