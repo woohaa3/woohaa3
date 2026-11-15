@@ -72,6 +72,8 @@ const CARD_IDS: Readonly<Record<string, string>> = {
   "seedream-v5-lite": "seedream-5.0-lite",
   "seedream-v5-pro": "seedream-5.0-pro",
   "dola-Seedream-5.0-pro": "seedream-5.0-pro",
+  // Dola Seedream 5.5 沿用 5.0 Pro 的比例 / 分辨率 / 输出格式语义。
+  "dola-Seedream-5.5": "seedream-5.0-pro",
   // GPT Image（2.5 / 2.6 变体共用质量、背景和输出格式语义；值域仍取上游交集）
   "rhart-image-g-2": "gpt-image-2.5",
   "rhart-image-g-2-official": "gpt-image-2.5",

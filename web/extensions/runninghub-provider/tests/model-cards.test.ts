@@ -28,6 +28,7 @@ describe("卡片映射", () => {
   it("RunningHub 渠道 id 映射到同一个模型的卡片", () => {
     expect(runningHubCard("seedream-v5-lite")?.id).toBe("seedream-5.0-lite");
     expect(runningHubCard("dola-Seedream-5.0-pro")?.id).toBe("seedream-5.0-pro");
+    expect(runningHubCard("dola-Seedream-5.5")?.id).toBe("seedream-5.0-pro");
     expect(runningHubCard("rhart-image-g-2.5-official-token/flare")?.id).toBe("gpt-image-2.5-flare");
     expect(runningHubCard("rhart-image-g-2.6-official-token/flare")?.id).toBe("gpt-image-2.5-flare");
     expect(runningHubCard("rhart-image-g-2.6-official-token/sunburst")?.id).toBe("gpt-image-2.5-sunburst");
@@ -89,6 +90,18 @@ describe("即梦：比例 + 档位取代 width/height", () => {
     expect(properties.aspectRatio).toBeUndefined();
     expect(properties.width).toBeDefined();
     expect(enumValues(properties.resolution)).toEqual(["1k", "2k", "4k"]);
+  });
+});
+
+describe("Dola Seedream 5.5：沿用 5.0 Pro 参数卡", () => {
+  it("显示比例、1K/1.5K/2K 分辨率和输出格式", () => {
+    const { properties, defaults } = projection("dola-Seedream-5.5");
+    expect(properties.width).toBeUndefined();
+    expect(properties.height).toBeUndefined();
+    expect(enumValues(properties.aspectRatio)).toContain("16:9");
+    expect(enumValues(properties.resolution)).toEqual(["1K", "2K"]);
+    expect(enumValues(properties.outputFormat)).toEqual(["jpeg", "png"]);
+    expect(defaults).toMatchObject({ resolution: "2K", outputFormat: "jpeg" });
   });
 });
 
