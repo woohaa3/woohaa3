@@ -215,7 +215,12 @@ export const canvasPlugin: HostPlugin<{
         if (typeof value.owner !== "string" || typeof value.requestId !== "string") return false;
         const queried = application.agentConversations().queryTurn({ owner: value.owner, requestId: value.requestId });
         if (!queried.ok) return false;
-        if (queried.conversation.canvasId !== identity.canvasId || queried.turn.requestId !== identity.runId) return false;
+        if (queried.conversation.canvasId !== identity.canvasId) return false;
+        const delivery = queried.turn.target.delivery;
+        const childAttempt = delivery?.purpose === "image-director-scene"
+          && delivery.domainRequestId === queried.turn.requestId
+          && identity.runId === `${queried.turn.requestId}:${delivery.attemptId}`;
+        if (queried.turn.requestId !== identity.runId && queried.turn.runId !== identity.runId && !childAttempt) return false;
         return ["succeeded", "partial", "failed", "cancelled"].includes(queried.turn.status);
       }
     });

@@ -411,13 +411,17 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       // released against that same application ledger. Failed/cancelled turns
       // never create completion history.
       onTurnSettled: ({ turn, status }) => {
+        const runId = turn.runId ?? turn.requestId;
         // 失败/取消的回合不再保留工具授予（用户停止、扩展停用、运行时停止都经同一条结算路径）。
-        if (status === "cancelled" || status === "failed") ctx.toolGrants.revoke(turn.requestId, turn.owner);
+        if (status === "cancelled" || status === "failed") ctx.toolGrants.revoke(runId, turn.owner);
         const assistantWorld = ctx.canvas.assistantWorld;
         if (!assistantWorld) return;
         const input = {
           canvasId: turn.canvasId,
-          runId: turn.requestId,
+          // Most adapters use the conversation request as their world run id.
+          // Image-director executes a persisted child attempt (`requestId:1`),
+          // which must be settled by its exact id or the durable lease remains.
+          runId,
           status,
           evidence: { owner: turn.owner, requestId: turn.requestId, turnId: turn.turnId }
         } as const;

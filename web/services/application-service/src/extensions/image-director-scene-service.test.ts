@@ -67,6 +67,7 @@ describe("image director orchestration", () => {
     const accepted = await h.service.accept({ owner: "owner", canvasId: "canvas", conversationId: "conversation", request, connection: binding, entry } as never);
     expect(accepted.ok).toBe(true);
     await h.finished;
+    await expect(h.finished).resolves.toMatchObject({ status: "succeeded", runId: "request:1" });
     expect(run).toHaveBeenCalledTimes(1);
     const input = run.mock.calls[0]![0] as any;
     expect(input.images[0].bytes).toEqual(Buffer.from([1, 2, 3]));

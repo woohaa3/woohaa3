@@ -145,6 +145,7 @@ export class ImageDirectorSceneService {
   }
 
   private async execute(record: ImageDirectorSceneRecord, context: Parameters<Parameters<AgentConversationService["dispatchDeliveryTurn"]>[1]>[0]): Promise<AgentAdapterRunOutcome> {
+    const childRequestId = `${record.request.requestId}:1`;
     try {
       if (!record.entry || !record.connection || !record.conversationId || !record.parentTurnId || !record.reservation) throw new Error("执行身份不完整");
       const adapter = await this.adapter(record.owner, record.connection, record.entry);
@@ -158,7 +159,7 @@ export class ImageDirectorSceneService {
         connection: record.connection,
         conversationId: record.conversationId,
         turnId: record.parentTurnId,
-        requestId: `${record.request.requestId}:1`,
+        requestId: childRequestId,
         prepared: roleTurn,
         intent: { ...record.entry, action: "generate", nodeId: record.reservation.nodeId, mode: "world", worldScope: { kind: "scene-area", areaId: record.reservation.areaId }, prompt: record.request.instructions },
         history: context.history,
@@ -177,7 +178,7 @@ export class ImageDirectorSceneService {
       record.revision = result.revision;
       record.stage = "delivered";
       this.deps.store.save(record);
-      return { status: "succeeded", receipt: { commandId: finalizeCommand(record) } };
+      return { status: "succeeded", runId: childRequestId, receipt: { commandId: finalizeCommand(record) } };
     } catch (error) {
       delete record.activeAttemptId;
       const known = record.reservation ? await this.deps.canvas.lookup({ owner: record.owner, canvasId: record.canvasId, commandId: finalizeCommand(record) }).catch(() => null) : null;
@@ -186,7 +187,7 @@ export class ImageDirectorSceneService {
         record.revision = known.revision;
         record.stage = "delivered";
         this.deps.store.save(record);
-        return { status: "succeeded", receipt: { commandId: finalizeCommand(record) } };
+        return { status: "succeeded", runId: childRequestId, receipt: { commandId: finalizeCommand(record) } };
       }
       record.stage = context.signal.aborted ? "cancelled" : "failed";
       record.error = error instanceof Error ? error.message : "执行失败";
@@ -194,7 +195,7 @@ export class ImageDirectorSceneService {
       if (record.reservation) {
         try { await this.deps.canvas.settleReservation({ owner: record.owner, canvasId: record.canvasId, reservation: record.reservation, status: context.signal.aborted ? "cancelled" : "failed" }); } catch { /* Preserve the original failure for reconciliation. */ }
       }
-      return { status: context.signal.aborted ? "cancelled" : "failed", error: { code: context.signal.aborted ? "cancelled" : "image-director-failed", message: record.error } };
+      return { status: context.signal.aborted ? "cancelled" : "failed", runId: childRequestId, error: { code: context.signal.aborted ? "cancelled" : "image-director-failed", message: record.error } };
     }
   }
 }

@@ -122,6 +122,13 @@ export type AgentConversationServiceOptions = {
       canvasId: string;
       requestId: string;
       action: string;
+      /**
+       * Domain adapters may execute a child attempt under a different run id
+       * than the durable conversation request (for example image-director's
+       * `requestId:1` attempt). Settlement must use that exact identity when
+       * releasing a world lease.
+       */
+      runId?: string;
     };
     status: ConversationTurnStatus;
   }) => void;
@@ -765,7 +772,8 @@ export function createAgentConversationService(options: AgentConversationService
           owner: turn.owner,
           canvasId: turn.canvasId,
           requestId: turn.requestId,
-          action: turn.action
+          action: turn.action,
+          ...(outcome.runId !== undefined ? { runId: outcome.runId } : {})
         },
         status
       });
