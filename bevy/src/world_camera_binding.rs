@@ -125,8 +125,8 @@ impl WorldCameraBinding {
 /// 相机渲染层：绑定实例只看该层，未绑定看整层世界内容 11，缺失/不可用渲染空层。
 /// `editor_guide` 只在编辑取景加上导演区层，且**不会**带回世界层 0。
 ///
-/// 拍摄主光放在独立层 12：相机必须包含该层，光才对本视图生效；该层没有几何体，
-/// 也不会被主画布相机包含，所以补光不会串到画布。
+/// 正式捕获相机在 `world_capture` 中另行加入拍摄主光层 12。卡片和编辑预览不包含该层，
+/// 防止捕获作业的补光串进卡片画面。
 pub(crate) fn camera_layers(resolution: &BindingResolution, editor_guide: bool) -> RenderLayers {
     let mut layers = match resolution.instance_layer() {
         Some(layer) => RenderLayers::layer(layer),
@@ -135,11 +135,6 @@ pub(crate) fn camera_layers(resolution: &BindingResolution, editor_guide: bool) 
             _ => RenderLayers::none(),
         },
     };
-    // 只有真的会渲染几何时才带主光层：缺目标/池满时视图本来就该是空的，加一层主光
-    // 只会让「渲染空层」的语义变得含混。
-    if layers.iter().count() > 0 {
-        layers = layers.with(crate::preview_layers::SHOOTING_KEY_LAYER);
-    }
     if editor_guide {
         layers = layers.with(crate::world_camera_preview::DIRECTOR_AREA_LAYER);
     }
@@ -231,26 +226,21 @@ mod tests {
         assert!(bindings.layers().next().is_none());
     }
 
-    /// 拍摄主光层必须只对拍摄视图生效：会渲染几何的视图包含它，主画布层 0 不含它。
-    /// 缺目标/池满的视图渲染空层，此时不加主光层（没有几何可照）。
+    /// 卡片/编辑预览不携带正式捕获的主光层，避免捕获作业的聚光灯串入卡片。
     #[test]
-    fn shooting_key_layer_is_view_scoped() {
+    fn preview_layers_exclude_shooting_key_layer() {
         let scene = scene_with(&[("a", "instance-a")]);
         let mut pool = PreviewLayerPool::default();
         let mut bindings = WorldCameraBinding::default();
         let key = RenderLayers::layer(crate::preview_layers::SHOOTING_KEY_LAYER);
-        for (resolution, renders_geometry) in [
-            (bindings.resolve(&scene, &mut pool, None), true),
-            (bindings.resolve(&scene, &mut pool, Some("instance-a")), true),
-            (BindingResolution::Missing, false),
-            (BindingResolution::Unavailable, false),
+        for resolution in [
+            bindings.resolve(&scene, &mut pool, None),
+            bindings.resolve(&scene, &mut pool, Some("instance-a")),
+            BindingResolution::Missing,
+            BindingResolution::Unavailable,
         ] {
             let layers = camera_layers(&resolution, false);
-            assert_eq!(
-                layers.intersects(&key),
-                renders_geometry,
-                "主光层只在会渲染几何的视图上出现"
-            );
+            assert!(!layers.intersects(&key), "预览相机不得携带正式捕获主光层");
             assert!(!layers.intersects(&RenderLayers::layer(0)), "拍摄视图不得包含主画布层");
         }
     }

@@ -49,9 +49,6 @@ pub(crate) struct WorldCameraPreviews {
 struct PreviewCard {
     camera: Entity,
     sprite: Entity,
-    /// View-scoped key light; kept on the same `RenderLayers` as the camera so
-    /// Bevy's view/mesh light filtering admits it for this card only.
-    light: Entity,
     image: Handle<Image>,
     size: UVec2,
     signature: String,
@@ -255,12 +252,14 @@ pub(crate) fn sync(
         } else {
             existing.expect("existing card").image.clone()
         };
-        let (camera_entity, sprite_entity, light_entity) = match existing {
+        let (camera_entity, sprite_entity) = match existing {
             None => {
                 let camera_entity = commands
                     .spawn((
                         Camera3d::default(),
-                        crate::model3d::shadows::world_camera_lighting(),
+                        // Camera cards keep the original ambient-only presentation. The
+                        // shooting key light belongs to capture jobs, not the editor card.
+                        crate::model3d::shadows::camera_lighting(),
                         Camera {
                             order: -10,
                             is_active: false,
@@ -277,17 +276,6 @@ pub(crate) fn sync(
                         bevy::render::view::NoIndirectDrawing,
                     ))
                     .id();
-                let light_entity = commands
-                    .spawn((
-                        // 主光层逐帧跟随相机视图层（见下方 insert）：Bevy 的视图/网格两道
-                        // 过滤都必须命中，光才对拍摄视图生效，且不会照到主画布。
-                        crate::model3d::shadows::shooting_key_light(RenderLayers::layer(
-                            crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER,
-                        )),
-                        Transform::default(),
-                        ChildOf(camera_entity),
-                    ))
-                    .id();
                 let sprite_entity = commands
                     .spawn((
                         Sprite {
@@ -302,9 +290,9 @@ pub(crate) fn sync(
                         ),
                     ))
                     .id();
-                (camera_entity, sprite_entity, light_entity)
+                (camera_entity, sprite_entity)
             }
-            Some(card) => (card.camera, card.sprite, card.light),
+            Some(card) => (card.camera, card.sprite),
         };
         if resize {
             commands
@@ -322,8 +310,6 @@ pub(crate) fn sync(
         }
         let view_layers =
             crate::world_camera_binding::camera_layers(&resolution, editing && edit.is_some_and(|edit| edit.show_helpers));
-        // 光必须与视图同一层集合：Bevy 的 punctual 光先按视图层过滤、再按网格层过滤。
-        commands.entity(light_entity).insert(view_layers.clone());
         commands.entity(camera_entity).insert((
             pose,
             lens,
@@ -362,7 +348,6 @@ pub(crate) fn sync(
             PreviewCard {
                 camera: camera_entity,
                 sprite: sprite_entity,
-                light: light_entity,
                 image,
                 size: target,
                 signature,
@@ -820,9 +805,9 @@ mod tests {
         assert!(!preview_camera_layers(&app).intersects(&RenderLayers::layer(0)));
     }
 
-    /// 卡片相机带一盏挂在自身下的主光（聚光灯）；主光只在独立层上，不会照到主画布。
+    /// 卡片相机不创建额外的用户不可见主光，避免改变编辑器卡片的既有呈现。
     #[test]
-    fn card_camera_owns_a_view_scoped_key_light() {
+    fn card_camera_keeps_ambient_only_lighting() {
         let app = run_sync(camera_scene(serde_json::Value::Null));
         let camera = app.world().resource::<WorldCameraPreviews>().cards["camera-node"].camera;
         let children: Vec<Entity> = app
@@ -830,25 +815,16 @@ mod tests {
             .get::<Children>(camera)
             .map(|children| children.iter().collect())
             .unwrap_or_default();
-        let mut lights = 0;
         for child in children {
-            let Some(light) = app.world().get::<SpotLight>(child) else {
-                continue;
-            };
-            lights += 1;
-            assert!(!light.shadow_maps_enabled, "拍摄主光不得投影");
-            let layers = app.world().get::<RenderLayers>(child).expect("key light layers");
-            assert!(
-                layers.intersects(&RenderLayers::layer(crate::preview_layers::SHOOTING_KEY_LAYER)),
-                "主光必须包含视图主光层"
-            );
-            assert!(
-                layers.intersects(&RenderLayers::layer(crate::world_camera_binding::WORLD_LAYER)),
-                "主光必须与拍摄视图的几何层相交，否则不生效"
-            );
-            assert!(!layers.intersects(&RenderLayers::layer(0)), "主光不得覆盖主画布层");
+            assert!(app.world().get::<SpotLight>(child).is_none());
         }
-        assert_eq!(lights, 1, "每个拍摄视图恰好一盏主光");
+        assert_eq!(
+            app.world()
+                .get::<bevy::light::AmbientLight>(camera)
+                .unwrap()
+                .brightness,
+            600.0
+        );
     }
 
     #[test]
