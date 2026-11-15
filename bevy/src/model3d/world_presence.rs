@@ -230,9 +230,10 @@ pub(crate) fn sync(
                 if selected && focus.is_none() {
                     if let Some(local) = node.model.as_ref().and_then(|model| model.ground_anchor_local) {
                         let point = transform.transform_point(Vec3::from_array(local));
-                        if point.is_finite() {
-                            let radius = (transform.scale.x.abs() * 0.065).clamp(3.0, 9.0);
-                            let thickness = (radius * 0.14).max(0.7);
+                        let model_extent = (max - min).abs().max_element();
+                        let radius = (model_extent * 0.0325).min(9.0);
+                        let thickness = (radius * 0.14).min(model_extent * 0.01);
+                        if point.is_finite() && radius > f32::EPSILON && thickness > f32::EPSILON {
                             let material = presence.assets.material(materials, color);
                             active_anchors.insert(node.id.clone());
                             let pair = *presence.ground_anchors.entry(node.id.clone()).or_insert_with(|| [commands.spawn_empty().id(), commands.spawn_empty().id()]);
@@ -326,9 +327,10 @@ fn spawn_aabb_edges(
     max: Vec3,
 ) {
     let extent = (max - min).abs();
-    let thickness = (extent.max_element() * 0.006).clamp(1.2, 6.0);
-    // 稍微外扩线框，避免与模型表面共面 z-fighting；仍围绕真实 AABB，不改模型高度。
-    let pad = thickness * 0.5;
+    let Some((thickness, pad)) = selection_edge_metrics(extent) else {
+        return;
+    };
+    // 线宽和外扩随模型尺寸缩放，避免固定世界单位下限把小模型包成一团。
     let min = min - Vec3::splat(pad);
     let max = max + Vec3::splat(pad);
     let extent = (max - min).abs();
@@ -372,6 +374,23 @@ fn spawn_aabb_edges(
             );
         }
     }
+}
+
+/// Derive selection chrome from the model bounds without an absolute world-unit minimum.
+///
+/// World models can be intentionally scaled far below the canonical metre size. A fixed
+/// `1.2`-unit stroke/padding then becomes larger than the model itself and visually occludes it.
+/// Keep the stroke proportional to the largest extent, while retaining the existing upper cap for
+/// very large models. The padding is also bounded by the model extent so it can never dominate a
+/// tiny selection.
+fn selection_edge_metrics(extent: Vec3) -> Option<(f32, f32)> {
+    let max_extent = extent.max_element();
+    if !extent.is_finite() || !max_extent.is_finite() || max_extent <= f32::EPSILON {
+        return None;
+    }
+    let thickness = (max_extent * 0.006).min(6.0);
+    let pad = (thickness * 0.5).min(max_extent * 0.04);
+    Some((thickness, pad))
 }
 
 fn spawn_ground_diamond(
@@ -573,5 +592,18 @@ mod tests {
         assert!((transform.translation.y - 64.0).abs() < 0.001);
         assert!((transform.translation.z + 192.0).abs() < 0.001);
         assert_eq!(transform.scale.x, 96.0);
+    }
+
+    #[test]
+    fn selection_edge_metrics_scale_with_tiny_models() {
+        let (small_thickness, small_pad) = selection_edge_metrics(Vec3::splat(0.1)).unwrap();
+        assert!(small_thickness < 0.1);
+        assert!(small_pad <= 0.1 * 0.04);
+
+        let (large_thickness, large_pad) = selection_edge_metrics(Vec3::splat(2_000.0)).unwrap();
+        assert_eq!(large_thickness, 6.0);
+        assert_eq!(large_pad, 3.0);
+
+        assert!(selection_edge_metrics(Vec3::ZERO).is_none());
     }
 }

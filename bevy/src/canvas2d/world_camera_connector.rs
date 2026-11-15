@@ -16,6 +16,8 @@ use super::CanvasMaterials;
 use super::geometry::Geometry;
 
 const CONNECTOR_Z: f32 = 9.9;
+/// A selected camera's connector stays above cards, edges, labels, and transient canvas overlays.
+const SELECTED_CONNECTOR_Z: f32 = 600.0;
 const CONNECTOR_WIDTH: f32 = 1.5;
 const CONNECTOR_ALPHA: f32 = 0.85;
 
@@ -67,7 +69,7 @@ pub(crate) fn sync(
                 c2,
                 end,
                 CONNECTOR_WIDTH,
-                CONNECTOR_Z,
+                connector_z(scene.0.selection.nodes.iter().any(|id| id == &node.id)),
                 color,
                 true,
                 CONNECTOR_ALPHA,
@@ -109,6 +111,14 @@ pub(crate) fn sync(
     }
 }
 
+fn connector_z(selected: bool) -> f32 {
+    if selected {
+        SELECTED_CONNECTOR_Z
+    } else {
+        CONNECTOR_Z
+    }
+}
+
 fn presentation_key(scene: &crate::protocol::Scene, theme: &ThemeResource) -> String {
     let mut key = String::new();
     key.push_str(theme.fingerprint());
@@ -125,7 +135,7 @@ fn presentation_key(scene: &crate::protocol::Scene, theme: &ThemeResource) -> St
         let _ = std::fmt::Write::write_fmt(
             &mut key,
             format_args!(
-                "{}:{:.4},{:.4},{:.4},{:.4};{:.4},{:.4},{:.4};{:.4},{:.4},{:.4},{:.4};",
+                "{}:{:.4},{:.4},{:.4},{:.4};{:.4},{:.4},{:.4};{:.4},{:.4},{:.4},{:.4};{};",
                 node.id,
                 node.x,
                 node.y,
@@ -138,6 +148,7 @@ fn presentation_key(scene: &crate::protocol::Scene, theme: &ThemeResource) -> St
                 camera.rotation[1],
                 camera.rotation[2],
                 camera.rotation[3],
+                scene.selection.nodes.iter().any(|id| id == &node.id),
             ),
         );
     }
@@ -148,6 +159,12 @@ fn presentation_key(scene: &crate::protocol::Scene, theme: &ThemeResource) -> St
 mod tests {
     use super::*;
     use bevy::sprite_render::AlphaMode2d;
+
+    #[test]
+    fn selected_connector_is_rendered_above_canvas_overlays() {
+        assert!(connector_z(true) > 500.0);
+        assert_eq!(connector_z(false), CONNECTOR_Z);
+    }
 
     #[test]
     fn sync_builds_a_mesh_for_world_camera_cards() {
