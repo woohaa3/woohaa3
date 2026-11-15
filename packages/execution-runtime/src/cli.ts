@@ -29,7 +29,7 @@ const FLAGS_WITH_VALUE = new Set([
   "socket", "state", "workspace", "token", "executor", "executor-module", "prepared",
   "payload", "turn-id", "request-id", "since", "timeout-ms", "owner-pid",
   "role", "role-module", "extension-id", "artifact-id", "input", "context", "target",
-  "channel", "tools", "available-tools"
+  "channel", "tools", "available-tools", "canvas-workspace-root", "canvas-workspace-protected-path"
 ]);
 
 function parse(argv: readonly string[]): Parsed {
@@ -265,6 +265,8 @@ async function main(): Promise<number> {
       stateDir: stateDir(parsed),
       token: generated,
       workspaceKey: workspaceKey(parsed),
+      ...(flag(parsed, "canvas-workspace-root") ? { canvasWorkspaceRoot: flag(parsed, "canvas-workspace-root") } : {}),
+      ...(has(parsed, "canvas-workspace-protected-path") ? { canvasWorkspaceProtectedPaths: flagAll(parsed, "canvas-workspace-protected-path") } : {}),
       executors,
       defaultExecutor: "echo",
       exitOnShutdown: true,

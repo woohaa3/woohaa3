@@ -62,3 +62,32 @@ test("devsvr restart reuses the same executor runtime and only explicit stop end
 		fs.rmSync(runtimeDir, { recursive: true, force: true });
 	}
 });
+
+test("desktop supervisor starts the CLI with workspace and protected paths", async () => {
+	const temp = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa-desktop-workspace-"));
+	const runtimeDir = path.join(temp, "runtime");
+	const workspaceRoot = path.join(temp, "workspaces");
+	const protectedPaths = [path.join(temp, "secrets"), path.join(temp, "media")];
+	fs.mkdirSync(runtimeDir, { mode: 0o700 });
+	for (const dir of protectedPaths) fs.mkdirSync(dir);
+	const workspaceKey = hashKey(temp);
+	const supervisor = createAgentSupervisorHost({ root: ROOT, runtimeDir, workspaceKey, canvasWorkspaceRoot: workspaceRoot, canvasWorkspaceProtectedPaths: protectedPaths, startupTimeoutMs: 10_000 });
+	let started = false;
+	try {
+		const runtime = await supervisor.ensure();
+		started = true;
+		const rpc = (method, params = {}) => supervisorRpc(runtime, method, params);
+		const settings = await rpc("workspace.settings");
+		assert.equal(settings.available, true);
+		assert.equal(settings.rootPath, workspaceRoot);
+		const handle = await rpc("workspace.acquire", { owner: "owner", canvasId: "canvas", requestId: "request" });
+		assert.equal(handle.canvasId, "canvas");
+		for (const [index, targetPath] of protectedPaths.entries()) {
+			await assert.rejects(rpc("workspace.migrate", { operationId: `protected-${index}`, targetPath, expectedRootRevision: settings.rootRevision }), /目标位置与应用运行数据重叠/);
+		}
+	} finally {
+		await supervisor.stop();
+		if (started) cli(runtimeDir, workspaceKey, "stop");
+		fs.rmSync(temp, { recursive: true, force: true });
+	}
+});

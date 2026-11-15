@@ -21,14 +21,14 @@ import { nodeDownloadArgs } from './lib/node-download-args.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=(command,args,options={})=>execFileSync(command,args,{cwd:root,stdio:'inherit',windowsHide:true,...options});
 /** 随包执行器 CLI：桌面宿主用它启动/复用 workspace 级 daemon。 */
-function ensureExecutorBundle(){
+function ensureExecutorBundle({rebuild=false}={}){
  const cli=path.join(root,'packages/execution-runtime/dist/cli.js');
- if(!fs.existsSync(cli))execFileSync('pnpm',['-C','web','--filter','woohaa3-executor','run','build'],{cwd:root,stdio:'inherit',shell:process.platform==='win32',windowsHide:true});
+ if(rebuild||!fs.existsSync(cli))execFileSync('pnpm',['-C','web','--filter','woohaa3-executor','run','build'],{cwd:root,stdio:'inherit',shell:process.platform==='win32',windowsHide:true});
  if(!fs.existsSync(cli))throw new Error('woohaa3-executor 构建后仍缺少 dist/cli.js');
  return cli;
 }
 function stageExecutorRuntime(output){
- const cli=ensureExecutorBundle();const dir=path.join(output,'executor-runtime');
+ const cli=ensureExecutorBundle({rebuild:true});const dir=path.join(output,'executor-runtime');
  fs.mkdirSync(path.join(dir,'dist'),{recursive:true});
  fs.copyFileSync(cli,path.join(dir,'dist','cli.js'));
  fs.writeFileSync(path.join(dir,'package.json'),JSON.stringify({name:'woohaa3-executor-runtime',private:true,type:'module'},null,2)+'\n');
