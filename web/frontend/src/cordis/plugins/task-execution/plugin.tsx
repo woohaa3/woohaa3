@@ -327,6 +327,9 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
                 nodeId={route.nodeId}
                 mode="world"
                 worldScope={{ kind: "world-camera", cameraId: camera.value.cameraId }}
+                onLocate={() => {
+                  if (writable) ctx.canvasLocate.locateNodes([route.nodeId], { select: false });
+                }}
                 writable={writable}
                 disabledReason={writable ? null : "当前会话不可写，无法让助手调整镜头。"}
                 onAuthorize={() => ctx.canvasNavigation.openDialog({ dialogId: "agent-assistant", payload: {} })}
@@ -539,7 +542,7 @@ export function taskExecutionExtension(options: { canvasId?: string } = {}): Plu
     },
     {
       name: TASK_EXECUTION_PLUGIN_ID,
-      inject: ["theme", "slots", "canvasRemote", "canvasSession", "canvasState", "taskCatalog", "dialogs", "modelInteractions", "canvasRuntime", "canvasNavigation", "canvasEdit", "appRouter", "applicationRemote", "mediaRemote"]
+      inject: ["theme", "slots", "canvasRemote", "canvasSession", "canvasState", "taskCatalog", "dialogs", "modelInteractions", "canvasRuntime", "canvasNavigation", "canvasEdit", "canvasLocate", "appRouter", "applicationRemote", "mediaRemote"]
     }
   );
 }

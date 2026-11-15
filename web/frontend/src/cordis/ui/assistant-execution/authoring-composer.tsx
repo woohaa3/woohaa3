@@ -21,8 +21,8 @@ import {
 } from "../../services/assistant-execution/selection.js";
 import { AuthoringGenerateLayout } from "../../plugins/task-execution/authoring-generate-layout.js";
 import { AuthoringMcpButton } from "../../plugins/task-execution/model-parameter-panel.js";
-import { Button, Switch } from "@woohaa3/ui/primitives";
-import { SendIcon } from "@woohaa3/ui/icons";
+import { Button, IconButton, Switch } from "@woohaa3/ui/primitives";
+import { LocateIcon, SendIcon } from "@woohaa3/ui/icons";
 import { resolveAgentDetailAction } from "../../plugins/task-execution/execution-panel/agent-detail-action.js";
 import type { AgentConversationSnapshotView } from "../../contract/agent-conversation.js";
 import type { AuthoringGenerationProps } from "../../contract/authoring.js";
@@ -391,7 +391,11 @@ export function AssistantAuthoringComposer(props: AuthoringGenerationProps) {
     >
       <AuthoringGenerateLayout
         inspector={inspector}
-        quickActions={props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
+        quickActions={props.onLocate ? (
+          <IconButton label="定位镜头卡片" title="定位镜头卡片" size="sm" disabled={!props.writable} onClick={props.onLocate}>
+            <LocateIcon />
+          </IconButton>
+        ) : props.mode === "world" && props.worldScope?.kind === "scene-area" ? (
           <DirectorCharacterToolbar canvasId={props.canvasId} nodeId={props.nodeId} areaId={props.worldScope.areaId} writable={props.writable} />
         ) : undefined}
         presentation={props.presentation === "expanded" ? "expanded" : "dock"}

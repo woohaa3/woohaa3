@@ -40,6 +40,8 @@ export type AssistantDeliveryTarget = {
  * service；宿主只提供目标身份、可写性与并发 precondition。
  */
 export type AuthoringGenerationProps = {
+  /** Optional host action rendered at the left edge of the panel header. */
+  onLocate?: () => void;
   /** Reports whether this exact controller owns a nonempty draft or an active submission. */
   onDraftStateChange?: (state: { hasDraft: boolean; busy: boolean }) => void;
   requestPresentation?: (intent: PanelPresentationIntent) => void;

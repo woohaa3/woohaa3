@@ -136,6 +136,20 @@ const generate = () =>
   )!;
 
 describe("统一 Agent 创作入口", () => {
+  it("宿主提供定位动作时把它放在面板左上角并转发点击", async () => {
+    const { props } = fixture();
+    const onLocate = vi.fn();
+    await render({ ...props, onLocate });
+
+    const button = el.querySelector<HTMLButtonElement>(
+      '.authoring-generate__header button[aria-label="定位镜头卡片"]',
+    );
+    expect(button).not.toBeNull();
+    expect(button?.closest(".authoring-generate__quick-actions")).not.toBeNull();
+    await act(async () => button?.click());
+    expect(onLocate).toHaveBeenCalledOnce();
+  });
+
   it("新面板继承全局模型与 Variant，已有会话优先恢复自己的选择", async () => {
     rememberAssistantPreference("owner", {
       sourceId: "sdk",
