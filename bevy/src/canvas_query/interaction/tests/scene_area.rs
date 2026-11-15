@@ -8,6 +8,7 @@ use crate::protocol::{SceneArea, SceneAreaBounds, SceneAreaPoint};
 
 fn area() -> SceneArea {
     SceneArea {
+        edit_scope: None,
         node_id: "area".into(),
         title: "大厅".into(),
         playback: None,

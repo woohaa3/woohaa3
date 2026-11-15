@@ -231,6 +231,7 @@ mod tests {
         };
         let scene = Scene {
             nodes: vec![crate::protocol::GraphNode {
+                edit_scope: None,
                 chrome: crate::protocol::NodeChrome::Card,
                 shared_world_instance: None,
                 world_camera: None,
@@ -276,6 +277,7 @@ mod tests {
         assert!(model_asset_registered(protected));
         queue_scene(Scene {
             nodes: vec![crate::protocol::GraphNode {
+                edit_scope: None,
                 chrome: crate::protocol::NodeChrome::Card,
                 shared_world_instance: None,
                 world_camera: None,
@@ -379,6 +381,7 @@ mod tests {
         // 排队一个引用 protected 的场景。
         queue_scene(Scene {
             nodes: vec![crate::protocol::GraphNode {
+                edit_scope: None,
                 chrome: crate::protocol::NodeChrome::Card,
                 shared_world_instance: None,
                 world_camera: None,

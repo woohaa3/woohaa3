@@ -8,6 +8,7 @@ use bevy::prelude::*;
 
 fn model_node() -> GraphNode {
     GraphNode {
+        edit_scope: None,
         chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,
@@ -268,6 +269,7 @@ fn focus_hides_non_target_models_without_despawn() {
     let mut world = world_with_resources();
 
     let node = |id: &str| GraphNode {
+        edit_scope: None,
         chrome: crate::protocol::NodeChrome::Card,
         shared_world_instance: None,
         world_camera: None,

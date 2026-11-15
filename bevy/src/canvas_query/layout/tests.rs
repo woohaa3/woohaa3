@@ -3,6 +3,7 @@
 
     fn node(width: f32, height: f32) -> GraphNode {
         GraphNode {
+            edit_scope: None,
             chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             world_camera: None,
@@ -208,6 +209,7 @@
 
     fn action_node(x: f32, y: f32) -> GraphNode {
         GraphNode {
+            edit_scope: None,
             chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             world_camera: None,

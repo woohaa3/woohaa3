@@ -176,6 +176,7 @@ mod tests {
 
     fn node(strip: Option<HistoryStripPresentation>) -> GraphNode {
         GraphNode {
+            edit_scope: None,
             chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             world_camera: None,

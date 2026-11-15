@@ -160,6 +160,7 @@ mod tests {
 
     fn node(id: &str, x: f32, y: f32, width: f32, height: f32) -> GraphNode {
         GraphNode {
+            edit_scope: None,
             chrome: crate::protocol::NodeChrome::Card,
             shared_world_instance: None,
             world_camera: None,
