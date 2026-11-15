@@ -129,7 +129,7 @@ function readDefines(env = process.env) {
  *
  * 源码级"同源"不等于运行期"同实例"。这里把这类包改回外部共享，才是真正的构建期保证。
  */
-export const SHARED_RUNTIME_PACKAGES = ['@sdppp/pptask', '@woohaa3/runtime-components'];
+export const SHARED_RUNTIME_PACKAGES = ['@sdppp/pptask', '@woohaa3/runtime-components', 'zod'];
 
 /**
  * 允许在宿主与扩展里各持一份的包（不参与门禁）。
@@ -243,6 +243,7 @@ function collectSharedRuntimePackages({ output, clientRoot, state }) {
     const anchors = [
       path.join(webRoot, 'backend'),
       path.join(webRoot, 'services', 'task-service'),
+      path.join(webRoot, 'services', 'mcp-service'),
       ...(name.startsWith('@woohaa3/') ? [path.join(webRoot, name.slice('@woohaa3/'.length))] : [])
     ];
     for (const anchor of anchors) {
