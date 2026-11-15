@@ -4,7 +4,7 @@
   "metadata": { "module": "./shared", "export": "REPLICATE_PLUGIN_METADATA", "order": 27 },
   "hostPlugin": { "module": "./backend", "factory": "createReplicateProviderPlugin", "features": ["provider"], "order": 17 },
   "icon": { "asset": "./assets/icon.png" },
-  "version": "1.0.1",
+  "version": "1.0.2",
   "engines": {
     "hostAbi": "^1.0.0",
     "sdkAbi": "^1.0.0",

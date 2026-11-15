@@ -11,7 +11,7 @@
  * 同一份 API Key 是唯一凭据权威；图片/视频、文字与临时上传分别记录可用证据，
  * 文字权限拒绝不会停用仍可用的媒体能力。
  */
-import { defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
+import { credentialEpoch, defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
 import { createRunninghubProvider } from "./provider/index.js";
 import { DEFAULT_LLM_BASE_URL } from "./provider/provider.js";
 import {
@@ -87,6 +87,9 @@ export function createRunningHubRegistration(input: RunningHubRegistrationInput)
     available,
     provider,
     catalogRevision: runningHubLanguageCatalogRevision(),
+    // 换 key 必须让 Task registry 重建实例：否则它按模型签名命中旧缓存，继续用持旧 key 的
+    // provider 提交任务（2026-11-16 现场：同 key 重启前全失败、重启后全成功）。
+    credentialEpoch: credentialEpoch(apiKey),
     models,
     serviceConnectionFactory: {
       protocols: ["chat-completions"],
@@ -253,16 +256,4 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
       log({ event: "runninghub-plugin-activated", available: registration.available, modelCount: registration.models.length });
     }
   };
-}
-
-/** 凭据修订：只用于缓存隔离与请求冻结，不进入日志或公开视图。 */
-function credentialEpoch(secret: string | undefined): number {
-  const value = (secret ?? "").trim();
-  if (value === "") return 0;
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
 }

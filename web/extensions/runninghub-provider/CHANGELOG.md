@@ -19,3 +19,7 @@
 ## 2.2.5
 
 - 2026-11-16 `2.2.5`（上一版 `2.2.4`）：补齐 Seedream 5.5（含 `seedream-v5.5`）的比例到像素请求转换
+
+## 2.2.6
+
+- 2026-11-16 `2.2.6`（上一版 `2.2.5`）：fix(credentials): 让换 API Key 立即重建执行实例（credentialEpoch 参与 registry 签名）

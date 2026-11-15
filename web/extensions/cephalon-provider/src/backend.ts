@@ -8,6 +8,7 @@
  * 发现失败时保留上一次成功发现的模型集合（内存态，不落盘），诊断只记稳定 code。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
@@ -79,6 +80,7 @@ export function createCephalonRegistration(input: CephalonRegistrationInput): { 
       providerId: CEPHALON_PROVIDER_ID,
       available,
       provider,
+      credentialEpoch: credentialEpoch(apiKey),
       models: cephalonModelDefinitions(models),
       // 文本模型按 OpenAI 兼容对话协议接入助手：平台地址固定，来源只能换 Key，不能改写主机。
       serviceConnectionFactory: {

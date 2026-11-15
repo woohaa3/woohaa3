@@ -5,6 +5,7 @@
  * apiKey 是 secret，不进入公开响应。模型不写死：凭据加载后请求 `GET /v1/models`，设置页可再刷新。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
@@ -80,6 +81,7 @@ export function createTokenHubRegistration(input: TokenHubRegistrationInput): { 
       providerId: TOKENHUB_PROVIDER_ID,
       available,
       provider,
+      credentialEpoch: credentialEpoch(apiKey),
       serviceConnectionFactory: {
         protocols: [`provider:${TOKENHUB_PROVIDER_ID}`, "chat-completions"],
         assistantProtocol: "chat-completions",

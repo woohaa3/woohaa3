@@ -6,6 +6,7 @@
  * 设置页可以再刷新。参考图由插件自己上传（`uploadReference`），不依赖宿主存储签名。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationProvider,
   type ExtensionPlugin,
@@ -85,6 +86,7 @@ export function createGrsaiRegistration(input: GrsaiRegistrationInput): { regist
       providerId: GRSAI_PROVIDER_ID,
       available,
       provider,
+      credentialEpoch: credentialEpoch(apiKey),
       models: grsaiModelDefinitions(catalog.models),
       describeModel: (model) => {
         const found = catalog.models.find((item) => item.id === model.providerModelId);

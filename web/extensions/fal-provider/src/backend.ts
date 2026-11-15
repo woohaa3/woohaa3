@@ -5,6 +5,7 @@
  * 凭据加载后逐个读取队列 OpenAPI 定义，设置页可再刷新。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
@@ -92,6 +93,7 @@ export function createFalRegistration(input: FalRegistrationInput): { registrati
       providerId: FAL_PROVIDER_ID,
       available,
       provider,
+      credentialEpoch: credentialEpoch(apiKey),
       models: falModelDefinitions(catalog.models),
       describeModel: (model) => {
         const found = catalog.models.find((item) => item.id === model.providerModelId);

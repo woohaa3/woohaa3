@@ -5,6 +5,7 @@
  * `owner/name` 名单：凭据加载后逐个读取输入定义，设置页可再刷新。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
@@ -96,6 +97,7 @@ export function createReplicateRegistration(input: ReplicateRegistrationInput): 
       providerId: REPLICATE_PROVIDER_ID,
       available,
       provider,
+      credentialEpoch: credentialEpoch(apiKey),
       models: replicateModelDefinitions(catalog.models),
       describeModel: (model) => {
         const found = catalog.models.find((item) => item.id === model.providerModelId);

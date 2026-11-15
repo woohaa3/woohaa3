@@ -8,6 +8,7 @@
  * 发现失败保留上一次成功发现的结果（进程内存，不落盘），诊断只记稳定事件名与脱敏原因。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
@@ -88,6 +89,7 @@ export function createDeepSeekRegistration(
       providerId: DEEPSEEK_PROVIDER_ID,
       available,
       provider,
+      credentialEpoch: credentialEpoch(apiKey),
       // 个人 API Key 来源：同一协议下按来源自己的凭据与地址执行，站点目录不被改写。
       serviceConnectionFactory: {
         protocols: ["chat-completions"],

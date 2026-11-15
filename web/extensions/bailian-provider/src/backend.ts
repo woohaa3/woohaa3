@@ -14,6 +14,7 @@
  * 注册表以卡片为准，执行路径不会凭空多出一个没有参数事实的模型。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationModelDefinition,
@@ -140,6 +141,7 @@ export function createBailianRegistration(input: BailianRegistrationInput): Gene
     provider: available
       ? createBailianProvider({ apiKey, baseURL: baseUrl, fetch: guarded })
       : undefined,
+    credentialEpoch: credentialEpoch(apiKey),
     models: bailianModelDefinitions(),
     describeModel: (model) =>
       describeModel(model.providerModelId, model.modelType) as GenerationModelDescription | undefined

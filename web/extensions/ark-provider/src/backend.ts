@@ -6,6 +6,7 @@
  * 参考图素材库仍由本扩展在视频提交前替换。
  */
 import {
+  credentialEpoch,
   defineConfigSchema,
   type GenerationModelDescription,
   type GenerationProvider,
@@ -148,6 +149,7 @@ export function createArkRegistration(input: ArkRegistrationInput): GenerationPr
     providerId: ARK_PROVIDER_ID,
     available,
     provider,
+    credentialEpoch: credentialEpoch(apiKey),
     models,
     describeModel: ({ providerModelId }) => {
       if (!models.some((model) => model.providerModelId === providerModelId)) return undefined;
