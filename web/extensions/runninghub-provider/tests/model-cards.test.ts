@@ -29,6 +29,8 @@ describe("卡片映射", () => {
     expect(runningHubCard("seedream-v5-lite")?.id).toBe("seedream-5.0-lite");
     expect(runningHubCard("dola-Seedream-5.0-pro")?.id).toBe("seedream-5.0-pro");
     expect(runningHubCard("rhart-image-g-2.5-official-token/flare")?.id).toBe("gpt-image-2.5-flare");
+    expect(runningHubCard("rhart-image-g-2.6-official-token/flare")?.id).toBe("gpt-image-2.5-flare");
+    expect(runningHubCard("rhart-image-g-2.6-official-token/sunburst")?.id).toBe("gpt-image-2.5-sunburst");
     // 同族不同代可以借用卡片当展示模板：值域仍取交集。
     expect(runningHubCard("rhart-image-g-2")?.id).toBe("gpt-image-2.5");
     expect(runningHubCard("rhart-image-n-g31-flash")?.id).toBe("gemini-3.1-flash-image");
@@ -114,6 +116,22 @@ describe("GPT Image 2.5：经济版只留上游真的有的键", () => {
       resolution: "2k",
       quality: "xhigh"
     });
+  });
+});
+
+describe("GPT Image 2.6：RunningHub 官方稳定版映射", () => {
+  it("Flare / Sunburst 都显示上游可执行参数", () => {
+    for (const id of [
+      "rhart-image-g-2.6-official-token/flare",
+      "rhart-image-g-2.6-official-token/sunburst"
+    ]) {
+      const { properties, defaults } = projection(id);
+      expect(properties.size).toBeDefined();
+      expect(enumValues(properties.background)).toEqual(["auto", "transparent", "opaque"]);
+      expect(enumValues(properties.quality)).toEqual(["auto", "low", "medium", "high", "xhigh", "max"]);
+      expect(enumValues(properties.outputFormat)).toEqual(["png", "jpeg", "webp", "gif"]);
+      expect(defaults).toMatchObject({ size: "auto", quality: "auto", outputFormat: "png" });
+    }
   });
 });
 

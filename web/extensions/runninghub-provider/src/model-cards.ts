@@ -58,7 +58,7 @@ export type RunningHubCardSchema = {
  * `dola-Seedream-*` / `bytedance/jimeng-*` = Seedream、`bytedance/seedance-*` /
  * `seedance-v1*` / `rhart-video/sparkvideo-*` = Seedance。
  *
- * 只有在**同族同代**时才登记。同族不同代（GPT Image 2 / 2.5、Seedance v1 / v2）也登记，
+ * 只有在**同族同代**时才登记。同族不同代（GPT Image 2 / 2.5 / 2.6、Seedance v1 / v2）也登记，
  * 因为面板值域是「卡片 ∩ 上游」——卡片只贡献顺序、label 与默认值，多出来的档位会被上游
  * 挡掉，不会凭空许诺能力。刻意不登记的是**身份还不确定**的：`rhart-image-g-1.5`
  * （上游给的是固定像素 `size`，跟我们任何一张卡片都不是一套参数）、`rhart-image-g-3/g-4`
@@ -72,13 +72,15 @@ const CARD_IDS: Readonly<Record<string, string>> = {
   "seedream-v5-lite": "seedream-5.0-lite",
   "seedream-v5-pro": "seedream-5.0-pro",
   "dola-Seedream-5.0-pro": "seedream-5.0-pro",
-  // GPT Image（2.5 有独立卡；2 同族同参，用 2.5 当模板，值域仍取交集）
+  // GPT Image（2.5 / 2.6 变体共用质量、背景和输出格式语义；值域仍取上游交集）
   "rhart-image-g-2": "gpt-image-2.5",
   "rhart-image-g-2-official": "gpt-image-2.5",
   "rhart-image-g-2.5-official-token/flare": "gpt-image-2.5-flare",
   "rhart-image-g-2.5-official-token/sunburst": "gpt-image-2.5-sunburst",
   "rhart-image-g-2.5/flare": "gpt-image-2.5-flare",
   "rhart-image-g-2.5/sunburst": "gpt-image-2.5-sunburst",
+  "rhart-image-g-2.6-official-token/flare": "gpt-image-2.5-flare",
+  "rhart-image-g-2.6-official-token/sunburst": "gpt-image-2.5-sunburst",
   // Nano Banana（n-g31 = Gemini 3.1 Flash 底；n-pro = Nano Banana Pro 参数族）
   "rhart-image-n-g31-flash": "gemini-3.1-flash-image",
   "rhart-image-n-g31-flash-official": "gemini-3.1-flash-image",
@@ -139,6 +141,7 @@ const UPSTREAM_OWNED_KEYS = new Set(["prompt", "imageUrls", "urls"]);
  * **卡片没有覆盖**的那几个，不改值域、不改默认值。
  */
 const KEY_TITLES: Readonly<Record<string, string>> = {
+  size: "图片尺寸",
   sequentialImageGeneration: "组图",
   maxImages: "组图张数",
   toolsType: "联网工具"
