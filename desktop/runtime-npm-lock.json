@@ -3,7 +3,7 @@
   "kind": "woohaa-runtime-npm-lock",
   "generatedFrom": {
     "lockfile": "client/locks/web/pnpm-lock.yaml",
-    "lockfileSha256": "33917f880f58ef5ba5c54dc1a98bd07b97bdeb86aa70656ce4c4642f062b5bc9"
+    "lockfileSha256": "6a71ccd92e1d0dafaa613c828c866224fe7c6999a2eba63ee55b77ba52ab5208"
   },
   "registry": {
     "default": "https://registry.npmjs.org/",
