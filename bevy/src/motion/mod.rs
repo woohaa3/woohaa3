@@ -278,6 +278,10 @@ pub struct ModelDelta {
     pub scale: Vec3,
     /// 透明度乘数（0..=1，缺省 1）。
     pub opacity: f32,
+    /// 该采样是否实际接管 rotation 通道（显式存在性；单位四元数同样接管）。
+    pub owns_rotation: bool,
+    /// 该采样是否实际接管 position 通道（零位移同样接管）。
+    pub owns_position: bool,
 }
 
 /// 由分量数组构造初始镜头状态；供 protocol（不依赖 Bevy 类型）复用。
@@ -302,6 +306,8 @@ impl Default for ModelDelta {
             translation: Vec3::ZERO,
             scale: Vec3::ONE,
             opacity: 1.0,
+            owns_rotation: false,
+            owns_position: false,
         }
     }
 }

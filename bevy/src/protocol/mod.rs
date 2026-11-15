@@ -43,8 +43,8 @@ pub(crate) use image_focus::{IMAGE_FOCUS_VERSION, ImageFocus, ImageFocusViewport
 pub(crate) use model::{
     CANVAS_RENDER_SCENE_VERSION, DEFAULT_BLEND_OPACITY, MODEL_ASSET_VERSION,
     MODEL_DESCRIPTOR_VERSION, MODEL_SCENE_IR_V2, ModelAabbDto, ModelAssetDescriptor,
-    ModelSkin, ModelDescriptor, ModelDescriptorDto, ModelOffset, ModelOp, ModelPlacement, ModelReference,
-    ModelSnapshot, canonical_signature, fnv1a64_utf16,
+    ModelSkin, ModelDescriptor, ModelDescriptorDto, ModelOffset, ModelOp, ModelPose, ModelPlacement, ModelReference,
+    ModelSnapshot, canonical_signature, fnv1a64_utf16, validate_model_poses,
 };
 #[allow(unused_imports)]
 pub(crate) use observer::{CANVAS_OBSERVER_UPDATE_VERSION, ObserverUpdateRequest, apply_observer};

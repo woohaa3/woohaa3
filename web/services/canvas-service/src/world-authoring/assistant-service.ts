@@ -23,6 +23,7 @@ import {
   DEFAULT_MODEL_PLACEMENT,
   applyCanvasCommands,
   describeWorldModelAnimationRig,
+  describeModelStaticPose,
   findNonOverlappingNodePosition,
   initialCameraCardPosition,
   SHARED_WORLD_VERSION,
@@ -440,6 +441,7 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
   if (rigCache.size >= 64) rigCache.delete(rigCache.keys().next().value!);
   if (!execution.ok) { rigCache.set(key, null); return null; }
   const value = describeWorldModelAnimationRig(execution.ops, rig);
+  value.staticPose = describeModelStaticPose(execution.ops);
   if (rigCache.size >= 64) rigCache.delete(rigCache.keys().next().value!);
   rigCache.set(key, value);
   return value;
@@ -1087,7 +1089,9 @@ async function animationRigOf(fields: Record<string, unknown>): Promise<import("
     }
     if (cameraView.sceneModels) {
       for (const model of cameraView.sceneModels) {
-        const rig = await animationRigOf(inspected.canvas.nodeData[model.nodeId] as Record<string, unknown>);
+        const fields = inspected.canvas.nodeData[model.nodeId] as Record<string, unknown>;
+        model.modelContentVersion = fields?.modelContentVersion;
+        const rig = await animationRigOf(fields);
         if (rig) model.animationRig = rig;
       }
       const stillIssued = resolve(input.contextId);

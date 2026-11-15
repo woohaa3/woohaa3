@@ -76,6 +76,7 @@ impl PreparedModelRequest {
         if self.ops.is_empty() {
             return Err("Empty model resource ops");
         }
+        super::model::validate_model_poses(&self.ops)?;
         Ok(())
     }
 

@@ -58,6 +58,7 @@ export * from "./canvas/model-definition.js";
 export * from "./canvas/glb/parse.js";
 export * from "./canvas/glb/import.js";
 export * from "./canvas/scene-ir-v2.js";
+export * from "./canvas/model-static-pose.js";
 export * from "./canvas/model-executor.js";
 export * from "./canvas/model-executor-v2.js";
 export * from "./canvas/model-api-descriptor.js";

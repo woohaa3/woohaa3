@@ -36,6 +36,7 @@ import {
   type SceneV2Op,
   type SceneV2ShapeOp,
   modelGroundAnchorLocal,
+  evaluateModelPoseGeometry,
   worldModelGroundAnchor,
   storedHumanoidRig,
   type Vec3,
@@ -315,6 +316,7 @@ function cameraRecord(nodeId: string, data: WorldCameraData): CameraRecord {
 /** Transform every primitive corner through its complete hierarchy. Composing
  * non-uniform scales and rotations as a single TRS can lose shear and underbound. */
 function authoritativeSceneBounds(ops: readonly SceneV2Op[]): Aabb | null {
+  if (ops.some(op => op.t === "group" && op.pose)) return evaluateModelPoseGeometry(ops).aabb;
   const shapes = ops.filter((op): op is SceneV2ShapeOp => ["group", "box", "cylinder", "mesh", "sphere", "capsule", "segment"].includes(op.t));
   const byId = new Map(shapes.map(shape => [shape.id, shape]));
   const min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
@@ -346,6 +348,10 @@ function authoritativeSceneBounds(ops: readonly SceneV2Op[]): Aabb | null {
  * Support functions avoid projecting a merged AABB through a second rotation;
  * mesh extrema come from the actual vertices. */
 function sceneGroundFootprint(ops: readonly SceneV2Op[], root: WorldTransform): GroundAabb | null {
+  if (ops.some(op => op.t === "group" && op.pose)) {
+    const bounds = evaluateModelPoseGeometry(ops).aabb;
+    return bounds ? instanceFootprint(bounds, root) : null;
+  }
   const shapes = ops.filter((op): op is SceneV2ShapeOp => ["group", "box", "cylinder", "mesh", "sphere", "capsule", "segment"].includes(op.t));
   const byId = new Map(shapes.map(shape => [shape.id, shape]));
   const min = [Infinity, Infinity], max = [-Infinity, -Infinity];

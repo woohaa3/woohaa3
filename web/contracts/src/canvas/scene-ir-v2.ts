@@ -25,6 +25,7 @@ export {
   type SceneV2MaterialAlphaMode,
   type SceneV2MaterialOp,
   type SceneV2ShapeBase,
+  type SceneV2Pose,
   type SceneV2GroupOp,
   type SceneV2BoxOp,
   type SceneV2CylinderOp,

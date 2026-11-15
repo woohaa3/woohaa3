@@ -33,6 +33,7 @@ fn descriptor(i: usize, parent_changed: bool) -> ModelAssetDescriptor {
                 position: [0.; 3],
                 rotation: if parent_changed && i == 0 {
                     [0., 45., 0.]
+                    pose: None,
                 } else {
                     [0.; 3]
                 },

@@ -277,6 +277,7 @@ fn humanoid_ops() -> Vec<ModelOp> {
             position: [0.6, 0.4, 0.0],
             rotation: [0.0; 3],
             scale: [1.0; 3],
+            pose: None,
         },
         ModelOp::Sphere {
             id: "elbow".into(),

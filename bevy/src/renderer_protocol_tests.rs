@@ -13,6 +13,7 @@ fn request(version: &str) -> RenderRequest {
             position: [0.0; 3],
             rotation: [0.0; 3],
             scale: [1.0; 3],
+            pose: None,
         }],
         capture: CaptureOptions::default(),
         placement: None,
@@ -89,7 +90,7 @@ fn rejects_malformed_json() {
 #[test]
 fn accepts_v2_motion_request() {
     let json = r##"{
-            "protocolVersion":"woohaa-model-renderer-protocol-v4",
+            "protocolVersion":"woohaa-model-renderer-protocol-v5",
             "requestId":"r","sceneVersion":"woohaa-model-scene-ir-v2","signature":"s",
             "extent":2,
             "ops":[{"t":"box","id":"b","parent":null,"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1],"color":"#ff0000","material":null,"size":[1,1,1]}],
@@ -190,4 +191,42 @@ fn world_camera_uses_metric_pose_and_real_perspective_foreshortening() {
     assert!((near_object.x / far_object.x - 2.0).abs() < 1e-5);
     assert!((projection.near - 6.4).abs() < 1e-5);
     assert_eq!(projection.far, 32000.0);
+}
+
+#[test]
+fn version_json_declares_static_pose_capability_and_current_protocols() {
+    let value: serde_json::Value = serde_json::from_str(&super::version_json()).unwrap();
+    assert_eq!(value["protocolVersion"], super::RENDERER_PROTOCOL_VERSION);
+    assert_eq!(value["worldProtocolVersion"], super::WORLD_RENDERER_PROTOCOL_VERSION);
+    assert_eq!(value["capabilities"], serde_json::json!([super::MODEL_STATIC_POSE_CAPABILITY]));
+    assert_eq!(value["sceneVersions"], serde_json::json!(super::SUPPORTED_SCENE_VERSIONS));
+}
+
+#[test]
+fn rejects_the_previous_v4_model_protocol_instead_of_ignoring_pose() {
+    let mut req = request("woohaa-model-scene-ir-v2");
+    req.protocol_version = "woohaa-model-renderer-protocol-v4".to_owned();
+    assert_eq!(
+        validate_request(&req).unwrap_err().0,
+        RenderErrorCode::UnsupportedProtocolVersion
+    );
+}
+
+#[test]
+fn accepts_group_pose_and_rejects_empty_pose_at_the_boundary() {
+    let json = r##"{
+        "protocolVersion":"woohaa-model-renderer-protocol-v5",
+        "requestId":"r","sceneVersion":"woohaa-model-scene-ir-v2","signature":"s","extent":2,
+        "ops":[{"t":"group","id":"root","parent":null,"position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1],"pose":{"rotation":[0,30,0],"position":[0,0.5,0]}}],
+        "capture":{"width":64,"height":64,"background":"transparent","cameraPreset":"dimetric"}
+    }"##;
+    let request = parse_request(json).expect("pose request parses");
+    assert!(validate_request(&request).is_ok());
+
+    let empty = json.replace(r#""pose":{"rotation":[0,30,0],"position":[0,0.5,0]}"#, r#""pose":{}"#);
+    let request = parse_request(&empty).expect("empty pose still parses");
+    assert_eq!(
+        validate_request(&request).unwrap_err().0,
+        RenderErrorCode::InvalidScene
+    );
 }

@@ -9,6 +9,8 @@ import {
   ALPHA_MODES,
   AXES,
   CAPSULE_EPSILON,
+  POSE_CHANNELS,
+  type SceneV2Pose,
   HEX_COLOR,
   MODES,
   SCENE_IR_V2_COORD_LIMIT,
@@ -18,6 +20,7 @@ import {
   SCENE_IR_V2_MIN_SEGMENT_LENGTH,
   SEGMENT_SHAPES,
   fail,
+  isRecord,
   type ReadResult,
   type SceneV2AnimationOp,
   type SceneV2MaterialAlphaMode,
@@ -187,7 +190,14 @@ export function readShape(
 
   const base = { id, parent, position, rotation, scale, material, color: color ?? (material === null ? "#cccccc" : null) };
 
-  if (t === "group") return { ok: true, value: { t: "group", ...base } };
+  if (t !== "group" && raw.pose !== undefined) {
+    return fail("invalid-pose", `对象 ${id} 只有 group 可以声明 pose`);
+  }
+  if (t === "group") {
+    const pose = readPose(raw.pose, id);
+    if (!pose.ok) return pose;
+    return { ok: true, value: { t: "group", ...base, ...(pose.value ? { pose: pose.value } : {}) } };
+  }
   if (t === "box") {
     const size = readVec3(raw.size, [1, 1, 1]);
     if (!size || size.some((value) => value <= 0)) return fail("invalid-primitive", `对象 ${id} 的 size 非法`);
@@ -372,6 +382,38 @@ export function readAnimation(
     op.range = [start, end];
   }
   return { ok: true, value: op };
+}
+
+/**
+ * 读取可选静态姿势（change: 2026-11-15-add-model-script-static-poses）。
+ *
+ * 严格：只允许 rotation/position；至少一个通道；向量必须是有限值。规范化移除等价零通道，
+ * 空 pose 归一为 `undefined`，因此未声明姿势的旧内容逐字节不变。
+ */
+export function readPose(raw: unknown, id: string): ReadResult<SceneV2Pose | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (!isRecord(raw)) return fail("invalid-pose", `对象 ${id} 的 pose 必须是对象`);
+  const keys = Object.keys(raw);
+  if (keys.length === 0) return fail("invalid-pose", `对象 ${id} 的 pose 不能为空`);
+  for (const key of keys) {
+    if (!POSE_CHANNELS.has(key)) return fail("invalid-pose", `对象 ${id} 的 pose 含未知字段 ${key}`);
+    // 显式写了通道却给 undefined/null 不是“省略”，而是非法向量。
+    if (raw[key] === undefined || raw[key] === null) {
+      return fail("invalid-pose", `对象 ${id} 的 pose.${key} 必须是三元有限向量`);
+    }
+  }
+  const pose: SceneV2Pose = {};
+  if (raw.rotation !== undefined) {
+    const rotation = readVec3(raw.rotation, null);
+    if (!rotation) return fail("invalid-pose", `对象 ${id} 的 pose.rotation 非法`);
+    if (rotation.some((value) => value !== 0)) pose.rotation = rotation;
+  }
+  if (raw.position !== undefined) {
+    const position = readVec3(raw.position, null);
+    if (!position) return fail("invalid-pose", `对象 ${id} 的 pose.position 非法`);
+    if (position.some((value) => value !== 0)) pose.position = position;
+  }
+  return { ok: true, value: pose.rotation || pose.position ? pose : undefined };
 }
 
 export function readId(input: unknown): string | null {

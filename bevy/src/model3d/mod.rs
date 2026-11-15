@@ -87,9 +87,10 @@ pub(crate) use runtime::sync_editor_scope_visibility;
 #[cfg(test)]
 pub(crate) use runtime::ModelAnchor;
 
-/// `compose_delta` 仅 native renderer 的离屏预览复用；wasm 侧走 `runtime` 内部调用。
+/// `compose_channels` 仅 native renderer 的离屏预览复用；wasm 侧走 `runtime` 内部调用。
 #[cfg(feature = "native-renderer")]
-pub(crate) use runtime::compose_delta;
+#[allow(unused_imports)]
+pub(crate) use runtime::compose_channels;
 
 /// 共享纯模型几何派生（prepared/register 边界与 native renderer 复用）
 /// （change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 6.1）。
@@ -172,3 +173,4 @@ pub(crate) fn set_bound_instance_layer(
 mod tests;
 
 pub(crate) mod skin;
+mod pose_math;

@@ -105,7 +105,7 @@ fn shared_resource_instances_keep_independent_roots_and_child_hierarchy() {
     let mut snapshot = sphere_snapshot("hierarchy");
     snapshot.ops = vec![
         ModelOp::Group { id: "parent".into(), parent: None, position: [0., 0., 0.],
-            rotation: [0., 90., 0.], scale: [2., 2., 2.] },
+            rotation: [0., 90., 0.], scale: [2., 2., 2.], pose: None },
         ModelOp::Sphere { id: "child".into(), parent: Some("parent".into()),
             position: [1., 0., 0.], rotation: [0.; 3], scale: [1.; 3],
             color: Some("#ffffff".into()), material: None, radius: 0.3 },

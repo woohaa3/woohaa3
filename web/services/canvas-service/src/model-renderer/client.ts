@@ -14,9 +14,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 
 /** 与 Rust `renderer_protocol` 对齐的协议常量。 */
-export const RENDERER_PROTOCOL_VERSION = "woohaa-model-renderer-protocol-v4";
-export const WORLD_RENDERER_PROTOCOL_VERSION = "woohaa-world-renderer-protocol-v1";
-export const RENDER_VERSION = "woohaa-model-render-v4";
+export const RENDERER_PROTOCOL_VERSION = "woohaa-model-renderer-protocol-v5";
+export const WORLD_RENDERER_PROTOCOL_VERSION = "woohaa-world-renderer-protocol-v2";
+export const RENDER_VERSION = "woohaa-model-render-v5";
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 export const MAX_PREVIEW_EDGE = 2048;
 

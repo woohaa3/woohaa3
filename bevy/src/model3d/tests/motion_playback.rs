@@ -27,6 +27,7 @@ fn rig_snapshot() -> ModelSnapshot {
                 position: [0.0; 3],
                 rotation: [0.0; 3],
                 scale: [1.0; 3],
+                pose: None,
             },
             ModelOp::Box {
                 id: "body".into(),
@@ -119,7 +120,13 @@ fn run_motion(world: &mut World, scene: &Scene) {
         .remove_resource::<Assets<StandardMaterial>>()
         .unwrap_or_default();
     let mut commands = world.commands();
-    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, &instances, scene);
+    let camera = apply_motion_playback(
+        &mut commands,
+        &mut visuals,
+        &mut materials,
+        &instances,
+        scene,
+    );
     world.flush();
     world.insert_resource(visuals);
     world.insert_resource(materials);
@@ -187,7 +194,13 @@ fn run_motion_expect_none(world: &mut World, scene: &Scene) {
         .remove_resource::<Assets<StandardMaterial>>()
         .unwrap_or_default();
     let mut commands = world.commands();
-    let camera = apply_motion_playback(&mut commands, &mut visuals, &mut materials, &instances, scene);
+    let camera = apply_motion_playback(
+        &mut commands,
+        &mut visuals,
+        &mut materials,
+        &instances,
+        scene,
+    );
     world.flush();
     world.insert_resource(visuals);
     world.insert_resource(materials);
@@ -225,7 +238,6 @@ fn seeking_before_motion_start_restores_base_instead_of_previous_frame() {
     assert!(restored.rotation.abs_diff_eq(base.rotation, 1e-6));
     assert_eq!(restored.translation, base.translation);
 }
-
 
 #[test]
 fn removing_motion_on_same_node_restores_previous_targets() {
@@ -476,7 +488,9 @@ fn part_rotations_preserve_hierarchy_instances_and_reset_without_rebuilding() {
     let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
     let mut scene = base_scene();
     let q = Quat::from_rotation_z(0.7);
-    scene.nodes[0].model.as_mut().unwrap().part_rotations = Some(std::collections::HashMap::from([("root".into(), q.to_array())]));
+    scene.nodes[0].model.as_mut().unwrap().part_rotations = Some(std::collections::HashMap::from(
+        [("root".into(), q.to_array())],
+    ));
     let mut other = scene.nodes[0].clone();
     other.id = "other".into();
     other.model.as_mut().unwrap().part_rotations = Some(Default::default());
@@ -486,33 +500,263 @@ fn part_rotations_preserve_hierarchy_instances_and_reset_without_rebuilding() {
     let parent = entity_of(&world, "root");
     let child = entity_of(&world, "hand");
     run_motion(&mut world, &scene);
-    assert!(world.get::<Transform>(parent).unwrap().rotation.abs_diff_eq(q, 1e-5));
+    assert!(
+        world
+            .get::<Transform>(parent)
+            .unwrap()
+            .rotation
+            .abs_diff_eq(q, 1e-5)
+    );
     assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), parent);
     let models = world.resource::<ModelVisuals>();
     let other_parent = models.roots["other"].part_entities["root"];
-    assert!(world.get::<Transform>(other_parent).unwrap().rotation.abs_diff_eq(Quat::IDENTITY, 1e-5));
+    assert!(
+        world
+            .get::<Transform>(other_parent)
+            .unwrap()
+            .rotation
+            .abs_diff_eq(Quat::IDENTITY, 1e-5)
+    );
     assert!(!models.roots["anim"].batched);
     scene.nodes[0].model.as_mut().unwrap().part_rotations = Some(Default::default());
     run_sync(&mut world, &scene, &resources);
     run_motion(&mut world, &scene);
     assert_eq!(entity_of(&world, "root"), parent);
-    assert!(world.get::<Transform>(parent).unwrap().rotation.abs_diff_eq(Quat::IDENTITY, 1e-5));
-    assert!((world.get::<Transform>(entity_of(&world, "body")).unwrap().rotation.y - 0.5_f32.sin()).abs() < 1e-4);
+    assert!(
+        world
+            .get::<Transform>(parent)
+            .unwrap()
+            .rotation
+            .abs_diff_eq(Quat::IDENTITY, 1e-5)
+    );
+    assert!(
+        (world
+            .get::<Transform>(entity_of(&world, "body"))
+            .unwrap()
+            .rotation
+            .y
+            - 0.5_f32.sin())
+        .abs()
+            < 1e-4
+    );
 }
 
 #[test]
 fn part_positions_reset_from_base_each_sample_and_on_removal() {
-    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), rig_snapshot())]);
+    let resources = resource_table([(
+        "woohaa-model-scene-ir-v2:sig-anim".to_owned(),
+        rig_snapshot(),
+    )]);
     let mut scene = base_scene();
-    scene.nodes[0].model.as_mut().unwrap().part_positions = Some(std::collections::HashMap::from([("root".into(), [0.0, 0.2, 0.0])]));
+    scene.nodes[0].model.as_mut().unwrap().part_positions = Some(std::collections::HashMap::from(
+        [("root".into(), [0.0, 0.2, 0.0])],
+    ));
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     let root = entity_of(&world, "root");
     let base = world.get::<Transform>(root).unwrap().translation;
     run_motion(&mut world, &scene);
     run_motion(&mut world, &scene);
-    assert!(world.get::<Transform>(root).unwrap().translation.abs_diff_eq(base + Vec3::Y * 0.2, 1e-5));
+    assert!(
+        world
+            .get::<Transform>(root)
+            .unwrap()
+            .translation
+            .abs_diff_eq(base + Vec3::Y * 0.2, 1e-5)
+    );
     scene.nodes[0].model.as_mut().unwrap().part_positions = None;
     run_motion(&mut world, &scene);
-    assert!(world.get::<Transform>(root).unwrap().translation.abs_diff_eq(base, 1e-5));
+    assert!(
+        world
+            .get::<Transform>(root)
+            .unwrap()
+            .translation
+            .abs_diff_eq(base, 1e-5)
+    );
+}
+
+// ---- 静态姿势：绑定基线、按通道动画覆盖、显式停止恢复 ----
+
+fn posed_snapshot() -> ModelSnapshot {
+    let mut snapshot = rig_snapshot();
+    if let ModelOp::Group { pose, .. } = &mut snapshot.ops[0] {
+        // 绕 Y 旋转 30°，并抬高 0.5（父空间偏移）。
+        *pose = Some(crate::protocol::ModelPose {
+            rotation: Some([0.0, 30.0, 0.0]),
+            position: Some([0.0, 0.5, 0.0]),
+        });
+    }
+    snapshot
+}
+
+fn posed_scene(reference: crate::protocol::ModelReference) -> Scene {
+    let mut scene = scene_with(&model_node(), Some(reference));
+    scene.animation_playback = None;
+    scene
+}
+
+#[test]
+fn static_pose_applies_to_the_bind_baseline() {
+    let snapshot = posed_snapshot();
+    let reference = reference_for(&snapshot, ModelPlacement::default());
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &posed_scene(reference), &resources);
+    let root = *world
+        .entity(entity_of(&world, "root"))
+        .get::<Transform>()
+        .unwrap();
+    assert!((root.translation.y - 0.5).abs() < 1e-6);
+    assert!((root.rotation.y - 15f32.to_radians().sin()).abs() < 1e-4);
+}
+
+#[test]
+fn animation_rotation_overrides_static_rotation_without_multiplying_it() {
+    let snapshot = posed_snapshot();
+    let reference = reference_for(&snapshot, ModelPlacement::default());
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &posed_scene(reference), &resources);
+
+    let mut scene = base_scene();
+    // 轨道目标是 body；改用 root 以便命中静态姿势根。
+    scene.animation_playback.as_mut().unwrap().model_motion[0].target_id = "root".into();
+    run_motion(&mut world, &scene);
+    let animated = *world
+        .entity(entity_of(&world, "root"))
+        .get::<Transform>()
+        .unwrap();
+    // 只接管 rotation：绑定 × 动画（1s × 1 rad/s），静态 30° 不再叠加。
+    assert!((animated.rotation.y - 0.5f32.sin()).abs() < 1e-4);
+    // position 通道未被动画接管，静态抬高保留。
+    assert!((animated.translation.y - 0.5).abs() < 1e-6);
+
+    // 显式停止：恢复静态姿势，不回到绑定 T-pose。
+    run_motion_expect_none(
+        &mut world,
+        &posed_scene(reference_for(&posed_snapshot(), ModelPlacement::default())),
+    );
+    let restored = *world
+        .entity(entity_of(&world, "root"))
+        .get::<Transform>()
+        .unwrap();
+    assert!((restored.rotation.y - 15f32.to_radians().sin()).abs() < 1e-4);
+    assert!((restored.translation.y - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn identity_rotation_and_zero_position_from_a_full_skeleton_still_override_static_pose() {
+    let snapshot = posed_snapshot();
+    let mut reference = reference_for(&snapshot, ModelPlacement::default());
+    // 完整骨架片段会为每个关节输出通道（单位旋转、零位移同样是显式接管）。
+    reference.part_rotations = Some(std::collections::HashMap::from([(
+        "root".to_owned(),
+        [0.0, 0.0, 0.0, 1.0],
+    )]));
+    reference.part_positions = Some(std::collections::HashMap::from([(
+        "root".to_owned(),
+        [0.0, 0.0, 0.0],
+    )]));
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
+    let mut world = world_with_resources();
+    let scene = posed_scene(reference);
+    run_sync(&mut world, &scene, &resources);
+    run_motion_expect_none(&mut world, &scene);
+    let root = *world
+        .entity(entity_of(&world, "root"))
+        .get::<Transform>()
+        .unwrap();
+    assert!(root.rotation.abs_diff_eq(Quat::IDENTITY, 1e-6));
+    assert!(root.translation.abs_diff_eq(Vec3::ZERO, 1e-6));
+}
+
+#[test]
+fn static_pose_survives_unstarted_pause_seek_end_removal_and_reconstruction() {
+    let snapshot = posed_snapshot();
+    let reference = reference_for(&snapshot, ModelPlacement::default());
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
+    let still = posed_scene(reference);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &still, &resources);
+    let base = *world.get::<Transform>(entity_of(&world, "root")).unwrap();
+    let mut scene = base_scene();
+    let playback = scene.animation_playback.as_mut().unwrap();
+    playback.model_motion[0].target_id = "root".into();
+    playback.model_motion[0].start_time = Some(1.0);
+    playback.model_motion[0].end_time = Some(2.0);
+    // At the start an identity rotation is an owned channel; before it, static remains.
+    for (time, expected_rotation, playing) in [
+        (0.0, base.rotation, true),
+        (1.0, Quat::IDENTITY, true),
+        (1.5, Quat::from_rotation_y(0.5), true),
+        (1.5, Quat::from_rotation_y(0.5), false),
+        (3.0, Quat::from_rotation_y(1.0), false),
+        (0.0, base.rotation, false),
+        (3.0, Quat::from_rotation_y(1.0), false),
+    ] {
+        let playback = scene.animation_playback.as_mut().unwrap();
+        playback.time = time;
+        playback.playing = playing;
+        run_motion(&mut world, &scene);
+        let actual = world.get::<Transform>(entity_of(&world, "root")).unwrap();
+        assert!(
+            actual.rotation.abs_diff_eq(expected_rotation, 1e-6),
+            "time={time}"
+        );
+        assert_eq!(
+            actual.translation, base.translation,
+            "rotation never owns static position"
+        );
+    }
+    scene
+        .animation_playback
+        .as_mut()
+        .unwrap()
+        .model_motion
+        .clear();
+    run_motion(&mut world, &scene);
+    assert_eq!(
+        *world.get::<Transform>(entity_of(&world, "root")).unwrap(),
+        base
+    );
+    run_sync(&mut world, &Scene::default(), &resources);
+    run_sync(&mut world, &still, &resources);
+    assert_eq!(
+        *world.get::<Transform>(entity_of(&world, "root")).unwrap(),
+        base
+    );
+}
+
+#[test]
+fn removing_one_sampled_channel_restores_only_that_static_channel() {
+    let snapshot = posed_snapshot();
+    let mut reference = reference_for(&snapshot, ModelPlacement::default());
+    reference.part_rotations = Some(std::collections::HashMap::from([(
+        "root".into(),
+        [0., 0., 0., 1.],
+    )]));
+    reference.part_positions = Some(std::collections::HashMap::from([(
+        "root".into(),
+        [0., 0., 0.],
+    )]));
+    let resources = resource_table([("woohaa-model-scene-ir-v2:sig-anim".to_owned(), snapshot)]);
+    let mut scene = posed_scene(reference);
+    let mut world = world_with_resources();
+    run_sync(&mut world, &scene, &resources);
+    run_motion_expect_none(&mut world, &scene);
+    scene.nodes[0].model.as_mut().unwrap().part_positions = None;
+    run_motion_expect_none(&mut world, &scene);
+    let root = *world.get::<Transform>(entity_of(&world, "root")).unwrap();
+    assert!(root.rotation.abs_diff_eq(Quat::IDENTITY, 1e-6));
+    assert!(root.translation.abs_diff_eq(Vec3::Y * 0.5, 1e-6));
+    scene.nodes[0].model.as_mut().unwrap().part_rotations = None;
+    for _ in 0..3 {
+        run_motion_expect_none(&mut world, &scene);
+    }
+    let root = world.get::<Transform>(entity_of(&world, "root")).unwrap();
+    assert!(
+        root.rotation
+            .abs_diff_eq(Quat::from_rotation_y(30f32.to_radians()), 1e-6)
+    );
+    assert!(root.translation.abs_diff_eq(Vec3::Y * 0.5, 1e-6));
 }

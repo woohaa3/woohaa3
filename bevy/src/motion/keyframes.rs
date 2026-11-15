@@ -126,10 +126,12 @@ pub(super) fn sample_frames(
     match property {
         ModelTrackProperty::Position => ModelDelta {
             translation: value,
+            owns_position: true,
             ..Default::default()
         },
         ModelTrackProperty::Rotation => ModelDelta {
             rotation: Quat::from_euler(EulerRot::YXZ, value.y, value.x, value.z),
+            owns_rotation: true,
             ..Default::default()
         },
         ModelTrackProperty::Scale => ModelDelta {

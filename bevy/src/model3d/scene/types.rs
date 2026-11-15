@@ -25,6 +25,60 @@ pub(crate) struct ModelEntitySpec {
     /// material key（`color:#rrggbb` 或 `material:<id>`），供缓存复用。
     pub(crate) material_key: String,
     pub(crate) animation: Option<ModelAnimationSpec>,
+    /// 独立静态姿势增量（change: 2026-11-15-add-model-script-static-poses）。
+    pub(crate) pose: Option<ModelPoseSpec>,
+}
+
+/// 静态姿势通道增量：rotation 为绑定后的局部旋转增量（弧度），position 为父空间平移偏移。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ModelPoseSpec {
+    pub(crate) rotation_radians: Option<[f32; 3]>,
+    pub(crate) position: Option<[f32; 3]>,
+}
+
+impl ModelEntitySpec {
+    /// 纯绑定/结构变换（不含静态姿势与动画）。
+    pub(crate) fn bind_transform(&self) -> Transform {
+        Transform {
+            translation: Vec3::from_array(self.position),
+            rotation: quat_from_xyz_radians(self.rotation_radians),
+            scale: Vec3::from_array(self.scale),
+        }
+    }
+
+    /// 绑定 × 静态姿势：无动画时的有效局部变换（层级由 ECS parent 组合）。
+    pub(crate) fn static_transform(&self) -> Transform {
+        self.effective_transform(None, None, None)
+    }
+
+    /// 按通道覆盖求有效局部变换。
+    ///
+    /// `rotation`/`position` 为动画实际接管的通道（显式 `Some`，零值同样接管）；缺失时回落到
+    /// 静态姿势通道，再回落到绑定值。`scale` 只有乘法增量，不属于静态姿势。
+    pub(crate) fn effective_transform(
+        &self,
+        rotation: Option<Quat>,
+        position: Option<Vec3>,
+        scale: Option<Vec3>,
+    ) -> Transform {
+        let bind_translation = Vec3::from_array(self.position);
+        let bind_rotation = quat_from_xyz_radians(self.rotation_radians);
+        let pose = self.pose;
+        let translation = bind_translation
+            + position
+                .or_else(|| pose.and_then(|pose| pose.position.map(Vec3::from_array)))
+                .unwrap_or(Vec3::ZERO);
+        let rotation_delta = rotation.or_else(|| {
+            pose.and_then(|pose| pose.rotation_radians)
+                .map(quat_from_xyz_radians)
+        });
+        let rotation = rotation_delta.map_or(bind_rotation, |delta| bind_rotation * delta);
+        Transform {
+            translation,
+            rotation,
+            scale: Vec3::from_array(self.scale) * scale.unwrap_or(Vec3::ONE),
+        }
+    }
 }
 
 /// 与 ECS 无关的几何描述。

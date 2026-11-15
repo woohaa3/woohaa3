@@ -90,7 +90,8 @@ import type { BevyRenderDraft, BevyRenderMarquee, BevyRenderSurface } from "./wi
 // v43: legacy model cards are gone. `modelPreview` / `ModelReference.placement` are removed and
 //      `model3d` without `sharedWorldInstance` only projects a read-only diagnostic card; older
 //      renderers would draw a preview card or a stale orbit pose, so reject mixed combinations.
-export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v43" as const;
+// v44: group.pose is evaluated by the renderer, independently of animation projections.
+export const CANVAS_RENDER_SCENE_VERSION = "woohaa-canvas-render-scene-v44" as const;
 
 /**
  * 非内容节点的画布 chrome。

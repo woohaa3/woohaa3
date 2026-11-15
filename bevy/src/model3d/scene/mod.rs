@@ -47,7 +47,7 @@ pub(crate) use materials::{
 #[allow(unused_imports)]
 pub(crate) use types::{
     CAPSULE_LATITUDES, CAPSULE_LONGITUDES, ModelAnimationSpec, ModelEntitySpec, ModelGeometry,
-    SPHERE_SECTORS, SPHERE_STACKS, SegmentGeometry, align_y_to, animation_axis,
+    ModelPoseSpec, SPHERE_SECTORS, SPHERE_STACKS, SegmentGeometry, align_y_to, animation_axis,
     quat_from_xyz_radians, segment_geometry, xyz_radians_from_quat,
 };
 

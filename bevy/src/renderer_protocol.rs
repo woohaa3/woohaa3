@@ -16,8 +16,13 @@ use crate::protocol::ModelOp;
 /// v2 起携带动画采样：`motion`、`placement`、`initialCamera`、`timeSeconds`
 /// （change: 2026-10-06-fix-model-media-references-and-animation-preview，任务 4.1）。
 /// 旧 worker 只认识 v1，收到 v2 会稳定拒绝，不会忽略运动字段后返回静态帧。
-pub const RENDERER_PROTOCOL_VERSION: &str = "woohaa-model-renderer-protocol-v4";
-pub const WORLD_RENDERER_PROTOCOL_VERSION: &str = "woohaa-world-renderer-protocol-v1";
+/// v5 adds independent static group poses (`group.pose`). A v4 worker rejects v5 instead of
+/// ignoring the field and returning the bind T-pose (change: 2026-11-15-add-model-script-static-poses).
+pub const RENDERER_PROTOCOL_VERSION: &str = "woohaa-model-renderer-protocol-v5";
+/// v2 adds the same static-pose capability to world capture requests.
+pub const WORLD_RENDERER_PROTOCOL_VERSION: &str = "woohaa-world-renderer-protocol-v2";
+/// 静态姿势能力声明；`--version-json` 与握手据此判断 renderer 是否支持 `group.pose`。
+pub const MODEL_STATIC_POSE_CAPABILITY: &str = "model-static-pose-v1";
 /// 单条消息体上限（防止超大消息耗尽内存）。
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 /// 预览尺寸上限。
@@ -109,6 +114,20 @@ impl InitialCameraRequest {
 
 /// 支持的 Scene IR 版本（change: 2026-10-07-remove-residual-compatibility —— V2-only）。
 pub const SUPPORTED_SCENE_VERSIONS: [&str; 1] = ["woohaa-model-scene-ir-v2"];
+
+/// `--version-json` 输出：协议版本与已实现的渲染能力。
+///
+/// 宿主用它判断是否可以把含 `group.pose` 的内容交给该 worker；缺失能力时必须在渲染准备
+/// 边界明确报不兼容，不能忽略字段后渲染绑定姿态。
+pub fn version_json() -> String {
+    serde_json::json!({
+        "protocolVersion": RENDERER_PROTOCOL_VERSION,
+        "worldProtocolVersion": WORLD_RENDERER_PROTOCOL_VERSION,
+        "sceneVersions": SUPPORTED_SCENE_VERSIONS,
+        "capabilities": [MODEL_STATIC_POSE_CAPABILITY],
+    })
+    .to_string()
+}
 
 /// 预览捕获选项（受控子集）。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -333,6 +352,15 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
     }
     if request.ops.is_empty() && request.world.is_none() {
         return Err((RenderErrorCode::InvalidScene, "ops 不能为空".to_owned()));
+    }
+    // 静态姿势是 v5 能力：空/非法 pose 在边界拒绝，不能忽略后渲染绑定姿态。
+    crate::protocol::validate_model_poses(&request.ops)
+        .map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
+    if let Some(world) = &request.world {
+        for entry in &world.instances {
+            crate::protocol::validate_model_poses(&entry.ops)
+                .map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
+        }
     }
     let capture = &request.capture;
     if let Some(world) = &request.world {

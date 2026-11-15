@@ -1,6 +1,7 @@
 /** Data-only model motion diagnostics. Bounds are conservative, not mesh contact or IK. */
 import {describeHumanoidWalkProfile,HUMANOID_WALK_PART_IDS} from "./world-walk.js";
 import {describeHumanoidMotion,sampleRigLandmarks,sampleJointEndpoint} from "./humanoid-motion-reference.js";
+import { effectiveGroupTransform } from "./model-static-pose.js";
 import type { WorldModelAnimationRig } from "./assistant-world-authority.js";
 import type { StoredHumanoidRig } from "./humanoid-rig.js";
 import { quatMul, quatRotate, transformOf, transformPoint, type Aabb, type Quat, type Transform, type Vec3 } from "./model-transform.js";
@@ -24,15 +25,16 @@ function envelope(points: Vec3[]): Aabb | null {
 }
 
 /** Evaluate the actual group hierarchy, then carry each geometry's local bounds with it. */
-function posedPoints(rig: WorldModelAnimationRig, rotations: SampledInstanceMotion["partRotations"] = {}) {
+function posedPoints(rig: WorldModelAnimationRig, rotations: SampledInstanceMotion["partRotations"] = {}, positions: SampledInstanceMotion["partPositions"] = {}) {
   const groups = new Map(rig.groups.map(group => [group.id,group]));
   const transforms = new Map<string,Transform>();
   const groupTransform = (id: string): Transform => {
     const cached = transforms.get(id);
     if (cached) return cached;
     const group = groups.get(id)!;
-    const local = transformOf(group);
-    if (rotations[id]) local.rotation = quatMul(local.rotation,[...rotations[id]] as Quat);
+    const local = effectiveGroupTransform(group);
+    if (rotations[id] !== undefined) local.rotation = quatMul(transformOf(group).rotation,[...rotations[id]] as Quat);
+    if (positions[id] !== undefined) local.translation = group.position.map((value, axis) => value + positions[id]![axis]!) as Vec3;
     transforms.set(id,local);
     return local;
   };
@@ -60,7 +62,7 @@ function posedPoints(rig: WorldModelAnimationRig, rotations: SampledInstanceMoti
 }
 
 export function describeWorldModelAnimationRig(ops: readonly SceneV2Op[], rig: StoredHumanoidRig | null): WorldModelAnimationRig {
-  const groups = ops.flatMap(op => op.t === "group" ? [{id:op.id,parent:op.parent,position:op.position,rotation:op.rotation,scale:op.scale}] : []);
+  const groups = ops.flatMap(op => op.t === "group" ? [{id:op.id,parent:op.parent,position:op.position,rotation:op.rotation,scale:op.scale,...(op.pose ? {pose:op.pose} : {})}] : []);
   const shapes = ops.flatMap(op => {
     if (op.t === "group" || !("position" in op)) return [];
     const localBounds = v2ShapeLocalBounds(op);
@@ -69,7 +71,8 @@ export function describeWorldModelAnimationRig(ops: readonly SceneV2Op[], rig: S
   const result: WorldModelAnimationRig = {groups,shapes,rig};
   const motionReference=describeHumanoidMotion(result);
   if(motionReference)result.motionReference=motionReference;
-  const points = posedPoints(result);
+  // Membership remains anchored to bind geometry, regardless of the saved pose.
+  const points = posedPoints({...result, groups: groups.map(({pose, ...group}) => group)});
   const feet = points.filter(shape => shape.foot).flatMap(shape => shape.points);
   const bounds = envelope(feet.length ? feet : points.flatMap(shape => shape.points));
   const groundAnchorLocal: Vec3 | null = bounds ? [(bounds.min[0]+bounds.max[0])/2,bounds.min[1],(bounds.min[2]+bounds.max[2])/2] : null;
@@ -153,7 +156,7 @@ export function inspectWorldAnimationModelSample(
   const alignment = speed > 1e-6 && forwardLength > 1e-6
     ? (forwardWorld![0]*velocity[0]!+forwardWorld![1]*velocity[1]!)/(speed*forwardLength) : null;
   const status = !forwardWorld ? "unknown" : speed <= 1e-6 ? "stationary" : alignment === null ? "unknown" : alignment > 0.5 ? "forward" : alignment < -0.5 ? "backward" : "sideways";
-  const shapePoints = rig ? posedPoints(rig,sample?.partRotations) : [];
+  const shapePoints = rig ? posedPoints(rig,sample?.partRotations,sample?.partPositions) : [];
   const mapWorld = (point: Vec3): Vec3 => {
     const rotated = quatRotate([...worldTransform.rotation],[point[0]*worldTransform.scale,-point[2]*worldTransform.scale,point[1]*worldTransform.scale]);
     return [rotated[0]+worldTransform.position.u,rotated[1]+worldTransform.position.v,rotated[2]+worldTransform.position.h];

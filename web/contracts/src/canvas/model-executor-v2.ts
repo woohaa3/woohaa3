@@ -23,7 +23,7 @@ import {
   type ModelScriptFailure,
   type RawSceneOp
 } from "./model-executor.js";
-import { validateModelSceneIrV2, type ModelSceneIrV2, type SceneV2Op } from "./scene-ir-v2.js";
+import { validateModelSceneIrV2, SCENE_IR_V2_COORD_LIMIT, type ModelSceneIrV2, type SceneV2Op } from "./scene-ir-v2.js";
 import {
   compileHumanoidRig,
   HUMANOID_REFERENCE_PARAMETERS,
@@ -114,6 +114,41 @@ export class SceneBuilderV2 {
 
   mesh(options: Record<string, unknown> = {}): string {
     return this.shape("mesh", options);
+  }
+
+  /**
+   * 声明无时间的静态姿势（change: 2026-11-15-add-model-script-static-poses）。
+   *
+   * 目标是**本脚本已经声明**的 group（含 `somaHumanoid()` 生成的关节）。只记录
+   * rotation/position 两个通道，按通道后写覆盖；零向量清除该通道；等价空 pose 移除。
+   * 语法/目标错误直接抛错（执行阶段失败），数值与骨架能力由 validator 复检。
+   */
+  pose(groupId: string, options: Record<string, unknown> = {}): void {
+    if (typeof groupId !== "string" || groupId.length === 0) {
+      throw new Error("scene.pose 需要已声明的 group id");
+    }
+    const target = this.ops.find((op) => op.id === groupId);
+    if (!target) throw new Error(`scene.pose 目标 ${groupId} 尚未声明`);
+    if (target.t !== "group") throw new Error(`scene.pose 目标 ${groupId} 不是 group`);
+    if (!options || typeof options !== "object" || Array.isArray(options)) {
+      throw new Error("scene.pose 选项必须是对象");
+    }
+    const keys = Object.keys(options);
+    if (keys.length === 0) throw new Error("scene.pose 至少需要 rotation 或 position");
+    for (const key of keys) {
+      if (key !== "rotation" && key !== "position") throw new Error(`scene.pose 不接受字段 ${key}`);
+    }
+    // `{rotation: undefined}` 不是“省略通道”，而是非法向量；显式声明了就必须给三个数字。
+    const pose: { rotation?: [number, number, number]; position?: [number, number, number] } =
+      { ...((target.pose ?? {}) as { rotation?: [number, number, number]; position?: [number, number, number] }) };
+    for (const channel of keys as Array<"rotation" | "position">) {
+      const vector = readPoseVector(options[channel], channel);
+      // 零向量清除该通道（恢复绑定），不保留等价零值。
+      if (vector.some((value) => value !== 0)) pose[channel] = vector;
+      else delete pose[channel];
+    }
+    if (pose.rotation || pose.position) target.pose = pose;
+    else delete target.pose;
   }
 
   oscillate(id: string, options: Record<string, unknown> = {}): string {
@@ -236,4 +271,19 @@ export type VersionedSceneV2Ops = SceneV2Op[];
 
 function asExplicitId(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * 作者侧姿势向量校验：三元有限数组，绝对值受 Scene IR 坐标上限约束。
+ * 与 validator 的 `readVec3` 同一正确性边界；返回副本以免后续脚本原地改写。
+ */
+function readPoseVector(input: unknown, field: string): [number, number, number] {
+  if (!Array.isArray(input) || input.length !== 3) throw new Error(`scene.pose.${field} 必须是三个数字`);
+  const values = input.map((value) => {
+    if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > SCENE_IR_V2_COORD_LIMIT) {
+      throw new Error(`scene.pose.${field} 含非法数值`);
+    }
+    return value;
+  });
+  return [values[0]!, values[1]!, values[2]!];
 }

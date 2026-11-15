@@ -53,7 +53,7 @@ pub fn derive_extent(model: &ModelSnapshot) -> f32 {
 /// 以 `snapshot.extent` 归一化模型尺寸——若仍为占位值，模型会按错误比例渲染得巨大无比。
 pub fn prepare_snapshot(mut model: ModelSnapshot) -> ModelSnapshot {
     let specs = super::build_entity_specs(&model);
-    let bounds = super::PreparedBounds::new(&specs);
+    let bounds = super::PreparedBounds::new(&specs, &model);
     let aabb = bounds.local.filter(ModelAabb::is_finite).map(to_dto);
     model.prepared_bounds = Some(std::sync::Arc::new(bounds));
     let extent = extent_from_aabb(aabb);
@@ -123,6 +123,7 @@ mod tests {
                 position: vec3([0.0, 0.0, 0.0]),
                 rotation: vec3([0.0, 0.0, 0.0]),
                 scale: vec3([1.0, 1.0, 1.0]),
+                pose: None,
             },
             ModelOp::Sphere {
                 id: "s".into(),

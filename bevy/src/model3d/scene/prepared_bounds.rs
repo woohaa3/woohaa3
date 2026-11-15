@@ -4,7 +4,7 @@
 //! 覆盖项按部件下标排序后二分，求值不再逐部件做字符串哈希。未变的查询共享缓存结果，
 //! 避免静止帧仍重建层级哈希表、遍历整场部件。
 use super::{ModelAabb, ModelEntitySpec, aabb::geometry_half_extents_and_center};
-use crate::protocol::{ModelPlacement, ModelSnapshot};
+use crate::protocol::{ModelOp, ModelPlacement, ModelSkin, ModelSnapshot};
 use bevy::prelude::*;
 use std::{
     collections::HashMap,
@@ -16,8 +16,108 @@ struct Part {
     id: String,
     /// 父部件在 `parts` 里的下标；构造期解析一次，求值期零哈希。
     parent: Option<u32>,
-    local: Transform,
+    /// 完整仿射局部矩阵（不重建 TRS，避免丢剪切）。
+    local: Mat4,
     geometry: Option<ModelAabb>,
+    /// 蒙皮变形数据：绑定 AABB 不是实际形状，必须按 FK/LBS 求值。
+    skin: Option<SkinPart>,
+    /// 姿势场景的精确形状：稀疏 mesh 只取引用顶点，解析体按 TS 同一公式求包围。
+    accurate: Option<AccurateShape>,
+}
+
+#[derive(Clone, Debug)]
+enum AccurateShape {
+    /// 被面引用的顶点（重复的姿势场景求值只变换这些点，不套 AABB 角）。
+    Points(Vec<[f32; 3]>),
+    Sphere { radius: f32 },
+    Cylinder { radius: f32, half_y: f32 },
+    Capsule { radius: f32, half_y: f32 },
+}
+
+impl AccurateShape {
+    fn bounds(&self, matrix: &Mat4) -> ModelAabb {
+        let rows = [
+            Vec3::new(matrix.x_axis.x, matrix.y_axis.x, matrix.z_axis.x),
+            Vec3::new(matrix.x_axis.y, matrix.y_axis.y, matrix.z_axis.y),
+            Vec3::new(matrix.x_axis.z, matrix.y_axis.z, matrix.z_axis.z),
+        ];
+        let center = matrix.transform_point3(Vec3::ZERO);
+        let (min, max) = match self {
+            Self::Points(points) => {
+                let mut min = Vec3::splat(f32::INFINITY);
+                let mut max = Vec3::splat(f32::NEG_INFINITY);
+                for point in points {
+                    let world = matrix.transform_point3(Vec3::from_array(*point));
+                    min = min.min(world);
+                    max = max.max(world);
+                }
+                (min, max)
+            }
+            Self::Sphere { radius } => {
+                let extent = Vec3::new(
+                    radius * rows[0].length(),
+                    radius * rows[1].length(),
+                    radius * rows[2].length(),
+                );
+                (center - extent, center + extent)
+            }
+            Self::Cylinder { radius, half_y } => {
+                // 与 TS 同一公式：轴向半径 + 高度半长沿局部 Y。
+                let extent = Vec3::new(
+                    radius * rows[0].xz().length() + half_y * rows[0].y.abs(),
+                    radius * rows[1].xz().length() + half_y * rows[1].y.abs(),
+                    radius * rows[2].xz().length() + half_y * rows[2].y.abs(),
+                );
+                (center - extent, center + extent)
+            }
+            Self::Capsule { radius, half_y } => {
+                let cylinder = (half_y - radius).max(0.0);
+                let extent = Vec3::new(
+                    radius * rows[0].length() + cylinder * rows[0].y.abs(),
+                    radius * rows[1].length() + cylinder * rows[1].y.abs(),
+                    radius * rows[2].length() + cylinder * rows[2].y.abs(),
+                );
+                (center - extent, center + extent)
+            }
+        };
+        ModelAabb::new(min.to_array(), max.to_array())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SkinPart {
+    vertices: Vec<[f32; 3]>,
+    /// 只统计被面引用的顶点；未使用顶点不参与实际形状。
+    referenced: Vec<usize>,
+    /// joint id 已解析为 `parts` 下标。
+    joints: Vec<u32>,
+    inverse_bind_matrices: Vec<[f32; 16]>,
+    indices: Vec<Vec<usize>>,
+    weights: Vec<Vec<f32>>,
+}
+
+impl SkinPart {
+    fn bounds(&self, worlds: &[Option<Mat4>]) -> Option<ModelAabb> {
+        let matrices: Option<Vec<Mat4>> = self
+            .joints
+            .iter()
+            .enumerate()
+            .map(|(index, joint)| {
+                let world = worlds.get(*joint as usize).copied().flatten()?;
+                let inverse = self.inverse_bind_matrices.get(index)?;
+                Some(world * Mat4::from_cols_array(inverse))
+            })
+            .collect();
+        let matrices = matrices?;
+        let (min, max) = super::super::pose_math::deformed_bounds_indices(
+            &self.vertices,
+            &self.referenced,
+            &self.indices,
+            &self.weights,
+            &matrices,
+        )?;
+        Some(ModelAabb::new(min, max))
+    }
 }
 
 /// 单槽记忆：`(输入指纹, 结果)`。片场每帧会被多个消费者（归属线、镜头适配、拍摄镜头标记）
@@ -59,6 +159,8 @@ impl<T: Clone> Memo<T> {
 #[derive(Debug)]
 pub(crate) struct PreparedBounds {
     parts: Vec<Part>,
+    /// 模型是否声明了 group.pose；无姿势时保留原快速路径。
+    posed: bool,
     /// `id → 下标`。只用于构造期解析父链，以及每次求值时定位少量根/覆盖项，
     /// 不参与逐部件循环。省下的 `parent: Option<String>` 正好抵消这份映射。
     index: HashMap<String, u32>,
@@ -70,7 +172,24 @@ pub(crate) struct PreparedBounds {
 }
 
 impl PreparedBounds {
-    pub(super) fn new(specs: &[ModelEntitySpec]) -> Self {
+    pub(super) fn new(specs: &[ModelEntitySpec], model: &ModelSnapshot) -> Self {
+        let posed = model
+            .ops
+            .iter()
+            .any(|op| matches!(op, ModelOp::Group { pose: Some(_), .. }));
+        // 蒙皮网格按 `id` 取回绑定数据：绑定 AABB 不是静态姿势下的实际形状。
+        let skins: HashMap<&str, &ModelSkin> = model
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                ModelOp::Mesh {
+                    id,
+                    skin: Some(skin),
+                    ..
+                } => Some((id.as_str(), skin)),
+                _ => None,
+            })
+            .collect();
         let mut parts: Vec<Part> = specs
             .iter()
             .map(|spec| {
@@ -84,12 +203,10 @@ impl PreparedBounds {
                 Part {
                     id: spec.id.clone(),
                     parent: None,
-                    local: Transform {
-                        translation: Vec3::from_array(spec.position),
-                        rotation: super::types::quat_from_xyz_radians(spec.rotation_radians),
-                        scale: Vec3::from_array(spec.scale),
-                    },
+                    local: spec.static_transform().to_matrix(),
                     geometry,
+                    skin: None,
+                    accurate: None,
                 }
             })
             .collect();
@@ -100,10 +217,57 @@ impl PreparedBounds {
         }
         for (part, spec) in parts.iter_mut().zip(specs) {
             part.parent = spec.parent.as_deref().and_then(|id| index.get(id).copied());
+            if posed {
+                part.accurate = accurate_shape(spec);
+            }
+            let Some(skin) = skins.get(spec.id.as_str()) else { continue };
+            // 绑定/无姿势路径保留原行为：蒙皮网格用几何顶点 AABB，不做 LBS。
+            if !posed {
+                continue;
+            }
+            let Some((vertices, referenced)) =
+                spec.geometry.as_ref().and_then(|geometry| match geometry {
+                    super::ModelGeometry::Mesh {
+                        vertices, faces, ..
+                    } => {
+                        let mut referenced: Vec<usize> = faces
+                            .iter()
+                            .flatten()
+                            .filter_map(|index| {
+                                ((*index as usize) < vertices.len()).then_some(*index as usize)
+                            })
+                            .collect();
+                        referenced.sort_unstable();
+                        referenced.dedup();
+                        if referenced.is_empty() {
+                            referenced.extend(0..vertices.len());
+                        }
+                        Some((vertices.clone(), referenced))
+                    }
+                    _ => None,
+                })
+            else {
+                continue;
+            };
+            let joints: Option<Vec<u32>> = skin
+                .joint_ids
+                .iter()
+                .map(|id| index.get(id.as_str()).copied())
+                .collect();
+            let Some(joints) = joints else { continue };
+            part.skin = Some(SkinPart {
+                vertices,
+                referenced,
+                joints,
+                inverse_bind_matrices: skin.inverse_bind_matrices.clone(),
+                indices: skin.indices.clone(),
+                weights: skin.weights.clone(),
+            });
         }
-        let local = union_of(evaluate(&parts, &[]));
+        let local = union_of(evaluate(&parts, &[], posed));
         Self {
             parts,
+            posed,
             index,
             local,
             placed_local_memo: Memo::default(),
@@ -115,14 +279,20 @@ impl PreparedBounds {
         model
             .prepared_bounds
             .clone()
-            .unwrap_or_else(|| Arc::new(Self::new(&super::build_entity_specs(model))))
+            .unwrap_or_else(|| {
+                Arc::new(Self::new(&super::build_entity_specs(model), model))
+            })
     }
 
     pub(crate) fn placed_local(&self, bases: &HashMap<String, Transform>) -> Option<ModelAabb> {
         if bases.is_empty() {
             return self.local;
         }
-        union_of(evaluate(&self.parts, &self.base_overrides(bases)))
+        union_of(evaluate(
+            &self.parts,
+            &self.base_overrides(bases),
+            self.posed,
+        ))
     }
 
     pub(crate) fn bytes(&self) -> usize {
@@ -131,7 +301,23 @@ impl PreparedBounds {
             + self
                 .parts
                 .iter()
-                .map(|part| part.id.capacity())
+                .map(|part| {
+                    let points = match &part.accurate {
+                        Some(AccurateShape::Points(points)) => points.capacity() * std::mem::size_of::<[f32; 3]>(),
+                        _ => 0,
+                    };
+                    let skin = part.skin.as_ref().map_or(0, |skin| {
+                        skin.vertices.capacity() * std::mem::size_of::<[f32; 3]>()
+                            + skin.referenced.capacity() * std::mem::size_of::<usize>()
+                            + skin.joints.capacity() * std::mem::size_of::<u32>()
+                            + skin.inverse_bind_matrices.capacity() * std::mem::size_of::<[f32; 16]>()
+                            + skin.indices.capacity() * std::mem::size_of::<Vec<usize>>()
+                            + skin.indices.iter().map(|row| row.capacity() * std::mem::size_of::<usize>()).sum::<usize>()
+                            + skin.weights.capacity() * std::mem::size_of::<Vec<f32>>()
+                            + skin.weights.iter().map(|row| row.capacity() * std::mem::size_of::<f32>()).sum::<usize>()
+                    });
+                    part.id.capacity() + points + skin
+                })
                 .sum::<usize>()
             + self
                 .index
@@ -235,24 +421,74 @@ fn override_at(overrides: &[(u32, Transform)], offset: usize) -> Option<Transfor
 }
 
 /// 解析后的部件拓扑：按 `parts` 顺序推进世界变换，返回 `(部件下标, 世界包围盒)`。
-fn evaluate(parts: &[Part], overrides: &[(u32, Transform)]) -> Vec<(usize, ModelAabb)> {
-    let mut worlds: Vec<Option<Transform>> = Vec::with_capacity(parts.len());
-    let mut bounds = Vec::new();
+fn evaluate(parts: &[Part], overrides: &[(u32, Transform)], posed: bool) -> Vec<(usize, ModelAabb)> {
+    let mut worlds: Vec<Option<Mat4>> = Vec::with_capacity(parts.len());
     for (offset, part) in parts.iter().enumerate() {
         // The original placement adapter only overrides group operations.
         let local = override_at(overrides, offset)
             .filter(|_| part.geometry.is_none())
+            .map(|transform| transform.to_matrix())
             .unwrap_or(part.local);
         let world = part
             .parent
             .and_then(|parent| worlds.get(parent as usize).copied().flatten())
-            .map_or(local, |parent| parent.mul_transform(local));
+            .map_or(local, |parent| parent * local);
         worlds.push(Some(world));
+    }
+    // 第二遍：蒙皮部件按 FK/LBS 求真实形状（绑定 AABB 只是绑定姿态下的近似）。
+    let mut bounds = Vec::new();
+    for (offset, part) in parts.iter().enumerate() {
+        let Some(world) = worlds.get(offset).copied().flatten() else {
+            continue;
+        };
+        if posed {
+            if let Some(bounds_) = part.skin.as_ref().and_then(|skin| skin.bounds(&worlds)) {
+                bounds.push((offset, bounds_));
+                continue;
+            }
+            if let Some(accurate) = &part.accurate {
+                bounds.push((offset, accurate.bounds(&world)));
+                continue;
+            }
+        }
         if let Some(geometry) = part.geometry {
-            bounds.push((offset, geometry.transformed(&world)));
+            bounds.push((offset, geometry.transformed_matrix(&world)));
         }
     }
     bounds
+}
+
+/// 姿势场景的精确形状声明；与 TS `evaluateModelPoseGeometry` 使用同一分类。
+fn accurate_shape(spec: &ModelEntitySpec) -> Option<AccurateShape> {
+    match spec.geometry.as_ref()? {
+        super::ModelGeometry::Mesh { vertices, faces, .. } => {
+            let mut referenced: Vec<usize> = faces
+                .iter()
+                .flatten()
+                .filter_map(|index| ((*index as usize) < vertices.len()).then_some(*index as usize))
+                .collect();
+            referenced.sort_unstable();
+            referenced.dedup();
+            if referenced.is_empty() {
+                referenced.extend(0..vertices.len());
+            }
+            Some(AccurateShape::Points(
+                referenced.into_iter().map(|index| vertices[index]).collect(),
+            ))
+        }
+        super::ModelGeometry::Sphere { radius } => Some(AccurateShape::Sphere {
+            radius: radius.abs(),
+        }),
+        super::ModelGeometry::Cylinder { radius, height } => Some(AccurateShape::Cylinder {
+            radius: radius.abs(),
+            half_y: height.abs() * 0.5,
+        }),
+        super::ModelGeometry::Capsule { radius, height } => Some(AccurateShape::Capsule {
+            radius: radius.abs(),
+            half_y: height.abs() * 0.5,
+        }),
+        super::ModelGeometry::Box { .. } => None,
+    }
 }
 
 fn union_of(bounds: Vec<(usize, ModelAabb)>) -> Option<ModelAabb> {
@@ -283,6 +519,7 @@ pub(crate) fn placed_local_aabb(
     let value = union_of(evaluate(
         &prepared.parts,
         &prepared.protocol_overrides(placements),
+        prepared.posed,
     ));
     prepared.placed_local_memo.write(key, value);
     value
@@ -358,7 +595,11 @@ pub(crate) fn placed_subtree_aabbs_counted(
         owner[offset] = owner_root;
     }
     // 计数只在真实求值结果上累加：无几何根不会制造"额外求值"，清空目标不进入本函数。
-    let evaluated = evaluate(parts, &prepared.protocol_overrides(placements));
+    let evaluated = evaluate(
+        parts,
+        &prepared.protocol_overrides(placements),
+        prepared.posed,
+    );
     let evaluated_parts = evaluated.len();
     let mut aggregated: Vec<(u32, ModelAabb)> = Vec::new();
     for (offset, bounds) in evaluated {

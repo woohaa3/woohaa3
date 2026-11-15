@@ -896,6 +896,7 @@ export type AssistantWorldObjectSummary = {
 };
 
 export type WorldModelAnimationRig = {
+  staticPose?: import("./model-static-pose.js").ModelStaticPoseSummary;
   walkProfile?: import("./world-walk.js").HumanoidWalkProfile | null;
   motionReference?: import("./humanoid-motion-reference.js").HumanoidMotionReference;
   shapes?: Array<{
@@ -911,7 +912,7 @@ export type WorldModelAnimationRig = {
     rootToGroundHeightMeters: number | null;
     anchorSource: "foot-geometry-bounds" | "geometry-bounds" | "unknown";
   };
-  groups: Array<Pick<import("./scene-ir-v2/types.js").SceneV2GroupOp, "id" | "parent" | "position" | "rotation" | "scale">>;
+  groups: Array<Pick<import("./scene-ir-v2/types.js").SceneV2GroupOp, "id" | "parent" | "position" | "rotation" | "scale" | "pose">>;
   rig: import("./humanoid-rig.js").StoredHumanoidRig | null;
 };
 
@@ -947,7 +948,7 @@ export type AssistantWorldContextView = {
   };
   /** Selected camera and published scene geometry, for camera-only composition edits. */
   camera?: { nodeId: WorldId; settings: WorldCameraData };
-  sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null; animationRig?: WorldModelAnimationRig }>;
+  sceneModels?: Array<{ instanceId: WorldId; nodeId: WorldId; title: string; transform: WorldTransform; localBounds: import("./model-transform.js").Aabb | null; animationRig?: WorldModelAnimationRig; modelContentVersion?: unknown }>;
   /**
    * Authoritative scripts of the instance identities in this scope (writable plus
    * read-only references), keyed by instance id. `read_world_resource` reads

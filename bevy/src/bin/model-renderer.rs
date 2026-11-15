@@ -12,6 +12,10 @@
 //! 诊断写 stderr，避免污染 framed stdout。
 
 fn main() {
+    if std::env::args().skip(1).any(|arg| arg == "--version-json") {
+        println!("{}", woohaa_bevy_canvas::renderer_protocol::version_json());
+        return;
+    }
     if let Err(error) = woohaa_bevy_canvas::model3d::preview::run_stdio() {
         eprintln!("model-renderer 退出：{error}");
         std::process::exit(1);

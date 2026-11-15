@@ -15,7 +15,6 @@ use bevy::{
     },
 };
 
-use crate::model3d::compose_delta;
 use crate::model3d::scene::{self, ModelEntitySpec, ModelGeometry};
 use crate::protocol::ModelSnapshot;
 use crate::renderer_protocol::{CaptureOptions, RenderErrorCode, RenderRequest};
@@ -95,6 +94,8 @@ fn spawn_model(
 ) -> (
     std::collections::HashMap<String, Entity>,
     std::collections::HashMap<String, Transform>,
+    std::collections::HashMap<String, Transform>,
+    std::collections::HashMap<String, scene::ModelPoseSpec>,
     std::collections::HashMap<String, Handle<StandardMaterial>>,
 ) {
     let specs = scene::build_entity_specs(model);
@@ -102,6 +103,8 @@ fn spawn_model(
     let root = commands.spawn((root_transform, Visibility::default())).id();
     let mut entities = std::collections::HashMap::new();
     let mut bases = std::collections::HashMap::new();
+    let mut binds = std::collections::HashMap::new();
+    let mut poses = std::collections::HashMap::new();
     let mut part_materials = std::collections::HashMap::new();
     let mut resources = super::super::resources::SharedResources::default();
 
@@ -110,9 +113,15 @@ fn spawn_model(
         let entity = match &spec.geometry {
             None => commands.spawn((transform, Visibility::default())).id(),
             Some(geometry) => {
-                let Some(mesh) = high_mesh(&mut resources, meshes, geometry) else {
+                let Some(mut mesh) = high_mesh(&mut resources, meshes, geometry) else {
                     continue;
                 };
+                // 蒙皮网格必须每实例独立：共享 handle 会被 LBS 改写并串扰其他实例。
+                if model.ops.iter().any(|op| matches!(op, crate::protocol::ModelOp::Mesh { id, skin: Some(_), .. } if id == &spec.id)) {
+                    if let Some(source) = meshes.get(&mesh).cloned() {
+                        mesh = meshes.add(source);
+                    }
+                }
                 let mut source = scene::standard_material_for(&spec.material_key, &material_specs);
                 if let Some(id) = spec.material_key.strip_prefix("material:")
                     .and_then(|key| material_specs.get(key))
@@ -128,6 +137,10 @@ fn spawn_model(
         };
         entities.insert(spec.id.clone(), entity);
         bases.insert(spec.id.clone(), transform);
+        binds.insert(spec.id.clone(), spec.bind_transform());
+        if let Some(pose) = spec.pose {
+            poses.insert(spec.id.clone(), pose);
+        }
     }
     for spec in &specs {
         if let Some(entity) = entities.get(&spec.id).copied() {
@@ -139,15 +152,39 @@ fn spawn_model(
             commands.entity(entity).insert(ChildOf(parent));
         }
     }
-    (entities, bases, part_materials)
+    // 与可见画布同一套实例内 LBS：原生离屏/世界渲染也按 jointWorld×inverseBind 变形。
+    for op in &model.ops {
+        if let crate::protocol::ModelOp::Mesh {
+            id,
+            vertices,
+            skin: Some(skin),
+            ..
+        } = op
+        {
+            let Some(entity) = entities.get(id).copied() else {
+                continue;
+            };
+            let Some(joints) = skin
+                .joint_ids
+                .iter()
+                .map(|joint| entities.get(joint).copied())
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            commands.entity(entity).insert(crate::model3d::skin::SkinBinding {
+                joints,
+                skin: skin.clone(),
+                vertices: vertices.clone(),
+                last_matrices: Vec::new(),
+            });
+        }
+    }
+    (entities, bases, binds, poses, part_materials)
 }
 
 fn local_transform(spec: &ModelEntitySpec) -> Transform {
-    Transform {
-        translation: Vec3::from_array(spec.position),
-        rotation: scene::quat_from_xyz_radians(spec.rotation_radians),
-        scale: Vec3::from_array(spec.scale),
-    }
+    spec.static_transform()
 }
 
 /// 离屏预览/录制帧的透明度应用：与可见播放同一条规则
@@ -388,6 +425,13 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
             }),
     );
     app.add_plugins(crate::model3d::shadows::ModelShadowsPlugin);
+    // 离屏渲染同样需要实例 LBS：Transform 传播之后、可见性/渲染之前更新网格顶点。
+    app.add_systems(
+        PostUpdate,
+        crate::model3d::skin::update
+            .after(bevy::transform::TransformSystems::Propagate)
+            .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+    );
     app.add_plugins(ScheduleRunnerPlugin::run_loop(
         std::time::Duration::from_millis(8),
     ));
@@ -474,7 +518,7 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
                 super::readiness::enqueue_readback(&mut commands, image, pixels_setup.clone(), capture_ready.clone());
                 return;
             }
-            let (entities, bases, part_materials) = spawn_model(
+            let (entities, bases, binds, poses, part_materials) = spawn_model(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
@@ -492,7 +536,14 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
                     else {
                         continue;
                     };
-                    let transform = compose_delta(*base, delta);
+                let transform = crate::model3d::compose_channels(
+                    *base,
+                    binds.get(part_id).copied(),
+                    poses.get(part_id).copied(),
+                    delta.owns_rotation.then_some(delta.rotation),
+                    delta.owns_position.then_some(delta.translation),
+                    Some(delta.scale),
+                );
                     commands.entity(*entity).insert(transform);
                     if !delta.opacity.is_finite() || delta.opacity >= 1.0 {
                         continue;
@@ -600,4 +651,194 @@ pub(crate) fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u
             .map_err(|error| error.to_string())?;
     }
     Ok(buffer)
+}
+
+#[cfg(test)]
+mod static_pose_skin_tests {
+    use super::*;
+    use crate::protocol::{ModelOp, ModelSkin};
+
+    fn skinned_snapshot() -> crate::protocol::ModelSnapshot {
+        let identity: [f32; 16] = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
+        crate::protocol::ModelSnapshot {
+            scene_version: Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+            ops: vec![
+                ModelOp::Group {
+                    id: "root".into(),
+                    parent: None,
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    pose: None,
+                },
+                ModelOp::Group {
+                    id: "root.joint".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    // 静态姿势把关节相对网格抬高 2 米。
+                    pose: Some(crate::protocol::ModelPose {
+                        rotation: None,
+                        position: Some([0., 2., 0.]),
+                    }),
+                },
+                ModelOp::Mesh {
+                    id: "skin".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    color: Some("#ffffff".into()),
+                    material: None,
+                    vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+                    faces: vec![[0, 1, 2]],
+                    normals: None,
+                    uvs: None,
+                    colors: None,
+                    skin: Some(ModelSkin {
+                        joint_ids: vec!["root.joint".into()],
+                        inverse_bind_matrices: vec![identity],
+                        indices: vec![vec![0], vec![0], vec![0]],
+                        weights: vec![vec![1.], vec![1.], vec![1.]],
+                    }),
+                },
+            ],
+            signature: "native-posed-skin".into(),
+            extent: 2.,
+            aabb: None,
+            geometry_keys: None,
+            prepared_bounds: None,
+            placement: Default::default(),
+        }
+    }
+
+    fn mesh_positions(app: &mut App, entity: Entity) -> Vec<[f32; 3]> {
+        let handle = app
+            .world()
+            .entity(entity)
+            .get::<Mesh3d>()
+            .expect("mesh entity")
+            .0
+            .clone();
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let mesh = meshes.get(&handle).expect("mesh asset");
+        match mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("positions") {
+            bevy::render::mesh::VertexAttributeValues::Float32x3(values) => values.clone(),
+            other => panic!("unexpected positions {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_preview_keeps_two_instances_of_the_same_skin_independent() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.add_plugins(bevy::transform::TransformPlugin);
+        app.add_systems(
+            PostUpdate,
+            crate::model3d::skin::update
+                .after(bevy::transform::TransformSystems::Propagate)
+                .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+        );
+        let spawn = |app: &mut App, offset: f32| {
+            let mut model = skinned_snapshot();
+            if let ModelOp::Group { pose: Some(pose), .. } = &mut model.ops[1] {
+                pose.position = Some([0., offset, 0.]);
+            }
+            let mut meshes = app.world_mut().remove_resource::<Assets<Mesh>>().unwrap();
+            let mut materials = app
+                .world_mut()
+                .remove_resource::<Assets<StandardMaterial>>()
+                .unwrap();
+            let entities = {
+                let mut commands = app.world_mut().commands();
+                super::spawn_model(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &model,
+                    Transform::default(),
+                    &Default::default(),
+                )
+                .0
+            };
+            app.world_mut().flush();
+            app.world_mut().insert_resource(meshes);
+            app.world_mut().insert_resource(materials);
+            entities["skin"]
+        };
+        let first = spawn(&mut app, 2.0);
+        let second = spawn(&mut app, 4.0);
+        let first_handle = app.world().entity(first).get::<Mesh3d>().unwrap().0.clone();
+        let second_handle = app.world().entity(second).get::<Mesh3d>().unwrap().0.clone();
+        assert_ne!(first_handle, second_handle, "skinned meshes must not share a mutable handle");
+        app.update();
+        let first_positions = mesh_positions(&mut app, first);
+        let second_positions = mesh_positions(&mut app, second);
+        assert!((first_positions[0][1] - 2.0).abs() < 1e-4, "{first_positions:?}");
+        assert!((second_positions[0][1] - 4.0).abs() < 1e-4, "{second_positions:?}");
+        // 第二个实例的更新不会污染第一个实例的网格。
+        app.world_mut()
+            .entity_mut(second)
+            .insert(Transform::from_translation(Vec3::new(1., 0., 0.)));
+        app.update();
+        assert!((mesh_positions(&mut app, first)[0][1] - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn native_preview_deforms_static_skinned_pose_and_applies_channel_override() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.add_plugins(bevy::transform::TransformPlugin);
+        app.add_systems(
+            PostUpdate,
+            crate::model3d::skin::update
+                .after(bevy::transform::TransformSystems::Propagate)
+                .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+        );
+        let model = skinned_snapshot();
+        let mut meshes = app.world_mut().remove_resource::<Assets<Mesh>>().unwrap();
+        let mut materials = app
+            .world_mut()
+            .remove_resource::<Assets<StandardMaterial>>()
+            .unwrap();
+        let (entities, _, _, _, _) = {
+            let mut commands = app.world_mut().commands();
+            super::spawn_model(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &model,
+                Transform::default(),
+                &Default::default(),
+            )
+        };
+        app.world_mut().flush();
+        app.world_mut().insert_resource(meshes);
+        app.world_mut().insert_resource(materials);
+
+        app.update();
+        let posed = mesh_positions(&mut app, entities["skin"]);
+        assert!((posed[0][1] - 2.0).abs() < 1e-4, "{posed:?}");
+
+        // 动画接管 position 通道（零位移）后应回到绑定形状，而不是叠加静态姿势。
+        app.world_mut()
+            .entity_mut(entities["root.joint"])
+            .insert(Transform::default());
+        app.update();
+        let overridden = mesh_positions(&mut app, entities["skin"]);
+        assert!((overridden[0][1]).abs() < 1e-4, "{overridden:?}");
+
+        // 显式移除覆盖（写回静态姿势）后恢复蒙皮。
+        app.world_mut()
+            .entity_mut(entities["root.joint"])
+            .insert(Transform::from_translation(Vec3::new(0., 2., 0.)));
+        app.update();
+        let restored = mesh_positions(&mut app, entities["skin"]);
+        assert!((restored[0][1] - 2.0).abs() < 1e-4, "{restored:?}");
+    }
 }

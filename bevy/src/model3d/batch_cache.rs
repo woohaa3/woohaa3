@@ -252,6 +252,7 @@ mod tests {
             geometry: Some(super::super::scene::ModelGeometry::Sphere { radius: 1. }),
             material_key: "material-a".into(),
             animation: None,
+            pose: None,
         };
         let mut second = first.clone();
         second.id = "scope-b::part".into();

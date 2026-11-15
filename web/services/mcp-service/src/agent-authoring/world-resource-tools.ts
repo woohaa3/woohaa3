@@ -1,7 +1,7 @@
 /** Resource-specific tools: strict operation branches, shared query semantics. */
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { WORLD_RESOURCE_TOOLS, SHARED_WORLD_VERSION, type WorldResourceEdit } from '@woohaa3/contracts';
+import { WORLD_RESOURCE_TOOLS, SHARED_WORLD_VERSION, executeWorldAnimationScript, type WorldResourceEdit } from '@woohaa3/contracts';
 import { structured, auditWrap, type AgentAuthoringToolDeps } from './tool-policy.js';
 import { worldGrant, worldFailure, denied, point, rotation, projection, captureMode, aspect, animationBudget, motionConventions } from './world-tool-shared.js';
 
@@ -53,9 +53,9 @@ function scriptSchema(target: typeof areaTarget | typeof modelTarget, animation:
 export function registerWorldResourceTools(server: McpServer, deps: AgentAuthoringToolDeps): void {
   server.registerTool(WORLD_RESOURCE_TOOLS.read, {
     title: '查询世界资源',
-    description: '授权内查询。get 读取单资源、脚本或 world_model_rig；list 仅枚举 scene_area/world_model/world_camera。脚本 lines 为闭区间，includeSource=false 只读元数据。版本来自真实回执；查询不授予写权限。',
+    description: '授权内查询。get 读取单资源、脚本、world_model_rig 或 world_model_pose（静态姿势、准确源码/内容版本、FK/LBS几何、脚表面及已声明动画覆盖；仅数据核验，不改变播放头）。expectedVersion 可核对刚写入的版本，过期返回 version-conflict。list 仅枚举 scene_area/world_model/world_camera。脚本 lines 为闭区间，includeSource=false 只读元数据。查询不授予写权限。',
     inputSchema: objectInput(z.discriminatedUnion('operation', [
-      z.strictObject({ operation: z.literal('get'), resourceType: z.enum(['scene_area','world_model','world_camera','world_model_script','scene_animation_script','world_model_rig']), target: z.union([areaTarget, modelTarget, cameraTarget]), includeSource: z.boolean().optional(), lines: z.strictObject({ start: z.number().int().positive(), end: z.number().int().positive() }).optional() }),
+      z.strictObject({ operation: z.literal('get'), resourceType: z.enum(['scene_area','world_model','world_camera','world_model_script','scene_animation_script','world_model_rig','world_model_pose']), target: z.union([areaTarget, modelTarget, cameraTarget]), expectedVersion: id.optional(), includeSource: z.boolean().optional(), lines: z.strictObject({ start: z.number().int().positive(), end: z.number().int().positive() }).optional() }),
       z.strictObject({ operation: z.literal('list'), resourceType: z.enum(['scene_area','world_model','world_camera']), areaId: id.optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(100).optional() })
     ])), outputSchema, annotations: { ...annotations, readOnlyHint: true, destructiveHint: false }
   }, async input => {
@@ -73,6 +73,22 @@ export function registerWorldResourceTools(server: McpServer, deps: AgentAuthori
       : input.resourceType === 'world_camera' ? (view.sceneCameras ?? []).map(camera => ({ ...camera, cameraId: camera.settings.cameraId, version: versionOf('world_camera', camera.settings.cameraId) }))
       : input.resourceType === 'scene_animation_script' ? scopedAreaId && view.sceneArea?.animationScript ? [{ areaId: scopedAreaId, ...view.sceneArea.animationScript, version: versionOf('scene_animation_script', scopedAreaId) }] : []
       : (view.sceneModels ?? []).flatMap<Record<string, unknown>>(model => {
+          if (input.resourceType === 'world_model_pose') {
+            const scriptVersion = versionOf('world_model_script', model.instanceId);
+            const pose = model.animationRig?.staticPose;
+            const animation = view.sceneArea?.animationScript;
+            const compiled = animation ? executeWorldAnimationScript(animation.script, { purpose: 'read', duration: animation.duration, loop: animation.loop }) : null;
+            const animationCoverage = compiled?.ok ? {
+              status: 'declared-coverage', playbackState: 'unknown',
+              partChannels: (compiled.ir.partTracks ?? []).filter(track => track.targetId === model.instanceId).map(track => ({ groupId: track.partId, channel: 'rotation', startTime: track.startTime, endTime: track.endTime })),
+              fullSkeletonClips: (compiled.ir.somaTracks ?? []).filter(track => track.targetId === model.instanceId).map(track => ({ jointPrefix: track.jointPrefix, startTime: track.startTime, endTime: track.endTime, channels: ['all-joint-rotations', 'Hips.position'] })),
+              walks: (compiled.ir.walkTracks ?? []).filter(track => track.targetId === model.instanceId).length,
+              animationVersion: versionOf('scene_animation_script', scopedAreaId ?? '')
+            } : { status: animation ? 'unavailable' : 'none', ...(compiled && !compiled.ok ? { reason: compiled.message } : {}) };
+            return [{ instanceId: model.instanceId, version: scriptVersion, scriptVersion, modelVersion: versionOf('world_model', model.instanceId), modelContentVersion: model.modelContentVersion,
+              transform: model.transform, ...(pose ?? { verification: 'unavailable', reason: '当前模型没有可核验的 ModelScript 编译姿势' }), available: !!pose, animationCoverage,
+              geometrySpace: 'model-local-Y-up-meters', revision: view.sceneArea?.revision }];
+          }
           if (input.resourceType === 'world_model_script') {
             const script = view.modelScripts?.[model.instanceId];
             return script ? [{ instanceId: model.instanceId, script, version: versionOf('world_model_script', model.instanceId) }] : [];
@@ -91,6 +107,7 @@ export function registerWorldResourceTools(server: McpServer, deps: AgentAuthori
     }
     const resource = resources.find(item => Object.entries(input.target).every(([key, value]) => item[key] === value));
     if (!resource) return worldFailure({ code: 'not-found', message: '授权读取范围内没有该资源' });
+    if (input.expectedVersion !== undefined && input.expectedVersion !== resource.version) return worldFailure({ code: 'version-conflict', message: '资源版本与待核验版本不一致，请读取当前版本' });
     if (typeof resource.script === 'string') {
       const lines = resource.script.split('\n');
       resource.totalLines = lines.length;

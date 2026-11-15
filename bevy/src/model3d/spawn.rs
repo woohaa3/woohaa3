@@ -123,7 +123,13 @@ pub(super) fn spawn_v2(
     strategy: super::batch_strategy::BatchStrategy,
     barriers: &HashSet<String>,
 ) -> ModelRoot {
-    let batched = batched && !model.ops.iter().any(|op|matches!(op,ModelOp::Mesh{skin:Some(_),..}));
+    // 带静态姿势的内容不做静态合批/平铺：合批会改写局部变换，绑定与静态两份事实必须可还原
+    // （change: 2026-11-15-add-model-script-static-poses）。
+    let batched = batched
+        && !model.ops.iter().any(|op| {
+            matches!(op, ModelOp::Mesh { skin: Some(_), .. })
+                || matches!(op, ModelOp::Group { pose: Some(_), .. })
+        });
     #[cfg(feature = "explicit-instancing")]
     let strategy = if strategy == super::batch_strategy::BatchStrategy::Explicit {
         super::batch_strategy::BatchStrategy::Automatic
@@ -150,6 +156,8 @@ pub(super) fn spawn_v2(
     let mut material_cache: HashMap<String, Handle<StandardMaterial>> = HashMap::new();
     let mut entities: HashMap<String, Entity> = HashMap::new();
     let mut base_transforms: HashMap<String, Transform> = HashMap::new();
+    let mut bind_transforms: HashMap<String, Transform> = HashMap::new();
+    let mut pose_specs: HashMap<String, scene::ModelPoseSpec> = HashMap::new();
     // 稳定部件 id → 该部件当前使用的共享材质（透明度动作据此克隆实例）。
     let mut part_materials: HashMap<String, Handle<StandardMaterial>> = HashMap::new();
 
@@ -264,11 +272,7 @@ pub(super) fn spawn_v2(
         if batched_parts.contains(&spec_index) {
             continue;
         }
-        let transform = Transform {
-            translation: Vec3::from_array(spec.position),
-            rotation: scene::quat_from_xyz_radians(spec.rotation_radians),
-            scale: Vec3::from_array(spec.scale),
-        };
+        let transform = spec.static_transform();
         let entity = match &spec.geometry {
             None => commands
                 .spawn((
@@ -333,6 +337,10 @@ pub(super) fn spawn_v2(
         ));
         entities.insert(spec.id.clone(), entity);
         base_transforms.insert(spec.id.clone(), transform);
+        bind_transforms.insert(spec.id.clone(), spec.bind_transform());
+        if let Some(pose) = spec.pose {
+            pose_specs.insert(spec.id.clone(), pose);
+        }
         spawned.push(entity);
     }
     for spec in &specs {
@@ -408,6 +416,8 @@ pub(super) fn spawn_v2(
         animation_entities,
         part_entities: entities,
         part_bases: base_transforms,
+        part_binds: bind_transforms,
+        part_poses: pose_specs,
         opacity: Default::default(),
         part_materials,
     }

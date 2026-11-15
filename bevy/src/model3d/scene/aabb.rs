@@ -63,6 +63,11 @@ impl ModelAabb {
     pub(crate) fn transformed(&self, transform: &Transform) -> ModelAabb {
         transform_aabb(transform, self)
     }
+
+    /// 用完整仿射矩阵重新包围（8 角取 min/max），保留非均匀父级缩放与旋转子级产生的剪切。
+    pub(crate) fn transformed_matrix(&self, matrix: &Mat4) -> ModelAabb {
+        transform_aabb_matrix(matrix, self)
+    }
 }
 
 /// 求模型局部空间包围盒（含层级、scale、sphere/capsule/segment 半径与 overlap）。
@@ -126,6 +131,8 @@ pub(crate) fn geometry_half_extents_and_center(geometry: &ModelGeometry) -> ([f3
             [0.0, 0.0, 0.0],
         ),
         ModelGeometry::Mesh { vertices, .. } => {
+            // 绑定/无姿势路径保留既有语义（全部顶点）；姿势路径在 prepared bounds 中
+            // 只取被面引用的顶点并做精确变换（与 TS 的 posed 求值一致）。
             if vertices.is_empty() {
                 return ([0.0; 3], [0.0; 3]);
             }
@@ -137,20 +144,49 @@ pub(crate) fn geometry_half_extents_and_center(geometry: &ModelGeometry) -> ([f3
                     max[axis] = max[axis].max(vertex[axis]);
                 }
             }
-            (
-                [
-                    (max[0] - min[0]) * 0.5,
-                    (max[1] - min[1]) * 0.5,
-                    (max[2] - min[2]) * 0.5,
-                ],
-                [
-                    (max[0] + min[0]) * 0.5,
-                    (max[1] + min[1]) * 0.5,
-                    (max[2] + min[2]) * 0.5,
-                ],
-            )
+            bounds_from_min_max(min, max)
         }
     }
+}
+
+fn bounds_from_min_max(min: [f32; 3], max: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    (
+        [
+            (max[0] - min[0]) * 0.5,
+            (max[1] - min[1]) * 0.5,
+            (max[2] - min[2]) * 0.5,
+        ],
+        [
+            (max[0] + min[0]) * 0.5,
+            (max[1] + min[1]) * 0.5,
+            (max[2] + min[2]) * 0.5,
+        ],
+    )
+}
+
+/// 用完整仿射矩阵把局部 AABB 变换后重新包围（8 角取 min/max）。
+fn transform_aabb_matrix(matrix: &Mat4, aabb: &ModelAabb) -> ModelAabb {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    for xi in 0..2 {
+        for yi in 0..2 {
+            for zi in 0..2 {
+                let corner = Vec3::new(
+                    if xi == 0 { aabb.min[0] } else { aabb.max[0] },
+                    if yi == 0 { aabb.min[1] } else { aabb.max[1] },
+                    if zi == 0 { aabb.min[2] } else { aabb.max[2] },
+                );
+                let world = matrix.transform_point3(corner);
+                min[0] = min[0].min(world.x);
+                min[1] = min[1].min(world.y);
+                min[2] = min[2].min(world.z);
+                max[0] = max[0].max(world.x);
+                max[1] = max[1].max(world.y);
+                max[2] = max[2].max(world.z);
+            }
+        }
+    }
+    ModelAabb { min, max }
 }
 
 /// 用变换矩阵把局部 AABB 变换后重新包围（8 角取 min/max）。

@@ -7,7 +7,7 @@
  */
 import http from "node:http";
 import { afterEach, expect, it } from "vitest";
-import { ASSISTANT_WORLD_TOOLS, assistantWorldToolsForScope, WORLD_RESOURCE_TOOLS } from "@woohaa3/contracts";
+import { ASSISTANT_WORLD_TOOLS, assistantWorldToolsForScope, WORLD_RESOURCE_TOOLS, executeModelScriptV2, describeModelStaticPose } from "@woohaa3/contracts";
 import type { ApplicationToolGrant, AssistantWorldContextView } from "@woohaa3/contracts";
 import { createModelMcpHttpHandler, MODEL_MCP_HTTP_PATH } from "../model-mcp/mcp-http.js";
 import type { AgentCanvasClient } from "../downstream/agent-canvas-client.js";
@@ -163,6 +163,29 @@ it('narrows camera-only schema and denies lifecycle/root writes', async () => {
   expect(catalog.map(tool => tool.name).sort()).toEqual(['get_world_context','read_world_resource','edit_world_camera'].sort());
   await callTool(base, WORLD_RESOURCE_TOOLS.camera, { operation: 'delete', operationId: 'delete', target: { cameraId: 'camera-1' }, expectedVersion: 'v1' }, issued.token);
   expect(writes).toBe(0);
+});
+
+it('reads an exact static pose version without writing, and rejects stale or foreign verification', async () => {
+  const issued = scopeGrant();
+  const compiled = executeModelScriptV2('const g = scene.group({id:"joint"}); scene.box({parent:g,size:[1,1,1]}); scene.pose(g,{position:[0,1,0]});');
+  expect(compiled.ok).toBe(true);
+  if (!compiled.ok) return;
+  const staticPose = describeModelStaticPose(compiled.scene.ops);
+  let writes = 0;
+  const view = contextView({
+    sceneModels: [{ instanceId: 'instance-1', nodeId: 'model', title: 'Box', transform: { version: 'shared-world-v1', position: { u: 0, v: 0, h: 0 }, rotation: [0,0,0,1], scale: 1 }, localBounds: staticPose.geometry.aabb, animationRig: { groups: [], rig: null, staticPose }, modelContentVersion: { revision: 2, contentHash: 'actual-content' } }],
+    resourceVersions: { 'world_model_script:instance-1': 'script-v2' }
+  });
+  const base = await start({ read: async () => ({ ok: true, view }), write: async () => { writes++; return { ok:false,code:'not-ready',message:'unused' }; }, complete: async () => ({ok:false,code:'not-ready',message:'unused'}) }, issued);
+  const args = {operation:'get',resourceType:'world_model_pose',target:{instanceId:'instance-1'},expectedVersion:'script-v2'};
+  const result = await callTool(base, WORLD_RESOURCE_TOOLS.read, args, issued.token);
+  expect(result.result?.structuredContent).toMatchObject({ok:true,version:'script-v2',resource:{available:true,verification:'sampled-data-only',poses:[{groupId:'joint',position:[0,1,0]}],geometry:{aabb:{min:[-.5,.5,-.5],max:[.5,1.5,.5]}},modelContentVersion:{revision:2},animationCoverage:{status:'none'}}});
+  const stale = await callTool(base,WORLD_RESOURCE_TOOLS.read,{...args,expectedVersion:'script-v1'},issued.token);
+  expect(stale.result?.structuredContent).toMatchObject({ok:false,code:'version-conflict'});
+  const foreign = await callTool(base,WORLD_RESOURCE_TOOLS.read,{...args,target:{instanceId:'foreign'}},issued.token);
+  expect(foreign.result?.structuredContent).toMatchObject({ok:false,code:'not-found'});
+  expect(writes).toBe(0);
+  expect(view.sceneModels?.[0]?.animationRig?.staticPose).toBe(staticPose);
 });
 
 it('does not allow retired standalone director tools', async () => {

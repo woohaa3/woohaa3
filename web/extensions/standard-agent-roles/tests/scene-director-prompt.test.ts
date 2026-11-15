@@ -34,7 +34,7 @@ describe("导演区资源工具协议", () => {
   });
 
   it("遵守用户冻结的扩区策略并检查回执", () => {
-    expect(text).toContain("锁定大小策略");
+    expect(text).toContain("锁定大小开关");
     expect(text).toContain("outside-scope");
     expect(text).not.toContain("先用 edit_scene_area（operation=update） 显式扩区");
   });

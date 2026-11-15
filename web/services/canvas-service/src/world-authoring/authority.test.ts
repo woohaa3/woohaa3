@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createEmptyWoohaa3ServerCanvas,
+  executeModelScriptV2,
   executeModelWithStoredRig,
   HUMANOID_REFERENCE_PARAMETERS,
   type WorldInstanceData,
@@ -128,6 +129,36 @@ function canvasFixture(): ServerCanvas {
 }
 
 describe("world authoring authority", () => {
+  it("uses static geometry for display bounds while keeping bind-based permission anchors", async () => {
+    const canvas = singleInstanceCanvas();
+    const source = `const g=scene.group({id:'root'});scene.box({parent:g,size:[1,2,1],position:[0,1,0]});`;
+    canvas.nodeData.solo.modelScript = source;
+    const authority = createWorldAuthoringAuthority({ executeScene: async script => {
+      const result = executeModelScriptV2(script);
+      if (!result.ok) return result;
+      return {ok:true,version:'woohaa-model-js-v2',sceneVersion:'scene-ir-v2',ops:result.scene.ops,json:result.json,sourceHash:script};
+    } });
+    const before = await authority.prepareCanvas(canvas, {kind:'scene-area',areaId:'area-main'});
+    if (!before.ok) throw new Error('preparation failed');
+    const first = authority.cacheFor(canvas.id, before.snapshot.scope)!.instances.get('solo-a')!;
+    const bindBounds = first.localAabb;
+    const bindAnchor = first.localGroundAnchor;
+    canvas.nodeData.solo.modelScript = source + `scene.pose(g,{position:[20,-0.3,0]});`;
+    const after = await authority.prepareCanvas(canvas, {kind:'scene-area',areaId:'area-main'});
+    if (!after.ok) throw new Error('pose preparation failed');
+    const posed = authority.cacheFor(canvas.id, after.snapshot.scope)!.instances.get('solo-a')!;
+    expect(after.snapshot.objects[0]?.containment).toBe('writable');
+    expect(posed.localGroundAnchor).toEqual(bindAnchor);
+    expect(posed.localAabb).not.toEqual(bindBounds);
+    expect(posed.localAabb!.min[0]).toBeCloseTo(19.5, 6);
+    expect(posed.localAabb!.min[1]).toBeCloseTo(-0.3, 6);
+    expect(posed.footprint!.min.u).toBeCloseTo(20.5, 6);
+    expect(posed.contentVersion).not.toBe(first.contentVersion);
+    // Reopening the same source reconstructs the same bounds without a playback projection.
+    const reopened = await authority.prepareCanvas(structuredClone(canvas), {kind:'scene-area',areaId:'area-main'});
+    expect(reopened.ok && reopened.snapshot.objects[0]?.containment).toBe('writable');
+    expect(authority.cacheFor(canvas.id, after.snapshot.scope)!.instances.get('solo-a')!.localAabb).toEqual(posed.localAabb);
+  });
   it("grants body overflow when the authoritative ground anchor remains inside", async () => {
     const authority = createWorldAuthoringAuthority({ executeScene });
     const prepared = await authority.prepareCanvas(canvasFixture(), { kind: "scene-area", areaId: "area-main" });

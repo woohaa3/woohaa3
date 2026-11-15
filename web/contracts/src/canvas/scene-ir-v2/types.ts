@@ -98,7 +98,19 @@ export type SceneV2ShapeBase = {
   color: string | null;
 };
 
-export type SceneV2GroupOp = SceneV2ShapeBase & { t: "group" };
+/**
+ * 可选静态姿势（change: 2026-11-15-add-model-script-static-poses）。
+ *
+ * 与 group 的结构/绑定 TRS 分开保存：`rotation` 是绑定旋转之后的旋转增量（角度制、局部
+ * Y-X-Z），`position` 是相对绑定位置的父空间平移偏移（模型米制）。至少一个通道；规范化后
+ * 等价零通道与空 pose 不保留，因此无姿势旧内容逐字节不漂移。
+ */
+export type SceneV2Pose = {
+  rotation?: Vec3;
+  position?: Vec3;
+};
+
+export type SceneV2GroupOp = SceneV2ShapeBase & { t: "group"; pose?: SceneV2Pose };
 export type SceneV2BoxOp = SceneV2ShapeBase & { t: "box"; size: Vec3 };
 export type SceneV2CylinderOp = SceneV2ShapeBase & { t: "cylinder"; radius: number; height: number };
 export type SceneV2SphereOp = SceneV2ShapeBase & { t: "sphere"; radius: number };
@@ -187,6 +199,7 @@ export type SceneIrV2ErrorCode =
   | "missing-material"
   | "duplicate-material"
   | "invalid-primitive"
+  | "invalid-pose"
   | "degenerate-segment"
   | "hierarchy-too-deep"
   | "render-budget-exceeded";
@@ -199,6 +212,8 @@ export const AXES = new Set(["x", "y", "z"]);
 export const MODES = new Set(["position", "rotation", "scale"]);
 export const SEGMENT_SHAPES = new Set(["box", "capsule"]);
 export const ALPHA_MODES = new Set(["opaque", "blend"]);
+/** 静态姿势唯一允许的通道（change: 2026-11-15-add-model-script-static-poses）。 */
+export const POSE_CHANNELS = new Set(["rotation", "position"]);
 export const HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;
 
 export function fail(code: SceneIrV2ErrorCode, message: string): { ok: false; code: SceneIrV2ErrorCode; message: string } {

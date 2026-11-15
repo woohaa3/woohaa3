@@ -12,7 +12,7 @@ import { MODEL_AUTHOR_FLOW, targetLine, TOOL_COMMON_RULES } from "../prompts.js"
 export const modelAuthorRole: AgentRoleImplementation = {
   definition: {
     id: "model-author",
-    revision: "1",
+    revision: "2",
     title: "模型作者",
     specialty: "在 3D 模型节点内读取权威脚本并做最小必要增量修改",
     instructions: [

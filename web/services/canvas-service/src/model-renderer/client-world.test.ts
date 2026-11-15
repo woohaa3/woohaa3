@@ -13,9 +13,9 @@ describe("world renderer wire compatibility", () => {
           const request = JSON.parse(buffered.subarray(4, 4 + length));
           buffered = buffered.subarray(4 + length);
           const world = request.world;
-          const correctWorld = request.protocolVersion === 'woohaa-world-renderer-protocol-v1'
+          const correctWorld = request.protocolVersion === 'woohaa-world-renderer-protocol-v2'
             && world.camera.projection.kind === 'perspective' && world.camera.cameraId === 'camera';
-          const correctModel = request.protocolVersion === 'woohaa-model-renderer-protocol-v4';
+          const correctModel = request.protocolVersion === 'woohaa-model-renderer-protocol-v5';
           const response = world ? { ok: false, code: correctWorld ? 'unsupported-protocol-version' : 'wrong-world-wire' }
             : correctModel ? { ok: true, pngLen: 3 } : { ok: false, code: 'wrong-model-wire' };
           const json = Buffer.from(JSON.stringify(response));

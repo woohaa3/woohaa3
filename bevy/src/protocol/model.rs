@@ -44,7 +44,12 @@ use serde::Deserialize;
 /// scene collections and no per-object playback; composite-asset nodes render as plain cards.
 /// v41 adds transient assistant execution IDs for scope-border feedback.
 /// v42 adds derived `cameraShot` semantics to world-camera cards (video duration/status).
-pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v43";
+/// v44 adds the optional independent static pose `group.pose` (change:
+/// 2026-11-15-add-model-script-static-poses). Old renderers reject the whole frame instead of
+/// ignoring the field and presenting the bind T-pose as success.
+pub(crate) const CANVAS_RENDER_SCENE_VERSION: &str = "woohaa-canvas-render-scene-v44";
+/// 渲染器必须显式声明的静态姿势能力（与 contracts 常量同名）。
+pub(crate) const MODEL_STATIC_POSE_CAPABILITY: &str = "model-static-pose-v1";
 /// prepared model resource envelope 版本。
 pub(crate) const MODEL_ASSET_VERSION: &str = "woohaa-prepared-model-resource-v1";
 /// 轻量 descriptor envelope 版本（与 payload envelope 分开，二者可独立演进）。
@@ -223,6 +228,7 @@ impl ModelAssetDescriptor {
         if self.ops.is_empty() {
             return Err("Empty model resource ops");
         }
+        validate_model_poses(&self.ops)?;
         Ok(())
     }
 
@@ -407,6 +413,11 @@ pub(crate) enum ModelOp {
         rotation: [f32; 3],
         #[serde(default = "default_model_vector_scale")]
         scale: [f32; 3],
+        /// 独立静态姿势（change: 2026-11-15-add-model-script-static-poses）。
+        ///
+        /// 与结构/绑定 TRS 分开保存：rotation 是绑定后的角度增量，position 是父空间偏移。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pose: Option<ModelPose>,
     },
     Box {
         id: String,
@@ -556,6 +567,43 @@ fn default_model_vector_scale() -> [f32; 3] {
     [1.0, 1.0, 1.0]
 }
 
+/// 可选静态姿势（change: 2026-11-15-add-model-script-static-poses）。
+///
+/// 严格解码：未知字段、空对象、显式 null 通道与非法数值都在边界拒绝；`pose` 只出现在
+/// group 上，其他 shape 携带 `pose` 由 serde 拒绝。
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct ModelPose {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) rotation: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) position: Option<[f32; 3]>,
+}
+
+impl ModelPose {
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.rotation.is_none() && self.position.is_none() {
+            return Err("Empty model pose");
+        }
+        for vector in [self.rotation, self.position].into_iter().flatten() {
+            if vector.iter().any(|value| !value.is_finite() || value.abs() > 1_000_000.0) {
+                return Err("Invalid model pose");
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 边界级姿势校验：只接受规范化的可选 group pose。
+pub(crate) fn validate_model_poses(ops: &[ModelOp]) -> Result<(), &'static str> {
+    for op in ops {
+        if let ModelOp::Group { pose: Some(pose), .. } = op {
+            pose.validate()?;
+        }
+    }
+    Ok(())
+}
+
 fn default_base_color() -> String {
     "#ffffff".to_owned()
 }
@@ -656,4 +704,43 @@ pub(crate) struct ModelSkin {
  pub inverse_bind_matrices: Vec<[f32;16]>,
  pub indices: Vec<Vec<usize>>,
  pub weights: Vec<Vec<f32>>,
+}
+
+#[cfg(test)]
+mod pose_tests {
+    use super::*;
+
+    fn ops(json: &str) -> Vec<ModelOp> {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn group_pose_parses_rotation_and_position_independently() {
+        let parsed = ops(r#"[{"t":"group","id":"root","parent":null,"pose":{"rotation":[0,30,0],"position":[0,0.5,0]}}]"#);
+        validate_model_poses(&parsed).unwrap();
+        let ModelOp::Group { pose, .. } = &parsed[0] else { panic!() };
+        let pose = pose.expect("pose");
+        assert_eq!(pose.rotation, Some([0.0, 30.0, 0.0]));
+        assert_eq!(pose.position, Some([0.0, 0.5, 0.0]));
+    }
+
+    #[test]
+    fn boundary_rejects_unknown_empty_and_non_finite_pose_fields() {
+        assert!(serde_json::from_str::<ModelOp>(r#"{"t":"group","id":"root","pose":{"scale":[1,1,1]}}"#).is_err());
+        let empty = ops(r#"[{"t":"group","id":"root","pose":{}}]"#);
+        assert_eq!(validate_model_poses(&empty), Err("Empty model pose"));
+        let infinite = ops(r#"[{"t":"group","id":"root","pose":{"rotation":[1e50,0,0]}}]"#);
+        assert_eq!(validate_model_poses(&infinite), Err("Invalid model pose"));
+        let too_far = ops(r#"[{"t":"group","id":"root","pose":{"position":[0,1000001,0]}}]"#);
+        assert_eq!(validate_model_poses(&too_far), Err("Invalid model pose"));
+    }
+
+    #[test]
+    fn no_pose_content_is_unchanged() {
+        let plain = ops(r#"[{"t":"group","id":"root","parent":null}]"#);
+        assert!(matches!(&plain[0], ModelOp::Group { pose: None, .. }));
+        validate_model_poses(&plain).unwrap();
+        let json = serde_json::to_string(&plain[0]).unwrap();
+        assert!(!json.contains("pose"));
+    }
 }

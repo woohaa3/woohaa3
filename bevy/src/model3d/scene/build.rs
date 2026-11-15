@@ -1,19 +1,20 @@
 //! V2 实体指令构建
 //! （change: refactor-bevy-rust-file-size，任务 2.2 / design D2；
-//!  change: 2026-10-07-remove-residual-compatibility —— 删除 V1 平铺构建路径）。
+//!  change: 2026-10-07-remove-residual-compatibility —— 删除 V1 平铺构建路径；
+//!  change: 2026-11-15-add-model-script-static-poses —— group.pose 作为独立增量）。
 
-use crate::protocol::{ModelOp, ModelSnapshot};
+use crate::protocol::{ModelOp, ModelPose, ModelSnapshot};
 
 use super::materials::material_key;
 use super::types::{
-    ModelAnimationSpec, ModelEntitySpec, ModelGeometry, animation_spec, segment_geometry,
-    xyz_radians_from_quat,
+    ModelAnimationSpec, ModelEntitySpec, ModelGeometry, ModelPoseSpec, animation_spec,
+    segment_geometry, xyz_radians_from_quat,
 };
 
 /// 展开一个 `ModelSnapshot` 为构建指令列表。
 ///
-/// V2 建立真实 parent→child 关系；`position/rotation/scale` 为局部值。
-/// `placement`/`unit` 由 adapter 在模型根上应用，不进入这里。
+/// V2 建立真实 parent→child 关系；`position/rotation/scale` 为**绑定**局部值，静态姿势在
+/// `pose` 中独立保存。`placement`/`unit` 由 adapter 在模型根上应用，不进入这里。
 pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> {
     let mut specs = Vec::new();
     for op in &model.ops {
@@ -25,6 +26,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 position,
                 rotation,
                 scale,
+                pose,
             } => specs.push(spec(
                 id,
                 parent.clone(),
@@ -34,6 +36,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 None,
                 op,
                 None,
+                pose.as_ref().map(pose_spec),
             )),
             ModelOp::Box {
                 id,
@@ -51,6 +54,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 scale,
                 Some(ModelGeometry::Box { size: *size }),
                 op,
+                None,
                 None,
             )),
             ModelOp::Cylinder {
@@ -74,6 +78,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 }),
                 op,
                 None,
+                None,
             )),
             ModelOp::Sphere {
                 id,
@@ -91,6 +96,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                 scale,
                 Some(ModelGeometry::Sphere { radius: *radius }),
                 op,
+                None,
                 None,
             )),
             ModelOp::Capsule {
@@ -113,6 +119,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                     height: *height,
                 }),
                 op,
+                None,
                 None,
             )),
             ModelOp::Mesh {
@@ -141,6 +148,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                     colors: colors.clone(),
                 }),
                 op,
+                None,
                 None,
             )),
             ModelOp::Segment {
@@ -188,6 +196,7 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
                     geometry,
                     op,
                     None,
+                    None,
                 );
                 // segment 的中心与朝向覆盖 op 的 position/rotation（from/to 是权威表达）。
                 if let Some(segment) =
@@ -205,6 +214,20 @@ pub(crate) fn build_entity_specs(model: &ModelSnapshot) -> Vec<ModelEntitySpec> 
     specs
 }
 
+/// `group.pose` → 运行期姿势增量（角度转弧度）。
+fn pose_spec(pose: &ModelPose) -> ModelPoseSpec {
+    ModelPoseSpec {
+        rotation_radians: pose.rotation.map(|rotation| {
+            [
+                rotation[0].to_radians(),
+                rotation[1].to_radians(),
+                rotation[2].to_radians(),
+            ]
+        }),
+        position: pose.position,
+    }
+}
+
 /// 动画挂到目标实体（V1/V2 相同：第二遍扫描 op）。
 fn attach_animations(model: &ModelSnapshot, specs: &mut [ModelEntitySpec]) {
     for op in &model.ops {
@@ -216,6 +239,7 @@ fn attach_animations(model: &ModelSnapshot, specs: &mut [ModelEntitySpec]) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spec(
     id: &str,
     parent: Option<String>,
@@ -225,6 +249,7 @@ fn spec(
     geometry: Option<ModelGeometry>,
     op: &ModelOp,
     animation: Option<ModelAnimationSpec>,
+    pose: Option<ModelPoseSpec>,
 ) -> ModelEntitySpec {
     ModelEntitySpec {
         id: id.to_owned(),
@@ -239,5 +264,6 @@ fn spec(
         geometry,
         material_key: material_key(op),
         animation,
+        pose,
     }
 }

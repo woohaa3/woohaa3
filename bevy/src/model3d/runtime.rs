@@ -247,8 +247,12 @@ pub(crate) struct ModelRoot {
     pub(super) animation_entities: Vec<Entity>,
     /// 稳定部件 id → entity（change: 2026-10-05-bind-model-animation-to-shots，任务 4.1）。
     pub(super) part_entities: HashMap<String, Entity>,
-    /// 稳定部件 id → **基础** transform（不含 motion 增量），供运动求值合成。
+    /// 稳定部件 id → **基础** transform（绑定 × 静态姿势，不含动画增量），供运动求值合成。
     pub(super) part_bases: HashMap<String, Transform>,
+    /// 稳定部件 id → 纯绑定 transform（动画接管某通道时从该通道的绑定值起算）。
+    pub(super) part_binds: HashMap<String, Transform>,
+    /// 稳定部件 id → 静态姿势通道增量。
+    pub(super) part_poses: HashMap<String, super::scene::ModelPoseSpec>,
     /// 透明度动作的专属材质实例（实体 → 实例），随根复用并在实体消失时回收
     /// （change: 2026-10-19-extend-film-set-for-motion-graphics，D2）。
     pub(super) opacity: super::opacity::OpacityMaterials,
@@ -638,7 +642,7 @@ pub(crate) fn apply_animation_playback(
 
 mod motion;
 pub(crate) use motion::apply_motion_playback;
-pub(crate) use motion::compose_delta;
+pub(crate) use motion::compose_channels;
 /// Quality-only updates never rebuild the hierarchy, execute author scripts or
 /// touch canonical AABBs. Cached variants are bounded to three per geometry.
 mod quality;

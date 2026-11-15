@@ -13,6 +13,7 @@ fn specs() -> Vec<ModelEntitySpec> {
             geometry: Some(ModelGeometry::Box { size: [1.; 3] }),
             material_key: "opaque".into(),
             animation: None,
+            pose: None,
         })
         .collect()
 }

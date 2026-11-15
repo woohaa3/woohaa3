@@ -12,6 +12,7 @@ use super::*;
                 geometry: Some(ModelGeometry::Box { size: [1.; 3] }),
                 material_key: "opaque".into(),
                 animation: None,
+                pose: None,
             })
             .collect()
     }
@@ -82,6 +83,7 @@ use super::*;
                 }),
                 material_key: "opaque".into(),
                 animation: None,
+                pose: None,
             })
             .collect()
     }
@@ -109,6 +111,7 @@ use super::*;
                 geometry: Some(ModelGeometry::Box { size: [1.; 3] }),
                 material_key: "opaque".into(),
                 animation: None,
+                pose: None,
             })
             .collect();
         specs.push(ModelEntitySpec {
@@ -120,6 +123,7 @@ use super::*;
             geometry: None,
             material_key: "opaque".into(),
             animation: None,
+            pose: None,
         });
         specs
     }
@@ -181,6 +185,7 @@ use super::*;
                 geometry: Some(ModelGeometry::Box { size: [1.; 3] }),
                 material_key: "opaque".into(),
                 animation: None,
+                pose: None,
             },
         );
         let planned = plan(

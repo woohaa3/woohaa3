@@ -18,6 +18,49 @@ import {
   type SceneIrV2Validation
 } from "./types.js";
 import { readAnimation, readMaterial, readShape } from "./reader.js";
+import { somaSkeletonIdentity } from "../soma-humanoid/validation.js";
+import { somaBodyJoints } from "../soma-humanoid/body-presets.js";
+import { SOMA77_JOINTS } from "../soma-humanoid/skeleton.js";
+import type { SceneV2GroupOp } from "./types.js";
+
+/**
+ * 标准 SOMA 骨架只允许关节 rotation 与 Hips 的 position（change:
+ * 2026-11-15-add-model-script-static-poses）。姿势是独立增量，绑定身份/骨长校验不看它，
+ * 但也不能用它移动非骨盆关节来改变肢长或整体位置。
+ *
+ * 逐个真实骨架根核验：同一模型可以包含多套 SOMA（双人摆姿）。只有该骨架精确匹配的
+ * 77 个关节 ID 受此限制；前缀下的其它普通 group 仍按普通程序化 group 处理。
+ */
+function validateSomaPoses(groups: readonly SceneV2GroupOp[]): { ok: true } | { ok: false; code: "invalid-pose"; message: string } {
+  const posed = groups.filter((group) => group.pose !== undefined);
+  if (posed.length === 0) return { ok: true };
+  // 候选骨架根：拥有直接子节点 `<root>.Hips`（SOMA 模板与体型预设都如此）。
+  const hipsParents = new Set(groups.filter((group) => group.id.endsWith(".Hips")).map((group) => group.parent));
+  for (const root of groups) {
+    if (!hipsParents.has(root.id)) continue;
+    const identity = somaSkeletonIdentity(groups, root.id);
+    if (!identity) continue;
+    const joints = new Set<string>(
+      identity.bodyPreset
+        ? somaBodyJoints(identity.bodyPreset).map((joint) => joint.name)
+        : SOMA77_JOINTS.map((joint) => joint.name)
+    );
+    const prefix = `${identity.prefix}.`;
+    for (const group of posed) {
+      if (group.id === identity.prefix) {
+        return { ok: false, code: "invalid-pose", message: `SOMA 根 ${group.id} 不能声明 pose；整体位置/朝向用实例 transform` };
+      }
+      if (!group.id.startsWith(prefix)) continue;
+      const name = group.id.slice(prefix.length);
+      // 只有精确匹配该骨架关节 ID 的 group 受 SOMA 通道限制。
+      if (!joints.has(name)) continue;
+      if (group.pose?.position !== undefined && name !== "Hips") {
+        return { ok: false, code: "invalid-pose", message: `SOMA 关节 ${group.id} 只允许 rotation，position 仅限 Hips` };
+      }
+    }
+  }
+  return { ok: true };
+}
 
 export function validateModelSceneIrV2(input: unknown): SceneIrV2Validation {
   if (!isRecord(input)) return fail("not-object", "Scene IR 必须是对象");
@@ -65,6 +108,9 @@ export function validateModelSceneIrV2(input: unknown): SceneIrV2Validation {
   }
 
   for(const op of ops){if(op.t==="mesh"&&op.skin?.jointIds.some(id=>!shapeIds.has(id)))return fail("invalid-mesh",`mesh ${op.id} 引用未知 joint`);}
+
+  const somaPoses = validateSomaPoses(ops.filter((op): op is SceneV2GroupOp => op.t === "group"));
+  if (!somaPoses.ok) return fail(somaPoses.code, somaPoses.message);
 
   // 父引用环检测（readShape 已保证 parent 先出现，这里再防御 future 变更）。
   for (const id of shapeIds) {

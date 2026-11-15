@@ -26,7 +26,10 @@ pub(crate) fn publish_motion(node: Option<&str>, poses: PartPoses) {
         let mut current = slot.borrow_mut();
         let equal = current.0.as_deref() == node && current.1.len() == poses.len()
             && poses.iter().all(|(id, p)| current.1.get(id).is_some_and(|q|
-                p.translation == q.translation && p.rotation == q.rotation && p.scale == q.scale && p.opacity == q.opacity));
+                p.translation == q.translation && p.rotation == q.rotation && p.scale == q.scale
+                    && p.opacity == q.opacity
+                    && p.owns_rotation == q.owns_rotation
+                    && p.owns_position == q.owns_position));
         if !equal {
             current.0 = node.map(str::to_owned);
             current.1 = poses;
@@ -213,10 +216,19 @@ pub(crate) fn model_candidates(
 fn world_triangles(node: &GraphNode, model: &ModelSnapshot, poses: Option<&PartPoses>) -> Vec<crate::canvas_query::model_pick::SurfaceTriangle> {
     let mut combined = poses.cloned().unwrap_or_default();
     if let Some(rotations) = node.model.as_ref().and_then(|m| m.part_rotations.as_ref()) {
-        for (id, q) in rotations { combined.entry(id.clone()).or_default().rotation *= Quat::from_array(*q); }
+        for (id, q) in rotations {
+            let entry = combined.entry(id.clone()).or_default();
+            let sampled = Quat::from_array(*q);
+            entry.rotation = if entry.owns_rotation { entry.rotation * sampled } else { sampled };
+            entry.owns_rotation = true;
+        }
     }
     if let Some(positions) = node.model.as_ref().and_then(|m| m.part_positions.as_ref()) {
-        for (id, p) in positions { combined.entry(id.clone()).or_default().translation += Vec3::from_array(*p); }
+        for (id, p) in positions {
+            let entry = combined.entry(id.clone()).or_default();
+            entry.translation += Vec3::from_array(*p);
+            entry.owns_position = true;
+        }
     }
     let poses = Some(&combined);
     let Some(root) = super::layout::model_root_transform(node).map(|transform| transform.to_matrix()) else {
@@ -236,8 +248,17 @@ fn world_triangles(node: &GraphNode, model: &ModelSnapshot, poses: Option<&PartP
             None => root,
         };
         visiting.pop();
-        let base = Transform { translation: Vec3::from_array(spec.position), rotation: super::scene::quat_from_xyz_radians(spec.rotation_radians), scale: Vec3::from_array(spec.scale) };
-        let local = poses.and_then(|p| p.get(&spec.id)).map_or(base, |delta| super::runtime::compose_delta(base, delta));
+        let base = spec.static_transform();
+        let local = poses.and_then(|p| p.get(&spec.id)).map_or(base, |delta| {
+            super::runtime::compose_channels(
+                base,
+                Some(spec.bind_transform()),
+                spec.pose,
+                delta.owns_rotation.then_some(delta.rotation),
+                delta.owns_position.then_some(delta.translation),
+                Some(delta.scale),
+            )
+        });
         Some(parent * local.to_matrix())
     }
     let mut triangles = Vec::new();
@@ -280,7 +301,7 @@ mod tests {
             "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
                 "transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
         let mut model = snapshot();
-        model.ops.insert(0, crate::protocol::ModelOp::Group { id: "joint".into(), parent: None, position: [0.;3], rotation: [0.;3], scale: [1.;3] });
+        model.ops.insert(0, crate::protocol::ModelOp::Group { id: "joint".into(), parent: None, position: [0.;3], rotation: [0.;3], scale: [1.;3] , pose: None });
         if let crate::protocol::ModelOp::Box { parent, position, .. } = &mut model.ops[1] { *parent = Some("joint".into()); *position = [3.,1.,0.]; }
         let base = world_triangles(&node, &model, None);
         node.model.as_mut().unwrap().part_rotations.as_mut().unwrap().insert("joint".into(), Quat::from_rotation_z(0.8).to_array());
@@ -634,6 +655,8 @@ mod tests {
         assert_eq!(query(Vec3::new(0., 64., 0.)), "m");
         let mut delta = crate::motion::ModelDelta::default();
         delta.translation = Vec3::new(4., 0., 0.);
+        // 手动采样代表动画实际接管 position 通道（与 evaluate 输出一致）。
+        delta.owns_position = true;
         publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
         assert!(query(Vec3::new(0., 64., 0.)).is_null());
         assert_eq!(query(Vec3::new(256., 64., 0.)), "m");
@@ -654,7 +677,7 @@ mod tests {
         let node = node(r#"{"id":"mesh","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{"resourceKey":"sparse"},"sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i","transform":{"version":"shared-world-v1","position":{"u":0,"v":0,"h":0},"rotation":[0,0,0,1],"scale":1}}}"#);
         let ops = vec![
             crate::protocol::ModelOp::Mesh { id: "surface".into(), parent: Some("parent".into()), position: [0.; 3], rotation: [0.; 3], scale: [1.; 3], color: Some("#ffffff".into()), material: None, vertices: vec![[0., 0., 0.], [2., 0., 0.], [0., 2., 0.]], faces: vec![[0, 1, 2]], normals: None, uvs: None, colors: None, skin: None },
-            crate::protocol::ModelOp::Group { id: "parent".into(), parent: None, position: [2., 0., 0.], rotation: [0.; 3], scale: [1.; 3] },
+            crate::protocol::ModelOp::Group { id: "parent".into(), parent: None, position: [2., 0., 0.], rotation: [0.; 3], scale: [1.; 3] , pose: None },
         ];
         let model = Arc::new(ModelSnapshot::new(Some(crate::protocol::MODEL_SCENE_IR_V2.into()), ops, "sparse".into(), 4., Default::default()));
         crate::bridge::queue_model_snapshot("sparse".into(), model.signature.clone(), model.scene_version.clone(), model);
@@ -677,7 +700,7 @@ mod tests {
         for (id, sign) in [("red", 1.0_f32), ("green", -1.0_f32)] {
             let json = format!(r#"{{"id":"{id}","type":"model3d","x":0,"y":0,"width":260,"height":195,"model":{{"resourceKey":"{id}"}},"sharedWorldInstance":{{"kind":"world-instance","version":"shared-world-v1","instanceId":"{id}","transform":{{"version":"shared-world-v1","position":{{"u":0,"v":0,"h":0}},"rotation":[0,0,0,1],"scale":1}}}}}}"#);
             nodes.push(node(&json));
-            let mut ops = vec![crate::protocol::ModelOp::Group { id: "parent".into(), parent: None, position: [0.; 3], rotation: [0.; 3], scale: [1.; 3] }];
+            let mut ops = vec![crate::protocol::ModelOp::Group { id: "parent".into(), parent: None, position: [0.; 3], rotation: [0.; 3], scale: [1.; 3] , pose: None }];
             for (part, position) in [("left", [-0.707 + sign * 0.612, sign * 0.5, 0.707 + sign * 0.612]), ("right", [0.707 - sign * 0.612, -sign * 0.5, -0.707 - sign * 0.612])] {
                 ops.push(crate::protocol::ModelOp::Box { id: part.into(), parent: Some("parent".into()), position, rotation: [0.; 3], scale: [1.; 3], color: Some("#ffffff".into()), material: None, size: [1.5; 3] });
             }
@@ -742,5 +765,138 @@ mod tests {
         assert_eq!(query(400., 300.), "model");
         assert!(query(4., 4.).is_null());
         crate::bridge::clear_model_assets();
+    }
+}
+
+#[cfg(all(test, feature = "canvas-core"))]
+mod static_pose_tests {
+    use super::*;
+
+    fn posed_model(rotation: [f32; 3], position: [f32; 3]) -> ModelSnapshot {
+        ModelSnapshot::new(
+            Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+            vec![
+                crate::protocol::ModelOp::Group {
+                    id: "root".into(),
+                    parent: None,
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    pose: Some(crate::protocol::ModelPose {
+                        rotation: Some(rotation),
+                        position: Some(position),
+                    }),
+                },
+                crate::protocol::ModelOp::Box {
+                    id: "body".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    color: Some("#ffffff".into()),
+                    material: None,
+                    size: [1., 1., 1.],
+                },
+            ],
+            "posed".into(),
+            2.,
+            Default::default(),
+        )
+    }
+
+    fn world_node(id: &str, signature: &str) -> crate::protocol::GraphNode {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "type": "model3d", "x": 0, "y": 0, "width": 260, "height": 195,
+            "model": {"resourceKey": format!("woohaa-model-scene-ir-v2:{signature}"), "sceneVersion": "woohaa-model-scene-ir-v2", "signature": signature},
+            "sharedWorldInstance": {"kind": "world-instance", "version": "shared-world-v1", "instanceId": id,
+                "transform": {"version": "shared-world-v1", "position": {"u":0,"v":0,"h":0}, "rotation": [0,0,0,1], "scale": 1}}
+        })).unwrap()
+    }
+
+    #[test]
+    fn static_pose_changes_pick_triangles() {
+        let node = world_node("posed", "posed");
+        let bind = posed_model([0.; 3], [0.; 3]);
+        let posed = posed_model([0., 90., 0.], [0., 1., 0.]);
+        let bind_triangles = world_triangles(&node, &bind, None);
+        let posed_triangles = world_triangles(&node, &posed, None);
+        assert!(!bind_triangles.is_empty());
+        assert!(!posed_triangles.is_empty());
+        assert_ne!(bind_triangles[0].vertices, posed_triangles[0].vertices);
+    }
+
+    fn skinned_posed_model(position: [f32; 3]) -> ModelSnapshot {
+        let identity: [f32; 16] = [
+            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+        ];
+        ModelSnapshot::new(
+            Some(crate::protocol::MODEL_SCENE_IR_V2.into()),
+            vec![
+                crate::protocol::ModelOp::Group {
+                    id: "root".into(), parent: None, position: [0.; 3], rotation: [0.; 3],
+                    scale: [1.; 3],
+                    pose: Some(crate::protocol::ModelPose { rotation: None, position: Some(position) }),
+                },
+                crate::protocol::ModelOp::Group {
+                    id: "root.joint".into(), parent: Some("root".into()),
+                    position: [0.; 3], rotation: [0.; 3], scale: [1.; 3], pose: None,
+                },
+                crate::protocol::ModelOp::Mesh {
+                    id: "skin".into(), parent: Some("root".into()), position: [0.; 3],
+                    rotation: [0.; 3], scale: [1.; 3], color: Some("#ffffff".into()),
+                    material: None,
+                    vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+                    faces: vec![[0, 1, 2]], normals: None, uvs: None, colors: None,
+                    skin: Some(crate::protocol::ModelSkin {
+                        joint_ids: vec!["root.joint".into()],
+                        inverse_bind_matrices: vec![identity],
+                        indices: vec![vec![0], vec![0], vec![0]],
+                        weights: vec![vec![1.], vec![1.], vec![1.]],
+                    }),
+                },
+            ],
+            "skinned-posed".into(), 2., Default::default(),
+        )
+    }
+
+    #[test]
+    fn pick_skinning_uses_the_same_static_pose() {
+        let node = world_node("skinned", "skinned-posed");
+        let bind = skinned_posed_model([0.; 3]);
+        let posed = skinned_posed_model([0., 1., 0.]);
+        let bind_triangles = world_triangles(&node, &bind, None);
+        let posed_triangles = world_triangles(&node, &posed, None);
+        assert!(!bind_triangles.is_empty());
+        assert_ne!(bind_triangles[0].vertices, posed_triangles[0].vertices);
+        let shift = posed_triangles[0].vertices[0][1] - bind_triangles[0].vertices[0][1];
+        assert!(shift.abs() > 1e-3, "shift={shift}");
+    }
+
+    #[test]
+    fn ownership_change_with_identical_numbers_invalidates_motion_cache() {
+        let mut delta = crate::motion::ModelDelta::default();
+        delta.translation = Vec3::ZERO;
+        publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
+        let first = MOTION.with(|slot| slot.borrow().2);
+        // 数值完全相同，但 ownership 变化意味着有效姿势不同，必须换 revision。
+        publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
+        assert_eq!(first, MOTION.with(|slot| slot.borrow().2));
+        delta.owns_position = true;
+        publish_motion(Some("m"), HashMap::from([("body".into(), delta)]));
+        assert_ne!(first, MOTION.with(|slot| slot.borrow().2));
+        publish_motion(None, HashMap::new());
+    }
+
+    #[test]
+    fn two_instances_keep_independent_static_pose_surfaces() {
+        let first = world_node("first", "posed-a");
+        let second = world_node("second", "posed-b");
+        let left = posed_model([0., 0., 0.], [0., 1., 0.]);
+        let right = posed_model([0., 0., 0.], [0., -1., 0.]);
+        let left_triangles = world_triangles(&first, &left, None);
+        let right_triangles = world_triangles(&second, &right, None);
+        assert_ne!(left_triangles[0].vertices, right_triangles[0].vertices);
+        // 重新求值第一个实例不受第二个实例影响（无共享变形状态）。
+        assert_eq!(left_triangles[0].vertices, world_triangles(&first, &left, None)[0].vertices);
     }
 }

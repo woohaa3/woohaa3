@@ -43,6 +43,9 @@ ${methods}
 - 模板固定骨架、绑定姿态和骨长；当前机甲装甲是绑定到关节的刚性可编辑部件，不宣称是官方白模的平滑蒙皮。SOMA兼容不表示已经接好Kimodo或导演区播放。
 - 体型预设：scene.somaHumanoid({id:"actor",style:"humanoid",bodyPreset:"soma-body-v2/female"}); Anny 官方参数直接提供男/女两种青年基础体型，muscle/weight 固定为官方平均锚点，身高按年龄段固定；另有 soma-body-v2/{male|female}-newborn（新生儿0.52米）、soma-body-v2/{male|female}-child（男女童1.15米）和 soma-body-v2/{male|female}-old（男女老人1.68米）。快速预设不再使用头身比或腿/躯干/腰部手工变形，也暂不暴露身高和体型控制；旧 soma-body-v1 ID 继续可读。全部脚底Y=0，不能用于mecha。未指定bodyPreset保留旧标准白模/机甲。保存版本化ID，不改写已有作品。animate_humanoid 会核对真实目标绑定帧并适配源动作，源Kimodo资产与目标预设身份分别保留。
 - 新建完整最小脚本：scene.somaHumanoid({id:"pilot",style:"mecha"}); 使用 submit_model_script 提交，画布和原生渲染器均通过普通Scene IR渲染。
+- 静态摆姿势使用 scene.pose，不创建动画：const actor = scene.somaHumanoid({id:"actor",style:"humanoid",bodyPreset:"soma-body-v2/female"}); scene.pose(actor.joint("Spine1"), {rotation:[15,0,0]}); scene.pose(actor.joint("Hips"), {position:[0,-0.1,0]}); 这是可执行 API 示例，角度不代表已验收的潜行姿势库。
+- scene.pose 只操作已声明 group；rotation 是原绑定旋转之后的局部 Y-X-Z 角度增量，position 是父空间米制偏移。重复调用按通道覆盖而不累加，零向量清除对应通道。SOMA 只允许77关节 rotation 与 Hips position，绑定 TRS、骨长、蒙皮与体型身份保留。整体位置和朝向使用实例 transform。
+- 动画按通道覆盖静态姿势，单位旋转和零位移也会接管；未开始且无值的轨道不接管。完整 SOMA 片段接管全部关节旋转和 Hips 位移；暂停/seek/终点按现有播放语义保持，显式停止或移除后恢复静态姿势。不要自动删除已有动画。导演区静态写入后用 read_world_resource(resourceType="world_model_pose",operation="get",target={instanceId}) 一次核对当前版本、FK/LBS 与真实脚表面；数据诊断不是视觉验收。
 - 修改已有SOMA模型时保留模板调用与id，在原脚本上修改外观参数或增加装备；禁止退化成无骨架散件。
 
 ${HUMANOID_RIG_AUTHORING_ENABLED ? `旧版14关节模型兼容说明（仅用于编辑已有 rig.joint 作品，新建人形不要采用）：

@@ -1,0 +1,25 @@
+[
+  {
+    "name": "bind-times-local-delta",
+    "group": { "position": [1, 2, 3], "rotation": [0, 90, 0], "scale": [2, 3, 4], "pose": { "rotation": [90, 0, 0], "position": [0, -0.25, 0] } },
+    "expected": { "translation": [1, 1.75, 3], "rotation": [0.5, 0.5, -0.5, 0.5], "scale": [2, 3, 4] }
+  },
+  {
+    "name": "identity-animation-owns-rotation-only",
+    "group": { "position": [1, 2, 3], "rotation": [0, 90, 0], "scale": [2, 3, 4], "pose": { "rotation": [90, 0, 0], "position": [0, -0.25, 0] } },
+    "animation": { "rotation": [0, 0, 0] },
+    "expected": { "translation": [1, 1.75, 3], "rotation": [0, 0.7071067811865476, 0, 0.7071067811865476], "scale": [2, 3, 4] }
+  },
+  {
+    "name": "zero-animation-owns-position-only",
+    "group": { "position": [1, 2, 3], "rotation": [0, 90, 0], "scale": [2, 3, 4], "pose": { "rotation": [90, 0, 0], "position": [0, -0.25, 0] } },
+    "animation": { "position": [0, 0, 0] },
+    "expected": { "translation": [1, 2, 3], "rotation": [0.5, 0.5, -0.5, 0.5], "scale": [2, 3, 4] }
+  },
+  {
+    "name": "animation-overrides-both-static-channels",
+    "group": { "position": [1, 2, 3], "rotation": [0, 90, 0], "scale": [2, 3, 4], "pose": { "rotation": [90, 0, 0], "position": [0, -0.25, 0] } },
+    "animation": { "rotation": [0, -90, 0], "position": [0.5, 0, -0.75] },
+    "expected": { "translation": [1.5, 2, 2.25], "rotation": [0, 0, 0, 1], "scale": [2, 3, 4] }
+  }
+]

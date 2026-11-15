@@ -20,9 +20,11 @@ import {
   type Transform
 } from "../model-transform.js";
 import { SCENE_IR_V2_VERSION, V2_SHAPE_OPS, type SceneV2Op, type SceneV2ShapeOp } from "./types.js";
+import { effectiveGroupTransform, evaluateModelPoseGeometry } from "../model-static-pose.js";
 
 /** 根据规范化 V2 IR 求世界局部包围盒（含层级、scale、radius、overlap）。 */
 export function v2SceneAabb(ops: readonly SceneV2Op[]): Aabb | null {
+  if (ops.some(op => op.t === "group" && op.pose)) return evaluateModelPoseGeometry(ops).aabb;
   const worldOf = new Map<string, Transform>();
   let result: Aabb | null = null;
 
@@ -76,6 +78,7 @@ export function v2ExtentFromAabb(box: Aabb | null): number {
  * 套上去，长度会被乘到 parent 的不同轴上而与渲染画面不符。
  */
 function localTransformOf(op: SceneV2ShapeOp): Transform {
+  if (op.t === "group" && op.pose) return effectiveGroupTransform(op);
   if (op.t === "segment") {
     const segment = segmentLocalTransform(op);
     if (segment) return segment;

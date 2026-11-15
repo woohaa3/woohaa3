@@ -49,6 +49,8 @@ pub fn evaluate(
     for track in tracks {
         if let Some(delta) = evaluate_model_track(track, now) {
             if let Some((_, previous)) = model.iter_mut().find(|(id, _)| id == &track.target_id) {
+                previous.owns_rotation |= delta.owns_rotation;
+                previous.owns_position |= delta.owns_position;
                 match track.motion.property() {
                     ModelTrackProperty::Position => previous.translation = delta.translation,
                     ModelTrackProperty::Rotation => previous.rotation = delta.rotation,
@@ -74,6 +76,7 @@ fn evaluate_model_track(track: &ModelTrack, now: f32) -> Option<ModelDelta> {
         }
         ModelMotion::Rotate { axis, speed } => ModelDelta {
             rotation: Quat::from_axis_angle(axis.vector(), (now - track.start_time) * *speed),
+            owns_rotation: true,
             ..Default::default()
         },
         ModelMotion::Move { axis, speed, range } => {
@@ -88,6 +91,7 @@ fn evaluate_model_track(track: &ModelTrack, now: f32) -> Option<ModelDelta> {
             translation[axis.index()] = value;
             ModelDelta {
                 translation,
+                owns_position: true,
                 ..Default::default()
             }
         }
@@ -102,6 +106,7 @@ fn evaluate_model_track(track: &ModelTrack, now: f32) -> Option<ModelDelta> {
             match mode {
                 OscillateMode::Rotation => ModelDelta {
                     rotation: Quat::from_axis_angle(axis.vector(), wave),
+                    owns_rotation: true,
                     ..Default::default()
                 },
                 OscillateMode::Scale => {
@@ -117,6 +122,7 @@ fn evaluate_model_track(track: &ModelTrack, now: f32) -> Option<ModelDelta> {
                     translation[axis.index()] = wave;
                     ModelDelta {
                         translation,
+                        owns_position: true,
                         ..Default::default()
                     }
                 }

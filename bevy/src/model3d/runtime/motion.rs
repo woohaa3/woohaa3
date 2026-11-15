@@ -63,7 +63,14 @@ fn apply_clip_playback(
             let Some(base) = root.part_bases.get(part_id).copied() else {
                 continue;
             };
-            let transform = compose_delta(base, delta);
+            let transform = compose_channels(
+                base,
+                root.part_binds.get(part_id).copied(),
+                root.part_poses.get(part_id).copied(),
+                delta.owns_rotation.then_some(delta.rotation),
+                delta.owns_position.then_some(delta.translation),
+                Some(delta.scale),
+            );
             if let Ok(mut entity_commands) = commands.get_entity(entity) {
                 entity_commands.insert(transform);
             }
@@ -131,12 +138,42 @@ fn reset_motion_parts(
     }
 }
 
-/// 增量合成：旋转乘在基础旋转之后；平移与缩放叠加（与 `motion::ModelDelta` 语义一致）。
-pub(crate) fn compose_delta(base: Transform, delta: &crate::motion::ModelDelta) -> Transform {
+/// 按通道求有效局部 transform（change: 2026-11-15-add-model-script-static-poses）。
+///
+/// `base` 是绑定 × 静态姿势（无动画时的事实）；`bind`/`pose` 让动画接管的通道从绑定值起算，
+/// 而不是把静态增量再乘一次。`rotation`/`position` 为 `Some` 表示动画实际接管该通道，
+/// 零值/单位四元数同样接管。
+pub(crate) fn compose_channels(
+    base: Transform,
+    bind: Option<Transform>,
+    pose: Option<super::super::scene::ModelPoseSpec>,
+    rotation: Option<Quat>,
+    position: Option<Vec3>,
+    scale: Option<Vec3>,
+) -> Transform {
+    let bind_rotation = bind.map_or(base.rotation, |bind| bind.rotation);
+    // 动画接管 position 时从绑定位置起算（丢弃静态平移），但缩放仍沿用静态基础。
+    let translation = match (position, bind) {
+        (Some(delta), Some(bind)) => bind.translation + delta,
+        (Some(delta), None) => base.translation + delta,
+        (None, _) => base.translation,
+    };
+    let rotation = match (rotation, bind) {
+        (Some(delta), _) => bind_rotation * delta,
+        (None, _) => {
+            // 无动画通道时保留静态姿势（base 已含），只有调用方给出 bind 才重新合成以
+            // 防止旧调用把增量乘两次。
+            pose.and_then(|pose| pose.rotation_radians)
+                .filter(|_| bind.is_some())
+                .map_or(base.rotation, |delta| {
+                    bind_rotation * super::super::scene::quat_from_xyz_radians(delta)
+                })
+        }
+    };
     Transform {
-        translation: base.translation + delta.translation,
-        rotation: base.rotation * delta.rotation,
-        scale: base.scale * delta.scale,
+        translation,
+        rotation,
+        scale: base.scale * scale.unwrap_or(Vec3::ONE),
     }
 }
 
@@ -181,16 +218,20 @@ pub(crate) fn apply_motion_playback(
             let (Some(entity), Some(base)) = (
                 root.part_entities.get(&id), root.part_bases.get(&id),
             ) else { continue };
-            let mut pose = *base;
-            if scene.animation_playback.as_ref().is_some_and(|p| p.node_id == node_id) {
-                if let Some(delta) = clip.get(&id) {
-                    pose = compose_delta(pose, delta);
-                }
-            }
-            if let Some(q) = rotations.and_then(|r| r.get(&id)) {
-                pose.rotation *= Quat::from_array(*q);
-            }
-            if let Some(p) = positions.and_then(|p| p.get(&id)) { pose.translation += Vec3::from_array(*p); }
+            let clip = if scene.animation_playback.as_ref().is_some_and(|p| p.node_id == node_id) {
+                clip.get(&id)
+            } else { None };
+            let part_rotation = rotations.and_then(|r| r.get(&id)).copied().map(Quat::from_array);
+            let part_position = positions.and_then(|p| p.get(&id)).copied().map(Vec3::from_array);
+            let (rotation, position, scale) = animation_channels(clip, part_rotation, part_position);
+            let pose = compose_channels(
+                *base,
+                root.part_binds.get(&id).copied(),
+                root.part_poses.get(&id).copied(),
+                rotation,
+                position,
+                scale,
+            );
             if let Ok(mut entity) = commands.get_entity(*entity) {
                 entity.insert(pose);
             }
@@ -200,4 +241,30 @@ pub(crate) fn apply_motion_playback(
         }
     }
     camera
+}
+
+/// 合并 clip 采样与外部关节采样，返回实际接管的通道（change: 2026-11-15-add-model-script-static-poses）。
+///
+/// 普通 MotionScript 只接管其轨道实际产生的通道；完整 SOMA 片段由上游为全部关节输出
+/// `partRotations`/`partPositions`，因此自然接管完整骨架（含单位旋转与零位移）。
+fn animation_channels(
+    clip: Option<&crate::motion::ModelDelta>,
+    part_rotation: Option<Quat>,
+    part_position: Option<Vec3>,
+) -> (Option<Quat>, Option<Vec3>, Option<Vec3>) {
+    let clip_rotation = clip.filter(|delta| delta.owns_rotation).map(|delta| delta.rotation);
+    let rotation = match (clip_rotation, part_rotation) {
+        (Some(clip), Some(part)) => Some(clip * part),
+        (Some(clip), None) => Some(clip),
+        (None, part) => part,
+    };
+    let position = match (
+        clip.filter(|delta| delta.owns_position).map(|delta| delta.translation),
+        part_position,
+    ) {
+        (Some(clip), Some(part)) => Some(clip + part),
+        (Some(clip), None) => Some(clip),
+        (None, part) => part,
+    };
+    (rotation, position, clip.map(|delta| delta.scale))
 }

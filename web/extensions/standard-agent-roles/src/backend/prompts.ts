@@ -30,6 +30,7 @@ export const TOOL_COMMON_RULES = [
 ] as const;
 
 export const MODEL_AUTHOR_FLOW = [
+  "摆出、保持、摆姿势等静态要求使用 ModelScript 的 scene.pose；不创建 MotionScript 或恒定动画轨道。先读模型和 get_model_api，保留绑定骨架，只追加或修改静态姿势。明确要求行走、连续变化、时序或循环时才使用动画。",
   "流程：新建人物、机器人或机甲时必须使用 scene.somaHumanoid 标准模板，保留77个SOMA关节，通过 armorColor/jointColor/accentColor/lightColor 修改外观；不要自行搭建旧14关节骨架。先调用 get_model_api 了解当前脚本 API，再调用 get_model_node 读取权威 nodeType、当前 modelScript、modelContentVersion 与 cameras。",
   "然后只做用户要求的增量修改，保留未提及的部件、材质、尺寸与层级；除非用户明确要求重建，不要整体重写模型。",
   "用 submit_model_script 提交完整脚本，并带上稳定 requestId 与读取到的 expectedModelContentHash。",
@@ -37,6 +38,8 @@ export const MODEL_AUTHOR_FLOW = [
 ] as const;
 
 export const DIRECTOR_MOTION_FLOW = [
+  "先判定静态/动态意图：摆出、保持、摆姿势、合影、定格（例如摆出潜行姿势）默认是静态。先 get_world_context 找到角色，get_model_api 读取 scene.pose，read_world_resource(world_model_script) 读取原脚本及版本，再通过 edit_world_model_script 添加/修改 scene.pose(actor.joint(...), {rotation, position})。只有 Hips 能做位移，rotation 为绑定局部 Y-X-Z 度、position 为父空间米制偏移；不要改绑定 TRS、体型或骨长。写后一次 read_world_resource(world_model_pose) 核对准确版本和数据。静态任务不调用 animate_humanoid、edit_scene_animation_script 或 sample_scene_animation，也不因 Kimodo 不可用而改走关节动画兜底。",
+  "world_model_pose 的动画覆盖摘要表示现有动画可能盖住静态通道。不要静默删除或改写已有动画；向用户说明实际覆盖。静态数据只能证明几何，不能证明平衡、自然度或视觉验收；脚表面未知时不按脚踝/绑定包围盒反复调整高度。明确要求走动、连续过程、顺序或循环的任务再遵守下列动画流程；单独的潜行姿势不属于这些动态请求。",
   "双人推、击打与受击等需要发力伸展时序配合的动作，必须调用animate_humanoid_interaction，禁止用两次animate_humanoid替代后直接结束。该工具由宿主强制生成、检查双方时序/根位移、验证路径并对齐应用；不要把inspectTiming或对齐留给用户再提一次。先get_world_context读取两人的真实instanceId和expectedVersion。initiator/responder分别写单人prompt、duration、rootMotion，initiatorEvent选择真实发力端（双手推handsForward，单手出拳用对应手，踢击用对应脚）。这只是运动学候选，不保证接触或自然度。",
   "互动位移必须按动作含义决定，不以用户没说translate为理由选择原地。被推开、踉跄后退、退几步、向前冲等描述使用rootMotion:translate并由宿主检查路径；站定发力或用户明确要求原地则in-place。allowInPlaceTravel:true只用于用户明确要求原地而素材仍有根位移的情况。movement-decision-required必须处理模式或解释边界限制，不能报互动完成。修正rootMotion后用相同双方prompt/duration/版本重调animate_humanoid_interaction，宿主在同回合复用已生成任务；不要改prompt重复生成，也不要单独apply绕过剩余流程。不可擅自缩短位移、扩大导演区或重生成满意素材绕过路径检查。失败按phase/generationIds/appliedActors恢复，保留已完成对象，只报告实际状态。",
 

@@ -32,6 +32,7 @@ fn group(id: &str, parent: Option<&str>) -> ModelOp {
         position: [0.0; 3],
         rotation: [0.0; 3],
         scale: [1.0; 3],
+        pose: None,
     }
 }
 
@@ -399,4 +400,408 @@ fn file_material_texture_id_is_preserved_and_unresolved_texture_stays_plain() {
     assert_eq!(spec.base_color_texture.as_deref(), Some("glbtex:0123456789abcdef"));
     // 纹理尚未上传时材质仍可构建（纯色回退），不阻塞节点其余部分。
     assert!(spec.to_material().base_color_texture.is_none());
+}
+
+#[test]
+fn static_pose_is_independent_from_bind_trs_and_changes_prepared_bounds() {
+    let bind_ops = vec![
+        group("root", None),
+        ModelOp::Box {
+            id: "arm".into(),
+            parent: Some("root".into()),
+            position: [1.0, 0.0, 0.0],
+            rotation: [0.0; 3],
+            scale: [1.0; 3],
+            color: Some("#ffffff".into()),
+            material: None,
+            size: [0.5; 3],
+        },
+    ];
+    let mut posed_ops = bind_ops.clone();
+    if let ModelOp::Group { pose, .. } = &mut posed_ops[0] {
+        *pose = Some(crate::protocol::ModelPose {
+            rotation: Some([0.0, 90.0, 0.0]),
+            position: Some([0.0, 1.0, 0.0]),
+        });
+    }
+    let bind = snapshot(true, bind_ops);
+    let posed = prepare_snapshot(snapshot(true, posed_ops));
+    let specs = build_entity_specs(&posed);
+    let root = &specs[0];
+    // 绑定事实原样保留；静态姿势单独表述。
+    assert_eq!(root.position, [0.0; 3]);
+    assert_eq!(root.rotation_radians, [0.0; 3]);
+    assert!(root.bind_transform().rotation.abs_diff_eq(Quat::IDENTITY, 1e-6));
+    assert!((root.static_transform().rotation.y - 45f32.to_radians().sin()).abs() < 1e-5);
+    assert!((root.static_transform().translation.y - 1.0).abs() < 1e-6);
+    // prepared AABB 来自有效姿势：90° 旋转把 +X 的部件转到 Z 轴，且整体抬高 1。
+    let bind_aabb = derive_aabb(&bind).expect("bind bounds");
+    let posed_aabb = derive_aabb(&posed).expect("posed bounds");
+    assert!((posed_aabb.max[1] - (bind_aabb.max[1] + 1.0)).abs() < 1e-4);
+    assert!((posed_aabb.max[0] - 0.25).abs() < 1e-3);
+    assert!((posed_aabb.max[2] + 0.75).abs() < 1e-3);
+}
+
+#[test]
+fn prepared_bounds_use_fk_lbs_for_static_skinned_pose() {
+    let identity: [f32; 16] = [
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ];
+    let build = |pose: Option<crate::protocol::ModelPose>| {
+        snapshot(
+            true,
+            vec![
+                ModelOp::Group {
+                    id: "root".into(),
+                    parent: None,
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    pose,
+                },
+                ModelOp::Group {
+                    id: "root.joint".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    pose: None,
+                },
+                ModelOp::Mesh {
+                    id: "skin".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    color: Some("#ffffff".into()),
+                    material: None,
+                    vertices: vec![[-1., -1., 0.], [1., -1., 0.], [0., 1., 0.]],
+                    faces: vec![[0, 1, 2]],
+                    normals: None,
+                    uvs: None,
+                    colors: None,
+                    skin: Some(crate::protocol::ModelSkin {
+                        joint_ids: vec!["root.joint".into()],
+                        inverse_bind_matrices: vec![identity],
+                        indices: vec![vec![0], vec![0], vec![0]],
+                        weights: vec![vec![1.], vec![1.], vec![1.]],
+                    }),
+                },
+            ],
+        )
+    };
+    let bind = prepare_snapshot(build(None));
+    let posed = prepare_snapshot(build(Some(crate::protocol::ModelPose {
+        rotation: None,
+        position: Some([0., 2.5, 0.]),
+    })));
+    let bind_aabb = derive_aabb(&bind).expect("bind bounds");
+    let posed_aabb = derive_aabb(&posed).expect("posed bounds");
+    assert!((bind_aabb.min[1] + 1.0).abs() < 1e-5);
+    assert!((bind_aabb.max[1] - 1.0).abs() < 1e-5);
+    // 蒙皮顶点整体上移 2.5：posed 顶点已完全离开绑定 AABB。
+    assert!((posed_aabb.min[1] - 1.5).abs() < 1e-5);
+    assert!((posed_aabb.max[1] - 3.5).abs() < 1e-5);
+    assert!(posed_aabb.min[1] > bind_aabb.max[1]);
+    // model_local_aabb / 原生预览取景走同一份 prepared bounds。
+    assert_eq!(model_local_aabb(&posed).map(|aabb| aabb.min[1]), Some(posed_aabb.min[1]));
+}
+
+/// 跨语言共享向量（TS 与 Rust 消费同一份 fixtures）。
+#[test]
+fn shared_static_pose_channel_vectors_match_rust_semantics() {
+    let vectors: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../tests/fixtures/model-static-pose/channels.json"))
+            .expect("channels fixture");
+    assert!(!vectors.is_empty());
+    for vector in vectors {
+        let group = &vector["group"];
+        let animation = &vector["animation"];
+        let expected = &vector["expected"];
+        let vec3 = |value: &serde_json::Value| -> [f32; 3] {
+            let values: Vec<f64> = serde_json::from_value(value.clone()).unwrap();
+            [values[0] as f32, values[1] as f32, values[2] as f32]
+        };
+        let degrees = |value: &serde_json::Value| -> [f32; 3] {
+            let values = vec3(value);
+            values.map(f32::to_radians)
+        };
+        let pose = &group["pose"];
+        let spec = ModelEntitySpec {
+            id: "g".into(),
+            parent: None,
+            position: vec3(&group["position"]),
+            rotation_radians: degrees(&group["rotation"]),
+            scale: vec3(&group["scale"]),
+            geometry: None,
+            material_key: String::new(),
+            animation: None,
+            pose: Some(ModelPoseSpec {
+                rotation_radians: pose.get("rotation").map(degrees),
+                position: pose.get("position").map(vec3),
+            }),
+        };
+        let rotation = animation.get("rotation").map(degrees).map(quat_from_xyz_radians);
+        let position = animation.get("position").map(vec3).map(Vec3::from_array);
+        let transform = spec.effective_transform(rotation, position, None);
+        let expected_translation = vec3(&expected["translation"]);
+        let expected_scale = vec3(&expected["scale"]);
+        let expected_rotation: Vec<f32> = serde_json::from_value(expected["rotation"].clone()).unwrap();
+        let name = vector["name"].as_str().unwrap();
+        for axis in 0..3 {
+            assert!(
+                (transform.translation[axis] - expected_translation[axis]).abs() < 1e-5,
+                "{name}: translation axis {axis}"
+            );
+            assert!(
+                (transform.scale[axis] - expected_scale[axis]).abs() < 1e-5,
+                "{name}: scale axis {axis}"
+            );
+        }
+        // 四元数符号可能整体取反；比较分量绝对值只用于本向量集的 q/w 同号约定。
+        let actual = transform.rotation.to_array();
+        for index in 0..4 {
+            assert!(
+                (actual[index] - expected_rotation[index]).abs() < 1e-5,
+                "{name}: rotation component {index} actual={actual:?} expected={expected_rotation:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn affine_bounds_preserve_shear_from_nonuniform_parent_scale() {
+    // 父级非均匀缩放 × 旋转子级：真实仿射是 S(2,1,1)·R(45°)；按 TRS 重建会得到
+    // R·S 并让 X 方向少算约 25%。
+    let build = |child_rotation: [f32; 3], child_pose: Option<crate::protocol::ModelPose>| {
+        snapshot(
+            true,
+            vec![
+                ModelOp::Group {
+                    id: "root".into(),
+                    parent: None,
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [2., 1., 1.],
+                    pose: None,
+                },
+                ModelOp::Group {
+                    id: "child".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: child_rotation,
+                    scale: [1.; 3],
+                    pose: child_pose,
+                },
+                ModelOp::Box {
+                    id: "box".into(),
+                    parent: Some("child".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    color: Some("#ffffff".into()),
+                    material: None,
+                    size: [1.; 3],
+                },
+            ],
+        )
+    };
+    for posed in [
+        prepare_snapshot(build([0., 45., 0.], None)),
+        prepare_snapshot(build(
+            [0.; 3],
+            Some(crate::protocol::ModelPose {
+                rotation: Some([0., 45., 0.]),
+                position: None,
+            }),
+        )),
+    ] {
+        let aabb = derive_aabb(&posed).expect("bounds");
+        assert!((aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
+        assert!((aabb.max[2] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "{aabb:?}");
+    }
+}
+
+#[test]
+fn skinned_affine_bounds_preserve_parent_shear() {
+    let identity: [f32; 16] = [
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ];
+    let model = prepare_snapshot(snapshot(
+        true,
+        vec![
+            ModelOp::Group {
+                id: "root".into(),
+                parent: None,
+                position: [0.; 3],
+                rotation: [0.; 3],
+                scale: [2., 1., 1.],
+                pose: None,
+            },
+            ModelOp::Group {
+                id: "root.joint".into(),
+                parent: Some("root".into()),
+                position: [0.; 3],
+                rotation: [0.; 3],
+                scale: [1.; 3],
+                pose: Some(crate::protocol::ModelPose {
+                    rotation: Some([0., 45., 0.]),
+                    position: None,
+                }),
+            },
+            ModelOp::Mesh {
+                id: "skin".into(),
+                parent: Some("root".into()),
+                position: [0.; 3],
+                rotation: [0.; 3],
+                scale: [1.; 3],
+                color: Some("#ffffff".into()),
+                material: None,
+                vertices: vec![[0., 0., 1.], [1., 0., 0.], [0., 1., 0.]],
+                faces: vec![[0, 1, 2]],
+                normals: None,
+                uvs: None,
+                colors: None,
+                skin: Some(crate::protocol::ModelSkin {
+                    joint_ids: vec!["root.joint".into()],
+                    inverse_bind_matrices: vec![identity],
+                    indices: vec![vec![0], vec![0], vec![0]],
+                    weights: vec![vec![1.], vec![1.], vec![1.]],
+                }),
+            },
+        ],
+    ));
+    let aabb = derive_aabb(&model).expect("bounds");
+    // S(2,1,1)·R(45°)·[0,0,1] = [√2, 0, 0.707]；TRS 重建会得到 x=0.707。
+    assert!((aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
+}
+
+#[test]
+fn unused_vertices_do_not_enlarge_mesh_aabb() {
+    let mesh = |skinned: bool| {
+        let skin = skinned.then(|| crate::protocol::ModelSkin {
+            joint_ids: vec!["root".into()],
+            inverse_bind_matrices: vec![[
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+            ]],
+            indices: vec![vec![0], vec![0], vec![0], vec![0]],
+            weights: vec![vec![1.], vec![1.], vec![1.], vec![1.]],
+        });
+        prepare_snapshot(snapshot(
+            true,
+            vec![
+                ModelOp::Group {
+                    id: "root".into(),
+                    parent: None,
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    // 姿势场景走精确引用顶点路径；绑定场景保留全部顶点语义。
+                    pose: Some(crate::protocol::ModelPose {
+                        rotation: Some([0., 10., 0.]),
+                        position: None,
+                    }),
+                },
+                ModelOp::Mesh {
+                    id: "mesh".into(),
+                    parent: Some("root".into()),
+                    position: [0.; 3],
+                    rotation: [0.; 3],
+                    scale: [1.; 3],
+                    color: Some("#ffffff".into()),
+                    material: None,
+                    // 第 4 个顶点没有任何面引用，不能把 AABB 拉到 x=100。
+                    vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [100., 0., 0.]],
+                    faces: vec![[0, 1, 2]],
+                    normals: None,
+                    uvs: None,
+                    colors: None,
+                    skin,
+                },
+            ],
+        ))
+    };
+    for model in [mesh(false), mesh(true)] {
+        let aabb = derive_aabb(&model).expect("bounds");
+        assert!(aabb.max[0] < 1.01, "unused vertex leaked into AABB: {aabb:?}");
+    }
+}
+
+#[test]
+fn posed_sparse_mesh_uses_exact_referenced_vertices_not_corner_aabb() {
+    // 三角形被 45° 旋转并受非均匀父级缩放；AABB 角变换会把两个轴同时放大而 overbound。
+    let model = prepare_snapshot(snapshot(
+        true,
+        vec![
+            ModelOp::Group {
+                id: "root".into(),
+                parent: None,
+                position: [0.; 3],
+                rotation: [0., 45., 0.],
+                scale: [2., 1., 1.],
+                pose: Some(crate::protocol::ModelPose {
+                    rotation: Some([0., 0., 0.]),
+                    position: None,
+                }),
+            },
+            ModelOp::Mesh {
+                id: "mesh".into(),
+                parent: Some("root".into()),
+                position: [0.; 3],
+                rotation: [0.; 3],
+                scale: [1.; 3],
+                color: Some("#ffffff".into()),
+                material: None,
+                vertices: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [100., 0., 0.]],
+                faces: vec![[0, 1, 2]],
+                normals: None,
+                uvs: None,
+                colors: None,
+                skin: None,
+            },
+        ],
+    ));
+    let aabb = derive_aabb(&model).expect("bounds");
+    // 引用顶点 (1,0,0) 经 S(2,1,1)·R45 后 (√2, 0, -√2)；未引用的 x=100 必须忽略。
+    assert!((aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
+    assert!((aabb.min[2] + std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
+    assert!(aabb.max[0] < 2.0, "{aabb:?}");
+}
+
+#[test]
+fn posed_analytic_primitives_match_ts_bounds_formula() {
+    // 胶囊在非均匀父级 + 旋转下按 TS 公式求包围，而不是套局部 AABB 角。
+    let model = prepare_snapshot(snapshot(
+        true,
+        vec![
+            ModelOp::Group {
+                id: "root".into(),
+                parent: None,
+                position: [0.; 3],
+                rotation: [0.; 3],
+                scale: [2., 1., 1.],
+                pose: Some(crate::protocol::ModelPose {
+                    rotation: Some([0., 0., 0.]),
+                    position: None,
+                }),
+            },
+            ModelOp::Capsule {
+                id: "capsule".into(),
+                parent: Some("root".into()),
+                position: [0.; 3],
+                rotation: [0., 0., 45.],
+                scale: [1.; 3],
+                color: Some("#ffffff".into()),
+                material: None,
+                radius: 0.5,
+                height: 2.0,
+            },
+        ],
+    ));
+    let aabb = derive_aabb(&model).expect("bounds");
+    // S(2,1,1)·Rz(45)，r=0.5，halfY=1：x=0.5*2+0.5*1.4142=1.7071，
+    // y=0.5*1+0.5*0.7071=0.8536，z=0.5。
+    assert!((aabb.max[0] - 1.707_106_8).abs() < 1e-3, "{aabb:?}");
+    assert!((aabb.max[1] - 0.853_553).abs() < 1e-3, "{aabb:?}");
+    assert!((aabb.max[2] - 0.5).abs() < 1e-3, "{aabb:?}");
 }
