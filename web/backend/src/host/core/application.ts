@@ -3,6 +3,7 @@ import { devPrincipalIdFromEnv } from "../base/access.js";
 import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createAgentRuntimeBridge } from "./agent-runtime-bridge.js";
 import { randomBytes } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { createAssistantTextPort } from "../../ports/assistant-text.js";
 import { createImageDirectorPort } from "../../ports/image-director-scene.js";
@@ -252,6 +253,8 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
         socketPath: bridgeSocket,
         token: bridgeToken,
         workspaceKey: executorWorkspace,
+        // Windows 的桥端点是命名管道，dirname 会落到 `\\.\pipe`，不能在那里写身份文件。
+        runtimeDir: process.platform === "win32" ? path.join(os.tmpdir(), "woohaa-host-bridge") : undefined,
         tools: roleAuthoring.tools,
         canvasRead: ({ subject, canvasId }) => runtimeCanvas.read({ subject, canvasId, permission: "read" }),
         mediaRead: async ({ storageKey, canvasId }) => {

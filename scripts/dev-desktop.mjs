@@ -90,6 +90,7 @@ async function main() {
   if (!remote) {
     const prepared = await prepareDevelopmentHost();
     env.WOOHAA_DESKTOP_HOST_ROOT = prepared.resourceRoot;
+    env.WOOHAA_DESKTOP_MODULE_ROOT = prepared.moduleRoot;
     env.WOOHAA_DESKTOP_NODE = prepared.node;
     env.WOOHAA_DESKTOP_HOST_PORT = back;
     env.WOOHAA_DESKTOP_UI_URL = url;

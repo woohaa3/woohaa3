@@ -142,19 +142,32 @@ export async function prepareDesktopHost({output=path.join(root,'.local/desktop-
  console.log(`[desktop-host] ${state.size} packages, ${extensions.length} extensions → ${output}`);
  return {resourceRoot:output,node,nodeVersion:DESKTOP_NODE_VERSION,nodeSha256:actual,extensions,packages:state.size,npmCli:npmCli.npmCli};
 }
+/**
+ * 开发态传给宿主的模块解析根。
+ *
+ * Windows 的 `backend-runtime` 是 junction。pnpm 把 `yaml` 装成相对链接，Node 按 junction
+ * 路径拼接，不会先 realpath，于是落到 `.local/locks` 而不是 `locks`。目录符号链接由内核先
+ * 解析父目录，所以 macOS/Linux 不受影响。发布树由 `attachRuntimePackage` 实体化依赖，也没有
+ * 这个问题。开发态的解析根就是真实的 `web/backend`。
+ */
+export function developmentModuleRoot(){
+ return path.join(root,'web/backend');
+}
 export async function prepareDevelopmentHost(){
  const prepared=await prepareDesktopNode();const artifact=nodeArtifact();const suffix=process.platform==='win32'?'.exe':'';
  const output=path.join(root,'.local/desktop-dev-host');fs.mkdirSync(output,{recursive:true});
  ensureExecutorBundle();
+ const moduleRoot=developmentModuleRoot();
  const executorLink=path.join(output,'executor-runtime');if(!fs.existsSync(executorLink))fs.symlinkSync(path.join(root,'packages/execution-runtime'),executorLink,process.platform==='win32'?'junction':'dir');
- for(const [name,source] of [['backend-runtime',path.join(root,'web/backend')],['frontend',path.join(root,'web/frontend/dist')],['scripts',path.join(root,'scripts')],['models.json',path.join(root,'web/services/task-service/pptask.models.json')]]) {
+ const backendLink=path.join(output,'backend-runtime');if(!fs.existsSync(backendLink))fs.symlinkSync(moduleRoot,backendLink,process.platform==='win32'?'junction':'dir');
+ for(const [name,source] of [['frontend',path.join(root,'web/frontend/dist')],['scripts',path.join(root,'scripts')],['models.json',path.join(root,'web/services/task-service/pptask.models.json')]]) {
   const dest=path.join(output,name);if(!fs.existsSync(dest)){if(process.platform==='win32'&&!fs.statSync(source).isDirectory())fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest,process.platform==='win32'?'junction':'dir');}
  }
  fs.writeFileSync(path.join(output,'desktop-host.mjs'),`import './scripts/desktop-host.mjs';\n`);
  const appVersion=JSON.parse(fs.readFileSync(path.join(root,'desktop/tauri.conf.json'),'utf8')).version;
- fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build:'development',nodeVersion:DESKTOP_NODE_VERSION,developmentRoot:root}));
+ fs.writeFileSync(path.join(output,'host-manifest.json'),JSON.stringify({schema:1,version:appVersion,build:'development',nodeVersion:DESKTOP_NODE_VERSION,developmentRoot:root,moduleRoot}));
  fs.mkdirSync(path.join(output,'tools'),{recursive:true});
  for(const [name,source] of [['model-renderer',path.join(root,`bevy/target/${artifact.triple}/debug/model-renderer${suffix}`)],['world-video-encoder',path.join(root,`bevy/target/${artifact.triple}/debug/world-video-encoder${suffix}`)]]){const dest=path.join(output,'tools',name+suffix);if(fs.existsSync(source)&&!fs.existsSync(dest)){if(process.platform==='win32')fs.copyFileSync(source,dest);else fs.symlinkSync(source,dest);}}
- return {...prepared,resourceRoot:output};
+ return {...prepared,resourceRoot:output,moduleRoot};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){prepareDesktopHost({build:process.env.WOOHAA_DESKTOP_BUILD??'development'}).catch(error=>{console.error(error);process.exitCode=1;});}

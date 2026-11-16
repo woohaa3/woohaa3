@@ -114,9 +114,16 @@ impl LocalHost {
                 command.arg("--dev-origin").arg(ui);
             }
         }
-        let mut child = command
+        // 开发态 moduleRoot 与入口目录分开：Windows junction 不能作为 Node 的模块解析起点。
+        // 未设置时保持发布包语义：resource-root 就是入口目录，不传 host-home。
+        let module_root = std::env::var_os("WOOHAA_DESKTOP_MODULE_ROOT").map(PathBuf::from);
+        command
             .arg("--resource-root")
-            .arg(&launch.root)
+            .arg(module_root.as_deref().unwrap_or(launch.root.as_path()));
+        if module_root.is_some() {
+            command.arg("--host-home").arg(&launch.root);
+        }
+        let mut child = command
             .arg("--data-dir")
             .arg(&launch.data)
             .arg("--instance")
@@ -700,10 +707,16 @@ pub fn handle_menu(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
             }
             // The startup worker exclusively owns restarts. It waits while busy is set.
             state.host.lock().unwrap().take();
-            let output = hidden_command(&state.launch.node)
+            let module_root = std::env::var_os("WOOHAA_DESKTOP_MODULE_ROOT").map(PathBuf::from);
+            let mut command = hidden_command(&state.launch.node);
+            command
                 .arg(state.launch.root.join("desktop-host.mjs"))
                 .arg("--resource-root")
-                .arg(&state.launch.root)
+                .arg(module_root.as_deref().unwrap_or(state.launch.root.as_path()));
+            if module_root.is_some() {
+                command.arg("--host-home").arg(&state.launch.root);
+            }
+            let output = command
                 .arg("--data-dir")
                 .arg(&state.launch.data)
                 .arg(action.flag())
