@@ -491,6 +491,38 @@ describe('Ark 图片请求字段的逐版本边界（按官方文档与实测 40
     })).toThrow(/2-100/);
   });
 
+  it('图层拆分与 background 互斥（上游实测 400，不再透传）', () => {
+    const image = 'https://cdn/a.png';
+    // 现场证据：上层勾了透明、请求带上 `background` 后上游直接拒——
+    //   The parameter `background` ... is not supported with layer_decomposition.
+    // 所以图层拆分时这个字段一个字符都不下发（不论用户选了透明还是不透明）。
+    const transparent = buildArkSeedreamRequestBody('doubao-seedream-5-5-261028', {
+      prompt: '按照live2d的标准拆分',
+      urls: [image],
+      size: '2K',
+      outputFormat: 'png',
+      layerDecomposition: true,
+      layerDecompositionMaxImages: 30,
+      background: 'transparent',
+    });
+    expect(transparent.layer_decomposition).toBe(true);
+    expect(transparent).not.toHaveProperty('background');
+    expect(transparent.output_format).toBe('png');
+    const opaque = buildArkSeedreamRequestBody('doubao-seedream-5-5-261028', {
+      prompt: '拆图层',
+      urls: [image],
+      layerDecomposition: true,
+      background: 'opaque',
+    });
+    expect(opaque).not.toHaveProperty('background');
+    // 非拆分时透明照常下发（5.5 文生图也能出原生 RGBA）。
+    expect(buildArkSeedreamRequestBody('doubao-seedream-5-5-261028', {
+      prompt: 'a red apple',
+      background: 'transparent',
+      outputFormat: 'png',
+    })).toMatchObject({ background: 'transparent', output_format: 'png' });
+  });
+
   it('Seedream 5.5 进了目录，并且和 pro 同族像素表', () => {
     expect(ARK_CATALOG.map((model) => model.id)).toContain(ARK_SEEDREAM_5_5_MODEL);
     const props = describeArkModel(ARK_SEEDREAM_5_5_MODEL).inputSchema?.properties as Record<string, any>;

@@ -28,3 +28,9 @@
   - fix：健康检查只把「未配 API Key」与「接入点格式非法」当作降级原因
 
 - 2026-11-16 `1.1.1`（上一版 `1.1.0`）：fix(contracts): 声明 sideEffects:false 恢复扩展产物 tree-shaking
+
+## 1.1.2
+
+- 2026-11-16 `1.1.2`（上一版 `1.1.1`）：fix(layer-decomposition): 图层拆分不再下发 `background`
+  - fix：上游实测 `background` 与 `layer_decomposition` 互斥（`The parameter background ... is not supported with layer_decomposition`，400），拆分开启时整个字段不下发，此前带 `background: transparent` 的请求必然失败
+  - fix：图层拆分开启时隐藏「背景」控件，不再摆一个注定报错的选项；旧草稿里残留的 `background` 也不会触发报错

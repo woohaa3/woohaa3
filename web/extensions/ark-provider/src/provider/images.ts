@@ -151,15 +151,22 @@ export function buildArkSeedreamRequestBody(
       'background',
     );
     if (background === 'transparent') {
-      // 5.5 支持文生图与图生图都出原生 RGBA；5.0 pro / flash 只能「图生图 + 1 张透明 PNG」。
-      const fromText = seedreamTransparentBackgroundFromText(preset);
-      if (!fromText && (images.length !== 1 || layerDecomposition)) {
-        throw new Error('ark Seedream transparent background requires single-image editing mode');
-      }
-      if (acceptsOutputFormat && outputFormat !== 'png') {
-        throw new Error('ark Seedream transparent background requires output_format=png');
+      // 上游实测（2026-11-16）：`background` 与 `layer_decomposition` 互斥，一起下发直接 400 ——
+      //   The parameter `background` ... is not supported with layer_decomposition.
+      // 图层拆分分支由下面的 `if (!layerDecomposition)` 整个跳过，不在这里拦，否则旧草稿里
+      // 残留的 `transparent` 会让用户看到一条与操作无关的报错（面板也已经隐藏该控件）。
+      if (!layerDecomposition) {
+        // 5.5 支持文生图与图生图都出原生 RGBA；5.0 pro / flash 只能「图生图 + 1 张透明 PNG」。
+        const fromText = seedreamTransparentBackgroundFromText(preset);
+        if (!fromText && images.length !== 1) {
+          throw new Error('ark Seedream transparent background requires single-image editing mode');
+        }
+        if (acceptsOutputFormat && outputFormat !== 'png') {
+          throw new Error('ark Seedream transparent background requires output_format=png');
+        }
       }
     }
+    // 图层拆分时整个字段都不下发：上游两个参数互斥，带上就 400。
     if (!layerDecomposition) body.background = background;
   } else if (input.background === 'transparent') {
     throw new Error('ark Seedream does not support transparent background');
@@ -288,7 +295,14 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
   }
   if (supportsTransparentBackground(modelId)) {
     // 与网关链路共用卡片目录的投影：透明选项自带「输出必须是 PNG」的联动。
-    properties.background = seedreamBackgroundField();
+    // 图层拆分与 `background` 在上游互斥（实测 400：`is not supported with
+    // layer_decomposition`），所以拆分开着时直接隐藏这个控件，不摆一个注定不能用的选项。
+    properties.background = spec.layerDecomposition
+      ? {
+          ...seedreamBackgroundField(),
+          'x-hidden-when': [{ field: 'layerDecomposition', equals: true }],
+        }
+      : seedreamBackgroundField();
   }
   if (spec.family === 'sequential') {
     properties.sequentialImageGeneration = selectSchema('组图', ['disabled', 'auto'], 'disabled');

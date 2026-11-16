@@ -20,12 +20,12 @@ import {
   isTerminalRecord,
   hasTextOutput,
   projectExecutionRecord,
-  readBinaryOutputUrl
+  readBinaryOutputUrls
 } from "./execution-projection.js";
 import {
   inferBinaryModelType,
   materializeBinaryBytesFromStore,
-  materializeBinaryResult,
+  materializeOutputs,
   materializeStableMediaResult,
   materializeVideoResult,
   projectMaterializingRecord,
@@ -121,19 +121,23 @@ export async function createTaskRuntime(options: TaskRuntimeOptions): Promise<Ta
         return;
       }
       if (modelType) {
-        const url = readBinaryOutputUrl(record, modelType);
-        if (url) {
+        const urls = readBinaryOutputUrls(record, modelType);
+        if (urls.length > 0) {
           settled.add(record.id);
           // 先投影「媒体准备中」再下载/转存：历史与 UI 都看不到「已成功但没有稳定媒体」的窗口。
           projectMaterializingRecord(options, record, association, modelType);
           if (modelType === "video") {
             // 海报/末帧只在 provider 原始结果里（providerMetadata），投影不携带。
-            trackMaterialization(materializeVideoResult(options, record, association, url));
+            trackMaterialization(materializeVideoResult(options, record, association, urls[0]!));
             return;
           }
-          // 图片/音频的字节同样在 durable 记录里：受控下载失败时 materializeBinaryResult 会用
+          // 图片/音频的字节同样在 durable 记录里：受控下载失败时 materializeOutputs 会用
           // 同一份字节回退转存，provider 地址过期/超时不会把已生成的结果判死。
-          trackMaterialization(materializeBinaryResult(options, record, association, { kind: "url", url, modelType }));
+          // 多产物（图层拆分）在这里一次性全量转存，不能只留第一张。
+          trackMaterialization(materializeOutputs(options, record, association, {
+            modelType,
+            sources: urls.map((url) => ({ kind: "url" as const, url }))
+          }));
           return;
         }
         if (!hasTextOutput(record)) {

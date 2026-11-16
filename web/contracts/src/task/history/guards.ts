@@ -103,6 +103,20 @@ function isTaskResultSummary(value: unknown): value is TaskResultSummary {
     if (value.poster.size !== undefined && !isNonNegativeInteger(value.poster.size)) return false;
     if (value.poster.checksum !== undefined && typeof value.poster.checksum !== "string") return false;
   }
+  if (value.outputs !== undefined) {
+    if (!Array.isArray(value.outputs)) return false;
+    // 多产物只承载稳定身份：每项都必须有 storageKey，序号唯一且从 0 连续递增。
+    for (const [position, entry] of value.outputs.entries()) {
+      if (!isJsonObject(entry)) return false;
+      if (!isNonNegativeInteger(entry.index) || entry.index !== position) return false;
+      if (!isNonEmptyString(entry.storageKey)) return false;
+      if (entry.label !== undefined && typeof entry.label !== "string") return false;
+      if (entry.locator !== undefined && typeof entry.locator !== "string") return false;
+      if (entry.contentType !== undefined && typeof entry.contentType !== "string") return false;
+      if (entry.size !== undefined && !isNonNegativeInteger(entry.size)) return false;
+      if (entry.checksum !== undefined && typeof entry.checksum !== "string") return false;
+    }
+  }
   return true;
 }
 

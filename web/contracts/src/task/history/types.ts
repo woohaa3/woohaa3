@@ -106,6 +106,34 @@ export type TaskResultSummary = {
     size?: number;
     checksum?: string;
   };
+  /**
+   * 一次生成给出的**全部**二进制产物（顺序即 provider 输出顺序）。
+   *
+   * 典型来源是图层拆分（Seedream 5.5 `layer_decomposition`：1 张底图 + N 个图层，
+   * 每张都是独立 PNG）。顶层 `storageKey` 等字段仍然表示**主产物**（= `outputs[0]`），
+   * 保证只关心一份结果的消费方（预览、下载、旧画布节点）行为不变；只有需要成套产物的
+   * 消费方（画布自动打组）才读这个数组。
+   *
+   * 缺省表示「只有一份产物」，绝不表示「不知道有几份」——单产物任务不写这个字段。
+   */
+  outputs?: TaskResultOutput[];
+};
+
+/**
+ * 多产物里的一项：稳定媒体身份 + 它在本次输出里的位置。
+ *
+ * 与顶层字段同样只允许稳定 metadata：绝不携带 provider 的临时/签名 URL 或字节。
+ */
+export type TaskResultOutput = {
+  /** 在本次输出里的序号（0 起，与 provider 返回顺序一致）。 */
+  index: number;
+  /** 可选的人类可读标签（如 provider 文件名推导出的 `layer_3`）。 */
+  label?: string;
+  storageKey: string;
+  locator?: string;
+  contentType?: string;
+  size?: number;
+  checksum?: string;
 };
 
 /** 安全错误摘要：只有名称与消息与结构化状态码，绝不含 stack / 上游响应头。 */

@@ -110,7 +110,7 @@ export const ARK_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: ARK_PLUGIN_ID,
   name: "Ark Provider",
   description: "火山方舟文本、图片与视频生成 Provider。填 API Key 即可用公开 Model ID 调用；如需绑定自定义限流/计费，再为模型填推理接入点。",
-  version: "1.1.1",
+  version: "1.1.2",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "ark-provider-config", schemaVersion: 1 },

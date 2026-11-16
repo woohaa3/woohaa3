@@ -19,14 +19,42 @@ export function sanitizeResult(result: TaskResultSummary): TaskResultSummary {
       ? { textTruncated: true }
       : {}),
     ...(result.storageKey !== undefined ? { storageKey: result.storageKey } : {}),
+    ...(result.locator !== undefined ? { locator: result.locator } : {}),
     ...(result.contentType !== undefined ? { contentType: result.contentType } : {}),
     ...(result.size !== undefined ? { size: result.size } : {}),
     ...(result.checksum !== undefined ? { checksum: result.checksum } : {}),
     ...(result.durationSeconds !== undefined ? { durationSeconds: result.durationSeconds } : {}),
     ...(result.fps !== undefined ? { fps: result.fps } : {}),
     ...(result.motion ? { motion: { ...result.motion } } : {}),
-    ...(result.poster ? { poster: { ...result.poster } } : {})
+    ...(result.poster ? { poster: { ...result.poster } } : {}),
+    // 多产物（图层拆分）：逐项同样只留稳定身份，缺 storageKey 的条目直接丢弃。
+    ...(result.outputs !== undefined ? { outputs: sanitizeOutputs(result.outputs) } : {})
   };
+}
+
+/**
+ * 多产物裁剪：与顶层字段同一份白名单。
+ *
+ * 这一处曾经漏改，真实后果是上游返回 17 张、转存日志也写了 `pending: 13`，但写进
+ * `result_json` 时 `outputs` 被整块丢掉，画布只拿到主产物一张白底板。
+ */
+function sanitizeOutputs(
+  outputs: NonNullable<TaskResultSummary["outputs"]>
+): NonNullable<TaskResultSummary["outputs"]> {
+  return outputs.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || typeof entry.storageKey !== "string" || entry.storageKey === "") return [];
+    return [
+      {
+        index: entry.index,
+        ...(entry.label !== undefined ? { label: entry.label.slice(0, 120) } : {}),
+        storageKey: entry.storageKey,
+        ...(entry.locator !== undefined ? { locator: entry.locator } : {}),
+        ...(entry.contentType !== undefined ? { contentType: entry.contentType } : {}),
+        ...(entry.size !== undefined ? { size: entry.size } : {}),
+        ...(entry.checksum !== undefined ? { checksum: entry.checksum } : {})
+      }
+    ];
+  });
 }
 
 /**

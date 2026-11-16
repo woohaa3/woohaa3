@@ -69,6 +69,23 @@ function imageAsset(): StoredAsset {
   };
 }
 
+/** 图层拆分里的一张产物：id 与媒体键按序号区分。 */
+function layerAsset(index: number): StoredAsset {
+  const checksum = `${index}`.repeat(64);
+  return {
+    id: `layer-${index}`,
+    nodeId: "n1",
+    title: `图层 ${index + 1}`,
+    mediaKind: "image",
+    source: "generated",
+    status: "ready",
+    url: `/api/media/generation-outputs/${checksum}.png`,
+    createdAt: NOW,
+    provenance: { taskNodeId: "n1", taskKind: "image-generation", runId: "run-1", outputIndex: index },
+    metadata: { storageKey: `generation-outputs/${checksum}.png`, checksum, contentType: "image/png", size: 10 + index }
+  };
+}
+
 function record(overrides: Partial<PptaskExecutionRecord> = {}): PptaskExecutionRecord {
   return {
     taskKey: "run-1",
@@ -97,6 +114,33 @@ describe("终态投影（任务 7.3 / 7.4）", () => {
     expect(exported.canvas.jobs[0].status).toBe("success");
     // seed(1) + projection(1) = 2。
     expect(exported.canvas.revision).toBe(2);
+  });
+
+  it("多产物（图层拆分）：每张落一张卡片，并自动打成一个 2D 组", async () => {
+    const { room, projector } = await setupRoom();
+    const layers = [0, 1, 2].map((index) => layerAsset(index));
+    const outcome = await projector.project(record({
+      output: { mediaKind: "image", asset: layers[0], assets: layers }
+    }));
+    expect(outcome.status).toBe("projected");
+
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    // 3 份资产全部落库（底图也算一份，不再只剩第一张）。
+    expect(exported.canvas.assets.map((asset) => asset.id)).toEqual(["layer-0", "layer-1", "layer-2"]);
+    // 每张都有独立卡片，原任务节点仍是主产物宿主。
+    const memberIds = ["image-run-1-layer-0", "image-run-1-layer-1", "image-run-1-layer-2"];
+    for (const [index, memberId] of memberIds.entries()) {
+      expect(exported.canvas.document.nodes.some((node) => node.id === memberId)).toBe(true);
+      expect(exported.canvas.nodeData[memberId].outputAssetId).toBe(`layer-${index}`);
+    }
+    expect(exported.canvas.nodeData["n1"].outputAssetId).toBe("layer-0");
+    // 自动创建的 2D 组框住全部成员。
+    const groupId = "group-run-1-layers";
+    expect(exported.canvas.document.nodes.some((node) => node.id === groupId)).toBe(true);
+    const groupData = exported.canvas.nodeData[groupId] as { workflowGroup2d?: { memberNodeIds: string[] } };
+    expect(groupData.workflowGroup2d?.memberNodeIds).toEqual(memberIds);
   });
 
   it("终态投影保留已受理任务的取景绑定（T10）", async () => {

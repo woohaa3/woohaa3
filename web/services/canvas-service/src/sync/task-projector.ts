@@ -14,6 +14,9 @@
  * 防止旧终态被永久重试。
  */
 import { YJS_SYNC_PROTOCOL_VERSION } from "@woohaa3/contracts/canvas-yjs";
+import { SHARED_WORLD_VERSION } from "@woohaa3/contracts";
+import { findAgentNodeDescriptor } from "@woohaa3/contracts";
+import { stableAuthorityVersion } from "../world-authoring/authority.js";
 import type { CanvasRoom } from "./room.js";
 import type { CanvasCommand } from "@woohaa3/contracts";
 import type { CanvasNodeData, ServerCanvas, StoredAsset, StoredJob } from "@woohaa3/contracts";
@@ -46,6 +49,14 @@ export type PptaskExecutionRecord = {
     /** 视频海报资产（稳定引用）。 */
     posterAsset?: StoredAsset;
     durationSeconds?: number;
+    /**
+     * 一次生成的**全部**资产（顺序 = provider 输出顺序，`[0]` 与 `asset` 相同）。
+     *
+     * 图层拆分（Seedream 5.5 `layer_decomposition`）一次给 1 张底图 + N 个图层，每张都要
+     * 落成独立卡片并由一个自动创建的 2D 组框住；只有 `asset` 会让画布只看到一张图
+     * （真实缺陷：Live2D 拆分结果是一块白底板，全部图层被丢弃）。
+     */
+    assets?: StoredAsset[];
   };
   /** 终态发生时间（参与 terminal identity）。 */
   terminalAt: string;
@@ -159,6 +170,99 @@ function emptySuccessFailurePatch(record: PptaskExecutionRecord, detail: string)
   };
 }
 
+/** 多产物布局：每行最多几张卡片（全部铺开，不做折叠）。 */
+const MULTI_OUTPUT_COLUMNS = 5;
+/** 卡片之间的间距。 */
+const MULTI_OUTPUT_GAP = 40;
+/** 组框内边距（组卡片要把成员完整包住）。 */
+const MULTI_OUTPUT_GROUP_PADDING = 32;
+
+/**
+ * 一次生成的多张图片 → 独立卡片 + 一个自动创建的 2D 组。
+ *
+ * 图层拆分（Seedream 5.5 `layer_decomposition`）一次给 1 张底图 + N 个图层。只投影第一张
+ * 时画布上只剩一块白底板（真实缺陷），所以这里把**每一张**都落成独立图片节点，并用
+ * `workflow-group-2d` 框住整批——用户要的正是一套可整体拖动的图层集合。
+ *
+ * 三条硬约束：
+ * - 组与成员节点 id 由 `runId + 序号` 确定性生成，投影重投只会撞同一批 id（幂等）；
+ * - 成员表只写本次新建的节点（不吞掉节点已属的其它组，那是用户的选择）；
+ * - 原任务节点仍是主产物的宿主：它保留 `outputAssetId` = 第一张，作为「生成入口」留在组外。
+ */
+function buildMultiOutputCommands(
+  record: PptaskExecutionRecord,
+  primaryAsset: StoredAsset,
+  extraAssets: readonly StoredAsset[],
+  origin: { x: number; y: number },
+  baseZIndex: number
+): CanvasCommand[] {
+  const commands: CanvasCommand[] = [];
+  const assets = [primaryAsset, ...extraAssets];
+  const size = findAgentNodeDescriptor("image")?.defaultSize ?? { width: 320, height: 320 };
+  const columns = Math.min(MULTI_OUTPUT_COLUMNS, assets.length);
+  const rows = Math.ceil(assets.length / columns);
+  const memberIds: string[] = [];
+  for (const [index, asset] of assets.entries()) {
+    const memberId = multiOutputNodeId(record, index);
+    memberIds.push(memberId);
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    commands.push({
+      type: "node.add",
+      node: {
+        id: memberId,
+        type: "image",
+        position: {
+          x: origin.x + column * (size.width + MULTI_OUTPUT_GAP),
+          y: origin.y + row * (size.height + MULTI_OUTPUT_GAP)
+        },
+        width: size.width,
+        height: size.height
+      },
+      nodeData: {
+        title: asset.title ?? `图层 ${index + 1}`,
+        outputAssetId: asset.id,
+        resourceKind: "image",
+        taskStatus: "successed"
+      }
+    });
+    commands.push({ type: "asset.upsert", asset });
+  }
+  const groupId = multiOutputGroupId(record);
+  const groupWidth = columns * size.width + (columns - 1) * MULTI_OUTPUT_GAP + MULTI_OUTPUT_GROUP_PADDING * 2;
+  const groupHeight = rows * size.height + (rows - 1) * MULTI_OUTPUT_GAP + MULTI_OUTPUT_GROUP_PADDING * 2;
+  const workflowGroup = {
+    kind: "workflow-group-2d" as const,
+    version: SHARED_WORLD_VERSION,
+    groupId,
+    scopeVersion: stableAuthorityVersion("workflow-group-scope", { groupId, memberNodeIds: memberIds }),
+    memberNodeIds: memberIds
+  };
+  commands.push({
+    type: "node.add",
+    node: {
+      id: groupId,
+      type: "workflow-group-2d",
+      position: { x: origin.x - MULTI_OUTPUT_GROUP_PADDING, y: origin.y - MULTI_OUTPUT_GROUP_PADDING },
+      width: groupWidth,
+      height: groupHeight,
+      zIndex: baseZIndex - 1
+    },
+    nodeData: { title: "图层拆分", workflowGroup2d: workflowGroup } as unknown as CanvasNodeData
+  });
+  return commands;
+}
+
+/** 多产物成员节点的确定性 id（重投撞同一批 id，走 commandId 幂等）。 */
+function multiOutputNodeId(record: PptaskExecutionRecord, index: number): string {
+  return `image-${record.runId}-layer-${index}`;
+}
+
+/** 多产物自动组的确定性 id。 */
+function multiOutputGroupId(record: PptaskExecutionRecord): string {
+  return `group-${record.runId}-layers`;
+}
+
 /**
  * 由终态记录构造命令批次内容。
  *
@@ -200,29 +304,55 @@ export function buildProjectionCommands(input: {
       commands.push(emptySuccessFailurePatch(record, `${record.output?.mediaKind} 结果缺少资产`));
     } else if (binaryOutput && mediaAsset && record.output) {
       const output = record.output;
-      commands.push({ type: "asset.upsert", asset: mediaAsset });
-      // 视频海报：独立图片资产，通过稳定 posterAssetId 关联。
-      if (output.mediaKind === "video" && output.posterAsset) {
-        commands.push({ type: "asset.upsert", asset: output.posterAsset });
-      }
-      commands.push({
-        type: "nodeData.patch",
-        nodeId: record.nodeId,
-        value: {
-          taskStatus: "successed",
-          outputAssetId: mediaAsset.id,
-          ...(output.mediaKind === "video" && output.posterAsset
-            ? { posterAssetId: output.posterAsset.id }
-            : {}),
-          resourceKind: mediaAsset.mediaKind,
-          ...(output.durationSeconds !== undefined
-            ? { durationSeconds: output.durationSeconds }
-            : {}),
-          progress: 100,
-          error: null,
-          errorMessage: null
+      // 多产物（图层拆分）：每张都落成独立卡片，并自动打成一个 2D 组。
+      const extraAssets = (output.assets ?? []).filter((asset) => asset.id !== mediaAsset.id);
+      if (extraAssets.length > 0 && output.mediaKind === "image") {
+        const canvasNode = currentCanvas.document.nodes.find((entry) => entry.id === record.nodeId);
+        commands.push(...buildMultiOutputCommands(
+          record,
+          mediaAsset,
+          extraAssets,
+          { x: canvasNode?.position?.x ?? 0, y: canvasNode?.position?.y ?? 0 },
+          canvasNode?.zIndex ?? 0
+        ));
+        // 原任务节点仍是主产物宿主：成功态、outputAssetId 指第一张，作为「生成入口」留在组外。
+        commands.push({
+          type: "nodeData.patch",
+          nodeId: record.nodeId,
+          value: {
+            taskStatus: "successed",
+            outputAssetId: mediaAsset.id,
+            resourceKind: mediaAsset.mediaKind,
+            progress: 100,
+            error: null,
+            errorMessage: null
+          }
+        });
+      } else {
+        commands.push({ type: "asset.upsert", asset: mediaAsset });
+        // 视频海报：独立图片资产，通过稳定 posterAssetId 关联。
+        if (output.mediaKind === "video" && output.posterAsset) {
+          commands.push({ type: "asset.upsert", asset: output.posterAsset });
         }
-      });
+        commands.push({
+          type: "nodeData.patch",
+          nodeId: record.nodeId,
+          value: {
+            taskStatus: "successed",
+            outputAssetId: mediaAsset.id,
+            ...(output.mediaKind === "video" && output.posterAsset
+              ? { posterAssetId: output.posterAsset.id }
+              : {}),
+            resourceKind: mediaAsset.mediaKind,
+            ...(output.durationSeconds !== undefined
+              ? { durationSeconds: output.durationSeconds }
+              : {}),
+            progress: 100,
+            error: null,
+            errorMessage: null
+          }
+        });
+      }
     } else if (record.output?.mediaKind === "text") {
       // 文本结果：直接写进 nodeData（没有媒体 bytes，不需要 COS）。
       commands.push({

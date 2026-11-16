@@ -207,16 +207,18 @@ export function isTerminalRecord(record: ExecutionRecord): boolean {
   return record.state === "succeeded" || record.state === "failed" || record.state === "cancelled";
 }
 
-/** 投影里若已带受控下载地址，直接用它（少数 provider 返回 URL）。 */
-export function readBinaryOutputUrl(
+/** 投影里若已带受控下载地址，按输出顺序全部取出（图层拆分会有多张）。
+ *
+ * 单产物任务返回长度 1 的数组，调用方行为与旧实现一致；返回空数组表示没有可下载地址。
+ */
+export function readBinaryOutputUrls(
   record: ExecutionRecord,
   modelType: "image" | "video" | "audio" | "motion"
-): string | undefined {
+): string[] {
   const outputs = record.result?.outputs ?? [];
-  const match = outputs.find(
-    (output) => output.kind === modelType && typeof output.url === "string" && output.url !== ""
-  );
-  return match?.url;
+  return outputs
+    .filter((output) => output.kind === modelType && typeof output.url === "string" && output.url !== "")
+    .map((output) => output.url as string);
 }
 
 /** 投影里已有文本输出时不需要按二进制转存。 */
