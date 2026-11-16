@@ -42,6 +42,7 @@ type RuntimePayload = {
   images?: Array<{ bytes: string; contentType: string }>;
   mcpEndpoint?: { name: string; url: string };
   bridge: HostRuntimeOptions["bridge"];
+  executable?: string;
   candidate?: { images: Array<{ bytes: string; contentType: string }>; outputSchema: Record<string, unknown> };
 };
 
@@ -194,6 +195,11 @@ export function createRuntimeConversationAdapter(
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      const executableLease = adapter.acquireExecutable
+        ? await adapter.acquireExecutable(input)
+        : adapter.resolveExecutable
+          ? await Promise.resolve(adapter.resolveExecutable(input)).then((entry) => entry ? { entry, release: () => {} } : null)
+          : undefined;
       const payload: RuntimePayload = {
         owner: input.owner,
         canvasId: input.canvasId,
@@ -204,6 +210,7 @@ export function createRuntimeConversationAdapter(
         history: input.history,
         ...(input.images ? { images: input.images.map((image) => ({ bytes: Buffer.from(image.bytes).toString("base64"), contentType: image.contentType })) } : {}),
         bridge: options.bridge,
+        ...(executableLease?.entry ? { executable: executableLease.entry } : {}),
         ...(options.mcpEndpoint ? { mcpEndpoint: { name: "woohaa", url: options.mcpEndpoint } } : {}),
         ...(input.candidate
           ? {
@@ -247,6 +254,7 @@ export function createRuntimeConversationAdapter(
         return { status: "failed", error: { code: "runtime-error", message: error instanceof Error ? error.message : String(error) } };
       } finally {
         input.signal.removeEventListener("abort", abort);
+        executableLease?.release();
       }
     },
     async cancel(input) {

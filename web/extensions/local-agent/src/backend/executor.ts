@@ -53,6 +53,7 @@ type Payload = {
   images?: readonly { bytes: string; contentType: string }[];
   mcpEndpoint?: { name: string; url: string };
   bridge?: LocalAgentBridge;
+  executable?: string;
   candidate?: { images?: readonly { bytes: string; contentType: string }[]; outputSchema?: Record<string, unknown> };
 };
 
@@ -128,7 +129,7 @@ function createProcessManager(
   const configDir = path.join(workDir, "config");
   fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
   const { command, configured } = binaryFor(adapter, process.env);
-  const executable = options.executableFor?.(adapter.adapterId) ?? resolveLocalExecutable(configured, command, process.env);
+  const executable = payload.executable ?? options.executableFor?.(adapter.adapterId) ?? resolveLocalExecutable(configured, command, process.env);
   if (!executable) throw new Error(`未安装 ${adapter.label} 所需运行时（${command}）`);
   const handles = new Map<string, ProcessHandle>();
   const sourceCodexHome = adapter.adapterId === "codex-appserver" ? deployment.codexHome ?? resolveCodexHome(process.env) : null;

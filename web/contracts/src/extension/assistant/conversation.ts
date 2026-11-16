@@ -619,6 +619,9 @@ export type AgentConversationAdapter = {
   models(input: { owner: string }): Promise<AgentCatalogSnapshot>;
   /** 讨论或目标执行；未声明能力时调用方 MUST 拒绝并说明原因。 */
   run(input: AgentAdapterRunInput): Promise<AgentAdapterRunOutcome>;
+  /** 为独立执行器解析或申请宿主端持有的运行时组件租约与可执行路径。 */
+  acquireExecutable?(input?: AgentAdapterRunInput): Promise<{ entry: string; release(): void } | null>;
+  resolveExecutable?(input?: AgentAdapterRunInput): Promise<string | null> | string | null;
   /**
    * 宿主重启接管：按冻结输入接回执行器 journal，从 cursor 继续跟随事件并返回终态。
    *
