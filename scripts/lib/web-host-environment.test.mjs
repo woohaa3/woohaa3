@@ -44,6 +44,17 @@ test('受管安装根落在数据目录，不随资源根替换被删', (t) => {
   assert.ok(fs.existsSync(env.WOOHAA3_EXTENSION_MANAGED_DIR));
 });
 
+test('agent bridge identity uses the executor state directory, not its named pipe', (t) => {
+  const { resourceRoot, dataDir } = fixture(t);
+  const runtimeDir = path.join(dataDir, '.local', 'agent-runtime');
+  const env = buildWebHostEnvironment({
+    resourceRoot, dataDir, host: '127.0.0.1', port: 4173, basePath: '/', baseEnv: {},
+    agentRuntime: { socketPath: '\\\\.\\pipe\\woohaa-agent-test', token: 'token', workspaceKey: 'workspace', runtimeDir }
+  });
+  assert.equal(env.WOOHAA3_AGENT_RUNTIME_DIR, runtimeDir);
+  assert.notEqual(env.WOOHAA3_AGENT_RUNTIME_DIR, path.dirname(env.WOOHAA3_AGENT_RUNTIME_SOCKET));
+});
+
 test('web host can explicitly disable runtime installation', (t) => {
   const { resourceRoot, dataDir } = fixture(t);
   const env = buildWebHostEnvironment({ resourceRoot, dataDir, host: '127.0.0.1', port: 4173, basePath: '/', runtimeInstall: 'disabled', baseEnv: {} });

@@ -89,10 +89,12 @@ async function main(){
   env.WOOHAA3_AGENT_RUNTIME_SOCKET=agentRuntime.socketPath;
   env.WOOHAA3_AGENT_RUNTIME_TOKEN=agentRuntime.token;
   env.WOOHAA3_AGENT_WORKSPACE_KEY=agentRuntime.workspaceKey;
+  env.WOOHAA3_AGENT_RUNTIME_DIR=agentRuntime.runtimeDir;
   Object.assign(process.env,{
    WOOHAA3_AGENT_RUNTIME_SOCKET:agentRuntime.socketPath,
    WOOHAA3_AGENT_RUNTIME_TOKEN:agentRuntime.token,
-   WOOHAA3_AGENT_WORKSPACE_KEY:agentRuntime.workspaceKey
+   WOOHAA3_AGENT_WORKSPACE_KEY:agentRuntime.workspaceKey,
+   WOOHAA3_AGENT_RUNTIME_DIR:agentRuntime.runtimeDir
   });
   console.error(`[agent-runtime] 执行器就绪 pid=${agentRuntime.pid} reused=${agentRuntime.reused}`);
  }catch(error){

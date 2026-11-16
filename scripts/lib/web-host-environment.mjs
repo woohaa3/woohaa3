@@ -50,7 +50,8 @@ export function buildWebHostEnvironment({ resourceRoot, dataDir, host, port, bas
     ...(agentRuntime ? {
       WOOHAA3_AGENT_RUNTIME_SOCKET: agentRuntime.socketPath,
       WOOHAA3_AGENT_RUNTIME_TOKEN: agentRuntime.token,
-      WOOHAA3_AGENT_WORKSPACE_KEY: agentRuntime.workspaceKey
+      WOOHAA3_AGENT_WORKSPACE_KEY: agentRuntime.workspaceKey,
+      WOOHAA3_AGENT_RUNTIME_DIR: agentRuntime.runtimeDir
     } : {}),
     /**
      * 受管安装根（市场安装落盘处）必须放在**数据目录**，不能留在资源根。

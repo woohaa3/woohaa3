@@ -275,7 +275,7 @@ export function createAgentSupervisorHost({
 				const workspaceReady = !canvasWorkspaceRoot || await rpc({ socketPath: identity.socketPath, token: identity.token, workspaceKey }, "workspace.settings").then(value => value?.available === true, () => false);
 				if ((!expectedRuntimeBuild || marker === expectedRuntimeBuild) && workspaceReady) {
 					log(`复用执行器运行时（pid ${identity.pid}，${identity.runtimeVersion}）`);
-					return { socketPath: identity.socketPath, token: identity.token, workspaceKey, pid: identity.pid, reused: true };
+					return { socketPath: identity.socketPath, token: identity.token, workspaceKey, runtimeDir, pid: identity.pid, reused: true };
 				}
 				log(`执行器运行时制品已更新（${marker || "未记录"} → ${expectedRuntimeBuild}），重启运行时`);
 				await stopRuntimeImpl();
@@ -289,7 +289,7 @@ export function createAgentSupervisorHost({
 			throw new Error(`执行器运行时目录不满足私有权限：${stored.message}`);
 		}
 
-		const next = { socketPath, token: readToken(), workspaceKey };
+		const next = { socketPath, token: readToken(), workspaceKey, runtimeDir };
 		// 命名管道没有 unlink 语义：随最后一个句柄关闭由系统回收，跳过清理。
 		if (process.platform !== "win32") {
 			try { fs.unlinkSync(socketPath); } catch { /* already removed */ }

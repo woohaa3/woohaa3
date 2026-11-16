@@ -47,6 +47,7 @@ test("reuses a matching healthy runtime and its persisted token", async () => {
 	assert.equal(config.reused, true);
 	assert.equal(config.pid, 4242);
 	assert.equal(config.token, "persisted-token");
+	assert.equal(config.runtimeDir, runtimeDir);
 	assert.equal(spawns.length, 0);
 	assert.equal(calls[0].method, "ping");
 	assert.equal(fs.existsSync(path.join(runtimeDir, "token")), false);
