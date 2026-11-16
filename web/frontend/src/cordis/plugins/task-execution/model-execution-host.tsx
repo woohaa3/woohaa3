@@ -1,6 +1,7 @@
 import { useOptionalService } from "../../react.js";
 import { MediaConfiguration } from "../../ui/assistant-execution/media-configuration.js";
 import { mediaDraftTarget, mediaDraftPartition, switchMediaParameters, mediaParameterEditingError, visibleMediaParameters } from "./configuration-draft.js";
+import { canvasModelParameterStore, canvasModelParametersKey, rememberedModelParameters } from "./canvas-model-parameters.js";
 import { recordAcceptedGeneration, generationIdentity } from "../../services/assistant-execution/recent.js";
 /**
  * Model Execution Host
@@ -252,10 +253,30 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
     () => (model ? registry.resolve(model.interaction) : null),
     [model, registry]
   );
+  // 画布内「同一模型上一次参数」：按数据空间 + 画布隔离，只读浏览器本地偏好。
+  const preferenceVersion = useSyncExternalStore(
+    canvasModelParameterStore.subscribe,
+    canvasModelParameterStore.getVersion
+  );
+  const canvasParametersKey = useMemo(
+    () => (canvasId ? canvasModelParametersKey(space, canvasId) : null),
+    [space, canvasId]
+  );
+  const remembered = useMemo<Record<string, unknown> | undefined>(() => {
+    void preferenceVersion;
+    if (!canvasParametersKey || !model || !panelKind) return undefined;
+    return rememberedModelParameters(model, canvasModelParameterStore.get(canvasParametersKey, model.modelKey));
+  }, [canvasParametersKey, model, panelKind, preferenceVersion]);
   const parameters = useMemo<Record<string, unknown>>(() => {
     if (!context) return {};
-    return derivePanelDraft(context.nodeData, draft).parameters;
-  }, [context, draft]);
+    const own = derivePanelDraft(context.nodeData, draft).parameters;
+    // 该节点该模型已经有自己的参数（本地草稿或已提交快照）时偏好不参与，
+    // 避免回放覆盖用户正在改的值；「本节点草稿 > 画布内该模型上次参数 > schema 默认」
+    // 的顺序只在这里体现（schema 默认由 `parametersOnOpen` 在面板内补缺）。
+    const hasOwn = Object.keys(own).some((key) => key !== "model" && key !== "serviceConnectionId");
+    if (hasOwn || !remembered) return own;
+    return { ...remembered, ...own };
+  }, [context, draft, remembered]);
   const draftPrompt = useMemo(
     () => (context ? derivePanelDraft(context.nodeData, draft).prompt : ""),
     [context, draft]
@@ -354,14 +375,18 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         const next = typedModels.find(e => e.modelKey === nextModel)!;
         const partition = mediaDraftPartition(nextModel, nextSource);
         const own = draftStore.get(draftNodeId, partition);
+        // 目标模型在该画布上有上次参数时优先回放，其次才按语义从当前模型迁移。
+        const replayed = !own.parameters?.model && canvasParametersKey
+          ? rememberedModelParameters(next, canvasModelParameterStore.get(canvasParametersKey, nextModel))
+          : undefined;
         const restored = switchMediaParameters(model, next, parameters, own.parameters);
-        const values = restored.parameters;
+        const values = replayed ? { ...replayed, model: nextModel } : restored.parameters;
         draftStore.patch(draftNodeId, partition, { prompt: patch.prompt ?? draftPrompt, parameters: { ...values, model: nextModel, serviceConnectionId: nextSource || undefined } });
         mediaSourceSelections.set(draftNodeId, nextSource);
         setSourceSelections(current => ({ ...current, [draftNodeId]: nextSource }));
         draftStore.setSelection(draftNodeId, nextModel);
         saveModelSelection(context.nodeId, nextModel);
-        setConfigurationNotice(restored.resetLabels.length ? `已恢复默认：${restored.resetLabels.join("、")}` : "");
+        setConfigurationNotice(replayed ? "" : (restored.resetLabels.length ? `已恢复默认：${restored.resetLabels.join("、")}` : ""));
         return;
       }
       // 参数手势：把连续变更合并为一次可撤销的本地条目（任务 1.6）。
@@ -380,7 +405,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         ...(patch.parameters !== undefined ? { parameters: patch.parameters } : {})
       });
     },
-    [context, draft, draftStore, targetModelKey, typedModels, props, saveModelSelection, draftNodeId, draftModelKey, sourceId, model, parameters, draftPrompt]
+    [context, draft, draftStore, targetModelKey, typedModels, props, saveModelSelection, draftNodeId, draftModelKey, sourceId, model, parameters, draftPrompt, canvasParametersKey]
   );
 
   /**
@@ -484,9 +509,12 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
         return { ok: false, error: outcome.error };
       }
       recordAcceptedGeneration(space, panelKind, generationIdentity(sourceId || model?.providerId || "", targetModelKey));
+      // 受理成功才记「这个模型在这张画布上用了什么参数」。只记用户真正提交的生成参数，
+      // 不记临时的面板调整；写进浏览器本地偏好，不进 Y.Doc / 任务历史。
+      if (canvasParametersKey) canvasModelParameterStore.record(canvasParametersKey, targetModelKey, resolvedParameters);
       return { ok: true, runId: outcome.runId, jobId: outcome.jobId };
     },
-    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture, space, sourceId, draftNodeId, draftModelKey, sourceError]
+    [catalog, canvas, catalogState, context, disabledReason, draftStore, model, panelKind, pendingSelection, showEmptyUpstreamAlert, submitCoordinator, targetModelKey, worldCapture, space, sourceId, draftNodeId, draftModelKey, sourceError, canvasParametersKey]
   );
 
   const submitIntent = useCallback(
@@ -617,7 +645,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             {...(taskState.errorMessage !== undefined
               ? { errorMessage: taskState.errorMessage }
               : {})}
-            draft={derivePanelDraft(context.nodeData, draft)}
+            draft={{ prompt: draftPrompt, parameters }}
             references={references}
             blockingReasons={displayBlockingReasons}
             {...(binding?.statusSummary ? { statusSummary: binding.statusSummary } : {})}
