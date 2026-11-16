@@ -240,6 +240,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     const executorSocket = env.WOOHAA3_AGENT_RUNTIME_SOCKET?.trim() ?? "";
     const executorToken = env.WOOHAA3_AGENT_RUNTIME_TOKEN?.trim() ?? "";
     const executorWorkspace = env.WOOHAA3_AGENT_WORKSPACE_KEY?.trim() ?? "";
+    const executorRuntimeDir = env.WOOHAA3_AGENT_RUNTIME_DIR?.trim() ?? "";
     let agentRuntime: import("@woohaa3/application-service").HostRuntimeOptions | undefined;
     if (executorSocket && executorToken && executorWorkspace) {
       const socketDir = path.dirname(executorSocket);
@@ -250,6 +251,8 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       const runtimeCanvas = createExtensionNodeFacade(ctx.canvas, "agent-runtime-bridge");
       const bridge = await createAgentRuntimeBridge({
         socketPath: bridgeSocket,
+        // Windows 命名管道不是文件目录，桥身份必须落在执行器的真实状态目录。
+        runtimeDir: executorRuntimeDir || undefined,
         token: bridgeToken,
         workspaceKey: executorWorkspace,
         tools: roleAuthoring.tools,

@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentRuntimeBridge } from "./agent-runtime-bridge.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];
+let endpointSequence = 0;
+const testSocketPath = (directory: string) => process.platform === "win32"
+  ? `\\\\.\\pipe\\woohaa-host-bridge-test-${process.pid}-${endpointSequence++}`
+  : path.join(directory, "bridge.sock");
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
@@ -31,10 +35,43 @@ function call(socketPath: string, request: Record<string, unknown>): Promise<Rec
 }
 
 describe("Agent runtime host bridge", () => {
+  it.skipIf(process.platform !== "win32")("Windows 缺省目录不会尝试写入管道命名空间", async () => {
+    await expect(createAgentRuntimeBridge({
+      socketPath: `\\\\.\\pipe\\woohaa-host-bridge-invalid-${process.pid}`,
+      token: "secret",
+      workspaceKey: "ws",
+      tools: { issue: vi.fn(), revoke: vi.fn(), authorize: vi.fn() } as never,
+      canvasRead: async () => ({ canvasId: "c" } as never),
+      mediaRead: async () => ({ bytes: Uint8Array.from([]), contentType: "application/octet-stream" })
+    })).rejects.toThrow("需要真实的运行时目录");
+  });
+
+  it.skipIf(process.platform !== "win32")("Windows 命名管道与桥身份文件使用独立路径", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa3-bridge-win32-"));
+    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const socketPath = `\\\\.\\pipe\\woohaa-host-bridge-test-${process.pid}-${Date.now()}`;
+    const bridge = await createAgentRuntimeBridge({
+      socketPath,
+      runtimeDir: dir,
+      token: "secret",
+      workspaceKey: "ws",
+      tools: { issue: vi.fn(), revoke: vi.fn(), authorize: vi.fn() } as never,
+      canvasRead: async () => ({ canvasId: "c" } as never),
+      mediaRead: async () => ({ bytes: Uint8Array.from([]), contentType: "application/octet-stream" })
+    });
+    cleanups.push(() => bridge.close());
+
+    const identity = JSON.parse(fs.readFileSync(path.join(dir, "host-bridge.json"), "utf8")) as { socketPath: string };
+    expect(identity.socketPath).toBe(socketPath);
+    expect(await call(socketPath, { token: "secret", workspaceKey: "ws", method: "canvas.read", params: { subject: "u", canvasId: "c" } }))
+      .toMatchObject({ ok: true, result: { canvasId: "c" } });
+    expect(fs.readdirSync(dir).filter(name => name.endsWith(".tmp"))).toEqual([]);
+  });
+
   it("校验身份并按白名单回调工具/画布/媒体", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa3-bridge-"));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const socketPath = path.join(dir, "bridge.sock");
+    const socketPath = testSocketPath(dir);
     const tools = {
       issue: vi.fn(async () => ({ token: "grant-1", canvasIds: ["c"], nodeIds: ["n"], tools: ["get_model_node"], workId: "w" })),
       revoke: vi.fn(),
@@ -42,6 +79,7 @@ describe("Agent runtime host bridge", () => {
     };
     const bridge = await createAgentRuntimeBridge({
       socketPath,
+      runtimeDir: dir,
       token: "secret",
       workspaceKey: "ws",
       tools: tools as never,
@@ -100,7 +138,7 @@ describe("Host bridge turn leases across host restarts (task 2.3)", () => {
   async function bridgeFixture() {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa3-bridge-lease-"));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const socketPath = path.join(dir, "bridge.sock");
+    const socketPath = testSocketPath(dir);
     const tools = { issue: vi.fn(), revoke: vi.fn(), authorize: vi.fn(() => ({ ok: true as const })) };
     const create = async () => {
       const bridge = await createAgentRuntimeBridge({
@@ -204,7 +242,8 @@ describe("host-call reconstruction through a restarted bridge (task 2.4)", () =>
   it("keeps serving an in-flight executor turn with the persisted bridge identity and turn authority", async () => {
     const { startExecutorDaemon } = await import("../../../../../packages/execution-runtime/src/daemon.js");
     const { createExecutorClient } = await import("../../../../../packages/execution-runtime/src/client.js");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa3-bridge-adopt-"));
+    // Windows 的 8.3 短 TEMP 路径含 `~`，会被模块 URL 转义后破坏动态 import。
+    const dir = fs.mkdtempSync(path.join(process.platform === "win32" ? process.env.LOCALAPPDATA ?? os.tmpdir() : os.tmpdir(), "woohaa3-bridge-adopt-"));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const modulePath = path.join(dir, "executor.mjs");
     fs.writeFileSync(modulePath, `export const createExecutor = () => ({ id: "custom", kind: "agent", async run(_input, ctx) {
@@ -214,7 +253,7 @@ describe("host-call reconstruction through a restarted bridge (task 2.4)", () =>
       return { status: "succeeded", result: { first, second } };
     } });`);
     const daemon = await startExecutorDaemon({
-      socketPath: path.join(dir, "executor.sock"),
+      socketPath: testSocketPath(dir),
       stateDir: dir,
       token: "daemon-token",
       workspaceKey: "ws"
@@ -228,9 +267,9 @@ describe("host-call reconstruction through a restarted bridge (task 2.4)", () =>
       hostMethods: ["connection.get"], configRevision: 1, credentialEpoch: 1, expiresAt: null, revokedAt: null
     };
     const tools = { issue: vi.fn(), revoke: vi.fn(), authorize: vi.fn(() => ({ ok: true as const })) };
-    const makeBridge = async () => {
+    const makeBridge = async (socketPath: string) => {
       const bridge = await createAgentRuntimeBridge({
-        socketPath: path.join(dir, "bridge.sock"),
+        socketPath,
         token: "boot-token",
         workspaceKey: "ws",
         runtimeDir: dir,
@@ -241,7 +280,8 @@ describe("host-call reconstruction through a restarted bridge (task 2.4)", () =>
       bridge.setTurnAuthority((turnId) => turnId === turnAuthority.turnId ? turnAuthority : null);
       return bridge;
     };
-    const first = await makeBridge();
+    const first = await makeBridge(testSocketPath(dir));
+    const bridgeSocketPath = first.socketPath;
     const lease = first.registerCall(async () => "first-host", {
       turnId: turnAuthority.turnId, requestId: turnAuthority.requestId, owner: turnAuthority.owner, methods: turnAuthority.hostMethods, exp: 0
     });
@@ -253,7 +293,7 @@ describe("host-call reconstruction through a restarted bridge (task 2.4)", () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
     await first.close();
 
-    const second = await makeBridge();
+    const second = await makeBridge(bridgeSocketPath);
     cleanups.push(() => second.close());
     second.setAdoptionHandler(async (turnId) => {
       second.registerCall(async () => "second-host", {
@@ -267,6 +307,6 @@ describe("host-call reconstruction through a restarted bridge (task 2.4)", () =>
       await new Promise((resolve) => setTimeout(resolve, 50));
       view = await client.queryTurn(turnAuthority.turnId);
     }
-    expect(view).toMatchObject({ status: "succeeded", result: { first: "first-host", second: "second-host" } });
+    expect(view, JSON.stringify(view)).toMatchObject({ status: "succeeded", result: { first: "first-host", second: "second-host" } });
   });
 });
