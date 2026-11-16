@@ -449,8 +449,11 @@ export async function writeDshEntry(root, engine) {
   const modulePath = engine.entry.module;
   const source = [
     "import { createRequire } from 'node:module';",
+    "import { pathToFileURL } from 'node:url';",
     "const require = createRequire(import.meta.url);",
-    `const { runCli } = await import(require.resolve(${JSON.stringify(modulePath)}));`,
+    // `require.resolve` 返回的是裸文件路径；Windows 上 `import('C:\\…')` 会被当成 `c:` 协议，
+    // 触发 ERR_UNSUPPORTED_ESM_URL_SCHEME。统一经 pathToFileURL 转成 file:// URL。
+    `const { runCli } = await import(pathToFileURL(require.resolve(${JSON.stringify(modulePath)})).href);`,
     'export { runCli };',
     ''
   ].join('\n');

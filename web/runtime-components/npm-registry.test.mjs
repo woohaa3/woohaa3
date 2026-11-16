@@ -5,8 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { createRuntimeComponentManager } from './index.mjs';
-import { extractNpmTarball, orderRegistries, planLayout, probeRegistry, registryTarballUrl, verifyIntegrity } from './npm-registry.mjs';
+import { extractNpmTarball, orderRegistries, planLayout, probeRegistry, registryTarballUrl, verifyIntegrity, writeDshEntry } from './npm-registry.mjs';
 
 const BLOCK = 512;
 function header({ name, mode = 0o755, size = 0, type = '0' }) {
@@ -58,6 +61,7 @@ function npmTarball(files) {
 }
 const integrity = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const execFileAsync = promisify(execFile);
 
 function packageJson(name, version, extra = {}) {
   return JSON.stringify({ name, version, ...extra });
@@ -429,4 +433,24 @@ test('approved lifecycle scripts run with the app node and denied scripts never 
   const directory = path.join(f.root, 'runtimes/tool/1.0.0', `${process.platform}-${process.arch}`, 'node_modules/@fixture/a');
   assert.equal(await fs.readFile(path.join(directory, 'ran.txt'), 'utf8'), f.toolsDir);
   await assert.rejects(fs.stat(path.join(directory, 'denied.txt')), { code: 'ENOENT' });
+});
+
+test('dsh entry imports its module through a file URL so Windows paths stay loadable', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'woohaa-dsh-entry-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const packageDirectory = path.join(root, 'node_modules/@fixture/dsh/lib');
+  await fs.mkdir(packageDirectory, { recursive: true });
+  await fs.writeFile(path.join(packageDirectory, 'bin.js'), 'export const runCli = () => 7;\n');
+  await fs.writeFile(
+    path.join(root, 'node_modules/@fixture/dsh/package.json'),
+    JSON.stringify({ name: '@fixture/dsh', version: '1.0.0', exports: { './lib/bin.js': './lib/bin.js' } })
+  );
+  const file = await writeDshEntry(root, { entry: { file: 'entry.mjs', module: '@fixture/dsh/lib/bin.js', export: 'runCli' } });
+  const source = await fs.readFile(file, 'utf8');
+  // `require.resolve` 返回裸路径；Windows 上直接 `import('C:\\…')` 会被读成 `c:` 协议。
+  assert.match(source, /pathToFileURL\(require\.resolve\(/);
+  assert.doesNotMatch(source, /import\(require\.resolve\(/);
+  const probe = `const module = await import(${JSON.stringify(pathToFileURL(file).href)});if(typeof module.runCli !== 'function')process.exit(3);process.stdout.write(String(module.runCli()));`;
+  const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', probe], { cwd: root });
+  assert.equal(stdout, '7');
 });
