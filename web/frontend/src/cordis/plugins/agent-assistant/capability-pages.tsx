@@ -105,6 +105,16 @@ export function CapabilityOverview({ local, remote, sources, loading, connection
         ? hostingCandidates.length ? hostingCandidates.map((candidate, index) => <span key={candidate.exposerId}><strong className="agent-assistant__hosting-name">{candidate.label}{index === 0 ? <span className="agent-assistant__hosting-priority" title="优先使用"><StarIcon size={14} /></span> : null}</strong><span>{candidate.lastError ? "最近调用失败" : candidate.configured ? "已配置" : "未配置"}</span></span>) : "尚未配置提供商，点击查看详情。"
         : counted.length ? counted.map(row => <span key={row.id}><strong>{row.name}</strong><span>{row.status}</span></span>) : "尚未配置提供商，点击查看详情。";
       const empty = active !== null && !pending(item.id) && !failed(item.id) && value.local + value.suppliers === 0;
+      // Agent 没有配置时必须同时露出本地 Agent 与模型提供商两条路：卡片交给两个真实按钮，
+      // 不再把整张卡做成一个先跳详情的入口。
+      if (item.id === "agent" && empty && !rows.length) return <div key={item.id} className="agent-assistant__capability-card" data-capability={item.id} data-placeholder={false} data-empty={true} data-actions={true}>
+        <span className="agent-assistant__capability-card-top"><item.icon size={26} /></span>
+        <strong>{item.label}</strong><span className="agent-assistant__capability-description">{item.description}</span>
+        <div className="agent-assistant__capability-add-actions">
+          <Button size="sm" className="agent-assistant__capability-add" icon={<PlusIcon size={14} />} onClick={() => onNavigate("agents")}>添加本地 Agent</Button>
+          <Button size="sm" className="agent-assistant__capability-add" icon={<PlusIcon size={14} />} onClick={() => onAdd("agent")}>添加模型提供商</Button>
+        </div>
+      </div>;
       return <button key={item.id} type="button" className="agent-assistant__capability-card" data-capability={item.id} data-placeholder={reserved} data-empty={empty} onClick={() => {
         if (empty && !rows.length && item.id !== "agent") onAdd(item.id as ActiveCapability);
         else select(item.id);
