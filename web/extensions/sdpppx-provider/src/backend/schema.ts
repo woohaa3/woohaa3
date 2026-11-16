@@ -148,6 +148,21 @@ function isRequiredField(name: string, field: RecordValue, required: ReadonlySet
   return field.required === true || required.has(name);
 }
 
+const PROMPT_TITLES = new Set(["提示词", "prompt"]);
+
+/**
+ * 识别模板里的提示词字段。
+ *
+ * 模板实际会用 `2_prompt` 这类带前缀的 key，标题仍是「提示词」；只按配置的
+ * `SDPPPX_PROMPT_FIELD`（缺省 `prompt`）匹配会把它当成普通参数渲染出来。
+ */
+function isPromptField(key: string, field: RecordValue | undefined, configured: string): boolean {
+  if (key === configured) return true;
+  const lower = key.toLowerCase();
+  if (lower === "prompt" || lower.endsWith("_prompt") || lower.endsWith("-prompt")) return true;
+  return PROMPT_TITLES.has(textOf(field?.title)?.toLowerCase() ?? "");
+}
+
 /**
  * 把一个 Formily 字段转成宿主字段；返回 undefined 表示「不认识」，交给 rawParams。
  */
@@ -159,7 +174,8 @@ function convertField(
   const title = textOf(field.title) ?? key;
   const description = textOf(field.description);
   const items = itemsOf(field);
-  const base: RecordValue = { title };
+  // 模板字段是模型的主参数：全部进入 common，不藏进「高级参数」。
+  const base: RecordValue = { title, "x-pptask-presentation": { section: "common" } };
   if (description) base.description = description;
   if (isRequiredField(key, field, required)) base.required = true;
   if (field.default !== undefined) base.default = field.default;
@@ -266,13 +282,18 @@ export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSch
       : []
   );
   const formValues = isRecord(input.formValues) ? input.formValues : {};
-  const hasPromptField = !input.minimal && Object.prototype.hasOwnProperty.call(rawProperties, promptField);
+  let detectedPromptField = promptField;
+  let hasPromptField = false;
 
   if (!input.minimal) {
     for (const [key, rawFieldValue] of Object.entries(rawProperties)) {
-      // prompt 由画布上游文字节点解析，不在宿主参数面板里重复展示。
-      if (key === promptField) continue;
       const field = isRecord(rawFieldValue) ? rawFieldValue : undefined;
+      // prompt 由画布上游文字节点解析，不在宿主参数面板里重复展示。
+      if (isPromptField(key, field, promptField)) {
+        if (!hasPromptField) detectedPromptField = key;
+        hasPromptField = true;
+        continue;
+      }
       if (!field) {
         unknownFields.push(key);
         continue;
@@ -303,7 +324,7 @@ export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSch
     },
     defaultInput,
     promptRequirement,
-    promptField,
+    promptField: detectedPromptField,
     hasPromptField,
     referenceFields,
     unknownFields,

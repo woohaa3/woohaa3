@@ -35,7 +35,13 @@ describe("Formily → 宿主 inputSchema", () => {
     const properties = built.inputSchema.properties as Record<string, Record<string, unknown>>;
     expect(properties.prompt).toBeUndefined();
     expect(properties.rawParams).toBeUndefined();
-    expect(properties.steps).toMatchObject({ type: "integer", minimum: 1, maximum: 50, "x-component": "NumberPicker" });
+    expect(properties.steps).toMatchObject({
+      type: "integer",
+      minimum: 1,
+      maximum: 50,
+      "x-component": "NumberPicker",
+      "x-pptask-presentation": { section: "common" }
+    });
     expect(properties.steps?.default).toBe(20);
     expect(properties.ratio).toMatchObject({ type: "number", multipleOf: 0.5 });
     expect(properties.enhance).toMatchObject({ type: "boolean", "x-component": "Switch" });
@@ -106,5 +112,28 @@ describe("Formily → 宿主 inputSchema", () => {
     expect(built.promptField).toBe("text");
     expect((built.inputSchema.properties as Record<string, unknown>).text).toBeUndefined();
     expect((built.inputSchema.properties as Record<string, unknown>).prompt).toBeUndefined();
+  });
+
+  it("识别带前缀的模板提示词字段（2_prompt），不把它当普通参数", () => {
+    const built = buildSdpppxInputSchema({
+      formSchema: {
+        type: "object",
+        required: ["2_prompt", "2_resolution"],
+        properties: {
+          "2_prompt": { type: "string", title: "提示词", "x-component": "Input.TextArea" },
+          "2_resolution": { type: "string", title: "清晰度", enum: ["1K", "2K"] }
+        }
+      },
+      promptField: "prompt"
+    });
+    const properties = built.inputSchema.properties as Record<string, unknown>;
+    expect(built.hasPromptField).toBe(true);
+    expect(built.promptField).toBe("2_prompt");
+    expect(properties["2_prompt"]).toBeUndefined();
+    expect(properties["2_resolution"]).toMatchObject({
+      title: "清晰度",
+      "x-pptask-presentation": { section: "common" }
+    });
+    expect(built.inputSchema.required).toEqual(["2_resolution"]);
   });
 });
