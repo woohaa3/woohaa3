@@ -42,6 +42,17 @@ fn push(world: &mut World, owner: Entity, labels: Vec<Label>) {
     world.flush();
 }
 
+fn labels_of_role(world: &mut World, owner: Entity, role: CanvasLabelRole) -> Vec<Entity> {
+    let mut rows: Vec<_> = world
+        .query::<(Entity, &CanvasLabel, &ChildOf)>()
+        .iter(world)
+        .filter(|(_, label, child)| child.parent() == owner && label.role == role)
+        .map(|(entity, label, _)| (label.slot, entity))
+        .collect();
+    rows.sort_by_key(|(slot, _)| *slot);
+    rows.into_iter().map(|(_, entity)| entity).collect()
+}
+
 fn labels_of(world: &mut World, owner: Entity) -> Vec<Entity> {
     let mut rows: Vec<_> = world
         .query::<(Entity, &CanvasLabel, &ChildOf)>()
@@ -164,6 +175,110 @@ fn step_changes_keep_text_content_and_logical_layout() {
         let width = bounds.width.expect("标签有界");
         assert!((width * scale - LABEL_BOUNDS.x).abs() <= 1.0e-3);
     }
+}
+
+#[test]
+fn label_index_isolates_owner_role_and_restores_empty_request() {
+    let mut world = world();
+    let a = owner(&mut world);
+    let b = owner(&mut world);
+    let card = |text: &str| (text.to_owned(), Vec2::ZERO, 12.0, 0xFFFFFFu32);
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        a,
+        vec![card("a0"), card("a1"), card("a2")],
+        5.0,
+        LabelStyle::Node,
+    );
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Running,
+        a,
+        vec![("run".into(), Vec2::ZERO, 13.0, 0xFFFFFF)],
+        6.0,
+        LabelStyle::Running,
+    );
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        b,
+        vec![card("b0"), card("b1")],
+        5.0,
+        LabelStyle::Node,
+    );
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
+
+    let a_cards = labels_of_role(&mut world, a, CanvasLabelRole::Card);
+    let a_running = labels_of_role(&mut world, a, CanvasLabelRole::Running);
+    let b_cards = labels_of_role(&mut world, b, CanvasLabelRole::Card);
+    assert_eq!(a_cards.len(), 3);
+    assert_eq!(a_running.len(), 1);
+    assert_eq!(b_cards.len(), 2);
+
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        a,
+        vec![card("a0")],
+        5.0,
+        LabelStyle::Node,
+    );
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
+    assert_eq!(
+        labels_of_role(&mut world, a, CanvasLabelRole::Card),
+        vec![a_cards[0]]
+    );
+    assert!(world.get_entity(a_cards[1]).is_err());
+    assert!(world.get_entity(a_cards[2]).is_err());
+    assert_eq!(
+        labels_of_role(&mut world, a, CanvasLabelRole::Running),
+        a_running
+    );
+    assert_eq!(
+        labels_of_role(&mut world, b, CanvasLabelRole::Card),
+        b_cards
+    );
+
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        a,
+        Vec::new(),
+        5.0,
+        LabelStyle::Node,
+    );
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
+    assert!(labels_of_role(&mut world, a, CanvasLabelRole::Card).is_empty());
+    assert!(world.get_entity(a_cards[0]).is_err());
+    assert_eq!(
+        labels_of_role(&mut world, a, CanvasLabelRole::Running),
+        a_running
+    );
+    assert_eq!(
+        labels_of_role(&mut world, b, CanvasLabelRole::Card),
+        b_cards
+    );
+
+    world.resource_mut::<LabelRequests>().push(
+        CanvasLabelRole::Card,
+        a,
+        vec![card("a0-again")],
+        5.0,
+        LabelStyle::Node,
+    );
+    world.run_system_once(sync_canvas_labels).unwrap();
+    world.flush();
+    let restored = labels_of_role(&mut world, a, CanvasLabelRole::Card);
+    assert_eq!(restored.len(), 1);
+    assert_ne!(restored[0], a_cards[0]);
+    assert_eq!(world.get::<Text2d>(restored[0]).unwrap().0, "a0-again");
+    assert_eq!(
+        labels_of_role(&mut world, a, CanvasLabelRole::Running),
+        a_running
+    );
+    assert_eq!(
+        labels_of_role(&mut world, b, CanvasLabelRole::Card),
+        b_cards
+    );
 }
 
 #[test]

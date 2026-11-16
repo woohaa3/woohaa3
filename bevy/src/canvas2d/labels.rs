@@ -197,24 +197,26 @@ pub(crate) fn sync_canvas_labels(
         wanted.insert((request.owner, *role), request);
     }
 
-    // 1) 回收不再被请求的角色/owner 标签。
+    // 一次遍历：回收不再被请求的角色/owner，并按 owner+role 分组。
+    // 分组只活在本次同步，不写入 Resource。
+    let mut grouped: std::collections::HashMap<(Entity, CanvasLabelRole), Vec<(u16, Entity)>> =
+        std::collections::HashMap::new();
     for (entity, label, child) in &existing {
-        if !wanted.contains_key(&(child.parent(), label.role)) {
+        let key = (child.parent(), label.role);
+        if !wanted.contains_key(&key) {
             commands.entity(entity).despawn();
+        } else {
+            grouped.entry(key).or_default().push((label.slot, entity));
         }
     }
 
-    // 2) 每个请求按 slot 复用/补建/缩容。
+    // 每个请求只取自己那组，按 slot 复用/补建/缩容。
     for ((owner, role), request) in &wanted {
         if commands.get_entity(*owner).is_err() {
             // 投影已回收的 owner：请求是上一帧残留，安全丢弃。
             continue;
         }
-        let mut slots: Vec<(u16, Entity)> = existing
-            .iter()
-            .filter(|(_, label, child)| child.parent() == *owner && label.role == *role)
-            .map(|(entity, label, _)| (label.slot, entity))
-            .collect();
+        let mut slots = grouped.remove(&(*owner, *role)).unwrap_or_default();
         slots.sort_by_key(|(slot, _)| *slot);
         let len = request.labels.len();
         for (slot, entity) in &slots {
