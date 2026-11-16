@@ -16,6 +16,7 @@ import {
   CANVAS_TASK_LIMITS,
   isGenerationStableMediaResult,
   isSomaMotionMetadata,
+  readImageMediaType,
   type GenerationStableMediaResult,
   type TaskResultSummary,
   type TaskResultOutput,
@@ -634,10 +635,13 @@ export function readRawBinarySources(
     const bytes = toUint8Array(item, maxBytes);
     if (!bytes || bytes.byteLength === 0 || bytes.byteLength > maxBytes) break;
     const descriptor = bytesFromBase64Descriptor(item, maxBytes);
+    // 字节是唯一权威事实：provider 只给地址时 `readProviderContentType` 只能退回默认
+    // image/png，实际字节可能是 JPEG/WebP，按默认值落库会让下游按错误类型解析。
+    const sniffed = modelType === "image" ? readImageMediaType(bytes) : null;
     sources.push({
       kind: "bytes",
       bytesBase64: Buffer.from(bytes).toString("base64"),
-      contentType: descriptor?.mediaType ?? fallbackContentType
+      contentType: sniffed ?? descriptor?.mediaType ?? fallbackContentType
     });
   }
   return sources;
@@ -712,7 +716,8 @@ export function readProviderContentType(raw: unknown, modelType: BinaryModelType
     ? (modelType === "image" ? container.images : modelType === "audio" ? container.audios : modelType === "motion" ? container.motions : container.videos)
     : undefined;
   const directFirst = Array.isArray(direct) ? direct[0] : undefined;
-  const directMediaType = isRecord(directFirst) ? directFirst.mediaType : undefined;
+  // provider 结果里这个字段叫法不一致：runtime/provider 用 `mediaType`，Replicate 这类适配器用 `mimeType`。
+  const directMediaType = isRecord(directFirst) ? directFirst.mediaType ?? directFirst.mimeType : undefined;
   if (typeof directMediaType === "string" && (directMediaType.startsWith(`${modelType}/`) || modelType === "motion" && directMediaType === "application/x-npz")) return directMediaType;
   const metadata = isRecord(raw) ? (raw as { providerMetadata?: unknown }).providerMetadata : undefined;
   if (isRecord(metadata)) {
@@ -725,7 +730,7 @@ export function readProviderContentType(raw: unknown, modelType: BinaryModelType
           ? list.audios
           : list.videos;
       const first = Array.isArray(candidate) ? candidate[0] : undefined;
-      const mediaType = isRecord(first) ? first.mediaType : undefined;
+      const mediaType = isRecord(first) ? first.mediaType ?? first.mimeType : undefined;
       if (typeof mediaType === "string" && mediaType.startsWith(`${modelType}/`)) return mediaType;
     }
   }

@@ -71,6 +71,7 @@ function record(overrides: Partial<PptaskTaskRecord> = {}): PptaskTaskRecord {
 }
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+const JPEG = new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1]);
 
 describe("落库前归档（result-archive）", () => {
   it("state 与 result 携带同一份字节时只 import 一次，两处都换成稳定引用", async () => {
@@ -186,6 +187,21 @@ describe("落库前归档（result-archive）", () => {
     const archive = createResultArchiver({ mediaClient: client });
     expect(await archive(record({ result: { images: [PNG, new Uint8Array([1, 2, 3])] } }))).toBeUndefined();
     expect(imports).toHaveLength(0);
+  });
+
+  it("URL 产出的图片按字节签名落库，不被默认的 image/png 覆盖", async () => {
+    const { client, imports } = makeClient();
+    const archive = createResultArchiver({ mediaClient: client });
+    // URL 结果的 providerMetadata 只有地址没有类型，类型推断会退回默认 image/png。
+    const payload = record({
+      result: { images: [JPEG], providerMetadata: { tokenhub: { images: [{ url: "https://files.example/a.jpeg" }] } } }
+    });
+
+    const archived = await archive(payload);
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0]).toMatchObject({ contentType: "image/jpeg" });
+    expect(archived?.result).toMatchObject({ media: { contentType: "image/jpeg" } });
   });
 });
 

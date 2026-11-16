@@ -29,6 +29,7 @@ export * from "./task/model-presets.js";
 export * from "./task/generation-parameters/index.js";
 export * from "./task/video-parameters.js";
 export * from "./media/keys.js";
+export * from "./media/image-type.js";
 export * from "./media/protocol.js";
 export * from "./media/storage.js";
 export * from "./media/variants.js";

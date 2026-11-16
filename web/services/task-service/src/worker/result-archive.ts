@@ -16,7 +16,7 @@
  * 2. **只处理受支持的形状**：单产物的 image/audio；video 仍只走地址路径（大对象不按字节转存）。
  */
 import { createHash } from "node:crypto";
-import { CANVAS_TASK_LIMITS, isGenerationStableMediaResult } from "@woohaa3/contracts";
+import { CANVAS_TASK_LIMITS, isGenerationStableMediaResult, readImageMediaType } from "@woohaa3/contracts";
 import type { MediaClient } from "../clients/media-client.js";
 import type { TaskPayloadSnapshot, TaskPayloadTransform } from "../repository/sqlite-task-store.js";
 import { bytesFromBase64Descriptor, readProviderContentType } from "./media-materialization.js";
@@ -102,9 +102,13 @@ export function createResultArchiver(options: ResultArchiveOptions): TaskPayload
     if (known && known.digest === digest) return known.media;
 
     const canvasId = readCanvasId(payload.context);
+    const declaredContentType = readProviderContentType(payload.result ?? readStateResult(payload.state), kind);
+    // URL 产出的 providerMetadata 只有地址，类型只能退回默认 image/png；落库前按字节签名
+    // 纠正成真实格式，否则后续按记录类型解析图片会失败。
+    const sniffedImageType = kind === "image" ? readImageMediaType(bytes) : null;
     const metadata = await client.importBytes({
       bytesBase64: Buffer.from(bytes).toString("base64"),
-      contentType: readProviderContentType(payload.result ?? readStateResult(payload.state), kind),
+      contentType: sniffedImageType ?? declaredContentType,
       maxBytes: maxBytesFor(kind),
       ...(canvasId ? { canvasId } : {})
     });

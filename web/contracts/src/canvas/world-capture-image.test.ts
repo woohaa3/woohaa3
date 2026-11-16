@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isInspectableWorldCaptureContentType,
-  readWorldCaptureImageDimensions
+  readWorldCaptureImageDimensions,
+  readWorldCaptureImageType
 } from "./world-capture-image.js";
 
 function pngHeader(width: number, height: number): Uint8Array {
@@ -38,5 +39,27 @@ describe("world capture image dimensions", () => {
     expect(isInspectableWorldCaptureContentType("image/webp")).toBe(true);
     expect(isInspectableWorldCaptureContentType("image/gif")).toBe(false);
     expect(isInspectableWorldCaptureContentType("video/mp4")).toBe(false);
+  });
+});
+
+describe("world capture image type sniffing", () => {
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+  const webp = (() => {
+    const bytes = new Uint8Array(16);
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0); // RIFF
+    bytes.set([0x57, 0x45, 0x42, 0x50], 8); // WEBP
+    return bytes;
+  })();
+
+  it("identifies the real family from bytes", () => {
+    expect(readWorldCaptureImageType(pngHeader(4, 4))).toBe("image/png");
+    expect(readWorldCaptureImageType(jpeg)).toBe("image/jpeg");
+    expect(readWorldCaptureImageType(webp)).toBe("image/webp");
+  });
+
+  it("does not guess from a declared type or accept unsupported families", () => {
+    expect(readWorldCaptureImageType(new TextEncoder().encode("GIF89a......"))).toBeNull();
+    expect(readWorldCaptureImageType(new Uint8Array())).toBeNull();
+    expect(readWorldCaptureImageType(new TextEncoder().encode("not an image"))).toBeNull();
   });
 });
