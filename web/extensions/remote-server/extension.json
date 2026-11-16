@@ -45,6 +45,6 @@
     "hostAbi": "^1.0.0",
     "sdkAbi": "^1.0.0",
     "protocolVersion": 1,
-    "host": { "capabilities": 1, "generation": 1, "log": 1, "marketplace": 1, "services": 1, "storage": 1, "telemetry": 1, "webServer": 1 }
+    "host": { "capabilities": 2, "generation": 1, "log": 1, "marketplace": 1, "services": 1, "storage": 1, "telemetry": 1, "webServer": 1 }
   }
 }
