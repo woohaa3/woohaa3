@@ -49,6 +49,7 @@ export type ImageViewerSessionOptions = {
   transition: FocusTransitionPort;
   runtime: ImageViewerRuntimePort;
   decode?: (url: string) => Promise<{ width: number; height: number; drawable: CanvasImageSource }>;
+  prepare?: (url: string, edge: number, signal?: AbortSignal) => Promise<import("@woohaa3/contracts").PreparedImageResource>;
   createCanvas?: RasterCanvasFactory;
   /** 进入/退出过渡时长（毫秒）；缺省尊重 `prefers-reduced-motion`。 */
   transitionDuration?: number;
@@ -153,7 +154,7 @@ export class ImageViewerSession {
     try {
       if (this.decode) decoded = await this.decode(this.currentTarget.url);
       else {
-        prepared = await prepareImageResource(this.currentTarget.url, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION, this.decodeAbort.signal);
+        prepared = await (this.options.prepare ?? prepareImageResource)(this.currentTarget.url, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION, this.decodeAbort.signal);
         decoded = { width: prepared.sourceWidth, height: prepared.sourceHeight };
       }
     } catch (error) {
@@ -309,7 +310,7 @@ export class ImageViewerSession {
     try {
       if (this.decode) decoded = await this.decode(url);
       else {
-        prepared = await prepareImageResource(url, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION, this.decodeAbort.signal);
+        prepared = await (this.options.prepare ?? prepareImageResource)(url, IMAGE_VIEWER_TEXTURE_MAX_DIMENSION, this.decodeAbort.signal);
         decoded = { width: prepared.sourceWidth, height: prepared.sourceHeight };
       }
     } catch (failure) {

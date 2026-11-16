@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyWoohaa3ServerCanvas } from "@woohaa3/contracts";
 import type { ImageFocusTarget } from "../../focus/image-focus-target.js";
 import { ImageViewerSession, fitZoomFor, clampZoom } from "./session.js";
+import { ViewerImageCache } from "./prepared-cache.js";
 
 function canvasWithAsset(url = "/api/media/canvas-1/asset-1.png") {
   const base = createEmptyWoohaa3ServerCanvas("canvas-1", "2026-10-28T00:00:00.000Z");
@@ -26,6 +27,7 @@ function target(url = "/api/media/canvas-1/asset-1.png"): ImageFocusTarget {
 
 function session(overrides: {
   decode?: () => Promise<{ width: number; height: number; drawable: CanvasImageSource }>;
+  prepare?: (url: string, edge: number, signal?: AbortSignal) => Promise<import("@woohaa3/contracts").PreparedImageResource>;
   rect?: () => { x: number; y: number; width: number; height: number };
 } = {}) {
   const setProjection = vi.fn();
@@ -43,7 +45,8 @@ function session(overrides: {
       isActive: () => false
     },
     runtime: { setProjection, setTexture, setPending },
-    decode: overrides.decode ?? (async () => ({ width: 2000, height: 1000, drawable: {} as CanvasImageSource })),
+    decode: overrides.prepare ? undefined : overrides.decode ?? (async () => ({ width: 2000, height: 1000, drawable: {} as CanvasImageSource })),
+    prepare: overrides.prepare,
     createCanvas: () => ({
       width: 0,
       height: 0,
@@ -57,6 +60,21 @@ function session(overrides: {
 }
 
 describe("宿主默认图片查看会话", () => {
+  it("退出后重新建立会话复用图片准备结果，并重新提交纹理与取景", async () => {
+    const pixels = new Uint8Array(8);
+    const load = vi.fn(async () => ({ width: 2, height: 1, sourceWidth: 4, sourceHeight: 2, pixels }));
+    const cache = new ViewerImageCache(load);
+    const prepare = cache.prepare.bind(cache);
+    const first = session({ prepare });
+    await first.instance.start(); first.instance.dispose();
+    const second = session({ prepare });
+    await second.instance.start();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(second.setTexture).toHaveBeenCalledWith({ nodeId: "node-1", width: 2, height: 1, pixels });
+    expect(second.instance.state()).toMatchObject({ loading: false, width: 4, height: 2 });
+    expect(second.setProjection).toHaveBeenCalled();
+    second.instance.dispose(); cache.dispose();
+  });
   it("进入时上传聚焦纹理并推入 woohaa-image-focus-v1 投影", async () => {
     const { instance, setProjection, setTexture, setPending } = session();
     await instance.start();

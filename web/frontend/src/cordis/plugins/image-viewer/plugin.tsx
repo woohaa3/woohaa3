@@ -20,6 +20,7 @@ import { resolveImageFocusTarget } from "../../focus/image-focus-target.js";
 import type { FocusContentRect } from "../../focus/types.js";
 import { IMAGE_VIEW_SERVICE } from "../service-keys.js";
 import { ImageViewerSession } from "./session.js";
+import { ViewerImageCache } from "./prepared-cache.js";
 import { ImageViewerWorkspace } from "./image-viewer-workspace.js";
 
 export const IMAGE_VIEWER_PLUGIN_ID = "image-viewer";
@@ -28,6 +29,7 @@ const IMAGE_VIEWER_WORKSPACE_ID = "image-viewer-workspace";
 export function imageViewerExtension(): Plugin.Function<void> {
   return definePlugin(
     (ctx: Context) => {
+      const images = new ViewerImageCache();
       const getCanvas = () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
       let session: ImageViewerSession | null = null;
       let detachViewport: (() => void) | null = null;
@@ -55,6 +57,7 @@ export function imageViewerExtension(): Plugin.Function<void> {
         const current = new ImageViewerSession({
           nodeId,
           target: resolved,
+          prepare: (url, edge, signal) => images.prepare(url, edge, signal),
           getCanvas,
           rect: contentRect,
           savedViewport: controller?.viewport() ?? { x: 0, y: 0, zoom: 1 },
@@ -171,6 +174,7 @@ export function imageViewerExtension(): Plugin.Function<void> {
         removeWorkspace?.();
         removeWorkspace = null;
         exit();
+        images.dispose();
       }, "image-viewer-lifecycle");
     },
     { name: IMAGE_VIEWER_PLUGIN_ID, inject: ["slots", "canvasRuntime", "canvasNavigation", "focusExit"] }

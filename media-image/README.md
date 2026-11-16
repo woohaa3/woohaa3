@@ -26,6 +26,14 @@ uses sRGB; ICC conversion uses moxcms, malformed or unsupported profiles fail ex
 EXIF orientation is applied. GIF/animated AVIF are static first-frame previews. Resampling
 integrates linear-light premultiplied colours and returns straight-alpha RGBA8. It does not
 allocate a full floating-point copy of the source. Source files are never rewritten.
+Final linear-to-sRGB encoding reuses a 64 KiB lookup per worker, with at most one byte of
+channel error against the transfer function, avoiding per-output-channel exponentiation.
+
+The default browser image viewer retains prepared RGBA variants in a page-owned LRU
+(48 MiB, at most eight entries), keyed by the complete authorized URL and edge size.
+Re-entering a retained image skips transport and decode; source URL changes select a new
+variant. Leaving the canvas releases the cache. Native renderer handles are not retained
+by this browser cache, and failures/cancelled loads are never cached.
 
 The browser module has a 1 GiB linear-memory maximum, which remains the single-instance hard
 cap (1152 MiB including compressed, transfer and encoded staging). Per-job reservations are
