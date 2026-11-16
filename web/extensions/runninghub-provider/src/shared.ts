@@ -16,6 +16,7 @@ import modelsData from "../data/models.json";
 export * from "./shared/identity.js";
 import { RUNNINGHUB_PLUGIN_ID, RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
 import { runningHubCardSchema } from "./model-cards.js";
+import type { RunningHubRegion } from "./region.js";
 
 /**
  * 受控 API 地址默认值（国际站，MUST NOT 由用户输入）。
@@ -87,6 +88,23 @@ let cachedRegistry: RunningHubRegistry | undefined;
 
 /** 刷新得到的运行期清单（`undefined` = 用入库清单）。 */
 let runtimeModels: RunningHubLogicalModel[] | undefined;
+
+/** 运行期清单对应的站点区域；区域变化时旧清单必须失效。 */
+let runtimeRegion: RunningHubRegion | undefined;
+
+/**
+ * 切换当前站点区域。
+ *
+ * 只重置运行期清单与缓存，不修改入库的 `data/models.json`：换 Key 后区域变化时不能继续
+ * 用上一个站点过滤过的清单；同区域重复调用保留用户刚刷新过的结果。
+ */
+export function setRunningHubRegion(region: RunningHubRegion): void {
+  if (runtimeRegion === region) return;
+  runtimeRegion = region;
+  runtimeModels = undefined;
+  liveOnlyIds = new Set();
+  cachedRegistry = undefined;
+}
 
 /**
  * 公开清单没收录、但站点目录页仍在售的模型 id（刷新时算出）。

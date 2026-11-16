@@ -99,6 +99,12 @@ describe("RunningHub 插件按区域接线", () => {
     await plugin.apply(ctx, { apiKey: "key" } as never);
 
     expect(registered[0]!.serviceConnectionFactory?.endpoints?.["chat-completions"]).toBe("https://llm.runninghub.cn/v1");
+    const modelIds = registered[0]!.models.map((model) => model.providerModelId);
+    expect(modelIds).toContain("llm/qwen/qwen3.8-flash-next");
+    expect(modelIds).not.toContain("llm/anthropic/claude-opus-5");
+    expect(modelIds).toContain("api/seedream-v5-pro");
+    expect(modelIds).not.toContain("api/seedream-v5-flash");
+    expect(modelIds).toContain("api/rhart-image-n-pro");
     expect(calls.filter(url => url.endsWith("/uc/openapi/accountStatus"))).toEqual([
       "https://www.runninghub.ai/uc/openapi/accountStatus",
       "https://www.runninghub.cn/uc/openapi/accountStatus"

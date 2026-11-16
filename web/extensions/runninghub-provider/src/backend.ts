@@ -31,14 +31,15 @@ import {
   prepareRunningHubInput,
   runningHubEndpointModelId,
   runningHubModelDefinition,
-  runningHubModelDefinitions,
   runningHubRegistry,
-  setRunningHubModels
+  setRunningHubModels,
+  setRunningHubRegion
 } from "./shared.js";
 import { translateRunningHubParameters } from "./model-cards.js";
-import { discoverRunningHubModels } from "./discovery.js";
+import { discoverRunningHubModels, runningHubModelDefinitionsForRegion } from "./discovery.js";
 import {
   discoverRunningHubLanguageModels,
+  ensureRunningHubLanguageRegion,
   runningHubLanguageCapabilities,
   runningHubLanguageCatalogRevision,
   runningHubLanguageDefinitions,
@@ -63,6 +64,7 @@ import {
   type RunningHubRegion
 } from "./region.js";
 import { createRunningHubRegionStore, type RunningHubRegionStore } from "./backend/region-store.js";
+import type { RunningHubEndpointAvailability } from "./model-availability.js";
 
 export { DEFAULT_RUNNINGHUB_API_BASE, DEFAULT_LLM_BASE_URL };
 
@@ -82,6 +84,10 @@ export const RUNNINGHUB_CONFIG = defineConfigSchema({
 
 export type RunningHubRegistrationInput = {
   apiKey?: string;
+  /** 当前站点区域；缺省国际站。 */
+  region?: RunningHubRegion;
+  /** 区域可用性覆盖（测试）；缺省使用入库映射。 */
+  availability?: RunningHubEndpointAvailability;
   /** 受控媒体 API 地址（测试可覆盖；默认写死常量）。 */
   apiBaseURL?: string;
   /** 受控文字 API 地址（测试可覆盖；默认写死常量）。 */
@@ -97,6 +103,8 @@ export type RunningHubPluginDependencies = Pick<RunningHubRegistrationInput, "ap
   regionProbeTimeoutMs?: number;
   /** 测试可注入持久化实现；缺省使用 `ctx.services.documents` 或进程内缓存。 */
   regionStore?: RunningHubRegionStore;
+  /** 测试可注入区域可用性；缺省使用入库映射。 */
+  availability?: RunningHubEndpointAvailability;
   /** 受控上传地址覆盖（测试）；缺省按区域派生。 */
   uploadUrl?: string;
   /** 受控标准模型目录页覆盖（测试）；缺省按区域派生。 */
@@ -107,6 +115,7 @@ export type RunningHubPluginDependencies = Pick<RunningHubRegistrationInput, "ap
 
 export function createRunningHubRegistration(input: RunningHubRegistrationInput): GenerationProvider {
   const apiKey = (input.apiKey ?? "").trim();
+  const region = input.region ?? DEFAULT_RUNNINGHUB_REGION;
   const available = apiKey !== "";
   const providerOptions = {
     apiBaseURL: input.apiBaseURL ?? DEFAULT_RUNNINGHUB_API_BASE,
@@ -115,7 +124,7 @@ export function createRunningHubRegistration(input: RunningHubRegistrationInput)
     ...(input.fetchImpl ? { fetch: input.fetchImpl } : {})
   };
   const provider = available ? createRunninghubProvider({ apiKey, ...providerOptions } as never) : undefined;
-  const models = [...runningHubModelDefinitions(), ...runningHubLanguageDefinitions()];
+  const models = [...runningHubModelDefinitionsForRegion(region, input.availability), ...runningHubLanguageDefinitions()];
   return {
     extensionId: RUNNINGHUB_PLUGIN_ID,
     providerId: RUNNINGHUB_PROVIDER_ID,
@@ -202,7 +211,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
     inject: ["log", "generation", "gateway", "access", "storage", "exposer"],
     modelRefresh: {
       path: RUNNINGHUB_REFRESH_PATH,
-      hint: "媒体模型来自 RunningHub 官方公开的端点 registry；文字模型来自官方 OpenAI 兼容目录 /v1/models。刷新会更新两份独立目录，失败时保留上一次成功快照。文字模型与模型 API 需要 Enterprise-Shared Key。"
+      hint: "媒体模型来自 RunningHub 官方公开的端点 registry，并按当前站点隐藏上游 1001 的端点；文字模型来自当前站点区域的官方 OpenAI 兼容目录 /v1/models。刷新会更新两份独立目录，失败时保留上一次成功快照。文字模型与模型 API 需要 Enterprise-Shared Key。"
     },
     Config: RUNNINGHUB_CONFIG,
     health: (config) =>
@@ -281,6 +290,9 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
         return DEFAULT_RUNNINGHUB_REGION;
       };
       const region = await resolveRegion();
+      // 换 Key 导致区域变化时，上一站过滤过的运行期清单与文字 fixture 必须一起失效。
+      setRunningHubRegion(region);
+      ensureRunningHubLanguageRegion(region);
 
       const apiBaseURL = deps.apiBaseURL ?? runningHubApiBaseURL(region);
       const languageBaseURL = deps.languageBaseURL ?? runningHubLLMBaseURL(region);
@@ -290,15 +302,22 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
 
       const registration = createRunningHubRegistration({
         ...(apiKey ? { apiKey } : {}),
+        region,
+        ...(deps.availability ? { availability: deps.availability } : {}),
         apiBaseURL,
         languageBaseURL,
         ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
         ...(deps.jobRepository ? { jobRepository: deps.jobRepository } : {})
       });
       const refresh = async (): Promise<ModelRefreshResult> => {
-        const before = new Set(registration.models.map((model) => model.providerModelId));
+        const before = new Set(
+          [...runningHubModelDefinitionsForRegion(region, deps.availability), ...runningHubLanguageDefinitions()]
+            .map((model) => model.providerModelId)
+        );
         const mediaResult = await discoverRunningHubModels({
           base: runningHubRegistry().models,
+          region,
+          ...(deps.availability ? { availability: deps.availability } : {}),
           catalogUrl,
           ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
         });
@@ -313,6 +332,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
           const partsMedia = [`上游 ${mediaResult.discovered} 个媒体逻辑模型`];
           if (mediaResult.removed.length > 0) partsMedia.push(`移除 ${mediaResult.removed.length} 个已下架的`);
           if (mediaResult.liveOnly.length > 0) partsMedia.push(`保留 ${mediaResult.liveOnly.length} 个站点仍在售的`);
+          if (mediaResult.regionHidden.length > 0) partsMedia.push(`${runningHubRegionLabel(region)}不可用 ${mediaResult.regionHidden.length} 个已隐藏`);
           if (!mediaResult.catalogChecked) partsMedia.push("站点目录未取到，本次未做下架清理");
           parts.push(partsMedia.join("，"));
         } else {
@@ -330,7 +350,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
           parts.push(`文字目录刷新失败，保留上次成功目录：${languageResult.message}`);
         }
 
-        const all = [...runningHubModelDefinitions(), ...runningHubLanguageDefinitions()];
+        const all = [...runningHubModelDefinitionsForRegion(region, deps.availability), ...runningHubLanguageDefinitions()];
         registration.models.splice(0, registration.models.length, ...all);
         // 目录修订参与服务来源 revision：能力变化即使模型 ID 集合不变也要让旧投影失效。
         registration.catalogRevision = runningHubLanguageCatalogRevision();

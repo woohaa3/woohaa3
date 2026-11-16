@@ -10,6 +10,9 @@ import { RUNNINGHUB_BALANCE_PATH } from "../src/balance.js";
 import { catalogLogicalIds, discoverRunningHubModels, registryEntries } from "../src/discovery.js";
 import { findRunningHubModel, runningHubRegistry } from "../src/shared.js";
 
+/** 旧用例不关心区域过滤：空映射表示所有端点都“未知”，全部保留。 */
+const NO_REGION_FILTER = { ai: new Set<string>(), cn: new Set<string>() };
+
 /** 上游 registry 的最小形状：两个操作合并成一个逻辑模型。 */
 const REGISTRY = {
   version: "test",
@@ -118,6 +121,7 @@ describe("RunningHub 模型发现", () => {
     const result = await discoverRunningHubModels({
       base,
       fetchImpl: routingFetch(),
+      availability: NO_REGION_FILTER,
       patchEntries: []
     });
     if (!result.ok) throw new Error(result.message);
@@ -138,6 +142,7 @@ describe("RunningHub 模型发现", () => {
     const result = await discoverRunningHubModels({
       base,
       fetchImpl: routingFetch({ catalog: '<button>"/seedream-v5-lite/image-to-image"</button>' }),
+      availability: NO_REGION_FILTER,
       patchEntries: []
     });
     if (!result.ok) throw new Error(result.message);
@@ -150,6 +155,7 @@ describe("RunningHub 模型发现", () => {
     const result = await discoverRunningHubModels({
       base,
       fetchImpl: routingFetch({ catalog: null }),
+      availability: NO_REGION_FILTER,
       patchEntries: []
     });
     if (!result.ok) throw new Error(result.message);
@@ -178,7 +184,7 @@ describe("刷新路由", () => {
 
   it("鉴权通过 → 合并模型并回 200；刷新后新模型可解析", async () => {
     const { ctx, handlers, registered } = fakeContext();
-    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai" });
+    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai", availability: NO_REGION_FILTER });
     await plugin.apply(ctx, { apiKey: "key" } as never);
     // 刷新路由与余额路由各注册一条；刷新在前。
     expect(handlers).toHaveLength(2);
@@ -209,6 +215,7 @@ describe("刷新路由", () => {
     const { ctx, handlers } = fakeContext();
     const plugin = createRunningHubProviderPlugin({
       region: "ai",
+      availability: NO_REGION_FILTER,
       fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
         expect(String(url)).toBe("https://www.runninghub.ai/uc/openapi/accountStatus");
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer key");
@@ -231,16 +238,79 @@ describe("刷新路由", () => {
 
   it("别的路径不处理；未授权回 401", async () => {
     const { ctx, handlers } = fakeContext();
-    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai" });
+    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai", availability: NO_REGION_FILTER });
     await plugin.apply(ctx, { apiKey: "key" } as never);
     expect(await handlers[0]!({ method: "GET", url: RUNNINGHUB_REFRESH_PATH }, fakeResponse())).toBe(false);
 
     const denied = fakeContext();
     (denied.ctx as unknown as { access: { authenticator: () => Promise<null> } }).access = { authenticator: async () => null };
-    const deniedPlugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai" });
+    const deniedPlugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai", availability: NO_REGION_FILTER });
     await deniedPlugin.apply(denied.ctx, { apiKey: "key" } as never);
     const res = fakeResponse();
     expect(await denied.handlers[0]!({ method: "POST", url: RUNNINGHUB_REFRESH_PATH }, res)).toBe(true);
     expect(res.state.status).toBe(401);
+  });
+});
+
+describe("RunningHub 刷新按区域裁剪", () => {
+  const availability = {
+    ai: new Set(["rhart-image-g-cn-only/text-to-image"]),
+    cn: new Set(["rhart-image-g-ai-only/text-to-image", "rhart-image-g-mixed/text-to-image"])
+  };
+  const regionRegistry = {
+    models: [
+      { endpoint: "rhart-image-g-ai-only/text-to-image", output_type: "image", name_cn: "AI only", params: [{ fieldKey: "prompt", type: "STRING", required: true }] },
+      { endpoint: "rhart-image-g-cn-only/text-to-image", output_type: "image", name_cn: "CN only", params: [{ fieldKey: "prompt", type: "STRING", required: true }] },
+      { endpoint: "rhart-image-g-unknown/text-to-image", output_type: "image", name_cn: "Unknown", params: [{ fieldKey: "prompt", type: "STRING", required: true }] },
+      { endpoint: "rhart-image-g-mixed/text-to-image", output_type: "image", name_cn: "Mixed", params: [{ fieldKey: "prompt", type: "STRING", required: true }] },
+      { endpoint: "rhart-image-g-mixed/edit", output_type: "image", name_cn: "Mixed", params: [{ fieldKey: "prompt", type: "STRING", required: true }, { fieldKey: "imageUrls", type: "IMAGE", required: false }] }
+    ]
+  };
+  const base = [
+    { id: "rhart-image-g-ai-only", routes: [{ endpoint: "rhart-image-g-ai-only/text-to-image" }] },
+    { id: "rhart-image-g-cn-only", routes: [{ endpoint: "rhart-image-g-cn-only/text-to-image" }] },
+    { id: "rhart-image-g-unknown", routes: [{ endpoint: "rhart-image-g-unknown/text-to-image" }] },
+    {
+      id: "rhart-image-g-mixed",
+      routes: [
+        { endpoint: "rhart-image-g-mixed/text-to-image" },
+        { endpoint: "rhart-image-g-mixed/edit" }
+      ]
+    }
+  ];
+
+  it("国内站隐藏国际站独有模型，保留共享与未知端点", async () => {
+    const result = await discoverRunningHubModels({
+      base: base as never,
+      region: "cn",
+      availability,
+      patchEntries: [],
+      fetchImpl: routingFetch({ registry: regionRegistry, catalog: null })
+    });
+    if (!result.ok) throw new Error(result.message);
+    const ids = result.models.map((model) => model.id);
+    expect(ids).not.toContain("rhart-image-g-ai-only");
+    expect(ids).toContain("rhart-image-g-cn-only");
+    expect(ids).toContain("rhart-image-g-unknown");
+    expect(result.regionHidden).toEqual(["rhart-image-g-ai-only"]);
+    // 混合模型只保留国内站可用的 edit 路由，不把国际站独有路由带进来。
+    expect(result.models.find((model) => model.id === "rhart-image-g-mixed")?.routes.map((route) => route.endpoint)).toEqual([
+      "rhart-image-g-mixed/edit"
+    ]);
+  });
+
+  it("国际站隐藏国内站独有模型", async () => {
+    const result = await discoverRunningHubModels({
+      base: base as never,
+      region: "ai",
+      availability,
+      patchEntries: [],
+      fetchImpl: routingFetch({ registry: regionRegistry, catalog: null })
+    });
+    if (!result.ok) throw new Error(result.message);
+    const ids = result.models.map((model) => model.id);
+    expect(ids).toContain("rhart-image-g-ai-only");
+    expect(ids).not.toContain("rhart-image-g-cn-only");
+    expect(result.regionHidden).toContain("rhart-image-g-cn-only");
   });
 });

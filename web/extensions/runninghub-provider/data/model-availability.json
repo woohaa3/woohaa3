@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "source": "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/developer-kit/model-registry.public.json",
+  "method": "POST /openapi/v2/<endpoint> with an invalid Bearer token; errorCode 1001 means the route is absent in that region.",
+  "note": "由 scripts/generate-model-availability.mjs 生成；只记录有证据不可用的端点，未知端点保留。",
+  "unavailable": {
+    "ai": [
+      "dola-Seedream-5.0-flash/image-to-image",
+      "dola-Seedream-5.0-flash/layer-decomposition",
+      "dola-Seedream-5.0-flash/text-to-image"
+    ],
+    "cn": [
+      "seedream-v5-flash/image-to-image",
+      "seedream-v5-flash/layer-decomposition",
+      "seedream-v5-flash/text-to-image",
+      "seedream-v5-pro/layer-decomposition"
+    ]
+  }
+}
