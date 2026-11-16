@@ -51,7 +51,8 @@
 	border-radius: 12px;
 	background: var(--app-web-panel);
 	box-shadow: 0 10px 26px var(--app-web-shadow);
-	z-index: 20;
+	/* Keep corner controls above node media overlays (z-index: 20). */
+	z-index: 21;
 }
 
 /* 概览区：小地图 + 两侧内容（如右侧缩放条）；收起后整块不渲染。 */
@@ -70,7 +71,7 @@
 	flex-direction: column;
 	align-items: flex-end;
 	gap: 6px;
-	z-index: 20;
+	z-index: 21;
 }
 
 .canvas-control-panel-cluster__top {
