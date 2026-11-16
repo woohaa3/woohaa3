@@ -8,6 +8,23 @@ export function readRuntimeHealth(json: string): RuntimeHealth {
   return health;
 }
 
+/**
+ * 内部故障码 → 可直接展示的触发原因。
+ *
+ * 展示层只给「暂停/重建」这类状态，用户无从判断发生了什么；把原因翻成一句话后，
+ * 不用展开技术详情也能知道是卡死、上下文丢失还是表面脱离。未知码多为底层错误原文，
+ * 原样保留，避免把真实信息吞掉。
+ */
+export function runtimeReasonText(reason: string): string {
+  if (reason === "watchdog") return "30 秒内没有收到画面更新，渲染器疑似卡死";
+  if (reason === "surface-detached") return "画布渲染表面已从页面脱离";
+  if (reason === "renderer-reloaded") return "渲染器被重复加载";
+  if (reason === "health") return "渲染器健康状态读取失败";
+  if (reason === "native-viewport") return "桌面画布视口通信失败";
+  if (reason === "Runtime disposed") return "画布页面已关闭，重建被取消";
+  return reason;
+}
+
 type EventRecord = { at: number; event: string; duration?: number };
 
 /** Bounded, payload-free diagnostics and recovery policy, separate from editing state. */
@@ -74,17 +91,27 @@ export class RuntimeSupervisor {
     const now = this.now();
     while (this.attempts.length && now - this.attempts[0]! > 60000) this.attempts.shift();
     const relocated = reason === "surface-detached";
+    const rebuilt = reason.startsWith("重建失败：");
+    const cause = runtimeReasonText(rebuilt ? reason.slice("重建失败：".length) : reason);
     this.record(reason === "watchdog" ? "watchdog" : "fault");
     if (!manual && !relocated && this.attempts.length >= 2) {
       this.phase = "degraded";
       this.options.issues.report({ key: "runtime:recovery", scope: "runtime", operation: "recovery",
-        recoverable: false, message: "渲染器连续恢复失败，已停止自动重试。编辑现场仍保留，可手动重建预览。", detail: reason });
+        recoverable: false,
+        message: `画布预览已停止自动恢复：连续两次重建失败（最后一次原因：${cause}）。编辑内容与待确认操作仍保留，点击「重建画布预览」可手动重试。`,
+        detail: reason });
       return;
     }
     if (!relocated) { this.attempts.push(now); if (this.attempts.length > 2) this.attempts.shift(); }
     this.phase = "recovering";
+    const attempt = Math.max(1, this.attempts.length);
+    const progress = manual ? "正在按你的请求重建画布预览" : relocated ? "正在自动重建画布预览" : `正在自动重建画布预览（第 ${attempt}/2 次）`;
     this.options.issues.report({ key: "runtime:recovery", scope: "runtime", operation: "recovery",
-      recoverable: false, message: "正在重建画布预览，编辑现场已保留。", detail: reason });
+      recoverable: false,
+      message: rebuilt
+        ? `画布预览重建失败（原因：${cause}），${manual ? "正在按你的请求重试" : `继续自动重试（第 ${attempt}/2 次）`}；编辑内容与待确认操作已保留。`
+        : `画布预览已暂停（原因：${cause}），${progress}；编辑内容与待确认操作已保留。`,
+      detail: reason });
     const epoch = ++this.epoch;
     this.timer = setTimeout(() => { this.timer = null; void this.recover(epoch, now); }, manual ? 0 : 250 * Math.max(1, this.attempts.length));
   }

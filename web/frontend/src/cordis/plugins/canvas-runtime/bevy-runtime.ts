@@ -856,12 +856,13 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         }
         const recoveredInteraction = lastScene ? replacement.set_scene(JSON.stringify(lastScene)) : 0;
         let remaining = 30000; let sampledAt = performance.now();
+        let health = readRuntimeHealth(replacement.runtime_health());
         while (!disposed && remaining > 0) {
           const now = performance.now();
           if (target.document.visibilityState === "visible") remaining -= now - sampledAt;
           sampledAt = now;
           if (realmFault) throw new Error(realmFault);
-          const health = readRuntimeHealth(replacement.runtime_health());
+          health = readRuntimeHealth(replacement.runtime_health());
           if (replacement.is_ready() && health.renders > 0 && (!lastScene || (health.appliedGeneration! >= recoveredInteraction && health.renderedGeneration! >= recoveredInteraction))) {
             module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset();
             // A replacement realm starts transparent with the startup curtain restored.
@@ -872,7 +873,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           }
           await new Promise(resolve => target.setTimeout(resolve, 50));
         }
-        throw new Error("渲染器重建未通过健康检查");
+        if (disposed) throw new Error("Runtime disposed");
+        throw new Error(`渲染器重建未通过健康检查：30 秒内没有确认到画面（就绪 ${replacement.is_ready() ? "是" : "否"}，累计渲染 ${health.renders} 帧，场景代际 应用 ${health.appliedGeneration ?? 0} / 呈现 ${health.renderedGeneration ?? 0}，重建前代际 ${recoveredInteraction}）。`);
       } catch (error) { disposeRealm(); throw error; }
     }, invalidate: () => { try { resourceFailures.retry(); } finally { runtime.retryRuntimeIssues?.(); } } });
     if (realmFault) { supervisor.fail(realmFault); }

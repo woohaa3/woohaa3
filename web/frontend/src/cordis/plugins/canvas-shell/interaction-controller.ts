@@ -80,8 +80,12 @@ export function installInteractionController(options: InteractionControllerOptio
   const reportFrameIssue = (operation: string, error: unknown) => {
     const detail = errorDetail(error);
     if (operation === "scene" || operation === "frame") renderError = detail;
+    const reason = detail.length > 120 ? `${detail.slice(0, 120)}…` : detail;
+    const label = operation === "scene" ? "场景提交" : operation === "frame" ? "逐帧渲染" : operation === "model-fly" ? "视角动画" : operation;
     try { options.getRuntime()?.reportRuntimeIssue?.({ key: `frame:${operation}`, scope: "frame", operation,
-      message: operation === "scene" ? "画布更新失败，正在尝试恢复。" : "部分画布预览更新失败，可以重试。",
+      message: operation === "scene"
+        ? `画布${label}失败（${reason}），正在自动恢复；编辑内容与同步不受影响。`
+        : `画布${label}失败（${reason}），其余编辑仍可用，可点击「重试预览」。`,
       detail, recoverable: true }); } catch { /* Diagnostic isolation. */ }
   };
   const frameLoop = createInteractionFrameLoop({ target,

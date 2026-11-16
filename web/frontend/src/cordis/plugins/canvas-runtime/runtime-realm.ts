@@ -75,7 +75,7 @@ export async function createRuntimeRealm(target: typeof globalThis, fault: (reas
     const abort = () => { dispose(); reject(signal!.reason); };
     signal?.addEventListener("abort", abort, { once: true });
     cleanups.push(() => signal?.removeEventListener("abort", abort));
-    const timer = target.setTimeout(() => { reject(new Error("渲染器装载超时")); }, 30000);
+    const timer = target.setTimeout(() => { reject(new Error("渲染器装载超时：30 秒内没有收到渲染器就绪信号，可能是资源加载失败、缓存版本不匹配或图形驱动不可用")); }, 30000);
     cleanups.push(() => target.clearTimeout(timer));
     host.prepend(iframe);
     // A same-origin bootstrap handoff survives the document navigation via the parent.

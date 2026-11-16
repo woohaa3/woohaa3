@@ -58,6 +58,29 @@ it("连续故障只自动重建两次，手动恢复可继续，有界诊断不�
   f.supervisor.dispose();
 });
 
+it("外显文案带上触发原因、重试次数与停止自动恢复的后果", async () => {
+  const f = fixture(vi.fn(async () => { throw new Error("GPU unavailable"); }));
+  f.supervisor.fail("watchdog");
+  const first = f.issues.getSnapshot()[0]?.message ?? "";
+  expect(first).toContain("画布预览已暂停");
+  expect(first).toContain("30 秒内没有收到画面更新");
+  expect(first).toContain("第 1/2 次");
+  expect(first).toContain("编辑内容与待确认操作已保留");
+  await vi.advanceTimersByTimeAsync(250);
+  const second = f.issues.getSnapshot()[0]?.message ?? "";
+  expect(second).toContain("画布预览重建失败");
+  expect(second).toContain("GPU unavailable");
+  expect(second).toContain("继续自动重试（第 2/2 次）");
+  await vi.runAllTimersAsync();
+  expect(f.supervisor.phase).toBe("degraded");
+  const stopped = f.issues.getSnapshot()[0]?.message ?? "";
+  expect(stopped).toContain("已停止自动恢复");
+  expect(stopped).toContain("GPU unavailable");
+  expect(stopped).toContain("编辑内容与待确认操作仍保留");
+  expect(stopped).toContain("重建画布预览");
+  f.supervisor.dispose();
+});
+
 it("真实致命问题只在健康重建成功后清除，迟到恢复不得改写已销毁实例", async () => {
   let finish!: () => void;
   const f = fixture(vi.fn(() => new Promise<void>(resolve => { finish = resolve; })));

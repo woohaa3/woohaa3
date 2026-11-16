@@ -28,8 +28,8 @@ export function CanvasRenderWarnings({ runtime, onRetry }: { runtime: BevyRuntim
   return (
     <aside className="canvas-render-warnings" role="alert" aria-label="画布预览问题">
       <div className="canvas-render-warnings__header">
-        <strong>{fatal ? "画布预览暂时不可用，编辑现场仍保留" : runtimeIssues.some(issue => issue.scope === "frame")
-          ? "画布预览更新遇到问题，正在尝试恢复" : "部分素材或动作未能加载，画布仍可操作"}</strong>
+        <strong>{fatal ? "画布预览已暂停" : runtimeIssues.some(issue => issue.scope === "frame")
+          ? "画布预览更新异常，正在自动恢复" : "部分素材未能显示，编辑仍可用"}</strong>
         <IconButton
           className="canvas-render-warnings__close"
           label="关闭画布提示"
