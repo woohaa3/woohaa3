@@ -254,8 +254,12 @@ describe("刷新路由", () => {
 
 describe("RunningHub 刷新按区域裁剪", () => {
   const availability = {
-    ai: new Set(["rhart-image-g-cn-only/text-to-image"]),
-    cn: new Set(["rhart-image-g-ai-only/text-to-image", "rhart-image-g-mixed/text-to-image"])
+    ai: new Set([
+      "rhart-image-g-ai-only/text-to-image",
+      "rhart-image-g-mixed/text-to-image",
+      "rhart-image-g-mixed/edit"
+    ]),
+    cn: new Set(["rhart-image-g-cn-only/text-to-image", "rhart-image-g-mixed/edit"])
   };
   const regionRegistry = {
     models: [
@@ -291,8 +295,9 @@ describe("RunningHub 刷新按区域裁剪", () => {
     const ids = result.models.map((model) => model.id);
     expect(ids).not.toContain("rhart-image-g-ai-only");
     expect(ids).toContain("rhart-image-g-cn-only");
-    expect(ids).toContain("rhart-image-g-unknown");
-    expect(result.regionHidden).toEqual(["rhart-image-g-ai-only"]);
+    // 国内站严格按 SKU 白名单：两边都没有的未知端点也隐藏。
+    expect(ids).not.toContain("rhart-image-g-unknown");
+    expect(result.regionHidden).toEqual(["rhart-image-g-ai-only", "rhart-image-g-unknown"]);
     // 混合模型只保留国内站可用的 edit 路由，不把国际站独有路由带进来。
     expect(result.models.find((model) => model.id === "rhart-image-g-mixed")?.routes.map((route) => route.endpoint)).toEqual([
       "rhart-image-g-mixed/edit"

@@ -11,12 +11,25 @@ const PUBLIC_URL = "https://rh-images.example.com/input/openapi/a.png?q-sign-tim
 
 const REGISTRY = {
   models: [
-    { endpoint: "rhart-image-g-9/text-to-image", output_type: "image", name_cn: "GPT Image 9", params: [{ fieldKey: "prompt", type: "STRING", required: true }] }
+    { endpoint: "seedream-v5.5/text-to-image", output_type: "image", name_cn: "Seedream 5.5 文生图", params: [{ fieldKey: "prompt", type: "STRING", required: true }] }
   ]
 };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+/** 区域探测用空文件上传；真正上传素材时文件非空。 */
+async function isRegionProbe(body: BodyInit | null | undefined): Promise<boolean> {
+  if (!(body instanceof FormData)) return false;
+  const file = body.get("file");
+  return file instanceof Blob && file.size === 0;
+}
+
+function uploadProbeResponse(url: string): Response {
+  return url.includes("www.runninghub.cn")
+    ? json({ code: 1, msg: "file is required" })
+    : json({ code: 1, msg: "ApiKey verification failed: API Key不存在" });
 }
 
 function fakeResponse() {
@@ -89,6 +102,7 @@ describe("RunningHub 插件按区域接线", () => {
       if (url.includes("call-api/standard-api")) return new Response("<html>rhart-image-g-9</html>", { status: 200 });
       if (url.endsWith("llm.runninghub.cn/v1/models")) return json({ object: "list", data: [{ id: "qwen/qwen3.8", capabilities: { chat: true, tools: true, vision: false, streaming: true } }] });
       if (url.endsWith("/media/upload/binary")) {
+        if (await isRegionProbe(init?.body)) return uploadProbeResponse(url);
         return json({ code: 0, data: { type: "image", download_url: PUBLIC_URL } });
       }
       throw new Error(`Unexpected request: ${url} init=${String(init?.method)}`);
@@ -103,11 +117,13 @@ describe("RunningHub 插件按区域接线", () => {
     expect(modelIds).toContain("llm/qwen/qwen3.8-flash-next");
     expect(modelIds).not.toContain("llm/anthropic/claude-opus-5");
     expect(modelIds).toContain("api/seedream-v5-pro");
-    expect(modelIds).not.toContain("api/seedream-v5-flash");
-    expect(modelIds).toContain("api/rhart-image-n-pro");
-    expect(calls.filter(url => url.endsWith("/uc/openapi/accountStatus"))).toEqual([
-      "https://www.runninghub.ai/uc/openapi/accountStatus",
-      "https://www.runninghub.cn/uc/openapi/accountStatus"
+    expect(modelIds).toContain("api/seedream-v5-flash");
+    expect(modelIds).not.toContain("api/rhart-image-n-pro");
+    expect(modelIds).not.toContain("api/rhart-image-g-2.5/flare");
+    expect(modelIds).not.toContain("api/dola-Seedream-5.0-pro");
+    expect(calls.filter(url => url.endsWith("/media/upload/binary"))).toEqual([
+      "https://www.runninghub.ai/openapi/v2/media/upload/binary",
+      "https://www.runninghub.cn/openapi/v2/media/upload/binary"
     ]);
 
     // 临时图床上传走国内站。
@@ -119,6 +135,8 @@ describe("RunningHub 插件按区域接线", () => {
     expect(await handlers[1]!({ method: "GET", url: RUNNINGHUB_BALANCE_PATH }, balanceResponse)).toBe(true);
     expect(balanceResponse.state.status).toBe(200);
     expect(JSON.parse(balanceResponse.state.body)).toMatchObject({ ok: true, balance: { remainMoney: 12 } });
+    expect(calls).toContain("https://www.runninghub.cn/uc/openapi/accountStatus");
+    expect(calls).not.toContain("https://www.runninghub.ai/uc/openapi/accountStatus");
 
     // 刷新目录走国内站的标准模型页与文字目录。
     const refreshResponse = fakeResponse();
@@ -150,32 +168,33 @@ describe("RunningHub 插件按区域接线", () => {
 
   it("持久化命中时不重复探测，重启后仍用上次区域", async () => {
     const documents = memoryDocuments();
-    let accountCalls = 0;
-    const firstFetch = (async (input: string | URL | Request) => {
+    let probeCalls = 0;
+    const firstFetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/uc/openapi/accountStatus")) {
-        accountCalls += 1;
-        return url.includes("www.runninghub.cn") ? json({ code: 0, data: { remainMoney: "1" } }) : json({ code: 806, msg: "APIKEY_USER_NOT_FOUND" });
+      if (url.endsWith("/media/upload/binary") && await isRegionProbe(init?.body)) {
+        probeCalls += 1;
+        return uploadProbeResponse(url);
       }
       throw new Error(`Unexpected request: ${url}`);
     }) as typeof globalThis.fetch;
     const first = fakeContext(documents);
     await createRunningHubProviderPlugin({ fetchImpl: firstFetch }).apply(first.ctx, { apiKey: "key" } as never);
-    expect(accountCalls).toBe(2);
+    expect(probeCalls).toBe(2);
 
     // 重启后：即使两个站都不可达，也应复用文档里的 cn，不再探测。
     const offline = (async () => { throw new Error("offline"); }) as unknown as typeof globalThis.fetch;
     const second = fakeContext(documents);
     await createRunningHubProviderPlugin({ fetchImpl: offline }).apply(second.ctx, { apiKey: "key" } as never);
-    expect(accountCalls).toBe(2);
+    expect(probeCalls).toBe(2);
     expect(second.registered[0]!.serviceConnectionFactory?.endpoints?.["chat-completions"]).toBe("https://llm.runninghub.cn/v1");
   });
 
   it("testConnection 报告站点；无效、不可达与区域不明分别给出真实原因", async () => {
     const pluginFor = (fetchImpl: typeof globalThis.fetch) => createRunningHubProviderPlugin({ fetchImpl });
 
-    const cnSuccess = (async (input: string | URL | Request) => {
+    const cnSuccess = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/media/upload/binary") && await isRegionProbe(init?.body)) return uploadProbeResponse(url);
       if (url.endsWith("/uc/openapi/accountStatus")) {
         return url.includes("www.runninghub.cn") ? json({ code: 0, data: { remainMoney: "1" } }) : json({ code: 806, msg: "APIKEY_USER_NOT_FOUND" });
       }

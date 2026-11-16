@@ -1,20 +1,24 @@
 #!/usr/bin/env node
 /**
- * 生成 `data/model-availability.json`：RunningHub 标准模型在哪些站点的 API 路由不存在。
+ * 生成 `data/model-availability.json`：RunningHub 标准模型在两站的**可售/可用**端点。
  *
  * ```sh
  * node scripts/generate-model-availability.mjs
  * ```
  *
- * 判定只看**路由是否存在**：对 registry 里的每个端点向两个站点各发一次最小 POST，使用一个
- * 明确无效的 Bearer Key。上游在参数/鉴权校验前先匹配路由：
- * - `errorCode === 1001`（Invalid URL）→ 该站点没有这个端点；
- * - `1007` / `1026` / `806` 等业务码 → 路由存在（只是参数或 Key 不合格）；
- * - 网络失败、5xx、405 等无法判断 → 记为“未知”，不写入不可用清单。
+ * 数据源是官方标准模型 SKU 列表（`POST /api/sku/list`，`categoryType: STANDARD_MODEL`）与
+ * SKU 详情（`POST /api/sku/detail`）。详情里的：
+ * - `rhEndpoint`：与 registry 精确匹配的 API 路由；
+ * - `isOversea`：0 表示国内站可用，1 表示仅海外/国际站；
+ * - `status` / `sourceTypeName`：售卖状态与供应商。
  *
- * 因此这份映射只保存**有证据不可用**的端点；运行期只隐藏这些端点，未知端点一律保留。
- * 不要用 SKU 列表代替：SKU 是商品/售卖信息，和 API 路由是否注册不是一回事
- * （例如 `rhart-image-n-pro` 的端点在两个站点都存在）。
+ * 两站的 SKU 列表本身也不同（国际站 400、国内站 283）。只记录**有正面证据**的端点：
+ * 某个端点只在一个站的可用清单里时，另一站隐藏它；两个站都没有的端点视为“未知”并保留
+ * （legacy/free 端点可能不作为 SKU 出售），避免用不完整清单误删合法模型。
+ *
+ * 不要用 `/openapi/v2/<endpoint>` 的 `1001` 探测代替：路由注册不等于账号能调用。
+ * 实测国内站账号调用 `rhart-image-g-*`、`rhart-image-n-*`、`dola-*` 会失败，但路由探测
+ * 仍返回参数错误；SKU 的 `isOversea` 才是区域可用性标记。
  */
 import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -22,13 +26,14 @@ import { fileURLToPath } from "node:url";
 
 const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_OUT = resolve(PACKAGE_DIR, "data/model-availability.json");
-const REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/developer-kit/model-registry.public.json";
 const REGIONS = {
   ai: "https://www.runninghub.ai",
   cn: "https://www.runninghub.cn"
 };
-const PROBE_TOKEN = "rh-region-probe-invalid";
-const TIMEOUT_MS = 20_000;
+const LIST_PATH = "/api/sku/list";
+const DETAIL_PATH = "/api/sku/detail";
+const PAGE_SIZE = 500;
+const TIMEOUT_MS = 30_000;
 
 function usage(message) {
   if (message) console.error(message);
@@ -38,7 +43,7 @@ function usage(message) {
 
 function parseArgs(argv) {
   let out = DEFAULT_OUT;
-  let concurrency = 12;
+  let concurrency = 8;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--out") {
@@ -58,95 +63,109 @@ function parseArgs(argv) {
   return { out, concurrency };
 }
 
-async function registryEndpoints() {
-  const response = await fetch(REGISTRY_URL, {
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(30_000)
+async function postJson(origin, path, body) {
+  const response = await fetch(`${origin}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(TIMEOUT_MS)
   });
-  if (!response.ok) throw new Error(`registry 返回 HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`${origin}${path} 返回 HTTP ${response.status}`);
   const payload = await response.json();
-  const list = Array.isArray(payload) ? payload : Array.isArray(payload?.models) ? payload.models : null;
-  if (!list) throw new Error("registry 缺少 models 数组");
-  const endpoints = new Set();
-  for (const entry of list) {
-    if (entry && typeof entry === "object" && typeof entry.endpoint === "string" && entry.endpoint.trim() !== "") {
-      endpoints.add(entry.endpoint.trim());
+  if (!payload || typeof payload !== "object" || payload.code !== 0) {
+    throw new Error(`${origin}${path} 返回失败：${payload && typeof payload === "object" ? payload.msg ?? "unknown" : "non-object"}`);
+  }
+  return payload.data;
+}
+
+async function listSkus(origin) {
+  const records = [];
+  for (let pageNum = 1; pageNum <= 20; pageNum += 1) {
+    const data = await postJson(origin, LIST_PATH, {
+      categoryType: "STANDARD_MODEL",
+      pageNum,
+      pageSize: PAGE_SIZE
+    });
+    const page = data && typeof data === "object" ? data.page : undefined;
+    const pageRecords = page && Array.isArray(page.records) ? page.records : [];
+    records.push(...pageRecords);
+    const total = Number(page?.total);
+    if (pageRecords.length === 0 || (Number.isFinite(total) && records.length >= total)) break;
+  }
+  if (records.length === 0) throw new Error(`${origin}${LIST_PATH} 没有返回标准模型 SKU`);
+  return records;
+}
+
+async function skuDetail(origin, skuId) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const data = await postJson(origin, DETAIL_PATH, { id: skuId });
+      if (!data || typeof data !== "object") return { skipped: true };
+      const endpoint = typeof data.rhEndpoint === "string" ? data.rhEndpoint.trim().replace(/^\/+/, "") : "";
+      if (!endpoint) return { skipped: true };
+      return {
+        endpoint,
+        // 0 = 国内站可用；1 = 仅海外；缺失时不据此判断，交给所在站的列表决定。
+        isOversea: typeof data.isOversea === "number" ? data.isOversea : undefined
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("1913") || message.includes("暂无权限")) return { skipped: true };
+      if (attempt === 2) throw error;
     }
   }
-  if (endpoints.size === 0) throw new Error("registry 没有端点");
+  return { skipped: true };
+}
+
+async function endpointsForRegion(origin, concurrency) {
+  const records = await listSkus(origin);
+  const ids = [...new Set(records.map((record) => String(record?.id ?? "").trim()).filter(Boolean))];
+  const endpoints = new Set();
+  let cursor = 0;
+  let failures = 0;
+
+  async function worker() {
+    while (cursor < ids.length) {
+      const index = cursor;
+      cursor += 1;
+      const id = ids[index];
+      try {
+        const result = await skuDetail(origin, id);
+        if (result.endpoint) {
+          // 国内站清单里标成仅海外的 SKU 不进入国内站可用集合。
+          if (origin === REGIONS.cn && result.isOversea === 1) continue;
+          endpoints.add(result.endpoint);
+        } else if (result.skipped) {
+          console.error(`[model-availability] ${origin} SKU ${id} 无可用 rhEndpoint，跳过`);
+        }
+      } catch (error) {
+        failures += 1;
+        console.error(`[model-availability] ${origin} SKU ${id} 详情失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, () => worker()));
+  if (failures > 0) throw new Error(`${origin} 有 ${failures} 个 SKU 详情失败，拒绝写入不完整映射`);
+  console.error(`[model-availability] ${origin}：${records.length} 个 SKU，${endpoints.size} 个可用端点`);
   return [...endpoints].sort();
 }
 
-async function probe(origin, endpoint) {
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const response = await fetch(`${origin}/openapi/v2/${endpoint}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${PROBE_TOKEN}`
-        },
-        body: "{}",
-        signal: AbortSignal.timeout(TIMEOUT_MS)
-      });
-      const text = await response.text();
-      let payload;
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        return { state: "unknown" };
-      }
-      const code = payload && typeof payload === "object" ? Number(payload.errorCode) : Number.NaN;
-      if (code === 1001) return { state: "unavailable" };
-      if (Number.isFinite(code)) return { state: "available", code };
-      if (response.status === 404) return { state: "unavailable" };
-      return { state: "unknown" };
-    } catch {
-      if (attempt === 2) return { state: "unknown" };
-    }
-  }
-  return { state: "unknown" };
-}
-
-async function unavailableForRegion(origin, endpoints, concurrency) {
-  const unavailable = new Set();
-  const counts = { available: 0, unavailable: 0, unknown: 0 };
-  let cursor = 0;
-
-  async function worker() {
-    while (cursor < endpoints.length) {
-      const index = cursor;
-      cursor += 1;
-      const endpoint = endpoints[index];
-      const result = await probe(origin, endpoint);
-      counts[result.state] += 1;
-      if (result.state === "unavailable") unavailable.add(endpoint);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, endpoints.length) }, () => worker()));
-  console.error(
-    `[model-availability] ${origin}：可用 ${counts.available}，不可用 ${counts.unavailable}，未知 ${counts.unknown}`
-  );
-  return [...unavailable].sort();
-}
-
 const { out, concurrency } = parseArgs(process.argv.slice(2));
-const endpoints = await registryEndpoints();
-const unavailable = {};
+const regions = {};
 for (const [region, origin] of Object.entries(REGIONS)) {
-  unavailable[region] = await unavailableForRegion(origin, endpoints, concurrency);
+  regions[region] = await endpointsForRegion(origin, concurrency);
 }
 
 const artifact = {
-  schemaVersion: 2,
-  source: REGISTRY_URL,
-  method: "POST /openapi/v2/<endpoint> with an invalid Bearer token; errorCode 1001 means the route is absent in that region.",
-  note: "由 scripts/generate-model-availability.mjs 生成；只记录有证据不可用的端点，未知端点保留。",
-  unavailable
+  schemaVersion: 3,
+  source: {
+    ai: `${REGIONS.ai}${LIST_PATH}?categoryType=STANDARD_MODEL`,
+    cn: `${REGIONS.cn}${LIST_PATH}?categoryType=STANDARD_MODEL`
+  },
+  note: "由 scripts/generate-model-availability.mjs 生成；按站点 SKU 列表与详情 isOversea/rhEndpoint 记录可用端点。只隐藏有正面证据属于另一站的端点，未知端点保留。",
+  regions
 };
 
 writeFileSync(out, `${JSON.stringify(artifact, null, 2)}\n`);
-console.error(
-  `[model-availability] 写入 ${out}（ai 不可用 ${unavailable.ai.length}，cn 不可用 ${unavailable.cn.length}）`
-);
+console.error(`[model-availability] 写入 ${out}（ai ${regions.ai.length}，cn ${regions.cn.length}）`);

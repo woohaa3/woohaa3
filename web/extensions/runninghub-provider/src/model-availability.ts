@@ -1,17 +1,18 @@
 /**
  * RunningHub 标准模型区域可用性（change: 2026-11-17-add-runninghub-region-detection）。
  *
- * `data/model-availability.json` 由 `scripts/generate-model-availability.mjs` 探测两站标准模型
- * API 路由生成。运行期只读这份映射，不批量请求上游。
+ * `data/model-availability.json` 由 `scripts/generate-model-availability.mjs` 从两站标准模型
+ * SKU 列表与详情生成。运行期只读这份映射，不批量请求上游。
  *
- * 过滤是**保守**的：只隐藏“有证据不可用”的端点（上游返回 1001 Invalid URL）。网络失败、
- * 5xx、405 等未知情况不写入清单，运行期一律保留，避免用不完整探测误删合法模型。
+ * 国内站使用**严格白名单**：只有出现在国内站 SKU 列表里的端点是可用的。国际站使用保守
+ * 过滤：只隐藏“明确属于国内站独有”的端点，未知端点保留。SKU 详情里的 `isOversea`
+ * （1 = 仅海外，0 = 国内可用）用于生成清单，不能用 API 路由是否存在代替售卖/账号可用性。
  */
 import availabilityData from "../data/model-availability.json";
 import type { RunningHubRegion } from "./region.js";
 
 export type RunningHubEndpointAvailability = {
-  /** 明确不可用的端点；不是可用列表。 */
+  /** 该站点 SKU 清单覆盖到的可用端点。 */
   readonly ai: ReadonlySet<string>;
   readonly cn: ReadonlySet<string>;
 };
@@ -27,11 +28,11 @@ function endpointSet(value: unknown): Set<string> {
 }
 
 function availabilityFrom(value: unknown): RunningHubEndpointAvailability {
-  const unavailable = value && typeof value === "object" && !Array.isArray(value)
-    ? (value as { unavailable?: unknown }).unavailable
+  const regions = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as { regions?: unknown }).regions
     : undefined;
-  const record = unavailable && typeof unavailable === "object" && !Array.isArray(unavailable)
-    ? (unavailable as { ai?: unknown; cn?: unknown })
+  const record = regions && typeof regions === "object" && !Array.isArray(regions)
+    ? (regions as { ai?: unknown; cn?: unknown })
     : {};
   return { ai: endpointSet(record.ai), cn: endpointSet(record.cn) };
 }
@@ -41,8 +42,9 @@ export const RUNNINGHUB_ENDPOINT_AVAILABILITY: RunningHubEndpointAvailability = 
 /**
  * 该端点是否可在指定区域使用。
  *
- * - 明确记录为该区域不可用：隐藏。
- * - 其余（可用或未知）：保留。
+ * - 国内站：严格按国内 SKU 白名单，不在清单里就隐藏（GPT Image／全能图片／dola 等均不在）。
+ * - 国际站：在清单里可用；只在国内站清单里则隐藏；两边都没有视为未知并保留。
+ * - 两边的清单都为空（测试或映射损坏）时不隐藏，避免把整个目录清空。
  */
 export function isEndpointAvailableInRegion(
   region: RunningHubRegion,
@@ -51,7 +53,12 @@ export function isEndpointAvailableInRegion(
 ): boolean {
   const normalized = endpoint.trim().replace(/^\/+/, "");
   if (normalized === "") return true;
-  return !availability[region].has(normalized);
+  const current = availability[region];
+  const other = region === "ai" ? availability.cn : availability.ai;
+  if (current.size === 0 && other.size === 0) return true;
+  if (current.has(normalized)) return true;
+  if (region === "cn") return false;
+  return !other.has(normalized);
 }
 
 /** 只保留当前区域可用的路由。 */
