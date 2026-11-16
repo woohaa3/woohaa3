@@ -124,7 +124,7 @@ export function createExtensionExecutorRuntime(options: HostRuntimeOptions | und
               if (controller.signal.aborted) return { status: "cancelled" };
               await ensure();
               if (controller.signal.aborted || disposed) return { status: "cancelled" };
-              await client.runTurn({ turnId, requestId: input.requestId, kind: "agent", executor: `${registrationId}/${input.executor}`,
+              await client.runTurn({ turnId, requestId: input.requestId, owner: input.owner, kind: "agent", executor: `${registrationId}/${input.executor}`,
                 prepared: input.prepared, payload: input.payload, host: { ...options.bridge, leaseId: lease.leaseId } });
               submitted = true;
               if (controller.signal.aborted) cancel();
