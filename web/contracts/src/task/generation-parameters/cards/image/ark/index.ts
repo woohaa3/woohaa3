@@ -1,4 +1,5 @@
 import type { PresetCard } from "../../../card.js";
+import { seedream55 } from "./seedream-5.5.js";
 import { seedream50Pro } from "./seedream-5.0-pro.js";
 import { seedream50Flash } from "./seedream-5.0-flash.js";
 import { seedream50Lite } from "./seedream-5.0-lite.js";
@@ -7,6 +8,7 @@ import { seedream40 } from "./seedream-4.0.js";
 
 /** 即梦全部在售 / 仍列出的版本：每张卡片就是该版本能力的唯一来源。 */
 export const ARK_IMAGE_CARDS: readonly PresetCard[] = [
+  seedream55,
   seedream50Pro,
   seedream50Flash,
   seedream50Lite,
@@ -32,12 +34,19 @@ export {
 } from "./seedream-projection.js";
 export {
   SEEDREAM_ASPECT_RATIOS,
+  SEEDREAM_SIZE_TABLES,
   SEEDREAM_UNKNOWN_VERSION,
   seedreamGatewayResolutions,
+  seedreamLayerDecompositionOptions,
   seedreamPixelSize,
+  seedreamPromptOptimizeModes,
   seedreamSizeTable,
   seedreamSupportsAspectRatio,
+  seedreamSupportsOutputFormatParameter,
   seedreamSupportsTransparentBackground,
+  seedreamTransparentBackgroundFromText,
+  type SeedreamFeatureFlags,
   type SeedreamResolutionTier,
-  type SeedreamSizePreset
+  type SeedreamSizePreset,
+  type SeedreamSizeTableFamily
 } from "./seedream-spec.js";

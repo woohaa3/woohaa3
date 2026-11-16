@@ -24,13 +24,20 @@ export const seedream45 = imageCard({
     prefixes: ["seedream-4.5", "seedream-4-5", "seedream-image-4.5", "doubao-seedream-4-5"],
     resolutions: ["2K", "4K"],
     defaultResolution: "2K",
-    sizes: seedreamSizeTable("2K", "4K"),
+    sizes: seedreamSizeTable("lite", "2K", "4K"),
     aspectRatios: SEEDREAM_ASPECT_RATIOS,
     pixelWindow: {
       minTotalPixels: 3_686_400,
       maxTotalPixels: 16_777_216,
       minAspectRatio: 1 / 16,
       maxAspectRatio: 16
+    },
+    features: {
+      // 4.5 不认 `output_format`：只出 JPEG，传什么值都 400。
+      outputFormatParameter: false,
+      promptOptimizeModes: ["standard"],
+      streaming: true,
+      webSearch: false
     }
   },
   limits: {

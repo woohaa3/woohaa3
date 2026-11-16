@@ -29,18 +29,20 @@ export const SEEDREAM_ASPECT_RATIOS = [
 export type SeedreamResolutionTier = "1K" | "1.5K" | "2K" | "3K" | "4K";
 
 /**
- * 官方「档位 × 宽高比 → 像素值」表。
+ * 官方像素表的分组。
  *
- * 档位是全局规范（同一档位在不同版本里是同一张表），所以只在这里维护一份；
- * 卡片用 `seedreamSizeTable(...)` 声明自己用哪几个档位。
+ * **同一个档位在不同版本里不是同一张表**：官方文档按模型族各给一张「分辨率 × 宽高比」
+ * 映射表，2K 尤其不能混——5.5 / 5.0 pro / flash 的 2K 4:3 是 2368x1776，5.0 lite / 4.5
+ * 的 2K 4:3 是 2304x1728。所以表按族分组，不能只按档位收敛成一张全局部。
  *
- * 5.0 lite / 4.5 的 4K 表：镜像文档把 4:3 / 3:4 与 3:2 / 2:3 两行的像素值写反了
- * （4:3 那行给的是竖图 3520x4704）。这里按像素值实际表达的宽高比归位，保证选 4:3 拿到横图；
- * 像素值本身未改动，且都落在官方总像素窗口内（见各卡片的 `pixelWindow` 与单测）。
+ * - `pro`：Seedream 5.5、5.0 pro / flash，档位 1K / 1.5K / 2K
+ * - `lite`：Seedream 5.0 lite、4.5，档位 2K / 3K / 4K（4.5 只用 2K / 4K）
+ * - `4.0`：Seedream 4.0，档位 1K / 2K / 4K；2K / 4K 与 `lite` 相同，只有 1K 是单独一套
+ *   （16:9 = 1280x720、21:9 = 1512x648，比 pro 的 1424x800 / 1568x672 更窄）
  */
-export const SEEDREAM_TIER_SIZE_TABLES: Readonly<
-  Record<SeedreamResolutionTier, Readonly<Record<string, string>>>
-> = {
+export type SeedreamSizeTableFamily = "pro" | "lite" | "4.0";
+
+const PRO_TIERS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "1K": {
     "1:1": "1024x1024",
     "4:3": "1152x864",
@@ -61,6 +63,20 @@ export const SEEDREAM_TIER_SIZE_TABLES: Readonly<
     "2:3": "1248x1872",
     "21:9": "2352x1008",
   },
+  "2K": {
+    "1:1": "2048x2048",
+    "4:3": "2368x1776",
+    "3:4": "1776x2368",
+    "16:9": "2816x1584",
+    "9:16": "1584x2816",
+    "3:2": "2496x1664",
+    "2:3": "1664x2496",
+    "21:9": "3136x1344",
+  },
+};
+
+/** 5.0 lite / 4.5 共用的 2K / 3K / 4K 表。 */
+const LITE_TIERS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "2K": {
     "1:1": "2048x2048",
     "4:3": "2304x1728",
@@ -93,12 +109,54 @@ export const SEEDREAM_TIER_SIZE_TABLES: Readonly<
   },
 };
 
-/** 从规范表里取若干档位，供卡片声明 `sizes`。 */
+/** 4.0 只有 1K 与上面两族不同；2K / 4K 直接复用 `lite`。 */
+const FOUR_TIERS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "1K": {
+    "1:1": "1024x1024",
+    "4:3": "1152x864",
+    "3:4": "864x1152",
+    "16:9": "1280x720",
+    "9:16": "720x1280",
+    "3:2": "1248x832",
+    "2:3": "832x1248",
+    "21:9": "1512x648",
+  },
+  "2K": LITE_TIERS["2K"]!,
+  "4K": LITE_TIERS["4K"]!,
+};
+
+/**
+ * 官方「族 × 档位 × 宽高比 → 像素值」表。
+ *
+ * 表按族分组（见 `SeedreamSizeTableFamily`）：同一档位在不同族里可以是不同像素值，
+ * 卡片用 `seedreamSizeTable(family, ...tiers)` 声明自己用哪一族的哪几个档位。
+ *
+ * 5.0 lite / 4.5 的 4K 表：镜像文档把 4:3 / 3:4 与 3:2 / 2:3 两行的像素值写反了
+ * （4:3 那行给的是竖图 3520x4704）。这里按像素值实际表达的宽高比归位，保证选 4:3 拿到横图；
+ * 像素值本身未改动，且都落在官方总像素窗口内（见各卡片的 `pixelWindow` 与单测）。
+ */
+export const SEEDREAM_SIZE_TABLES: Readonly<
+  Record<SeedreamSizeTableFamily, Readonly<Record<string, Readonly<Record<string, string>>>>>
+> = {
+  pro: PRO_TIERS,
+  lite: LITE_TIERS,
+  "4.0": FOUR_TIERS,
+};
+
+/** 从某一族的规范表里取若干档位，供卡片声明 `sizes`。 */
 export function seedreamSizeTable(
+  family: SeedreamSizeTableFamily,
   ...tiers: readonly SeedreamResolutionTier[]
 ): Readonly<Record<string, Readonly<Record<string, string>>>> {
   const table: Record<string, Readonly<Record<string, string>>> = {};
-  for (const tier of tiers) table[tier] = SEEDREAM_TIER_SIZE_TABLES[tier];
+  const tiersOfFamily = SEEDREAM_SIZE_TABLES[family];
+  for (const tier of tiers) {
+    const pixels = tiersOfFamily[tier];
+    if (pixels === undefined) {
+      throw new Error(`Seedream ${family} has no official size table for tier ${tier}`);
+    }
+    table[tier] = pixels;
+  }
   return table;
 }
 
@@ -151,6 +209,56 @@ export type SeedreamSizePreset = {
    * `outputFormat: png` 联动（`x-pptask-requires`），请求翻译层也强制补 PNG。
    */
   transparentBackground?: boolean;
+  /**
+   * 该版本的请求字段与高级能力。缺省一律按“最保守”理解：不下发可选项、不猜高级参数。
+   *
+   * 这些开关与数值都来自官方「图片生成 API」文档的模型参数表（按版本逐行列出）；
+   * 卡片是它们唯一存放处，Provider 只负责读。
+   */
+  features?: SeedreamFeatureFlags;
+};
+
+/**
+ * 即梦各版本在**请求字段层面**的差异。
+ *
+ * 很多字段不是“填了就有用”，而是“这个版本压根不认”：传过去直接 400。
+ * 例如 `output_format` 只有 5.x 认，4.5 / 4.0 传了就报
+ * `the parameter output_format is not supported by the current model`；
+ * `optimize_prompt_options.mode=fast` 只有 5.0 pro 与 4.0 认。
+ */
+export type SeedreamFeatureFlags = {
+  /**
+   * 是否接受 `output_format` 请求字段。
+   *
+   * `false`（4.5 / 4.0）时**一个字符都不能发**：模型只出 JPEG，传 `jpeg` 也照样 400。
+   */
+  outputFormatParameter?: boolean;
+  /** 允许的提示词优化模式；缺省只允许 `standard`（`fast` 只有某些版本有）。 */
+  promptOptimizeModes?: readonly ("standard" | "fast")[];
+  /**
+   * 图层拆分的高级参数 `layer_decomposition_options`。
+   *
+   * 只有 5.5 认这个对象；5.0 pro / flash 只能光一个 `layer_decomposition: true`，
+   * 传了 `layer_decomposition_options` 会被拒绝。
+   */
+  layerDecompositionOptions?: {
+    minImages: number;
+    maxImages: number;
+    defaultMaxImages: number;
+    /** 是否支持 `text_recognition`（规整文字图层的富文本 OCR）。 */
+    textRecognition: boolean;
+  };
+  /** 支持联网搜索（`tools: [{ type: "web_search" }]`），目前只有 5.0 lite。 */
+  webSearch?: boolean;
+  /** 支持流式输出（`stream: true`），5.0 lite / 4.5 / 4.0 有。 */
+  streaming?: boolean;
+  /**
+   * 透明背景是否也能从**文生图**发起。
+   *
+   * `false` / 缺省：官方只允许“图生图 && 只输入 1 张带透明通道的图片”（5.0 pro / flash）。
+   * `true`：文生图与图生图都能出原生 RGBA（5.5）。
+   */
+  transparentBackgroundFromText?: boolean;
 };
 
 /** 认得出是即梦、但没有任何卡片匹配时的模型 id 前缀。 */
@@ -206,4 +314,33 @@ export function seedreamSupportsAspectRatio(preset: SeedreamSizePreset): boolean
 /** 该版本是否支持官方「透明背景」（`background`）：决定面板是否提供「背景」控件、请求是否下发。 */
 export function seedreamSupportsTransparentBackground(preset: SeedreamSizePreset): boolean {
   return preset.transparentBackground === true;
+}
+
+/**
+ * 该版本是否接受 `output_format` 请求字段。
+ *
+ * 缺省为 `false`（保守）：未登记的版本宁可不发这个字段，也不要让上游 400。
+ */
+export function seedreamSupportsOutputFormatParameter(preset: SeedreamSizePreset): boolean {
+  return preset.features?.outputFormatParameter === true;
+}
+
+/** 该版本允许的提示词优化模式；缺省只有 `standard`。 */
+export function seedreamPromptOptimizeModes(
+  preset: SeedreamSizePreset
+): readonly ("standard" | "fast")[] {
+  const modes = preset.features?.promptOptimizeModes;
+  return modes && modes.length > 0 ? modes : ["standard"];
+}
+
+/** 该版本的图层拆分高级参数；缺省表示不认 `layer_decomposition_options`。 */
+export function seedreamLayerDecompositionOptions(
+  preset: SeedreamSizePreset
+): SeedreamFeatureFlags["layerDecompositionOptions"] {
+  return preset.features?.layerDecompositionOptions;
+}
+
+/** 透明背景是否也能从文生图发起（目前只有 5.5）。 */
+export function seedreamTransparentBackgroundFromText(preset: SeedreamSizePreset): boolean {
+  return preset.features?.transparentBackgroundFromText === true;
 }

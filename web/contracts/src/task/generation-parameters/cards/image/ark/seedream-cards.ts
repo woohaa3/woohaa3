@@ -13,6 +13,7 @@
  */
 
 import type { PresetCard } from "../../../card.js";
+import { seedream55 } from "./seedream-5.5.js";
 import { seedream40 } from "./seedream-4.0.js";
 import { seedream45 } from "./seedream-4.5.js";
 import { seedream50Flash } from "./seedream-5.0-flash.js";
@@ -43,6 +44,7 @@ export function seedreamSpecOfCard(card: PresetCard): SeedreamSizePreset | undef
 
 /** 声明了即梦版本语义的卡片（顺序即前缀兜底的顺序：更具体的版本排前面）。 */
 export const SEEDREAM_CARDS: readonly PresetCard[] = [
+  seedream55,
   seedream50Pro,
   seedream50Flash,
   seedream50Lite,

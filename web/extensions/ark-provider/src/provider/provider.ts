@@ -12,9 +12,11 @@ export type ArkProviderOptions = CommonProviderOptions & {
   /** 视频参考图提交前换成素材库 URI。图片生成仍使用 HTTPS 或 data URL。 */
   materializeImage?: (url: string, signal?: AbortSignal) => Promise<string>;
   /**
-   * 目录模型 ID → 推理接入点（`ep-`）。
-   * 给出这份映射后，请求体的 `model` 用接入点；没映射到的模型拒绝调用。
-   * 不传时仍用目录里的 Model ID（供直接按模型调用的测试）。
+   * 目录模型 ID → 推理接入点（`ep-`）。**可选覆盖，不是准入门槛**。
+   *
+   * 方舟自 2024 年起允许直接拿公开 Model ID 发起请求（`model: "doubao-seedream-5-5-261028"`），
+   * 不需要先建推理接入点；配置了 `ep-` 时用接入点（便于绑自己的限流/计费策略），
+   * 没配置就沿用目录里的 Model ID。
    */
   endpoints?: Record<string, string>;
 };
@@ -48,8 +50,9 @@ export function createArkProvider(options: ArkProviderOptions): PptaskProvider {
       if (modelType !== 'language' && modelType !== 'image' && modelType !== 'video') {
         throw new Error(`Unsupported Ark model: ${modelId}`);
       }
-      const model = assertArkModel(modelId, modelType);
-      if (endpoints && !endpoints[model.id]) throw new Error(`Ark 模型 ${modelId} 未配置推理接入点`);
+      // 只校验模型在目录里且类型对得上。推理接入点不是准入门槛：
+      // 没配 `ep-` 时直接用公开 Model ID 调用，配了就用接入点。
+      assertArkModel(modelId, modelType);
     },
     async execute(context) {
       if (context.modelType === 'language') {
@@ -79,12 +82,17 @@ export function createArkProvider(options: ArkProviderOptions): PptaskProvider {
   return createHttpProvider(protocol, { ...options, apiKey, baseURL: root, fetch: fetchImpl });
 }
 
+/**
+ * 把请求体的 `model` 换成推理接入点。
+ *
+ * 没配接入点时**保持目录里的 Model ID 不变**——公开 Model ID 本身就能直接调用，
+ * 接入点只作为可选覆盖（便于绑自己的限流/计费策略）。
+ */
 function applyEndpoint(body: Record<string, unknown>, modelId: string, endpoints?: Record<string, string>): void {
   if (!endpoints) return;
   const id = findArkModel(modelId)?.id ?? modelId;
   const endpoint = endpoints[id];
-  if (!endpoint) throw new Error(`Ark 模型 ${modelId} 未配置推理接入点`);
-  body.model = endpoint;
+  if (endpoint) body.model = endpoint;
 }
 
 async function materializeVideoImages(

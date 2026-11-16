@@ -86,10 +86,12 @@ describe("即梦：比例 + 档位取代 width/height", () => {
     });
   });
 
-  it("上游不认的档位不下发（4.0 没有比例表，像素字段保留）", () => {
+  it("上游不认的档位不下发", () => {
+    // 4.0 官方已给出「档位 × 宽高比」映射，面板改用「比例 + 档位」，
+    // 像素改由比例查表得出，不再摆一对 width/height。
     const { properties } = projection("seedream-v4");
-    expect(properties.aspectRatio).toBeUndefined();
-    expect(properties.width).toBeDefined();
+    expect(properties.aspectRatio).toBeDefined();
+    expect(properties.width).toBeUndefined();
     expect(enumValues(properties.resolution)).toEqual(["1k", "2k", "4k"]);
   });
 });
@@ -106,6 +108,7 @@ describe("Seedream 5.5：沿用 5.0 Pro 参数卡", () => {
   });
 
   it("提交时把 9:16 翻译为竖向像素", () => {
+    // 5.5 与 5.0 pro 同族：官方 2K 9:16 是 1584x2816（lite 族才是 1600x2848）。
     for (const modelId of ["dola-Seedream-5.5", "seedream-v5.5"]) {
       const model = findRunningHubModel(`api/${modelId}`)!;
       expect(translateRunningHubParameters(model, {
@@ -113,8 +116,8 @@ describe("Seedream 5.5：沿用 5.0 Pro 参数卡", () => {
         resolution: "2K",
         outputFormat: "jpeg"
       })).toEqual({
-        width: 1600,
-        height: 2848,
+        width: 1584,
+        height: 2816,
         resolution: "2K",
         outputFormat: "jpeg"
       });

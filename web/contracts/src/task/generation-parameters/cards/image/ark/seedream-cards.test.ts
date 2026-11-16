@@ -13,10 +13,15 @@ import {
   seedreamSpecOfCard
 } from "./seedream-cards.js";
 import {
+  SEEDREAM_ASPECT_RATIOS,
   seedreamGatewayResolutions,
+  seedreamLayerDecompositionOptions,
   seedreamPixelSize,
+  seedreamPromptOptimizeModes,
   seedreamSupportsAspectRatio,
-  seedreamSupportsTransparentBackground
+  seedreamSupportsOutputFormatParameter,
+  seedreamSupportsTransparentBackground,
+  seedreamTransparentBackgroundFromText
 } from "./seedream-spec.js";
 
 describe("卡片投影", () => {
@@ -100,11 +105,13 @@ describe("官方 size 语义", () => {
     expect(seedreamPixelSize(pro, "1:1", "2K")).toBe("2048x2048");
     expect(seedreamPixelSize(pro, "16:9", "1K")).toBe("1424x800");
     expect(seedreamPixelSize(pro, "21:9", "1.5K")).toBe("2352x1008");
-    expect(seedreamPixelSize(pro, "3:4", "2K")).toBe("1728x2304");
+    // pro 族的 2K 3:4 是 1776x2368（lite 族才是 1728x2304）：同档位不同族不能混表。
+    expect(seedreamPixelSize(pro, "3:4", "2K")).toBe("1776x2368");
 
     const lite = seedreamSizePresetFor("seedream-5-lite")!;
     expect(seedreamPixelSize(lite, "16:9", "3K")).toBe("4096x2304");
     expect(seedreamPixelSize(lite, "21:9", "4K")).toBe("6240x2656");
+    expect(seedreamPixelSize(lite, "3:4", "2K")).toBe("1728x2304");
 
     const fourFive = seedreamSizePresetFor("seedream-4.5")!;
     expect(seedreamPixelSize(fourFive, "3:2", "4K")).toBe("4992x3328");
@@ -147,18 +154,51 @@ describe("官方 size 语义", () => {
     }
   });
 
-  it("4.0 的卡片没有像素表，因此不暴露比例", () => {
+  it("4.0 有自己的 1K 表：官方文档已给出比例映射，因此暴露比例", () => {
     const four = seedreamSizePresetFor("seedream-4.0")!;
-    expect(seedreamSupportsAspectRatio(four)).toBe(false);
-    expect(four.aspectRatios).toEqual([]);
-    expect(seedreamPixelSize(four, "16:9", "2K")).toBeUndefined();
+    expect(seedreamSupportsAspectRatio(four)).toBe(true);
+    expect(four.aspectRatios).toEqual([...SEEDREAM_ASPECT_RATIOS]);
+    // 4.0 的 1K 与 pro 族不同（16:9 = 1280x720；pro 是 1424x800），2K / 4K 与 lite 一致。
+    expect(seedreamPixelSize(four, "16:9", "1K")).toBe("1280x720");
+    expect(seedreamPixelSize(four, "21:9", "1K")).toBe("1512x648");
+    expect(seedreamPixelSize(four, "16:9", "2K")).toBe("2848x1600");
+    expect(seedreamPixelSize(four, "16:9", "4K")).toBe("5504x3040");
   });
 
-  it("透明背景只有 5.0 pro / flash 的卡片声明", () => {
+  it("透明背景：5.5 / 5.0 pro / 5.0 flash 三张卡片声明，5.5 还能从文生图发", () => {
     const supported = SEEDREAM_SIZE_PRESETS
       .filter((preset) => seedreamSupportsTransparentBackground(preset))
       .map((preset) => preset.id);
-    expect(supported).toEqual(["seedream-5.0-pro", "seedream-5.0-flash"]);
+    expect(supported).toEqual(["seedream-5.5", "seedream-5.0-pro", "seedream-5.0-flash"]);
+    // 5.5 支持文生图出原生 RGBA；5.0 pro / flash 只能「图生图 + 单张透明 PNG」。
+    expect(seedreamTransparentBackgroundFromText(seedreamSizePresetFor("seedream-5.5")!)).toBe(true);
+    expect(seedreamTransparentBackgroundFromText(seedreamSizePresetFor("seedream-5-pro")!)).toBe(false);
+  });
+
+  it("只有 5.x 接受 output_format 字段；4.5 / 4.0 传了会被上游 400", () => {
+    for (const id of ["seedream-5.5", "seedream-5-pro", "seedream-5-flash", "seedream-5-lite"]) {
+      expect(seedreamSupportsOutputFormatParameter(seedreamSizePresetFor(id)!), id).toBe(true);
+    }
+    for (const id of ["seedream-4.5", "seedream-4.0"]) {
+      expect(seedreamSupportsOutputFormatParameter(seedreamSizePresetFor(id)!), id).toBe(false);
+    }
+  });
+
+  it("极速提示词优化只有 5.0 pro 与 4.0 有，其余版本传 fast 会被拒", () => {
+    const fast = ["seedream-5.0-pro", "seedream-4.0"];
+    for (const preset of SEEDREAM_SIZE_PRESETS) {
+      expect(seedreamPromptOptimizeModes(preset).includes("fast"), preset.id).toBe(
+        fast.includes(preset.id)
+      );
+    }
+  });
+
+  it("图层拆分高级参数只属于 5.5", () => {
+    const five5 = seedreamLayerDecompositionOptions(seedreamSizePresetFor("seedream-5.5")!);
+    expect(five5).toMatchObject({ minImages: 2, maxImages: 100, textRecognition: true });
+    for (const id of ["seedream-5-pro", "seedream-5-flash", "seedream-5-lite", "seedream-4.5", "seedream-4.0"]) {
+      expect(seedreamLayerDecompositionOptions(seedreamSizePresetFor(id)!), id).toBeUndefined();
+    }
   });
 
   it("比例或档位不在表里时返回 undefined，由调用方回退到档位", () => {

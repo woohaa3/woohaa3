@@ -79,9 +79,9 @@ describe("TokenHub 参数 schema", () => {
     expect(seedream.quality).toBeUndefined();
     expect(seedream.n).toBeUndefined();
 
-    // 4.0 的官方文档只给一组像素值，没有「比例 × 档位」，不提供无法兑现的控件。
+    // 4.0 官方已给出比例映射表，所以也提供比例控件。
     const four = propertiesOf("image", "seedream-image-4.0");
-    expect(four.aspectRatio).toBeUndefined();
+    expect(four.aspectRatio).toMatchObject({ default: "auto", "x-pptask-control": "aspect-ratio" });
     expect(four.resolution?.enum).toEqual([
       { value: "1K", label: "1K" },
       { value: "2K", label: "2K" },

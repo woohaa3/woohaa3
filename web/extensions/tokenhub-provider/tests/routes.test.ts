@@ -79,17 +79,18 @@ describe("TokenHub 系列路由", () => {
       .toMatchObject({ size: "2K" });
   });
 
-  it("Seedream 选了固定比例时按官方像素表下发 size，4.0 没有比例表则退回档位", () => {
+  it("Seedream 选了固定比例时按官方像素表下发 size", () => {
     // 即梦没有 aspect_ratio：比例必须写进像素 size 才生效。
+    // 官方按模型族给表：5.0 pro 的 2K 16:9 是 2816x1584（lite 族才是 2848x1600）。
     expect(buildSubmit("seedream-image-5-pro", { prompt: "猫", aspectRatio: "16:9", resolution: "2K" }).body)
-      .toMatchObject({ size: "2848x1600" });
+      .toMatchObject({ size: "2816x1584" });
     expect(buildSubmit("seedream-image-5-lite", { prompt: "猫", aspectRatio: "9:16", resolution: "3K" }).body)
       .toMatchObject({ size: "2304x4096" });
     expect(buildSubmit("seedream-image-4.5", { prompt: "猫", aspectRatio: "21:9", resolution: "4K" }).body)
       .toMatchObject({ size: "6240x2656" });
-    // 4.0 的官方文档只给一组像素值、没有按档位拆分，比例交给 prompt。
+    // 4.0 官方已给出比例映射表（1K 是 4.0 专属表），所以也能兑现固定比例。
     expect(buildSubmit("seedream-image-4.0", { prompt: "猫", aspectRatio: "16:9", resolution: "4K" }).body)
-      .toMatchObject({ size: "4K" });
+      .toMatchObject({ size: "5504x3040" });
     // 自适应 / 没选比例时保持原有「按档位下发」。
     expect(buildSubmit("seedream-image-5-pro", { prompt: "猫", aspectRatio: "auto", resolution: "1K" }).body)
       .toMatchObject({ size: "1K" });

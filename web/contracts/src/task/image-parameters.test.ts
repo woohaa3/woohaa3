@@ -152,8 +152,10 @@ describe("imageFamilyParameters", () => {
 
 describe("imageRequestFields", () => {
   it("seedream 查官方像素表；自适应只发档位", () => {
+    // 官方按模型族各给一张表：5.5 / 5.0 pro / flash 的 2K 16:9 是 2816x1584
+    // （lite / 4.5 才是 2848x1600），两族不能混用一张表。
     expect(imageRequestFields("seedream-5-pro", { resolution: "2K", aspectRatio: "16:9" }))
-      .toEqual({ size: "2848x1600" });
+      .toEqual({ size: "2816x1584" });
     // flash 的 1.5K 档位官方支持，自适应时原样下发。
     expect(imageRequestFields("seedream-5-flash", { resolution: "1.5K", aspectRatio: "auto" }))
       .toEqual({ size: "1.5K" });
@@ -164,7 +166,7 @@ describe("imageRequestFields", () => {
     expect(imageRequestFields("seedream-5-pro", { resolution: "1.5K", aspectRatio: "auto" }))
       .toEqual({ size: "2K" });
     expect(imageRequestFields("seedream-5-pro", { resolution: "1.5K", aspectRatio: "16:9" }))
-      .toEqual({ size: "2848x1600" });
+      .toEqual({ size: "2816x1584" });
   });
 
   it("seedream 透明背景下发 background，并把格式补成 PNG", () => {

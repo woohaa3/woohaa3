@@ -26,13 +26,21 @@ export const seedream50Lite = imageCard({
     prefixes: ["seedream-5-lite", "seedream-image-5-lite", "doubao-seedream-5-0-lite", "doubao-seedream-5-0"],
     resolutions: ["2K", "3K", "4K"],
     defaultResolution: "2K",
-    sizes: seedreamSizeTable("2K", "3K", "4K"),
+    sizes: seedreamSizeTable("lite", "2K", "3K", "4K"),
     aspectRatios: SEEDREAM_ASPECT_RATIOS,
     pixelWindow: {
       minTotalPixels: 3_686_400,
       maxTotalPixels: 16_777_216,
       minAspectRatio: 1 / 16,
       maxAspectRatio: 16
+    },
+    features: {
+      outputFormatParameter: true,
+      // 官方：lite 只有标准模式（`fast` 会被上游拒掉，实测 400）。
+      promptOptimizeModes: ["standard"],
+      // lite 唯一支持联网搜索与流式输出的版本。
+      webSearch: true,
+      streaming: true
     }
   },
   limits: {

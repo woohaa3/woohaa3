@@ -31,7 +31,7 @@ export const seedream50Flash = imageCard({
     prefixes: ["seedream-5-flash", "seedream-image-5-flash", "doubao-seedream-5-0-flash"],
     resolutions: ["1K", "1.5K", "2K"],
     defaultResolution: "2K",
-    sizes: seedreamSizeTable("1K", "1.5K", "2K"),
+    sizes: seedreamSizeTable("pro", "1K", "1.5K", "2K"),
     aspectRatios: SEEDREAM_ASPECT_RATIOS,
     pixelWindow: {
       minTotalPixels: 921_600,
@@ -39,7 +39,14 @@ export const seedream50Flash = imageCard({
       minAspectRatio: 1 / 16,
       maxAspectRatio: 16
     },
-    transparentBackground: true
+    transparentBackground: true,
+    features: {
+      outputFormatParameter: true,
+      // Flash 只有标准模式（「极速模式」只给 pro 与 4.0）。
+      promptOptimizeModes: ["standard"],
+      streaming: false,
+      webSearch: false
+    }
   },
   limits: {
     promptMaxChars: 800,

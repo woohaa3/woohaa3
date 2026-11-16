@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { findAdaptiveOption, referenceInputCapabilityFromDescription } from '@woohaa3/contracts';
 import {
   ARK_CATALOG,
+  ARK_SEEDREAM_5_5_MODEL,
   ARK_SEEDREAM_5_PRO_MODEL,
   arkApiRoot,
   buildArkChatRequestBody,
@@ -116,10 +117,12 @@ describe('Ark catalog', () => {
       .find((item) => item.value === 'transparent');
     expect(transparent?.['x-pptask-requires']).toEqual({ outputFormat: 'png' });
 
-    // 4.0 官方只给一组像素值、没有「比例 × 档位」，不提供无法兑现的比例控件。
+    // 4.0 官方已给出「档位 × 宽高比」映射（1K 是 4.0 专属表），所以也提供比例控件。
     const fourProps = describeArkModel('doubao-seedream-4-0-250828').inputSchema?.properties as Record<string, any>;
-    expect(fourProps.aspectRatio).toBeUndefined();
+    expect(fourProps.aspectRatio).toMatchObject({ default: 'auto', 'x-pptask-control': 'aspect-ratio' });
     expect(fourProps.size.enum.map((item: { value: string }) => item.value)).toEqual(['1K', '2K', '4K']);
+    // 4.0 不认 output_format：面板不展示这个注定发不出去的控件。
+    expect(fourProps.outputFormat).toBeUndefined();
   });
 });
 
@@ -206,11 +209,12 @@ describe('Seedream families', () => {
 
   it('turns the chosen aspect ratio into the official pixel size', () => {
     // 即梦没有 aspect_ratio：固定比例必须写进 size 才是真的固定。
+    // 官方按模型族给表：5.0 pro 的 2K 16:9 是 2816x1584（lite 族才是 2848x1600）。
     expect(buildArkSeedreamRequestBody(ARK_SEEDREAM_5_PRO_MODEL, {
       prompt: 'p',
       aspectRatio: '16:9',
       size: '2K',
-    })).toMatchObject({ size: '2848x1600' });
+    })).toMatchObject({ size: '2816x1584' });
 
     expect(buildArkSeedreamRequestBody(SEEDREAM_LITE, {
       prompt: 'p',
@@ -232,11 +236,18 @@ describe('Seedream families', () => {
       aspectRatio: '1:1',
       size: '4K',
     })).toThrow(/does not support/);
-    expect(() => buildArkSeedreamRequestBody('doubao-seedream-4-0-250828', {
+    // 4.0 现在有官方比例表，所以 16:9 @ 2K 是合法的（lite 族的像素值）。
+    expect(buildArkSeedreamRequestBody('doubao-seedream-4-0-250828', {
       prompt: 'p',
       aspectRatio: '16:9',
       size: '2K',
-    })).toThrow(/no official size table/);
+    })).toMatchObject({ size: '2848x1600' });
+    // 但不在官方表里的画幅仍要报错，不能默默回退。
+    expect(() => buildArkSeedreamRequestBody('doubao-seedream-4-0-250828', {
+      prompt: 'p',
+      aspectRatio: '5:4',
+      size: '2K',
+    })).toThrow(/does not support 5:4/);
   });
 
   it('ignores the aspect ratio under layer decomposition (presets only)', () => {
@@ -294,7 +305,7 @@ describe('Ark execution', () => {
     ]);
   });
 
-  it('sends the configured endpoint id instead of the catalog model id', async () => {
+  it('sends the configured endpoint id when provided, and falls back to the model id', async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -307,7 +318,9 @@ describe('Ark execution', () => {
     });
     await provider.videoModel(SEEDANCE_20).doStart!({ prompt: 'p', n: 1 } as never);
     expect(bodies[0]?.model).toBe('ep-20260101000000-video');
-    expect(() => provider.videoModel(SEEDANCE_25)).toThrow(/推理接入点/);
+    // 没配接入点的模型照样能用：回落成公开 Model ID，而不是报错。
+    await provider.videoModel(SEEDANCE_25).doStart!({ prompt: 'p', n: 1 } as never);
+    expect(bodies[1]?.model).toBe(SEEDANCE_25);
   });
 
   it('materializes duplicate video reference images once and keeps order', async () => {
@@ -396,5 +409,94 @@ describe('Ark 同步图片与 Seedream 约束（原 vendor sync-providers 覆盖
   it('rejects unsupported Ark models', () => {
     const provider = createArkProvider({ apiKey: 'key', fetch: vi.fn() as typeof fetch });
     expect(() => provider.imageModel('seedream')).toThrow('Unsupported Ark model');
+  });
+});
+
+describe('Ark 图片请求字段的逐版本边界（按官方文档与实测 400 对齐）', () => {
+  it('4.5 / 4.0 不下发 output_format：上游对这两个版本连 jpeg 也拒', () => {
+    // 实测：`the parameter output_format is not supported by the current model`。
+    // 这是曾经的真实缺陷——body 无条件带 output_format，4.0 / 4.5 每次都 400。
+    for (const model of ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828']) {
+      const body = buildArkSeedreamRequestBody(model, { prompt: 'a red apple', size: '2K' });
+      expect(body).not.toHaveProperty('output_format');
+      expect(body).toMatchObject({ prompt: 'a red apple' });
+    }
+    // 5.x 仍然照常下发。
+    expect(buildArkSeedreamRequestBody(ARK_SEEDREAM_5_PRO_MODEL, { prompt: 'p', size: '1K' }))
+      .toMatchObject({ output_format: 'jpeg' });
+  });
+
+  it('极速提示词优化只有 5.0 pro 与 4.0 放行，其余版本拒绝而不是静默回退', () => {
+    expect(buildArkSeedreamRequestBody(ARK_SEEDREAM_5_PRO_MODEL, {
+      prompt: 'p',
+      optimizePromptMode: 'fast',
+    })).toMatchObject({ optimize_prompt_options: { mode: 'fast' } });
+    expect(buildArkSeedreamRequestBody('doubao-seedream-4-0-250828', {
+      prompt: 'p',
+      optimizePromptMode: 'fast',
+    })).toMatchObject({ optimize_prompt_options: { mode: 'fast' } });
+    // 实测 lite / 4.5 / 5.5 传 fast 都会被上游拒。
+    for (const model of ['doubao-seedream-5-0-260128', 'doubao-seedream-4-5-251128', 'doubao-seedream-5-5-261028']) {
+      expect(() => buildArkSeedreamRequestBody(model, {
+        prompt: 'p',
+        optimizePromptMode: 'fast',
+      })).toThrow();
+      expect(buildArkSeedreamRequestBody(model, {
+        prompt: 'p',
+        optimizePromptMode: 'standard',
+      })).toMatchObject({ optimize_prompt_options: { mode: 'standard' } });
+    }
+  });
+
+  it('Seedream 5.5：文生图也能要透明背景，且不需要图生图前提', () => {
+    const body = buildArkSeedreamRequestBody('doubao-seedream-5-5-261028', {
+      prompt: 'a red apple',
+      background: 'transparent',
+      outputFormat: 'png',
+    });
+    expect(body).toMatchObject({ background: 'transparent', output_format: 'png' });
+    // 5.0 pro 仍然只能在「图生图 + 单张」时透明。
+    expect(() => buildArkSeedreamRequestBody(ARK_SEEDREAM_5_PRO_MODEL, {
+      prompt: 'a red apple',
+      background: 'transparent',
+      outputFormat: 'png',
+    })).toThrow('single-image editing mode');
+  });
+
+  it('图层拆分高级参数只对 5.5 下发，其他版本传了就报错', () => {
+    const image = 'https://cdn/a.png';
+    expect(buildArkSeedreamRequestBody('doubao-seedream-5-5-261028', {
+      prompt: '拆图层',
+      urls: [image],
+      layerDecomposition: true,
+      layerDecompositionMaxImages: 40,
+      layerTextRecognition: true,
+    })).toMatchObject({
+      layer_decomposition: true,
+      layer_decomposition_options: { max_images: 40, text_recognition: true },
+    });
+    // 5.0 pro 只有光杆布尔值：传 options 会被上游拒。
+    expect(() => buildArkSeedreamRequestBody(ARK_SEEDREAM_5_PRO_MODEL, {
+      prompt: '拆图层',
+      urls: [image],
+      layerDecomposition: true,
+      layerDecompositionMaxImages: 8,
+    })).toThrow(/only supported by Seedream 5.5/);
+    // 5.5 的 max_images 官方区间是 [2, 100]。
+    expect(() => buildArkSeedreamRequestBody('doubao-seedream-5-5-261028', {
+      prompt: '拆图层',
+      urls: [image],
+      layerDecomposition: true,
+      layerDecompositionMaxImages: 101,
+    })).toThrow(/2-100/);
+  });
+
+  it('Seedream 5.5 进了目录，并且和 pro 同族像素表', () => {
+    expect(ARK_CATALOG.map((model) => model.id)).toContain(ARK_SEEDREAM_5_5_MODEL);
+    const props = describeArkModel(ARK_SEEDREAM_5_5_MODEL).inputSchema?.properties as Record<string, any>;
+    expect(props.size.enum.map((item: { value: string }) => item.value)).toEqual(['1K', '1.5K', '2K']);
+    // 图层拆分的额外控件只在 5.5 出现。
+    expect(props.layerDecompositionMaxImages).toMatchObject({ minimum: 2, maximum: 100 });
+    expect(props.layerTextRecognition).toBeDefined();
   });
 });

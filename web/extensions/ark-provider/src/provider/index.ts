@@ -2,6 +2,7 @@ export {
   ARK_CATALOG,
   ARK_DEFAULT_BASE_URL,
   ARK_PROVIDER_ID,
+  ARK_SEEDREAM_5_5_MODEL,
   ARK_SEEDREAM_5_PRO_MODEL,
   arkApiRoot,
   assertArkModel,
