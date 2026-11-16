@@ -291,7 +291,6 @@ export function createCosStoragePlugin(): ExtensionPlugin<typeof COS_STORAGE_CON
         temporaryHosting: {
           category: "provider",
           priority: 100,
-          validitySeconds: DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
           ready: () => resolved.ok,
           credentialEpoch: () => credentialEpoch
         },

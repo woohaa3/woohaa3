@@ -71,6 +71,7 @@ export function GenericModelPanel(props: ModelPanelProps) {
         blockingReasons={blockingReasons}
         readOnly={readOnly}
         allowEmptySubmit={model.promptRequirement === "optional" || model.promptRequirement === "none"}
+        showPrompt={model.promptRequirement !== "none"}
         {...(props.actions?.viewTask ? { onViewTask: () => props.actions?.viewTask?.() } : {})}
         {...(referencesSlot !== undefined ? { referencesSlot } : {})}
         {...(props.renderers?.promptEditor ? { promptEditorSlot: props.renderers.promptEditor } : {})}

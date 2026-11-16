@@ -40,6 +40,8 @@ export type SdpppxTemporaryHostingOptions = {
   upload?: (input: SdpppxMediaUploadInput) => Promise<SdpppxMediaUploadResult>;
   probe?: (input: SdpppxMediaProbeInput) => Promise<SdpppxMediaProbeResult>;
   getCredentialEpoch?: () => number;
+  /** 上传成功后的地址通知：与模板参考上传共享允许名单，供 Provider 接受回退地址。 */
+  onUploaded?: (url: string) => void;
   /** 只记录来源、阶段、状态码、错误码与字节数；不输出令牌或完整下载 URL。 */
   log?: (event: Record<string, unknown>) => void;
 };
@@ -162,6 +164,7 @@ export function createSdpppxTemporaryExposer(options: SdpppxTemporaryHostingOpti
       if (epochOf() !== identity.epoch) throw staleError("SDPPPX 授权已变化，请重试");
       const current = sessionOf();
       if (!current || current.userId !== identity.userId) throw staleError("SDPPPX 账号已变化，请重试");
+      options.onUploaded?.(uploaded.url);
       log({
         event: "sdpppx-temporary-prepared",
         exposerId: SDPPPX_TEMPORARY_EXPOSER_ID,
@@ -188,8 +191,6 @@ export function createSdpppxTemporaryExposer(options: SdpppxTemporaryHostingOpti
       category: "provider",
       priority: 10,
       constraints: { mediaKinds: ["image", "video"], maxBytes: SDPPPX_MEDIA_MAX_BYTES },
-      // 明确未知：上游 `/media/upload` 不返回过期时间，也没有保留承诺。
-      validitySeconds: null,
       ready,
       statusNote: note,
       credentialEpoch: epochOf
@@ -198,14 +199,6 @@ export function createSdpppxTemporaryExposer(options: SdpppxTemporaryHostingOpti
       if (disposed) throw staleError("临时图床来源已撤销");
       const config = options.config();
       if (config.degradedCode !== null) throw mediaError("SDPPPX 部署参数不完整", config.degradedCode);
-      const required = input.request?.requiredValiditySeconds ?? input.expiresSeconds ?? 0;
-      if (required > 0) {
-        // 不继承宿主缺省一天：上游没有可确认的窗口时只能明确拒绝。
-        throw mediaError(
-          `SDPPPX 临时图床没有可确认的有效期（上游不返回期限），无法满足 ${required} 秒的有效窗口`,
-          "sdpppx-media-invalid-response"
-        );
-      }
       const signal = input.request?.signal;
       if (signal?.aborted) throw abortError();
 

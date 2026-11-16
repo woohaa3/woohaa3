@@ -106,6 +106,7 @@ export function ExecutionPanel({
 	runLabel,
 	pendingLabel = "生成中",
 	showExpand = true,
+	showPrompt = true,
 	showModelSelector = true,
     modelSelectorSlot,
 	showRun = true,
@@ -181,7 +182,8 @@ export function ExecutionPanel({
 		: undefined;
 	const parameterViolations = parameterViolationReasons(fields, effectiveParameters);
 	const parameterViolationHint = parameterViolations[0];
-	const promptOptional = allowEmptySubmit;
+	// 没有提示词输入框时不存在「请先输入提示词」：提示词交给画布上游文字节点解析。
+	const promptOptional = allowEmptySubmit || !showPrompt;
 	const canRun =
 		!readOnly &&
 		missingRequired.length === 0 &&
@@ -353,7 +355,7 @@ export function ExecutionPanel({
 
 	const runBlock = (
 		<RunActions
-			showPolish={showPolish}
+			showPolish={showPolish && showPrompt}
 			polishOpen={polishOpen}
 			onTogglePolish={() => setPolishOpen((open) => !open)}
 			activeSkill={activeSkill}
@@ -421,11 +423,13 @@ export function ExecutionPanel({
 		<div className="mc-panel__audio-layout">
 			{statusRow ? <div className="mc-panel__audio-status">{statusRow}</div> : null}
 			<div className="mc-panel__grid mc-panel__audio-header">{header}{inlineStatus}</div>
-			<div className="mc-panel__grid mc-panel__audio-prompt">
-				<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-prompt">
-					<span className="mc-panel__grid-control">{promptBlock}</span>
+			{showPrompt ? (
+				<div className="mc-panel__grid mc-panel__audio-prompt">
+					<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-prompt">
+						<span className="mc-panel__grid-control">{promptBlock}</span>
+					</div>
 				</div>
-			</div>
+			) : null}
 			<div className="mc-panel__audio-footer">
 				<div className="mc-panel__audio-footer-left">
 					<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-parameter">
@@ -458,20 +462,22 @@ export function ExecutionPanel({
 			aria-label="节点提示词编辑"
 			style={width ? ({ width } as CSSProperties) : undefined}
 		>
-			{expanded && showFormatToolbar ? (
+			{expanded && showFormatToolbar && showPrompt ? (
 				<FormatToolbar onCommand={onFormatCommand} />
 			) : null}
 			{isAudioTask && !expanded ? (
 				audioLayout
 			) : usesSectioned ? (
-				<div className="mc-panel__sectioned-layout">
+				<div className={`mc-panel__sectioned-layout${showPrompt ? "" : " mc-panel__sectioned-layout--no-prompt"}`}>
 					{statusRow ? <div className="mc-panel__audio-status">{statusRow}</div> : null}
 					<div className="mc-panel__grid mc-panel__sectioned-header">{header}{inlineStatus}</div>
-					<div className="mc-panel__grid mc-panel__sectioned-prompt">
-						<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-prompt">
-							<span className="mc-panel__grid-control">{promptBlock}</span>
+					{showPrompt ? (
+						<div className="mc-panel__grid mc-panel__sectioned-prompt">
+							<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-prompt">
+								<span className="mc-panel__grid-control">{promptBlock}</span>
+							</div>
 						</div>
-					</div>
+					) : null}
 					<div className="mc-panel__grid mc-panel__sectioned-footer">
 						{executionFeedback}
 						{showParameterSheet ? (
@@ -493,9 +499,11 @@ export function ExecutionPanel({
 					) : null}
 					{header}
 					{inlineStatus}
-					<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-prompt">
-						<span className="mc-panel__grid-control">{promptBlock}</span>
-					</div>
+					{showPrompt ? (
+						<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-prompt">
+							<span className="mc-panel__grid-control">{promptBlock}</span>
+						</div>
+					) : null}
 					{showParameterSheet ? (
 						<div className="mc-panel__grid-item mc-panel__grid-item--untitled mc-panel__grid-parameter">
 							<span className="mc-panel__grid-control">{parameterSheet}</span>

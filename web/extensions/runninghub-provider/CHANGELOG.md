@@ -43,3 +43,7 @@
 ## 2.3.2
 
 - 2026-11-17 `2.3.2`（上一版 `2.3.1`）：fix(region): 改用上传鉴权探测站点；媒体目录按国内站 SKU 白名单与 `isOversea` 过滤，GPT Image／全能图片／`dola-` Seedream 不再出现在国内站
+
+## 2.3.3
+
+- 2026-11-17 `2.3.3`（上一版 `2.3.2`）：fix(hosting): 跟随 exposer 契约移除 `validitySeconds` 声明

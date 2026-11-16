@@ -136,8 +136,6 @@ export function SdpppxSettingsPanel({ service }: SdpppxSettingsPanelProps) {
           <dd>{config.bridgeHost ?? "—"}</dd>
           <dt>提示词字段</dt>
           <dd>{config.promptField || "—"}</dd>
-          <dt>上传通道</dt>
-          <dd>{config.uploadProvider || "—"}</dd>
           <dt>任务超时</dt>
           <dd>{config.taskTimeoutMs > 0 ? `${Math.round(config.taskTimeoutMs / 1000)} 秒` : "—"}</dd>
           <dt>视频模板映射</dt>

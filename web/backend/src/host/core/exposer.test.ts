@@ -413,34 +413,30 @@ describe("临时图床自动路由", () => {
     expect(await exposer.expose({ namespace: "media", key: "image.png" })).toBe("https://images.invalid/a");
   });
 
-  it("明确未知窗口的来源可服务无窗口要求的请求，但被正数窗口要求排除", async () => {
+  it("来源不再按有效窗口筛选：自动与手动都照常选择来源", async () => {
     const local = memoryBackend("local");
     const { storage, exposer } = setup({ primary: "local" }, [local]);
     await storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
     const upload = vi.fn(async () => "https://unknown.invalid/a");
     exposer.register(providerExposer("unknown-window", upload, 1, {
-      temporaryHosting: { category: "provider", priority: 1, validitySeconds: null, ready: () => true }
+      temporaryHosting: { category: "provider", priority: 1, ready: () => true }
     }));
     exposer.register(builtinExposer("builtin", async () => "https://builtin.invalid/a"));
 
-    // 不要求未来有效窗口时仍可用；不能被宿主缺省一天「补齐」成承诺。
-    expect(await exposer.expose({ namespace: "media", key: "a.png" })).toBe("https://unknown.invalid/a");
+    // 900 秒签名请求仍由排序最前的来源处理，不因来源未声明窗口被排除。
+    expect(await exposer.expose({ namespace: "media", key: "a.png", expiresSeconds: 900 }))
+      .toBe("https://unknown.invalid/a");
     expect(upload).toHaveBeenCalledTimes(1);
+    expect(exposer.temporaryHosting().selectedId).toBe("unknown-window");
 
-    // 900 秒要求下候选被排除，自动路由走符合条件的内置来源。
-    expect(exposer.available("media", undefined, { requiredValiditySeconds: 900 })).toBe(true);
-    expect(exposer.temporaryHosting({ request: { requiredValiditySeconds: 900 } }).selectedId).toBe("builtin");
-    expect(await exposer.expose({ namespace: "media", key: "a.png", request: { requiredValiditySeconds: 900 } }))
-      .toBe("https://builtin.invalid/a");
-    expect(upload).toHaveBeenCalledTimes(1);
-
-    // 手动指定时明确失败，不静默改投。
-    const manual = setup({ primary: "local", expose: "unknown-window" }, [local]);
-    manual.exposer.register(providerExposer("unknown-window", async () => { throw new Error("无法满足 900 秒的有效窗口"); }, 1, {
-      temporaryHosting: { category: "provider", priority: 1, validitySeconds: null, ready: () => true }
+    // 手动指定同样不受窗口影响。
+    const manual = setup({ primary: "local", expose: "unknown-window" }, [memoryBackend("local")]);
+    await manual.storage.bucket("media").put("a.png", Uint8Array.of(1), "image/png");
+    manual.exposer.register(providerExposer("unknown-window", async () => "https://unknown.invalid/a", 1, {
+      temporaryHosting: { category: "provider", priority: 1, ready: () => true }
     }));
-    await expect(manual.exposer.expose({ namespace: "media", key: "a.png", request: { requiredValiditySeconds: 900 } }))
-      .rejects.toThrow(/900/);
+    expect(await manual.exposer.expose({ namespace: "media", key: "a.png", expiresSeconds: 900 }))
+      .toBe("https://unknown.invalid/a");
   });
 
   it("同优先级按稳定 ID 字典序选择，与注册顺序无关", async () => {
@@ -463,7 +459,6 @@ describe("临时图床自动路由", () => {
       temporaryHosting: {
         category: "provider",
         priority: 10,
-        validitySeconds: null,
         ready: () => false,
         statusNote: () => "未登录 SDPPPX"
       }
@@ -677,7 +672,7 @@ it("声明 COS 图床后按配置展示、自动选择并先复制素材再签�
   const unregister = exposer.register({
     exposerId: "cos", label: "COS / S3 对象存储", ownerExtensionId: "cos-storage",
     requiresReplica: true, targetBackendId: "cos",
-    temporaryHosting: { category: "provider", priority: 100, validitySeconds: 900, ready: () => true },
+    temporaryHosting: { category: "provider", priority: 100, ready: () => true },
     expose: input => cos.presign!(`${input.namespace}/${input.key}`, { expiresSeconds: input.expiresSeconds ?? 900 }, input.scope)
   });
   expect(exposer.list().filter(item => item.exposerId === "cos")).toHaveLength(1);
@@ -701,7 +696,7 @@ it("用户排序控制快照与调用优先级，热更新后立即生效并跳�
   const { storage, exposer } = setup(values, [memoryBackend("local")]);
   await storage.bucket("media").put("clip.mp4", Uint8Array.of(1), "video/mp4");
   exposer.register({ exposerId: "cos", requiresReplica: false,
-    temporaryHosting: { category: "provider", priority: 100, validitySeconds: 900 }, expose: async () => "https://cos.invalid" });
+    temporaryHosting: { category: "provider", priority: 100 }, expose: async () => "https://cos.invalid" });
   exposer.register({ exposerId: "images-only", requiresReplica: false,
     temporaryHosting: { category: "provider", priority: 10, constraints: { mediaKinds: ["image"] } }, expose: async () => "https://images.invalid" });
   expect(exposer.temporaryHosting().candidates.map(item => item.exposerId)).toEqual(["cos", "images-only"]);

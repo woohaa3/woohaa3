@@ -109,7 +109,9 @@ export function createSubmitCoordinator(options: SubmitCoordinatorOptions): Subm
     if (model.modelType !== input.expectedModelType) {
       return { ok: false, error: `模型 ${input.modelKey} 类型与节点不匹配` };
     }
-    if (input.prompt.trim().length === 0) return { ok: false, error: "请先输入提示词" };
+    if (model.promptRequirement !== "none" && input.prompt.trim().length === 0) {
+      return { ok: false, error: "请先输入提示词" };
+    }
     const promptLimit = canvasModelCapabilities(model).limits?.promptMaxChars;
     if (promptLimit !== undefined && input.prompt.length > promptLimit) {
       return { ok: false, error: `提示词超过所选模型的 ${promptLimit} 字上限` };

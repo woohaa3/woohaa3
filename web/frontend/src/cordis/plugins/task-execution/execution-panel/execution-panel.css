@@ -1198,6 +1198,12 @@
   min-height: 0;
 }
 
+/* 没有提示词输入的模型（promptRequirement: none）：头部与参数/操作区直接相邻。 */
+.mc-panel__sectioned-layout--no-prompt {
+  grid-template-rows: auto auto;
+  align-content: start;
+}
+
 .mc-panel__sectioned-header .mc-panel__grid-item,
 .mc-panel__sectioned-footer .mc-panel__grid-item {
   padding-bottom: 0;

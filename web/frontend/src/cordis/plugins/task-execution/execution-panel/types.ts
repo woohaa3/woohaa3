@@ -109,6 +109,13 @@ export interface ExecutionPanelProps {
 	modelConfig: ExecutionPanelModelConfig;
 	/** 受控数据。 */
 	data?: ExecutionPanelData;
+	/**
+	 * 是否渲染提示词输入框；缺省 true。
+	 *
+	 * `promptRequirement: "none"` 的模型（例如 sdpppx 模板模型）没有面板提示词，
+	 * 提示词由画布上游文字节点解析；隐藏输入框后主操作仍可按 allowEmptySubmit 提交。
+	 */
+	showPrompt?: boolean;
 	/** 所在面，默认 `canvas`（节点内联编辑器）。 */
 	surface?: ExecutionPanelSurface;
 	/** 主操作文案；缺省按任务类型显示「生成图片」等。 */

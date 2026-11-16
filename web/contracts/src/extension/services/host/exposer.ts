@@ -46,7 +46,7 @@ export type StorageExposeInput = {
   readonly request?: StorageExposeRequest;
 };
 
-/** 一次请求的素材事实与有效窗口要求。 */
+/** 一次请求的素材事实。 */
 export type StorageExposeRequest = {
   /** `image` / `video` / `audio`；缺省时由 contentType 推断。 */
   readonly mediaKind?: string;
@@ -54,8 +54,6 @@ export type StorageExposeRequest = {
   readonly contentType?: string;
   /** 素材字节数；缺省时由存储对象补齐。 */
   readonly sizeBytes?: number;
-  /** 外部任务还需要多久能读到该地址；无法满足时明确失败。 */
-  readonly requiredValiditySeconds?: number;
   /** 请求取消；已取消的请求直接失效，不参与回退。 */
   readonly signal?: AbortSignal;
 };
@@ -79,16 +77,6 @@ export type TemporaryHostingDeclaration = {
   readonly category: TemporaryHostingCategory;
   readonly priority?: number;
   readonly constraints?: TemporaryHostingConstraints;
-  /**
-   * 该来源承诺的有效窗口；用于判断本次请求所需窗口能否被满足。
-   *
-   * - 数字：来源能确认的最小窗口；
-   * - `null`：**明确未知/不承诺**——上游没有返回期限时不能按宿主缺省一天冒充承诺。
-   *   未知窗口仍可服务「不要求未来有效性」的请求，但任何正数窗口要求都会排除该来源；
-   * - 缺省：沿用「来源只声明了临时图床能力、未单独声明窗口」的历史语义（宿主上限一天），
-   *   已有来源不受影响。
-   */
-  readonly validitySeconds?: number | null;
   /** 配置完整、扩展已启用且上传实现就绪；返回 false 时不能成为候选。 */
   readonly ready?: () => boolean;
   /**

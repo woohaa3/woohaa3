@@ -59,6 +59,7 @@ function exposerOf(options: {
   credentialEpoch?: () => number;
   upload?: Parameters<typeof createSdpppxTemporaryExposer>[0]["upload"];
   probe?: Parameters<typeof createSdpppxTemporaryExposer>[0]["probe"];
+  onUploaded?: (url: string) => void;
 } = {}) {
   const { storage } = storageOf(options.objects ?? { "sha256-a.png": { bytes: PNG_BYTES, contentType: "image/png" } });
   const session = options.session ?? managerOf();
@@ -68,6 +69,7 @@ function exposerOf(options: {
     session,
     ...(options.credentialEpoch ? { getCredentialEpoch: options.credentialEpoch } : {}),
     ...(options.upload ? { upload: options.upload } : {}),
+    ...(options.onUploaded ? { onUploaded: options.onUploaded } : {}),
     probe: options.probe ?? probeOk
   });
 }
@@ -85,7 +87,7 @@ async function loaded(manager: SessionManager): Promise<SessionManager> {
 }
 
 describe("SDPPPX 临时图床来源声明", () => {
-  it("稳定 ID、provider 类别、priority 10、图片/视频、20 MiB、不复制、未知有效期", () => {
+  it("稳定 ID、provider 类别、priority 10、图片/视频、20 MiB、不复制", () => {
     const exposer = exposerOf();
     expect(exposer.exposerId).toBe(SDPPPX_TEMPORARY_EXPOSER_ID);
     expect(exposer.exposerId).toBe("sdpppx-temporary");
@@ -95,7 +97,6 @@ describe("SDPPPX 临时图床来源声明", () => {
     expect(exposer.temporaryHosting).toMatchObject({
       category: "provider",
       priority: 10,
-      validitySeconds: null,
       constraints: { mediaKinds: ["image", "video"], maxBytes: 20 * 1024 * 1024 }
     });
   });
@@ -115,46 +116,48 @@ describe("SDPPPX 临时图床上传", () => {
   it("读稳定素材、上传、匿名核验后返回地址；不写回任何缓存", async () => {
     const upload = vi.fn(async () => uploadOk());
     const probe = vi.fn(probeOk);
-    const exposer = exposerOf({ upload, probe });
+    const onUploaded = vi.fn();
+    const exposer = exposerOf({ upload, probe, onUploaded });
 
     expect(await exposer.expose({ namespace: "media", key: "sha256-a.png" })).toBe(PUBLIC_URL);
     expect(upload).toHaveBeenCalledTimes(1);
     expect(probe).toHaveBeenCalledWith(expect.objectContaining({ url: PUBLIC_URL, mediaType: "image/png" }));
+    // 地址交给扩展的允许名单，Provider 才能接受这条回退地址。
+    expect(onUploaded).toHaveBeenCalledWith(PUBLIC_URL);
     const first = upload.mock.calls[0] as unknown as [{ accessToken: string; baseUrl: string }];
     expect(first[0].accessToken).toBe("access-1");
 
     // 首版不建立跨请求地址缓存：第二次独立请求会重新上传。
     expect(await exposer.expose({ namespace: "media", key: "sha256-a.png" })).toBe(PUBLIC_URL);
     expect(upload).toHaveBeenCalledTimes(2);
+    expect(onUploaded).toHaveBeenCalledTimes(2);
   });
 
-  it("有正数有效窗口要求时明确拒绝，不发送上传", async () => {
+  it("有正数有效窗口要求时仍上传并返回地址", async () => {
     const upload = vi.fn(async () => uploadOk());
     const exposer = exposerOf({ upload });
-    await expect(exposer.expose({
-      namespace: "media",
-      key: "sha256-a.png",
-      request: { requiredValiditySeconds: 900 }
-    })).rejects.toMatchObject({ code: SDPPPX_ERROR_CODES.mediaInvalidResponse });
-    await expect(exposer.expose({
+    expect(await exposer.expose({
       namespace: "media",
       key: "sha256-a.png",
       expiresSeconds: 900
-    })).rejects.toThrow(/900 秒/);
-    expect(upload).not.toHaveBeenCalled();
+    })).toBe(PUBLIC_URL);
+    expect(upload).toHaveBeenCalledTimes(1);
   });
 
   it("匿名读取失败不返回不可读地址，也不清登录态", async () => {
     const store = createMemorySessionStore(SESSION);
     const session = await loaded(managerOf(store));
+    const onUploaded = vi.fn();
     const exposer = exposerOf({
       session,
       upload: async () => uploadOk(),
-      probe: async () => ({ ok: false as const, message: "匿名读取失败（HTTP 403）" })
+      probe: async () => ({ ok: false as const, message: "匿名读取失败（HTTP 403）" }),
+      onUploaded
     });
     await expect(exposer.expose({ namespace: "media", key: "sha256-a.png" })).rejects.toMatchObject({
       code: SDPPPX_ERROR_CODES.mediaNotReadable
     });
+    expect(onUploaded).not.toHaveBeenCalled();
     expect(session.session()).not.toBeNull();
     expect(await store.load()).toMatchObject({ userId: "user-1" });
   });

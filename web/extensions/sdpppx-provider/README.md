@@ -36,7 +36,6 @@ SDPPPX 接入：宿主侧完成微信扫码登录与 Supabase 会话，登录后
 | `SDPPPX_BRIDGE_URL` | 否 | `${部署身份的 supabaseUrl}/functions/v1/authing-bridge3` | 会话交换地址 |
 | `SDPPPX_TEMPLATE_MODEL_TYPES` | 否 | `{}` | 模板 → `image` / `video` 的 JSON 映射；未列出默认 `image` |
 | `SDPPPX_PROMPT_FIELD` | 否 | `prompt` | 模板表单里的提示词字段名 |
-| `SDPPPX_UPLOAD_PROVIDER` | 否 | `grsai` | `describe` 未给可用的 `recommendUploadProvider` 时的上传通道；服务端当前只接受 `grsai` |
 | `SDPPPX_TASK_TIMEOUT_MS` | 否 | `600000` | 单任务超时；模型级 `taskTimeoutMs` 可覆盖 |
 
 `SDPPPX_TEMPLATE_MODEL_TYPES` 只接受 `{ "<templateId>": "image" | "video" }`。单条非法值会被丢弃并记一条诊断；整体 JSON 非法时回落到空映射（全部按图片），不让一条坏配置阻止插件装载。
@@ -66,32 +65,33 @@ SDPPPX 接入：宿主侧完成微信扫码登录与 Supabase 会话，登录后
 
 | 项 | 值 |
 | --- | --- |
-| 端点 | `${SDPPPX_BASE_URL}/media/upload`（POST 原始二进制；不用 `/tasks/upload`） |
+| 端点 | `${SDPPPX_BASE_URL}/media/upload`（POST 原始二进制；模板参考与临时图床共用） |
 | 鉴权 | 当前登录会话的 Bearer；不发送 `X-Tenant-ID`、provider、filename |
-| 类型 / 上限 | `image/*`、`video/*`；非空且 ≤ 20 MiB（旧模板上传的 32 MiB 不适用） |
+| 类型 / 上限 | `image/*`、`video/*`；非空且 ≤ 20 MiB（模板参考与临时图床共用） |
 | 成功响应 | `{ code: 0, data: { url, media_type, size } }`；顶层 `url`、内部 key、字段缺失都判失败 |
 | 就绪条件 | 部署参数完整 **且** 当前登录会话可用；模板目录为空或刷新失败不影响 |
-| 有效窗口 | **未知**：上游不返回期限，来源声明 `validitySeconds: null` |
+| 有效窗口 | 上游不返回期限；来源不建立跨请求地址缓存，也不因此被排除出候选 |
 | 并发 | 按 画布 / `namespace/key` / 实际大小与 MIME / owner / SDPPPX userId / 授权代次 / baseUrl 合并 |
 | 缓存 | 首版**不缓存**跨请求地址；上传失败或取消后下一次独立需求重新上传 |
 
 上传成功后还会用**不带任何 SDPPPX 凭据**的 Range 读取核验地址可匿名访问（逐跳出网守卫、拒绝私网/非 HTTPS、拒绝 HTML/JSON 错误与空内容、MIME 必须与本次类型一致）。匿名 403 只说明地址不可读，**不会**清登录态；上传 401 才走既有会话失效路径，403 视为权限拒绝。
 
+模板参考上传也走同一个 `/media/upload`。Task 的参考上传失败并回落到这个临时图床时，图床返回的地址会写入模板参考的**允许名单**，`prepareInput` 据此接受它；其他来源的签名地址仍然拒绝。
+
 上游没有 TTL，也没有保留承诺，因此：
 
-- 不要求未来有效性的请求可以用这个来源；
-- 任何正数有效窗口要求（例如标准参考输入的 900 秒）都会把它排除在候选外：自动模式按既有规则走符合条件的其他来源或内置后备，手动指定时返回真实原因；
-- 不把宿主缺省的一天当成上游承诺，也不建立地址缓存。
-
-已知上游问题：存储文档记录部分对象上传后约 10 秒 ACL 变为 private、匿名读取 403，原因未定位。即时匿名读取通过不等于整个任务窗口可读；真实长窗口与跨提供商拉取仍需授权环境验收，见本 change 的 verification。
+- 宿主不按有效窗口筛选来源：标准参考输入的 900 秒签名请求仍可选择这个来源，自动与手动选择都一样；
+- 不把宿主缺省的一天当成上游承诺，也不建立跨请求地址缓存；
+- 已知上游问题（部分对象上传后约 10 秒 ACL 变为 private、匿名读取 403）保留为风险提示，不据此把来源排除出候选。
 
 ## 模板与任务
 
 - 目录来源：Supabase REST `biz_tasks.tasks_template`，按部署配置里的 `tenantId`、`is_active = true` 过滤，`updated_at` 倒序；`providerModelId` 就是模板 `id`。
 - 模板本身没有输出类型字段；视频模板必须写进 `SDPPPX_TEMPLATE_MODEL_TYPES`，否则按图片处理，结果阶段会失败。
-- 请求路径：`POST /tasks/create_stream`（SSE；当前服务端没有 `/tasks/create`，读到首个 `created` 的 `job_id` 后后台继续消费事件）、`POST /tasks/status`、`POST /tasks/result`、`POST /tasks/cancel`；describe 为 `GET /tasks/describe?templateId=`；上传为 `POST /tasks/upload?provider=&filename=`（带 `X-Tenant-ID`）。事件流断开或超时只回落轮询，不把任务判死。
+- 请求路径：`POST /tasks/create_stream`（SSE；当前服务端没有 `/tasks/create`，读到首个 `created` 的 `job_id` 后后台继续消费事件）、`POST /tasks/status`、`POST /tasks/result`、`POST /tasks/cancel`；describe 为 `GET /tasks/describe?templateId=`；参考素材上传为 `POST /media/upload`（Bearer + 原始二进制，不再使用 `/tasks/upload`）。事件流断开或超时只回落轮询，不把任务判死。
 - bridge 默认走 Supabase Edge Function `${部署身份的 supabaseUrl}/functions/v1/authing-bridge3`；若部署只在 ppserver 暴露桥接，把 `SDPPPX_BRIDGE_URL` 设为 `${SDPPPX_BASE_URL}/auth/authing-bridge3`。
-- 描述结果缓存 5 分钟；失败返回最小 prompt schema，不阻塞参数面板。
+- 描述结果缓存 5 分钟；失败返回空输入 schema，不阻塞参数面板。
+- 参数面板只显示白名单内的模板字段：不提供 rawParams，也不显示提示词输入框。提示词由画布上游文字节点解析，模板声明了 prompt 字段时提交阶段写回；`promptRequirement` 固定为 `none`。
 - 图片结果下载字节后返回 `images`；响应既不是已知图片魔数、`Content-Type` 也不是 `image/*` 时判任务失败，不会把 HTML 存成 PNG。视频结果返回 URL（`videos`）。
 - 多输出按顺序成为多个媒体结果。
 

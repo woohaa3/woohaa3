@@ -10,7 +10,6 @@ import {
   DEFAULT_SDPPPX_BASE_URL,
   DEFAULT_SDPPPX_PROMPT_FIELD,
   DEFAULT_SDPPPX_TASK_TIMEOUT_MS,
-  DEFAULT_SDPPPX_UPLOAD_PROVIDER,
   SDPPPX_ERROR_CODES,
   hostOf,
   textOf,
@@ -38,7 +37,6 @@ export type SdpppxConfig = {
   bridgeUrl: string | null;
   templateModelTypes: Record<string, "image" | "video">;
   promptField: string;
-  uploadProvider: string;
   taskTimeoutMs: number;
   /** 缺失的部署字段名（面向排障，不含值）。 */
   missing: string[];
@@ -126,7 +124,6 @@ export function readSdpppxConfig(
     bridgeUrl,
     templateModelTypes: templateTypes.map,
     promptField: envText(env, "SDPPPX_PROMPT_FIELD") ?? DEFAULT_SDPPPX_PROMPT_FIELD,
-    uploadProvider: envText(env, "SDPPPX_UPLOAD_PROVIDER") ?? DEFAULT_SDPPPX_UPLOAD_PROVIDER,
     taskTimeoutMs: parseTaskTimeout(envText(env, "SDPPPX_TASK_TIMEOUT_MS")),
     missing,
     degradedCode: missing.length > 0 ? SDPPPX_ERROR_CODES.configIncomplete : null,
@@ -151,7 +148,6 @@ export function summarizeSdpppxConfig(config: SdpppxConfig): SdpppxConfigSummary
     bridgeHost: hostOf(config.bridgeUrl),
     templateModelTypes: { ...config.templateModelTypes },
     promptField: config.promptField,
-    uploadProvider: config.uploadProvider,
     taskTimeoutMs: config.taskTimeoutMs
   };
 }

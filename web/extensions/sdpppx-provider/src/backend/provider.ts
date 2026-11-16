@@ -45,7 +45,6 @@ const TASK_REQUEST_TIMEOUT_MS = 20_000;
 
 export type SdpppxDescribe = {
   schema: SdpppxInputSchema;
-  recommendUploadProvider: string | null;
   cancelable: boolean | null;
   /** describe 失败时的稳定码；成功为 null。 */
   error: string | null;
@@ -61,8 +60,6 @@ export type SdpppxProviderOptions = {
   now?: () => number;
   jobRepository?: unknown;
   pollIntervalMs?: number;
-  /** describe 成功给出推荐上传通道时通知调用方（上传发生在 describe 之后，但两者解耦）。 */
-  onRecommendUploadProvider?: (provider: string) => void;
   log?: (event: Record<string, unknown>) => void;
 };
 
@@ -90,7 +87,6 @@ export function createSdpppxProvider(options: SdpppxProviderOptions) {
   const describeCache = new Map<string, { at: number; value: SdpppxDescribe }>();
   const describeInFlight = new Map<string, Promise<SdpppxDescribe>>();
   const streams = createTaskStreamTracker({ now, log });
-  let lastRecommendUploadProvider: string | null = null;
 
   function timeoutMs(): number {
     return options.config().taskTimeoutMs;
@@ -374,7 +370,6 @@ export function createSdpppxProvider(options: SdpppxProviderOptions) {
           promptField: config.promptField,
           minimal: true
         }),
-        recommendUploadProvider: null,
         cancelable: null,
         error
       });
@@ -391,18 +386,13 @@ export function createSdpppxProvider(options: SdpppxProviderOptions) {
           formValues: payload.formValues,
           promptField: config.promptField
         });
-        const recommend = textOf(payload.recommendUploadProvider);
-        if (recommend) {
-          lastRecommendUploadProvider = recommend;
-          options.onRecommendUploadProvider?.(recommend);
-        }
         const cancelable = typeof payload.cancelable === "boolean" ? payload.cancelable : null;
         log({
           event: "sdpppx-template-described",
           mappedFields: schema.mappedFields,
           unknownFields: schema.unknownFields.length
         });
-        return { schema, recommendUploadProvider: recommend ?? null, cancelable, error: null };
+        return { schema, cancelable, error: null };
       } catch (error) {
         const code = error instanceof SdpppxProviderError ? error.code : "sdpppx-template-describe-failed";
         log({ event: "sdpppx-template-describe-failed", code, modelType });
@@ -441,10 +431,9 @@ export function createSdpppxProvider(options: SdpppxProviderOptions) {
 
   async function prepareInput(input: GenerationPrepareInput): Promise<Record<string, unknown>> {
     const described = await describe(input.providerModelId, input.modelType === "video" ? "video" : "image");
-    const payload = buildSdpppxPayload(input, described.schema, options.config().promptField, options.uploads);
+    const payload = buildSdpppxPayload(input, described.schema, options.uploads);
     return {
-      // pptask 的 `doStart` 收到的就是这份对象。模板身份与 payload 用保留键携带；rawParams
-      // 已并入 payload，不再单独出现。
+      // pptask 的 `doStart` 收到的就是这份对象。模板身份与 payload 用保留键携带。
       __sdpppxTemplateId: input.providerModelId,
       __sdpppxModelId: input.providerModelId,
       __sdpppxPayload: payload
@@ -455,7 +444,6 @@ export function createSdpppxProvider(options: SdpppxProviderOptions) {
     describeCache.clear();
     describeInFlight.clear();
     streams.clear();
-    lastRecommendUploadProvider = null;
   }
 
   const provider = createPptaskProvider({
@@ -470,8 +458,7 @@ export function createSdpppxProvider(options: SdpppxProviderOptions) {
     provider,
     prepareInput,
     describeModel,
-    clear,
-    recommendUploadProvider: () => lastRecommendUploadProvider
+    clear
   };
 }
 
