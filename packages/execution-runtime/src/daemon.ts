@@ -195,7 +195,12 @@ export async function startExecutorDaemon(options: ExecutorDaemonOptions): Promi
           workspaceFor: input => {
             const handle = input.prepared?.workspace;
             if (!handle) return undefined;
-            if (!workspaces || createHash("sha256").update(JSON.stringify([handle.owner, input.requestId])).digest("hex") !== input.turnId || handle.requestId !== input.requestId || handle.canvasId !== input.prepared?.target.canvasId) throw new Error("工作目录与执行回合身份不一致");
+            // `turnId` 的推导有两种（本机适配器 / 扩展执行器），daemon 不猜哪一种：
+            // 优先用回合显式声明的 owner；缺省时退回旧的二元素哈希比对。
+            const ownerMatches = input.owner !== undefined
+              ? handle.owner === input.owner
+              : createHash("sha256").update(JSON.stringify([handle.owner, input.requestId])).digest("hex") === input.turnId;
+            if (!workspaces || !ownerMatches || handle.requestId !== input.requestId || handle.canvasId !== input.prepared?.target.canvasId) throw new Error("工作目录与执行回合身份不一致");
             return workspaces.attachHarness(handle);
           },
           hostFor: (input) => {

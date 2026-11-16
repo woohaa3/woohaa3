@@ -62,6 +62,37 @@ it("pins a cancelled turn until its harness drains, then migrates its files", as
     expect(fs.readFileSync(path.join(targetPath, handle.directoryKey, "shared/native.txt"), "utf8")).toBe("keep");
   } finally { await service.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
+it("accepts both host turnId derivations for the same canvas workspace handle", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-turn-id-"));
+  const options = { socketPath: path.join(root, "rpc.sock"), token: "token", workspaceKey: "profile", stateDir: path.join(root, "state"), canvasWorkspaceRoot: path.join(root, "files") };
+  const seen: Array<string | null> = [];
+  const daemon = await startExecutorDaemon({ ...options, defaultExecutor: "native-test", executors: [{ id: "native-test", kind: "agent", async run(_input, context) {
+    seen.push(context.workspace?.cwd ?? null);
+    return { status: "succeeded" };
+  } }] });
+  const client = createExecutorClient(options);
+  // 宿主侧两种 turnId：本机适配器只哈希 (owner, requestId)，扩展执行器还带 extensionId/executor。
+  const run = async (requestId: string, owner: string | undefined, handle: CanvasWorkspaceHandle, extensionScoped: boolean) => {
+    const turnId = extensionScoped
+      ? createHash("sha256").update(JSON.stringify(["sdk-agent", "sdk-agent", handle.owner, requestId])).digest("hex")
+      : createHash("sha256").update(JSON.stringify([handle.owner, requestId])).digest("hex");
+    await client.runTurn({ turnId, requestId, ...(owner !== undefined ? { owner } : {}), kind: "agent", prepared: prepared(handle) });
+    await client.call("turn.drain", { turnId });
+    return (await client.queryTurn(turnId))!;
+  };
+  try {
+    const local = await client.call<CanvasWorkspaceHandle>("workspace.acquire", { owner: "alice", canvasId: "canvas", requestId: "local" });
+    const extension = await client.call<CanvasWorkspaceHandle>("workspace.acquire", { owner: "alice", canvasId: "canvas", requestId: "extension" });
+    // 旧的隐式哈希约定仍可用（未声明的 owner 退回二元素比对）。
+    expect(await run("local", undefined, local, false)).toMatchObject({ status: "succeeded" });
+    // 扩展执行器的四元素 turnId 只要带上可信 owner 也应当通过。
+    expect(await run("extension", "alice", extension, true)).toMatchObject({ status: "succeeded" });
+    expect(seen).toHaveLength(2);
+    // 声明的 owner 与工作目录 owner 不一致时仍然拒绝（换 requestId 避免命中幂等记录）。
+    const forged = await client.call<CanvasWorkspaceHandle>("workspace.acquire", { owner: "alice", canvasId: "canvas", requestId: "forged" });
+    expect(await run("forged", "bob", forged, true)).toMatchObject({ status: "failed" });
+  } finally { await daemon.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
 it("retains unknown harness occupancy after restart even if the chat was already cancelled", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-recovery-"));
   const options = { stateDir: path.join(root, "state"), defaultRoot: path.join(root, "files"), profileKey: "profile" };

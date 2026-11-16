@@ -223,6 +223,7 @@ export function createRuntimeConversationAdapter(
         const turn = await client.runTurn({
           turnId: executionId,
           requestId: input.requestId,
+          owner: input.owner,
           kind: "agent",
           executor: options.executor,
           prepared: input.prepared,
