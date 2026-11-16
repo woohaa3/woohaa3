@@ -33,7 +33,7 @@ import type { RunningHubLogicalModel } from "./shared.js";
 export const RUNNINGHUB_REGISTRY_URL =
   "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/developer-kit/model-registry.public.json";
 
-/** 站点标准模型目录页：只当「这个模型还在」的正向证据。 */
+/** 站点标准模型目录页的国际站默认值：只当「这个模型还在」的正向证据；插件按区域覆盖。 */
 export const RUNNINGHUB_CATALOG_URL = "https://www.runninghub.ai/call-api/standard-api";
 
 const DISCOVERY_TIMEOUT_MS = 20_000;

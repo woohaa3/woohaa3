@@ -178,8 +178,8 @@ describe("刷新路由", () => {
 
   it("鉴权通过 → 合并模型并回 200；刷新后新模型可解析", async () => {
     const { ctx, handlers, registered } = fakeContext();
-    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch() });
-    plugin.apply(ctx, { apiKey: "key" } as never);
+    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai" });
+    await plugin.apply(ctx, { apiKey: "key" } as never);
     // 刷新路由与余额路由各注册一条；刷新在前。
     expect(handlers).toHaveLength(2);
 
@@ -208,6 +208,7 @@ describe("刷新路由", () => {
   it("余额路由用当前 Key 查询账户信息并回规范化读数", async () => {
     const { ctx, handlers } = fakeContext();
     const plugin = createRunningHubProviderPlugin({
+      region: "ai",
       fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
         expect(String(url)).toBe("https://www.runninghub.ai/uc/openapi/accountStatus");
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer key");
@@ -217,7 +218,7 @@ describe("刷新路由", () => {
         });
       }) as typeof globalThis.fetch
     });
-    plugin.apply(ctx, { apiKey: "key" } as never);
+    await plugin.apply(ctx, { apiKey: "key" } as never);
     expect(handlers).toHaveLength(2);
     const res = fakeResponse();
     expect(await handlers[1]!({ method: "GET", url: RUNNINGHUB_BALANCE_PATH }, res)).toBe(true);
@@ -230,14 +231,14 @@ describe("刷新路由", () => {
 
   it("别的路径不处理；未授权回 401", async () => {
     const { ctx, handlers } = fakeContext();
-    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch() });
-    plugin.apply(ctx, { apiKey: "key" } as never);
+    const plugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai" });
+    await plugin.apply(ctx, { apiKey: "key" } as never);
     expect(await handlers[0]!({ method: "GET", url: RUNNINGHUB_REFRESH_PATH }, fakeResponse())).toBe(false);
 
     const denied = fakeContext();
     (denied.ctx as unknown as { access: { authenticator: () => Promise<null> } }).access = { authenticator: async () => null };
-    const deniedPlugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch() });
-    deniedPlugin.apply(denied.ctx, { apiKey: "key" } as never);
+    const deniedPlugin = createRunningHubProviderPlugin({ fetchImpl: routingFetch(), region: "ai" });
+    await deniedPlugin.apply(denied.ctx, { apiKey: "key" } as never);
     const res = fakeResponse();
     expect(await denied.handlers[0]!({ method: "POST", url: RUNNINGHUB_REFRESH_PATH }, res)).toBe(true);
     expect(res.state.status).toBe(401);

@@ -5,13 +5,21 @@
  *
  * 通过 `ctx.generation` 注册 RunningHub provider：
  * - 媒体：入库的 API 逻辑模型（`data/models.json`），按输入路由到具体 `api/<endpoint>`；
- * - 文字：官方 OpenAI 兼容目录（`/v1/models`）与独立端点 `llm.runninghub.ai/v1`，身份 `llm/<id>`；
+ * - 文字：官方 OpenAI 兼容目录（`/v1/models`）与独立端点 `llm.runninghub.{ai|cn}/v1`，身份 `llm/<id>`；
  * - 临时图床：新版二进制上传接口返回的 `download_url`，由 `ctx.exposer` 作为提供商候选。
+ *
+ * 国内站与国际站的账号、Key 和目录互相独立；插件按当前 Key 的账户鉴权结果识别区域并持久化，
+ * 媒体、文字、上传、余额和刷新都从该区域派生地址（change: 2026-11-17-add-runninghub-region-detection）。
  *
  * 同一份 API Key 是唯一凭据权威；图片/视频、文字与临时上传分别记录可用证据，
  * 文字权限拒绝不会停用仍可用的媒体能力。
  */
-import { credentialEpoch, defineConfigSchema, type GenerationProvider, type ExtensionPlugin } from "@woohaa3/contracts";
+import {
+  credentialEpoch,
+  defineConfigSchema,
+  type GenerationProvider,
+  type ExtensionPlugin
+} from "@woohaa3/contracts";
 import { createRunninghubProvider } from "./provider/index.js";
 import { DEFAULT_LLM_BASE_URL } from "./provider/provider.js";
 import {
@@ -41,6 +49,20 @@ import { createRunningHubTemporaryExposer } from "./temporary-hosting.js";
 import { registerRunningHubRefreshRoute, type ModelRefreshResult } from "./refresh-route.js";
 import { fetchRunningHubBalance } from "./backend/balance.js";
 import { registerRunningHubBalanceRoute } from "./backend/balance-route.js";
+import {
+  DEFAULT_RUNNINGHUB_REGION,
+  detectRunningHubRegion,
+  isRunningHubRegion,
+  runningHubApiBaseURL,
+  runningHubCatalogURL,
+  runningHubKeyPageURL,
+  runningHubLLMBaseURL,
+  runningHubLLMCatalogURL,
+  runningHubRegionLabel,
+  runningHubUploadURL,
+  type RunningHubRegion
+} from "./region.js";
+import { createRunningHubRegionStore, type RunningHubRegionStore } from "./backend/region-store.js";
 
 export { DEFAULT_RUNNINGHUB_API_BASE, DEFAULT_LLM_BASE_URL };
 
@@ -68,7 +90,20 @@ export type RunningHubRegistrationInput = {
   jobRepository?: unknown;
 };
 
-export type RunningHubPluginDependencies = Pick<RunningHubRegistrationInput, "apiBaseURL" | "languageBaseURL" | "fetchImpl" | "jobRepository">;
+export type RunningHubPluginDependencies = Pick<RunningHubRegistrationInput, "apiBaseURL" | "languageBaseURL" | "fetchImpl" | "jobRepository"> & {
+  /** 受控覆盖（测试或部署排障）：跳过探测直接使用该区域。 */
+  region?: RunningHubRegion;
+  /** 区域探测的单站超时；缺省 5 秒。 */
+  regionProbeTimeoutMs?: number;
+  /** 测试可注入持久化实现；缺省使用 `ctx.services.documents` 或进程内缓存。 */
+  regionStore?: RunningHubRegionStore;
+  /** 受控上传地址覆盖（测试）；缺省按区域派生。 */
+  uploadUrl?: string;
+  /** 受控标准模型目录页覆盖（测试）；缺省按区域派生。 */
+  catalogUrl?: string;
+  /** 受控文字目录覆盖（测试）；缺省按区域派生。 */
+  languageCatalogUrl?: string;
+};
 
 export function createRunningHubRegistration(input: RunningHubRegistrationInput): GenerationProvider {
   const apiKey = (input.apiKey ?? "").trim();
@@ -162,7 +197,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
     label: "RunningHub",
     configPrefix: "providers.runninghub",
     setupOrder: 20,
-    website: "https://www.runninghub.ai/zh-cn/call-api/bill-task?tab=keys&type=shared&inviteCode=rh-v1272",
+    website: runningHubKeyPageURL(DEFAULT_RUNNINGHUB_REGION),
     modelTypes: ["language", "image", "video"],
     inject: ["log", "generation", "gateway", "access", "storage", "exposer"],
     modelRefresh: {
@@ -182,26 +217,95 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
     async testConnection(config) {
       const apiKey = (config.apiKey ?? "").trim();
       if (!apiKey) return { ok: false, message: "请先填写 RunningHub API Key" };
+
+      let region: RunningHubRegion;
+      if (deps.region && isRunningHubRegion(deps.region)) {
+        region = deps.region;
+      } else {
+        const detection = await detectRunningHubRegion({
+          apiKey,
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+          ...(deps.regionProbeTimeoutMs === undefined ? {} : { timeoutMs: deps.regionProbeTimeoutMs })
+        });
+        if (!detection.ok) return { ok: false, message: detection.message };
+        if (detection.accountState === "rejected") {
+          return {
+            ok: false,
+            message: `RunningHub API Key 在${runningHubRegionLabel(detection.region)}存在，但当前 Key 类型无法读取账户`
+          };
+        }
+        region = detection.region;
+      }
+
       const result = await fetchRunningHubBalance({
         apiKey,
-        ...(deps.apiBaseURL ? { apiBaseURL: deps.apiBaseURL } : {}),
+        apiBaseURL: deps.apiBaseURL ?? runningHubApiBaseURL(region),
         ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
         timeoutMs: 10_000
       });
       if (!result.ok) return { ok: false, message: result.message };
-      return { ok: true, message: "RunningHub API Key 测试通过" };
+      return { ok: true, message: `RunningHub API Key 测试通过（${runningHubRegionLabel(region)}）` };
     },
-    apply(ctx, config) {
+    async apply(ctx, config) {
       const log = ctx.log.scope(RUNNINGHUB_PLUGIN_ID);
       const apiKey = (config.apiKey ?? "").trim();
-      const registration = createRunningHubRegistration({ ...deps, ...(apiKey ? { apiKey } : {}) });
+      const regionStore = deps.regionStore ?? createRunningHubRegionStore({ documents: ctx.services?.documents });
+      const resolveRegion = async (): Promise<RunningHubRegion> => {
+        if (deps.region && isRunningHubRegion(deps.region)) return deps.region;
+        if (apiKey === "") return DEFAULT_RUNNINGHUB_REGION;
+
+        const cached = await regionStore.load(apiKey);
+        if (cached) return cached;
+
+        const detection = await detectRunningHubRegion({
+          apiKey,
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+          ...(deps.regionProbeTimeoutMs === undefined ? {} : { timeoutMs: deps.regionProbeTimeoutMs })
+        });
+        if (detection.ok) {
+          // 区域已唯一确定（即使账户接口拒绝了 Key 类型）就写缓存；能力失败由各能力自己报告。
+          const saved = await regionStore.save(apiKey, detection.region);
+          if (!saved) log({ event: "runninghub-region-persist-failed", region: detection.region });
+          return detection.region;
+        }
+        log({
+          event: "runninghub-region-detect-failed",
+          reason: detection.reason,
+          probes: detection.probes.map(({ region: probeRegion, outcome, status, code }) => ({
+            region: probeRegion,
+            outcome,
+            ...(status === undefined ? {} : { status }),
+            ...(code === undefined ? {} : { code })
+          }))
+        });
+        return DEFAULT_RUNNINGHUB_REGION;
+      };
+      const region = await resolveRegion();
+
+      const apiBaseURL = deps.apiBaseURL ?? runningHubApiBaseURL(region);
+      const languageBaseURL = deps.languageBaseURL ?? runningHubLLMBaseURL(region);
+      const catalogUrl = deps.catalogUrl ?? runningHubCatalogURL(region);
+      const languageCatalogUrl = deps.languageCatalogUrl ?? runningHubLLMCatalogURL(region);
+      const uploadUrl = deps.uploadUrl ?? runningHubUploadURL(region);
+
+      const registration = createRunningHubRegistration({
+        ...(apiKey ? { apiKey } : {}),
+        apiBaseURL,
+        languageBaseURL,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        ...(deps.jobRepository ? { jobRepository: deps.jobRepository } : {})
+      });
       const refresh = async (): Promise<ModelRefreshResult> => {
         const before = new Set(registration.models.map((model) => model.providerModelId));
         const mediaResult = await discoverRunningHubModels({
           base: runningHubRegistry().models,
+          catalogUrl,
           ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
         });
-        const languageResult = await discoverRunningHubLanguageModels(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {});
+        const languageResult = await discoverRunningHubLanguageModels({
+          url: languageCatalogUrl,
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
+        });
         const parts: string[] = [];
 
         if (mediaResult.ok) {
@@ -242,7 +346,7 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
         read: () =>
           fetchRunningHubBalance({
             apiKey: (config.apiKey ?? "").trim(),
-            ...(deps.apiBaseURL ? { apiBaseURL: deps.apiBaseURL } : {}),
+            apiBaseURL,
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
           })
       });
@@ -251,9 +355,15 @@ export function createRunningHubProviderPlugin(deps: RunningHubPluginDependencie
         storage: ctx.storage,
         getApiKey: () => (config.apiKey ?? "").trim() || undefined,
         getCredentialEpoch: () => credentialEpoch(config.apiKey),
+        uploadUrl,
         ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {})
       })));
-      log({ event: "runninghub-plugin-activated", available: registration.available, modelCount: registration.models.length });
+      log({
+        event: "runninghub-plugin-activated",
+        region,
+        available: registration.available,
+        modelCount: registration.models.length
+      });
     }
   };
 }

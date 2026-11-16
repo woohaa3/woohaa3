@@ -125,7 +125,7 @@ describe("RunningHub 插件装载", () => {
     for (const input of [{ apiKey: "secret" }, {}]) {
       const config = RUNNINGHUB_CONFIG["~standard"].validate(input);
       if (!("value" in config)) throw new Error("config invalid");
-      createRunningHubProviderPlugin().apply(ctx, config.value);
+      await createRunningHubProviderPlugin({ region: "ai" }).apply(ctx, config.value);
     }
     expect(registered.map((provider) => provider.available)).toEqual([true, false]);
   });
@@ -155,7 +155,7 @@ describe("RunningHub 插件装载", () => {
     } as never;
     const parsed = RUNNINGHUB_CONFIG["~standard"].validate({ apiKey: "secret" });
     if (!("value" in parsed)) throw new Error("config invalid");
-    createRunningHubProviderPlugin().apply(ctx, parsed.value);
+    await createRunningHubProviderPlugin({ region: "ai" }).apply(ctx, parsed.value);
     expect(registered[0]).toMatchObject({ exposerId: "runninghub-temporary", temporaryHosting: { category: "provider" } });
     expect(registered[0]!.temporaryHosting!.ready()).toBe(true);
   });

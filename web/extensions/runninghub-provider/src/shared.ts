@@ -17,7 +17,12 @@ export * from "./shared/identity.js";
 import { RUNNINGHUB_PLUGIN_ID, RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
 import { runningHubCardSchema } from "./model-cards.js";
 
-/** 受控 API 地址（写死在插件内，MUST NOT 由用户输入）。全球站（CN 节点已下线）。 */
+/**
+ * 受控 API 地址默认值（国际站，MUST NOT 由用户输入）。
+ *
+ * 实际地址由 API Key 识别出的站点区域派生；这里只保留国际站默认，供直接构造 registration
+ * 的测试和区域未确认时的降级路径使用。
+ */
 export const DEFAULT_RUNNINGHUB_API_BASE = "https://www.runninghub.ai/openapi/v2";
 
 export type RunningHubMediaKind = "image" | "video" | "audio";
@@ -269,7 +274,7 @@ export const RUNNINGHUB_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   name: "RunningHub Provider",
   description: "RunningHub Provider：图片／视频生成、官方文字模型与临时图床。",
   // 2.2.0：官方文字目录与独立端点、临时图床提供商候选。
-  version: "2.2.7",
+  version: "2.3.0",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "runninghub-provider-config", schemaVersion: 1 },

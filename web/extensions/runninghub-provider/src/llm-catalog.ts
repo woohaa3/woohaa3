@@ -12,7 +12,11 @@ import { isAgentReasoningEffort, reasoningEffortsForModel, type AgentReasoningEf
 import fixture from "../data/llm-models.json";
 import { RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
 
-/** 文字模型独立端点（与媒体任务 API 不同域）；由扩展声明给服务来源投影。 */
+/**
+ * 文字模型独立端点的国际站默认值（与媒体任务 API 不同域）。
+ *
+ * 插件按 API Key 识别出的区域覆盖：国际站 `llm.runninghub.ai`，国内站 `llm.runninghub.cn`。
+ */
 export const RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.ai/v1";
 /** 官方文字目录；公开只读，不需要 Key。 */
 export const RUNNINGHUB_LLM_CATALOG_URL = `${RUNNINGHUB_LLM_BASE_URL}/models`;

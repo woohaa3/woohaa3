@@ -22,6 +22,7 @@ import type {
 } from '@sdppp/pptask';
 import { createRunningHubLanguageModel } from './language.js';
 
+// 国际站默认值；插件按 API Key 识别出的站点区域显式传入对应地址。
 const DEFAULT_API_BASE_URL = 'https://www.runninghub.ai/openapi/v2';
 const DEFAULT_APP_BASE_URL = 'https://www.runninghub.ai';
 export const DEFAULT_LLM_BASE_URL = 'https://llm.runninghub.ai/v1';
