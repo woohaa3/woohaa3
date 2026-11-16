@@ -70,9 +70,17 @@ function createHost(
       }
     },
     capabilities: {
-      register: (id: string, value: unknown) => {
-        capabilityRegistry.set(id, value);
-        return () => capabilityRegistry.delete(id);
+      /**
+       * 与 `HostCapabilityService.register` 的契约一致：接一个 `{ id, version, value }`
+       * 对象（change: 2026-11-13-add-extension-capability-abi 起带 version）。
+       *
+       * 存储键用 `id@version`，与生产注册表同构（同 id 不同 version 并存），
+       * 并把 `value` 存进去——用例是按能力**形状**去找的，存错层会找到 undefined。
+       */
+      register: (registration: { id: string; version: number; value: unknown }) => {
+        const key = `${registration.id}@${registration.version}`;
+        capabilityRegistry.set(key, registration.value);
+        return () => capabilityRegistry.delete(key);
       }
     },
     services: { ...services, canvas },

@@ -9,7 +9,6 @@
  * 锁定的现场故障：导演区提交后报「助手返回了工具调用文本」，模型把调用写成了
  * `<｜DSML｜invoke>` 这样的文本——它根本没收到 `tools` 声明，因为那一轮被当成了讨论。
  */
-import { preparedTurnHash, stripPreparedHash } from "@woohaa3/contracts";
 import { describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
