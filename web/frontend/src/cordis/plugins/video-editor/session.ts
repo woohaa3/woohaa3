@@ -1,4 +1,4 @@
-import { createVideoPlaybackTrace, traceVideoPixels } from "../canvas-runtime/video-playback-diagnostics.js";
+import { createVideoPlaybackTrace, traceVideoPixels, observeVideoPlayback, probeVideoSource } from "../canvas-runtime/video-playback-diagnostics.js";
 /** 视频聚焦会话：解码、取景、历史 override 与迟到回调的生命周期。 */
 import { buildCanvasRenderScene } from "@woohaa3/contracts";
 import { rasterizeDrawable, defaultRasterCanvasFactory, type RasterCanvas } from "../canvas-runtime/media-raster.js";
@@ -18,6 +18,8 @@ export class VideoFocusSession {
   private generation = 0;
   private readonly playbackTrace;
   private frameSequence = 0;
+  private stopPlaybackDiagnostics = () => {};
+  private stopSourceProbe = () => {};
   /** 是否已执行首次进入放大动画（换源/历史恢复不重复放大）。 */
   private entered = false;
   private readonly minUploadInterval: number;
@@ -77,6 +79,8 @@ export class VideoFocusSession {
   start(): boolean {
     const { url } = this.currentTarget;
     this.playbackTrace.log("start", {}, true);
+    this.stopPlaybackDiagnostics = observeVideoPlayback(this.playbackTrace, this.video);
+    this.stopSourceProbe = probeVideoSource(this.playbackTrace, url);
     this.video.src = url;
     this.video.muted = true;
     this.video.loop = false;
@@ -125,14 +129,6 @@ export class VideoFocusSession {
     });
     // 播放状态监听属于整个解码元素的会话寿命；历史/当前来源切换后仍需通知 UI。
     // 只有取帧与来源加载回调按 generation 丢弃迟到结果。
-    for (const event of ["loadedmetadata", "loadeddata", "canplay", "playing", "play", "pause", "ended", "waiting", "stalled", "seeking", "seeked", "error", "timeupdate"]) {
-      this.video.addEventListener(event, () => {
-        if (this.disposed) return;
-        const video = this.video as VideoElementLike & { paused?: boolean; seeking?: boolean; readyState?: number; error?: { code: number } | null };
-        this.playbackTrace.log(event, { generation: this.generation, currentTime: Number(video.currentTime),
-          readyState: video.readyState, paused: video.paused, seeking: video.seeking, errorCode: video.error?.code }, event !== "timeupdate");
-      });
-    }
     this.video.addEventListener("timeupdate", () => { if (!this.disposed) this.emit(); });
     this.video.addEventListener("play", () => { if (!this.disposed) { this.scheduleFrames(this.generation); this.emit(); } });
     this.video.addEventListener("pause", () => { if (!this.disposed) { this.cancelFrameLoop(); this.emit(); } });
@@ -514,9 +510,10 @@ export class VideoFocusSession {
     const video = this.video;
     this.playbackTrace.log("frame-request", { generation, currentTime: Number(video.currentTime), videoFrameCallback: typeof video.requestVideoFrameCallback === "function" });
     if (typeof video.requestVideoFrameCallback === "function") {
-      this.frameHandle = video.requestVideoFrameCallback(() => {
+      this.frameHandle = video.requestVideoFrameCallback((_now, metadata) => {
         this.frameHandle = null;
-        this.playbackTrace.log("frame-callback", { generation, currentTime: Number(video.currentTime) });
+        const frame = metadata as { mediaTime?: number; presentedFrames?: number } | undefined;
+        this.playbackTrace.log("frame-callback", { generation, currentTime: Number(video.currentTime), mediaTime: frame?.mediaTime, presentedFrames: frame?.presentedFrames });
         this.pumpFrame(generation);
         if (this.isCurrent(generation) && !(video as unknown as { paused?: boolean }).paused) this.scheduleFrames(generation);
       });
@@ -543,7 +540,13 @@ export class VideoFocusSession {
     const width = Number(this.video.videoWidth);
     const height = Number(this.video.videoHeight);
     if (!width || !height) return;
-    const raster = rasterizeDrawable(this.video as unknown as CanvasImageSource, { width, height }, () => this.canvas, VIDEO_FOCUS_TEXTURE_MAX_DIMENSION);
+    let raster;
+    try {
+      raster = rasterizeDrawable(this.video as unknown as CanvasImageSource, { width, height }, () => this.canvas, VIDEO_FOCUS_TEXTURE_MAX_DIMENSION);
+    } catch (error) {
+      this.playbackTrace.log("raster-error", { error: error instanceof Error ? error.name : "unknown", currentTime: Number(this.video.currentTime) }, true);
+      throw error;
+    }
     if (!raster) { this.playbackTrace.log("raster-unavailable", {}, true); return; }
     traceVideoPixels(raster.pixels, this.playbackTrace, ++this.frameSequence, Number(this.video.currentTime));
     this.options.onTexture({ nodeId: this.nodeId, width: raster.width, height: raster.height, pixels: raster.pixels });
@@ -570,6 +573,8 @@ export class VideoFocusSession {
   dispose(): void {
     if (this.disposed) return;
     this.playbackTrace.log("dispose", { generation: this.generation, frames: this.frameSequence }, true);
+    this.stopPlaybackDiagnostics();
+    this.stopSourceProbe();
     this.disposed = true;
     this.transition.cancel();
     this.animationGeneration += 1;

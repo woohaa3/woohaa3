@@ -1,3 +1,4 @@
+import { createVideoPlaybackTrace, observeVideoPlayback, traceVideoPixels } from "./video-playback-diagnostics.js";
 /**
  * 画布视频帧会话
  * （change: enable-video-node-live-preview，design D1–D4/D8；
@@ -131,6 +132,9 @@ export type VideoFrameSessions = {
   dispose(): void;
 };
 type Session = {
+  trace: ReturnType<typeof createVideoPlaybackTrace>;
+  stopDiagnostics: () => void;
+  frameSequence: number;
   nodeId: string;
   sourceUrl: string;
   posterUrl: string | null;
@@ -231,6 +235,8 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   };
   const detachSession = (session: Session) => {
     if (session.detached) return;
+    session.trace.log("dispose", { frames: session.frameSequence }, true);
+    session.stopDiagnostics();
     session.detached = true;
     disposedCount += 1;
     pendingRestores.delete(session.nodeId);
@@ -280,7 +286,10 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       // 实时帧**不能**携带稳定内容身份：内容身份在 Rust 侧表示「同内容同尺寸可共享、像素不变」，
       // 视频每帧像素都变，带 `sourceUrl` 会让第二帧起被当成已驻留内容而跳过上传，
       // 画布上的视频就停在首帧（真实缺陷：hover 视频不播放）。以独占纹理逐帧覆盖。
-      return options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels) !== false;
+      traceVideoPixels(raster.pixels, session.trace, ++session.frameSequence, Number(session.video.currentTime));
+      const submitted = options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels) !== false;
+      session.trace.log("texture-submit", { accepted: submitted, sequence: session.frameSequence, mediaTime: Number(session.video.currentTime) });
+      return submitted;
     });
     if (!accepted) { loading.setLoading(session.load, false); return false; }
     session.hasRealFrame = true;
@@ -438,6 +447,8 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
 
   const createSession = (nodeId: string, url: string, posterUrl: string | null): Session => {
     const video = createVideo();
+    const trace = createVideoPlaybackTrace(nodeId, "card");
+    const stopDiagnostics = observeVideoPlayback(trace, video);
     video.src = url;
     video.muted = true;
     video.loop = true;
@@ -447,6 +458,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     video.crossOrigin = "anonymous";
     createdCount += 1;
     const session: Session = {
+      trace, stopDiagnostics, frameSequence: 0,
       nodeId,
       sourceUrl: url,
       posterUrl,
