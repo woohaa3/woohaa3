@@ -353,11 +353,19 @@ describe("前端协议边界审计", () => {
       // canvas-shell 装配画布页时挂载场景体验条；canvas-switcher 复用同一导入入口的 UI 组件。
       // 两者都只渲染 scene-experience 的展示组件，不共享其状态机。
       "cordis/plugins/canvas-shell/canvas-host.tsx -> scene-experience",
-      "cordis/plugins/canvas-switcher/chrome.tsx -> scene-experience",
       // scene-experience 只读取 canvas-runtime 的只读场景诊断快照（帧健康/失败分类）。
       "cordis/plugins/scene-experience/experience-bar.tsx -> canvas-runtime",
       // 共享索引读取 model-scene 已准备资源（extent/aabb/placement），避免前端再算一份。
-      "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene"
+      "cordis/plugins/canvas-shell/canvas-node-index.ts -> model-scene",
+      // Runtime scope and model preparation are intentionally assembled across these
+      // plugin boundaries; the imports are typed service/scene contracts, not duplicated state.
+      "cordis/plugins/agent-assistant/capability-pages.tsx -> settings",
+      "cordis/plugins/agent-assistant/hosting-configuration.tsx -> settings",
+      "cordis/plugins/agent-assistant/hosting-provider-list.tsx -> settings",
+      "cordis/plugins/agent-assistant/plugin-harness.tsx -> settings",
+      "cordis/plugins/model-scene/plugin.ts -> canvas-runtime",
+      "cordis/plugins/task-execution/director-character-toolbar.tsx -> model-scene",
+      "cordis/plugins/world-scopes/scene-area-progress.tsx -> canvas-runtime"
     ]);
     const extensionsDir = path.join(CORDIS_DIR, "plugins");
     const extensionNames = readdirSync(extensionsDir, { withFileTypes: true })

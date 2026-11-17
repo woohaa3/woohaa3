@@ -641,6 +641,13 @@ const server = createReviewServer((req, res) => {
 	}
 	// 同源 ingress：站点 API 路由到三个服务；未命中的继续走静态资源。
 	if (tryServeShowcase(req, res)) return;
+	// Extension release manifests are build-owned immutable static resources. Keep them
+	// outside the API ingress so an unknown release cannot be turned into a JSON 404
+	// before the dist handler gets a chance to serve the content-addressed file.
+	if (new URL(req.url || "/", "http://localhost").pathname.startsWith("/extension-releases/")) {
+		serveStatic(req, res);
+		return;
+	}
 	ingress
 		.handle(req, res)
 		.then((handled) => {

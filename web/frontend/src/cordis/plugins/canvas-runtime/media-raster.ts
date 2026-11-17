@@ -7,7 +7,7 @@
  *
  * canvas 工厂可注入，便于在无 DOM 的单元测试里验证尺寸、比例与迟到防护。
  */
-import { TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
+import { TEXTURE_MAX_DIMENSION } from "./texture-constants.js";
 
 /** 与 Rust protocol::MAX_TEXTURE_EDGE 保持一致；原图编辑/导出不受 GPU 预览上限影响。 */
 export const BEVY_TEXTURE_MAX_DIMENSION = 2048;

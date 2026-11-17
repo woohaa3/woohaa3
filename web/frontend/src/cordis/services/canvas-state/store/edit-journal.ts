@@ -25,7 +25,6 @@
 import {
   buildJournalSnapshot,
   EDIT_JOURNAL_MAX_BYTES,
-  EDIT_JOURNAL_MAX_ENTRIES,
   EDIT_JOURNAL_MAX_PENDING_BYTES,
   EDIT_JOURNAL_MAX_PENDING_ENTRIES,
   EDIT_JOURNAL_SETTLEMENT_HINT_MS,
@@ -47,17 +46,17 @@ import {
   type ParameterJournalEntry,
   type PendingRecord
 } from "./edit-journal-model.js";
+import { EditJournalHistory } from "./edit-journal-history.js";
+import { generateJournalId, journalNow } from "./edit-journal-runtime.js";
 
 export * from "./edit-journal-model.js";
 
 export class EditJournal {
-  private readonly entries: JournalEntry[] = [];
+  private readonly history = new EditJournalHistory();
   private readonly pendingRecords: PendingRecord[] = [];
   private queue: JournalTask[] = [];
   private readonly deps: EditJournalDependencies;
   /** 栈指针：entries[0..undoCursor] 可撤销；>undoCursor 为 redo 区。 */
-  private undoCursor = -1;
-  private currentBytes = 0;
   /** 仅长操作采纳（外部权威回执）互斥，不再作为用户入口门禁。 */
   private adopting = false;
   /** Prevent overlapping asynchronous replays from targeting the same cursor. */
@@ -93,12 +92,12 @@ export class EditJournal {
       if (generation !== this.generation) return { ok: false, reason: "页面已切换" };
       if (!result.ok) return result;
       if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
-      const existing = this.entries.find((entry): entry is CanvasJournalEntry => entry.kind === "canvas" && entry.id === id);
+      const existing = this.history.entries.find((entry): entry is CanvasJournalEntry => entry.kind === "canvas" && entry.id === id);
       if (existing) return { ok: true, entry: existing };
       if (result.allowNew === false) return { ok: false, reason: "该操作已不在撤销历史中" };
       if (estimateBytes(result.forward) + estimateBytes(result.inverse) > EDIT_JOURNAL_MAX_BYTES) return { ok: false, reason: "操作内容过多，请分批处理" };
       const entry: CanvasJournalEntry = { kind: "canvas", id, label: result.label, forward: result.forward, inverse: result.inverse, state: "committed" };
-      this.pushCommitted(entry);
+      this.history.pushCommitted(entry);
       this.notify();
       return { ok: true, entry };
     } catch (error) {
@@ -124,7 +123,7 @@ export class EditJournal {
   }): { ok: true; entry: ExternalJournalEntry } | { ok: false; reason: string } {
     if (!this.deps.isWritable()) return { ok: false, reason: "当前不可写，无法记录操作" };
     if (!input.id || input.id.length > 256) return { ok: false, reason: "操作身份无效" };
-    const existing = this.entries.find((entry): entry is ExternalJournalEntry => entry.kind === "external" && entry.id === input.id);
+    const existing = this.history.entries.find((entry): entry is ExternalJournalEntry => entry.kind === "external" && entry.id === input.id);
     if (existing) return { ok: true, entry: existing };
     const entry: ExternalJournalEntry = {
       kind: "external",
@@ -135,7 +134,7 @@ export class EditJournal {
       redo: input.redo,
       state: "committed"
     };
-    this.pushCommitted(entry);
+    this.history.pushCommitted(entry);
     this.notify();
     return { ok: true, entry };
   }
@@ -167,7 +166,7 @@ export class EditJournal {
       return { ok: false, reason: "等待保存的操作过多，请稍候", code: "journal-full" };
     }
 
-    const id = input.id ?? this.generateId();
+    const id = input.id ?? generateJournalId(this.deps);
     const commandId = input.commandId ?? `edit-forward:${id}`;
     const entry: CanvasJournalEntry = {
       kind: "canvas",
@@ -182,7 +181,7 @@ export class EditJournal {
       entry,
       commandId,
       bytes: estimated,
-      enqueuedAt: this.now(),
+      enqueuedAt: journalNow(this.deps),
       submittedAt: null,
       slow: false,
       undoRequested: false,
@@ -223,23 +222,23 @@ export class EditJournal {
     // pending 结构动作尚未确认时不插入本地参数记录：否则参数会排到更早的结构动作之前，
     // 撤销顺序与实际操作顺序相反（旧实现用全局 busy 同样拒绝）。
     if (this.pendingRecords.length > 0) return;
-    const top = this.entries[this.undoCursor];
+    const top = this.history.entries[this.history.undoCursor];
     if (
       top?.kind === "parameter"
-      && this.undoCursor === this.entries.length - 1
+      && this.history.undoCursor === this.history.entries.length - 1
       && top.nodeId === input.nodeId
       && top.modelKey === input.modelKey
       && top.revision === input.revision
     ) {
       top.after = { ...input.after };
-      this.currentBytes = this.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
-      this.enforceCapacity();
+      this.history.currentBytes = this.history.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
+      this.history.enforceCapacity();
       this.notify();
       return;
     }
     const entry: ParameterJournalEntry = {
       kind: "parameter",
-      id: this.generateId(),
+      id: generateJournalId(this.deps),
       label: input.label,
       nodeId: input.nodeId,
       modelKey: input.modelKey,
@@ -248,7 +247,7 @@ export class EditJournal {
       ...(input.revision !== undefined ? { revision: input.revision } : {}),
       state: "committed"
     };
-    this.pushCommitted(entry);
+    this.history.pushCommitted(entry);
     this.notify();
   }
 
@@ -270,22 +269,22 @@ export class EditJournal {
       }
       if (lastPending.undoRequested) return { ok: false, reason: "撤销尚未确认，请稍候" };
       lastPending.undoRequested = true;
-      this.enqueueTask(lastPending, "undo", lastPending.entry.inverse, `edit-undo:${lastPending.entry.id}:${this.nextSeq()}`);
+      this.enqueueTask(lastPending, "undo", lastPending.entry.inverse, `edit-undo:${lastPending.entry.id}:${(++this.seq).toString(36)}`);
       this.notify();
       this.scheduleDrain();
       return { ok: true, entry: lastPending.entry };
     }
 
-    const index = this.undoCursor;
+    const index = this.history.undoCursor;
     if (index < 0) return { ok: false, reason: "没有可撤销的操作" };
-    const entry = this.entries[index]!;
+    const entry = this.history.entries[index]!;
     if (entry.state === "conflict") {
       return { ok: false, reason: "该操作已被其他修改影响，无法撤销，请先跳过此记录" };
     }
     if (entry.kind === "canvas") {
       if (entry.undoPending) return { ok: false, reason: "撤销尚未确认，请稍候" };
       entry.undoPending = true;
-      this.enqueueTask(null, "undo", entry.inverse, `edit-undo:${entry.id}:${this.nextSeq()}`, entry);
+      this.enqueueTask(null, "undo", entry.inverse, `edit-undo:${entry.id}:${(++this.seq).toString(36)}`, entry);
       this.notify();
       this.scheduleDrain();
       return { ok: true, entry };
@@ -305,7 +304,7 @@ export class EditJournal {
     }
     const observed = entry.kind === "parameter" ? this.deps.currentRevision?.() : undefined;
     entry.undoRevision = result.revision ?? (observed === undefined ? undefined : observed + 0.5);
-    this.finishUndo(entry);
+    this.history.finishUndo(entry);
     this.notify();
     return { ok: true, entry };
   }
@@ -320,22 +319,22 @@ export class EditJournal {
       if (!lastPending.undoRequested) return { ok: false, reason: "没有可重做的操作" };
       if (lastPending.redoRequested) return { ok: false, reason: "重做尚未确认，请稍候" };
       lastPending.redoRequested = true;
-      this.enqueueTask(lastPending, "redo", lastPending.entry.forward, `edit-redo:${lastPending.entry.id}:${this.nextSeq()}`);
+      this.enqueueTask(lastPending, "redo", lastPending.entry.forward, `edit-redo:${lastPending.entry.id}:${(++this.seq).toString(36)}`);
       this.notify();
       this.scheduleDrain();
       return { ok: true, entry: lastPending.entry };
     }
 
-    const index = this.undoCursor + 1;
-    if (index >= this.entries.length) return { ok: false, reason: "没有可重做的操作" };
-    const entry = this.entries[index]!;
+    const index = this.history.undoCursor + 1;
+    if (index >= this.history.entries.length) return { ok: false, reason: "没有可重做的操作" };
+    const entry = this.history.entries[index]!;
     if (entry.state === "conflict") {
       return { ok: false, reason: "该操作已被其他修改影响，无法重做，请先跳过此记录" };
     }
     if (entry.kind === "canvas") {
       if (entry.redoPending) return { ok: false, reason: "重做尚未确认，请稍候" };
       entry.redoPending = true;
-      this.enqueueTask(null, "redo", entry.forward, `edit-redo:${entry.id}:${this.nextSeq()}`, entry);
+      this.enqueueTask(null, "redo", entry.forward, `edit-redo:${entry.id}:${(++this.seq).toString(36)}`, entry);
       this.notify();
       this.scheduleDrain();
       return { ok: true, entry };
@@ -351,19 +350,19 @@ export class EditJournal {
     if (!result.ok) return { ok: false, reason: result.reason };
     if (generation !== this.generation) return { ok: false, reason: "页面已切换" };
     const observed = entry.kind === "parameter" ? this.deps.currentRevision?.() : undefined;
-    this.finishRedo(entry, result.revision ?? (observed === undefined ? undefined : observed + 0.5));
+    this.history.finishRedo(entry, result.revision ?? (observed === undefined ? undefined : observed + 0.5));
     this.notify();
     return { ok: true, entry };
   }
 
   /** 显式跳过一条冲突记录（移除阻塞项，不自动撤销更早记录）。 */
   skipConflict(entryId: string): boolean {
-    const index = this.entries.findIndex((entry) => entry.id === entryId && entry.state === "conflict");
+    const index = this.history.entries.findIndex((entry) => entry.id === entryId && entry.state === "conflict");
     if (index >= 0) {
       // 被跳过的记录从栈中移除；若位于 redo 区则一并裁剪。
-      this.entries.splice(index, 1);
-      this.currentBytes = this.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
-      if (index <= this.undoCursor) this.undoCursor -= 1;
+      this.history.entries.splice(index, 1);
+      this.history.currentBytes = this.history.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
+      if (index <= this.history.undoCursor) this.history.undoCursor -= 1;
       this.notify();
       return true;
     }
@@ -379,7 +378,7 @@ export class EditJournal {
 
   /** 标记一条记录为冲突（handler 在撤销被权威拒绝时调用）。 */
   markConflict(entryId: string): void {
-    const entry = this.entries.find((candidate) => candidate.id === entryId);
+    const entry = this.history.entries.find((candidate) => candidate.id === entryId);
     if (entry) {
       entry.state = "conflict";
       this.notify();
@@ -418,10 +417,10 @@ export class EditJournal {
 
   snapshot(): EditJournalSnapshot {
     return buildJournalSnapshot({
-      entries: this.entries,
+      entries: this.history.entries,
       pendingRecords: this.pendingRecords,
-      undoCursor: this.undoCursor,
-      bytes: this.currentBytes,
+      undoCursor: this.history.undoCursor,
+      bytes: this.history.currentBytes,
       pendingBytes: this.pendingBytes()
     });
   }
@@ -429,11 +428,11 @@ export class EditJournal {
   /** 清空（切画布 / 刷新 / page dispose）。 */
   clear(): void {
     this.generation += 1;
-    this.entries.length = 0;
+    this.history.entries.length = 0;
     this.pendingRecords.length = 0;
     this.queue = [];
-    this.undoCursor = -1;
-    this.currentBytes = 0;
+    this.history.undoCursor = -1;
+    this.history.currentBytes = 0;
     this.adopting = false;
     this.replaying = false;
     this.activeTask = null;
@@ -449,7 +448,7 @@ export class EditJournal {
     this.notify();
   }
 
-  get size(): number { return this.entries.length; }
+  get size(): number { return this.history.entries.length; }
 
   get pendingSize(): number { return this.pendingRecords.length; }
 
@@ -556,7 +555,7 @@ export class EditJournal {
       }
 
       task.state = "sending";
-      task.startedAt = this.now();
+      task.startedAt = journalNow(this.deps);
       this.activeTask = task;
       this.notify();
       const outcome = this.deps.submitGuarded({ commandId: task.commandId, edit: task.edit });
@@ -570,7 +569,7 @@ export class EditJournal {
         this.failTask(task, outcome.reason);
         continue;
       }
-      if (task.record) task.record.submittedAt = new Date(this.now()).toISOString();
+      if (task.record) task.record.submittedAt = new Date(journalNow(this.deps)).toISOString();
 
       const settled = await this.waitForSettlement(task, outcome.settled, generation);
       if (generation !== this.generation) return;
@@ -687,7 +686,7 @@ export class EditJournal {
       const revision = settled.revision ?? this.deps.committedRevision?.(task.commandId);
       if (revision !== undefined) record.entry.revision = revision;
       this.removePending(record);
-      this.pushCommitted(record.entry);
+      this.history.pushCommitted(record.entry);
       this.notify();
       return;
     }
@@ -706,7 +705,7 @@ export class EditJournal {
     }
     else {
       task.entry.redoPending = false;
-      this.finishRedo(task.entry, settled.revision ?? this.deps.committedRevision?.(task.commandId));
+      this.history.finishRedo(task.entry, settled.revision ?? this.deps.committedRevision?.(task.commandId));
       this.notify();
       return;
     }
@@ -771,50 +770,13 @@ export class EditJournal {
   }
 
   private moveCursor(task: JournalTask): void {
-    const index = this.entries.indexOf(task.entry);
+    const index = this.history.entries.indexOf(task.entry);
     if (index < 0) return;
     if (task.direction === "undo") {
-      this.finishUndo(task.entry);
-    } else if (index === this.undoCursor + 1) {
-      this.undoCursor = index;
+      this.history.finishUndo(task.entry);
+    } else if (index === this.history.undoCursor + 1) {
+      this.history.undoCursor = index;
     }
-  }
-
-  private finishUndo(entry: JournalEntry): void {
-    const index = this.entries.indexOf(entry);
-    if (index < 0 || index > this.undoCursor) return;
-    // A later edit may have arrived before the undo response. It branches the
-    // history if it actually committed after this undo, even though the undo
-    // entry was still on the applied side when that edit was registered.
-    const branched = this.entries.slice(index + 1, this.undoCursor + 1).some(item =>
-      entry.undoRevision === undefined || item.revision === undefined || item.revision > entry.undoRevision
-    );
-    this.entries.splice(index, 1);
-    this.undoCursor--;
-    if (branched) this.currentBytes -= estimateBytes(entry);
-    else this.entries.splice(this.undoCursor + 1, 0, entry);
-  }
-
-  private finishRedo(entry: JournalEntry, revision: number | undefined): void {
-    const index = this.entries.indexOf(entry);
-    if (index >= 0) {
-      this.entries.splice(index, 1);
-      this.currentBytes -= estimateBytes(entry);
-      if (index <= this.undoCursor) this.undoCursor--;
-    }
-    entry.revision = revision;
-    entry.undoRevision = undefined;
-    if (index < 0) {
-      // A new commit may have discarded the redo while its request was in
-      // flight. The successful replay is itself an authoritative commit.
-      this.pushCommitted(entry);
-      return;
-    }
-    const later = revision === undefined ? -1 : this.entries.findIndex((item, i) => i <= this.undoCursor && item.revision !== undefined && item.revision > revision);
-    this.entries.splice(later < 0 ? this.undoCursor + 1 : later, 0, entry);
-    this.undoCursor++;
-    this.currentBytes += estimateBytes(entry);
-    this.enforceCapacity();
   }
 
   private removePending(record: PendingRecord): void {
@@ -826,78 +788,10 @@ export class EditJournal {
     return this.pendingRecords.reduce((sum, record) => sum + record.bytes, 0);
   }
 
-  private pushCommitted(entry: JournalEntry): void {
-    if (entry.revision !== undefined && this.undoCursor + 1 < this.entries.length) {
-      // A receipt can arrive after an undo even though its write preceded that
-      // undo. Keep only redo entries whose undo is known to be later than it.
-      const start = this.undoCursor + 1;
-      const cut = this.entries.findIndex((item, index) => index >= start && (item.undoRevision === undefined || item.undoRevision <= entry.revision!));
-      if (cut >= 0) {
-        const removed = this.entries.splice(cut);
-        for (const item of removed) this.currentBytes -= estimateBytes(item);
-      }
-      if (start < this.entries.length) {
-        const laterApplied = this.entries.findIndex((item, index) => index < start && item.revision !== undefined && item.revision > entry.revision!);
-        const index = laterApplied < 0 ? start : laterApplied;
-        this.entries.splice(index, 0, entry);
-        this.currentBytes += estimateBytes(entry);
-        this.undoCursor++;
-        this.enforceCapacity();
-        return;
-      }
-    }
-    // External receipts may arrive after newer commits. Insert them before the
-    // first known later revision instead of making an older edit the undo tip.
-    if (entry.revision !== undefined) {
-      const index = this.entries.findIndex(item => item.revision !== undefined && item.revision > entry.revision!);
-      if (index >= 0) {
-        this.entries.splice(index, 0, entry);
-        this.currentBytes += estimateBytes(entry);
-        if (index <= this.undoCursor + 1) this.undoCursor++;
-        this.enforceCapacity();
-        return;
-      }
-    }
-    // 新净修改成功：清空 redo 区。
-    if (this.undoCursor + 1 < this.entries.length) {
-      const removed = this.entries.splice(this.undoCursor + 1);
-      for (const item of removed) this.currentBytes -= estimateBytes(item);
-    }
-    this.entries.push(entry);
-    this.currentBytes += estimateBytes(entry);
-    this.undoCursor = this.entries.length - 1;
-    this.enforceCapacity();
-  }
-
-  /** 容量控制：先移除最旧已结算记录，保持界内。 */
-  private enforceCapacity(): void {
-    while (this.entries.length > EDIT_JOURNAL_MAX_ENTRIES || this.currentBytes > EDIT_JOURNAL_MAX_BYTES) {
-      this.entries.shift();
-      this.currentBytes = this.entries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
-      this.undoCursor = Math.max(-1, this.undoCursor - 1);
-      if (this.entries.length === 0) break;
-    }
-  }
-
   private notify(): void {
     this.deps.onChange?.();
   }
 
-  private now(): number {
-    return this.deps.now?.() ?? Date.now();
-  }
-
-  private nextSeq(): string {
-    this.seq += 1;
-    return this.seq.toString(36);
-  }
-
-  private generateId(): string {
-    if (this.deps.generateCommandId) return this.deps.generateCommandId();
-    const cryptoRef = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-    if (typeof cryptoRef?.randomUUID === "function") return cryptoRef.randomUUID();
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  }
 }
 
 /** 撤销/重做执行器：对参数/外部权威条目回放；画布条目由队列提交。 */

@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasNodeData, NodeCapabilityContext, ServerCanvas } from "@woohaa3/contracts";
 import { createFileModelPreparation, fileModelExecutionKey } from "./file-model-preparation.js";
+import type { CanvasScope } from "../plugins/canvas-runtime/canvas-scope.js";
 
 const ASSET_ID = `asset-upload-${"d".repeat(64)}`;
 
@@ -113,9 +114,9 @@ function buildGlb(options: { texture?: boolean } = {}): Uint8Array {
 function preparation(overrides: {
   blob?: Blob;
   read?: (asset: unknown, signal: AbortSignal | undefined, canvasId: string) => Promise<Blob>;
-  runtime?: { setModelMediaTexture: (id: string, width: number, height: number, rgba: Uint8Array, source?: string) => boolean };
+  runtime?: { setModelMediaTexture: (id: string, width: number, height: number, rgba: Uint8Array, source?: string | { sourceKey?: string; scope?: CanvasScope }) => boolean };
 } = {}) {
-  const uploads: Array<{ id: string; width: number; height: number; source?: string }> = [];
+  const uploads: Array<{ id: string; width: number; height: number; source?: string | { sourceKey?: string; scope?: CanvasScope } }> = [];
   const decodeTexture = vi.fn(async () => ({ width: 2, height: 2, rgba: new Uint8Array(16) }));
   const instance = createFileModelPreparation({
     runtime: () => ({
@@ -225,5 +226,64 @@ describe("GLB 文件模型准备", () => {
     const result = await instance.prepare(context(canvasWith(glbData(), {})));
     expect(result.status).toMatch(/^fail:load:not-glb/);
     expect(result.resource).toBeUndefined();
+  });
+
+  it("作用域切换后丢弃尚未上传的旧模型纹理", async () => {
+    const a = Object.freeze({ canvasId: "A", token: "1", sequence: 1 });
+    const b = Object.freeze({ canvasId: "B", token: "2", sequence: 2 });
+    let scope: typeof a | typeof b | null = a;
+    let markDecodeStarted: (() => void) | undefined;
+    const decodeStarted = new Promise<void>((resolve) => { markDecodeStarted = resolve; });
+    let releaseDecode: ((value: { width: number; height: number; rgba: Uint8Array }) => void) | undefined;
+    const decoded = new Promise<{ width: number; height: number; rgba: Uint8Array }>((resolve) => { releaseDecode = resolve; });
+    const uploads: unknown[] = [];
+    const instance = createFileModelPreparation({
+      runtime: () => ({ runtime: () => ({
+        canvasScopeMode: () => "scoped" as const,
+        currentCanvasScope: () => scope,
+        setModelMediaTexture: vi.fn((...args: unknown[]) => { uploads.push(args); return true; })
+      }) }),
+      read: async () => new Blob([buildGlb({ texture: true }).buffer as ArrayBuffer]),
+      decodeTexture: async () => {
+        markDecodeStarted?.();
+        return decoded;
+      }
+    });
+    const pending = instance.prepare(context(canvasWith(glbData(), {})));
+    await decodeStarted;
+    scope = b;
+    releaseDecode?.({ width: 1, height: 1, rgba: new Uint8Array(4) });
+    const result = await pending;
+    expect(result.status).toMatch(/^fail:execute:stale-scope/);
+    expect(uploads).toHaveLength(0);
+  });
+
+  it("scoped runtime 没有当前作用域时不报告纹理准备成功", async () => {
+    const instance = createFileModelPreparation({
+      runtime: () => ({ runtime: () => ({
+        canvasScopeMode: () => "scoped" as const,
+        currentCanvasScope: () => null,
+        setModelMediaTexture: vi.fn(() => true)
+      }) }),
+      read: async () => new Blob([buildGlb({ texture: true }).buffer as ArrayBuffer]),
+      decodeTexture: async () => ({ width: 1, height: 1, rgba: new Uint8Array(4) })
+    });
+    const result = await instance.prepare(context(canvasWith(glbData(), {})));
+    expect(result.status).toMatch(/^fail:execute:no-scope/);
+  });
+
+  it("运行时拒绝过期纹理上传时向上游报告失败", async () => {
+    const scope = Object.freeze({ canvasId: "A", token: "1", sequence: 1 });
+    const instance = createFileModelPreparation({
+      runtime: () => ({ runtime: () => ({
+        canvasScopeMode: () => "scoped" as const,
+        currentCanvasScope: () => scope,
+        setModelMediaTexture: vi.fn(() => false)
+      }) }),
+      read: async () => new Blob([buildGlb({ texture: true }).buffer as ArrayBuffer]),
+      decodeTexture: async () => ({ width: 1, height: 1, rgba: new Uint8Array(4) })
+    });
+    const result = await instance.prepare(context(canvasWith(glbData(), {})));
+    expect(result.status).toMatch(/^fail:execute:stale-scope/);
   });
 });

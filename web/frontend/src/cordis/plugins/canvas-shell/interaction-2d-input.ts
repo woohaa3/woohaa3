@@ -29,8 +29,6 @@ import { createWorldGroundGestureFamily } from "./world-ground-gesture.js";
 import type { InteractionCore } from "./interaction-core.js";
 import type { Gesture } from "./interaction-types.js";
 import { createWheelEntryHandler } from "./input/wheel-entry.js";
-import { createPerfInputRecorder, type PerfMoment } from "./input/perf-interaction.js";
-import { telemetryNow } from "../../services/telemetry-primitives.js";
 import { sceneAreaCursorTargets, sceneAreaEdgeCursor, workflowGroupCursor, workflowGroupInteraction, resizeCursorForEdge, type FrameEdge } from "./scene-area-cursor.js";
 import { canvasEditScopeStore } from "../../services/canvas-edit-scope.js";
 /** 右键位移阈值：小于它视为短点击（开菜单），达到则进入平移并抑制菜单。 */
@@ -194,41 +192,13 @@ export function create2dInputFamily(core: InteractionCore) {
       state.localPositions.set(id, { x: origin.x + snapped.dx, y: origin.y + snapped.dy });
     }
   };
-  /**
-   * 本次指针手势的性能收集器（change: 2026-10-25-enhance-telemetry-performance-collection，
-   * task 3.3 / design D2）。
-   *
-   * 只在**确认要开始某种手势**之后 `start`：门禁返回、命中不可用、命中横条动作等都不开启，
-   * 于是不会产生 `perf.interaction`（spec: 拒绝输入不发）。高频 pointermove 用 `accumulate`
-   * 累加，结束时只出一条 `perf.segment`。
-   */
-  const perf = createPerfInputRecorder();
-  /**
-   * 本次指针手势的计时起点。
-   *
-   * 种类在按下时并不确定（右键是菜单还是平移、拖拽是否越过阈值），所以起点先存下来，
-   * 确认消费的分支再 `start`。
-   */
-  let pointerMoment: PerfMoment;
-  /** 确认要开始某种手势：只在这里开门，门禁拒绝的路径不会调用。 */
-  const beginPerfGesture = (kind: string): void => {
-    perf.start(kind, pointerMoment);
-  };
-  /** 结束本次手势的性能事实；未开始时是 no-op（被拒绝的输入因此不发事件）。 */
-  const finishPerfGesture = (result: "success" | "failure" | "cancelled" = "success"): void => {
-    pointerMoment = undefined;
-    perf.finish(result);
-  };
-
   const resizeTarget = (
     gesture: Extract<Gesture, { kind: "resize" }>,
     world: Point
   ): { width: number; height: number; position?: Point } | null => resizeTargetHelper(gesture, world, options.nodeCapabilities);
 
   const commitDragGesture = drag.commit;
-  /** 取消路径：手势作废，性能事实按 `cancelled` 结算（不记成 success）。 */
   const cancelDragGesture = (): void => {
-    finishPerfGesture("cancelled");
     worldGround.cancel();
     worldCamera.cancel();
     drag.cancel();
@@ -241,15 +211,11 @@ export function create2dInputFamily(core: InteractionCore) {
     schedule,
     worldGround,
     worldCamera,
-    beginGesture: () => core.clearHover(),
-    beginPerfGesture
+    beginGesture: () => core.clearHover()
   });
 
   const onPointerDown = (event: PointerEvent) => {
     groundClick = null;
-    // 计时起点在最外层：命中查询也要算进这次输入的耗时（spec: 被拒绝的输入不发事件，
-    // 但它的时间仍然值得记下来——只是不产生 `perf.interaction`）。
-    pointerMoment = perf.enter();
     contextMenu.begin();
     // 聚焦查看：相机/编辑手势优先，短路一切 2D 手势（design D5）。
     // 非模态 editor/history panel 不得阻断 focus pointer（design D6）。
@@ -288,7 +254,6 @@ export function create2dInputFamily(core: InteractionCore) {
     // 平移手势只用视口，不依赖命中几何：在任何查询之前处理。
     if (event.button === 1 || state.spacePressed) {
       beginGesture();
-      beginPerfGesture("pan");
       state.gesture = { kind: "pan", pointerId: event.pointerId, last: { x: event.clientX, y: event.clientY } };
       canvas.setPointerCapture?.(event.pointerId);
       event.preventDefault();
@@ -296,10 +261,7 @@ export function create2dInputFamily(core: InteractionCore) {
     }
 
     // 命中由 Rust interaction snapshot 计算（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-    const hitStartedAt = pointerMoment;
     const hitResult = core.queryPoint(world, core.activeViewport().zoom, pressedHoveredEdgeId);
-    // 命中查询是这次输入里最贵的一步；记成固定段（stage 来自契约枚举）。
-    perf.accumulateSince("hit-query", hitStartedAt);
     if (!hitResult.ok) {
       // 几何不可用/过期：不开始新手势（design D3）。
       return;
@@ -346,7 +308,6 @@ export function create2dInputFamily(core: InteractionCore) {
       }
       core.claimSceneAreaGesture("pointer");
       beginGesture();
-      beginPerfGesture(started.intent === "move" ? "drag" : "resize");
       // Install the scene-area state before setSelection: without rAF (tests) or in a
       // synchronous subscriber, selection schedules a frame immediately and a "none"
       // gesture there would cancel the gesture we just started.
@@ -556,8 +517,6 @@ export function create2dInputFamily(core: InteractionCore) {
       // change: add-multi-select-aggregate-connect：从选区聚合把手批量拉线。
       if (aggregate.begin(hit.direction, world, event.pointerId)) {
         beginGesture();
-        // 聚合拉线在数据层面就是一次批量连线，归入 `connect`（契约的 kind 集合没有单独一项）。
-        beginPerfGesture("connect");
         canvas.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         schedule();
@@ -576,7 +535,6 @@ export function create2dInputFamily(core: InteractionCore) {
     if (hit && hit.kind === "port") {
       if (!canEditNode(workingCanvasOf(woohaa3CanvasStore.getState()), hit.nodeId)) return;
       beginGesture();
-      beginPerfGesture("connect");
       state.gesture = { kind: "connect", pointerId: event.pointerId, source: hit.nodeId, side: hit.side };
       state.draft = { source: hit.nodeId, side: hit.side, x: world.x, y: world.y };
       canvas.setPointerCapture?.(event.pointerId);
@@ -599,7 +557,6 @@ export function create2dInputFamily(core: InteractionCore) {
       }
       const bounds = cursorGroups.get(hit.nodeId)!;
       beginGesture();
-      beginPerfGesture("resize");
       state.gesture = { kind: "resize", pointerId: event.pointerId, nodeId: hit.nodeId,
         start: world, originWidth: bounds.width, originHeight: bounds.height,
         originPosition: { x: bounds.x, y: bounds.y }, edge: groupPart.edge, cursor: groupPart.cursor, moved: false };
@@ -633,7 +590,6 @@ export function create2dInputFamily(core: InteractionCore) {
           ? { width: renderNode.width, height: renderNode.height }
           : nodeSize({ type: kind, width: entry.width, height: entry.height });
         beginGesture();
-        beginPerfGesture("resize");
         state.gesture = {
           kind: "resize",
           pointerId: event.pointerId,
@@ -716,7 +672,6 @@ export function create2dInputFamily(core: InteractionCore) {
           ? createDragAttachState(singleId)
           : undefined;
       beginGesture();
-      beginPerfGesture("drag");
       state.gesture = {
         kind: "drag",
         pointerId: event.pointerId,
@@ -764,7 +719,6 @@ export function create2dInputFamily(core: InteractionCore) {
       });
     }
     beginGesture();
-    beginPerfGesture("marquee");
     state.gesture = {
       kind: "marquee",
       pointerId: event.pointerId,
@@ -795,17 +749,13 @@ export function create2dInputFamily(core: InteractionCore) {
     // 世界模型地面拖动：只更新瞬时世界位移预览，不做命中/悬停结算。
     if (state.gesture.kind === "world-ground") {
       setCursor("grabbing");
-      const moveAt = telemetryNow();
       worldGround.move(event);
-      perf.accumulateSince("gesture-move", moveAt);
       return;
     }
     // 镜头视锥拖动：只更新瞬时位姿预览，不做命中/悬停结算。
     if (state.gesture.kind === "world-camera") {
       setCursor("grabbing");
-      const moveAt = telemetryNow();
       worldCamera.move(event);
-      perf.accumulateSince("gesture-move", moveAt);
       return;
     }
     // 同一事件只读一次 canvas 外框（design D1 分段 + 任务 5.2）；world 换算与 hover 结算共用。
@@ -835,8 +785,6 @@ export function create2dInputFamily(core: InteractionCore) {
     } else {
       setCursor("");
     }
-    // 移动段的计时起点：一次 pointermove 只读一次时钟，后续分支共用。
-    const moveAt = telemetryNow();
     if (state.gesture.kind === "scene-area") {
       const runtime = core.sceneAreaGestures();
       if (event.altKey || state.gesture.moveMembers === false) {
@@ -845,16 +793,12 @@ export function create2dInputFamily(core: InteractionCore) {
         state.gesture.moveMembers = moveMembers;
       }
       else runtime?.update({ x: event.clientX, y: event.clientY });
-      perf.accumulateSince("gesture-move", moveAt);
       schedule();
       return;
     }
     if (state.gesture.kind === "right-press") {
       const distance = Math.hypot(event.clientX - state.gesture.startScreen.x, event.clientY - state.gesture.startScreen.y);
       if (distance >= RIGHT_CLICK_PAN_THRESHOLD_PX) {
-        // 越过阈值才确定这是平移：现在才开门，kind 因此是 `pan` 而不是菜单。
-        beginPerfGesture("pan");
-        perf.accumulateSince("hit-query", pointerMoment);
         state.gesture = {
           kind: "pan",
           pointerId: state.gesture.pointerId,
@@ -869,8 +813,6 @@ export function create2dInputFamily(core: InteractionCore) {
       state.gesture.last = { x: event.clientX, y: event.clientY };
       const base = state.viewportPreview ?? core.localViewport.get();
       state.viewportPreview = { x: base.x + dx, y: base.y + dy, zoom: base.zoom };
-      // 平移只改本地视口预览：这段耗时归 `viewport-apply`（与滚轮同一个阶段名）。
-      perf.accumulateSince("viewport-apply", moveAt);
       schedule("viewport");
       return;
     }
@@ -881,30 +823,25 @@ export function create2dInputFamily(core: InteractionCore) {
       applyDragPreview(state.gesture.origins, dx, dy);
       // 先更新位置覆盖，再基于包含覆盖的最新轻量 scene 求值接触（design D3）。
       const changedAttach = drag.evaluate();
-      perf.accumulateSince("gesture-move", moveAt);
       schedule(changedAttach ? "input" : "position-preview");
       return;
     }
     if (state.gesture.kind === "resize") {
       updateResizePreview(world);
-      perf.accumulateSince("gesture-move", moveAt);
       schedule();
       return;
     }
     if (state.gesture.kind === "connect") {
       state.draft = { source: state.gesture.source, side: state.gesture.side, x: world.x, y: world.y };
-      perf.accumulateSince("gesture-move", moveAt);
       schedule();
       return;
     }
     if (state.gesture.kind === "aggregate-connect") {
       aggregate.move(world);
-      perf.accumulateSince("gesture-move", moveAt);
       return;
     }
     if (state.gesture.kind === "marquee") {
       state.gesture.current = world;
-      perf.accumulateSince("gesture-move", moveAt);
       schedule();
     }
   };
@@ -928,7 +865,6 @@ export function create2dInputFamily(core: InteractionCore) {
     // 释放后仍请求一帧（沿用既有语义）；纯 pan 释放用 `"viewport"` 以保持纯视口帧，
     // 其它手势（拖拽/resize/连线/框选）可能改变结构或呈现，用缺省 `"input"` 走 full。
     const releasedKind = state.gesture.kind;
-    const commitAt = telemetryNow();
 
     try {
     if (state.gesture.kind === "scene-area") {
@@ -1055,8 +991,6 @@ export function create2dInputFamily(core: InteractionCore) {
         }
       }
     } else if (state.gesture.kind === "right-press") {
-      // 短按右键不是平移：到这里才确定它是菜单（spec: kind 取 `context-menu`）。
-      beginPerfGesture("context-menu");
       options.onContextMenu?.({
         screen: { x: event.clientX, y: event.clientY },
         world,
@@ -1070,8 +1004,6 @@ export function create2dInputFamily(core: InteractionCore) {
       // 提交/回调失败不得卡住输入：记录但不中断，手势仍在 finally 复位。
       options.onInteractionError?.(error);
     } finally {
-      // 提交阶段（可能含一次命令提交与状态收敛）单独记一段：它与指针移动是两种成本。
-      perf.accumulateSince("gesture-commit", commitAt);
       // 无论提交/回调是否抛错，都必须复位指针捕获与手势，避免拖拽状态卡死
       // （change: 2026-10-09-improve-canvas-workflow，任务 1.7 回归）。
       try {
@@ -1088,8 +1020,6 @@ export function create2dInputFamily(core: InteractionCore) {
       // 手势结束必须"推进版本号"：覆盖层只在版本变化时重渲染，仅靠访问器返回空数组会留下旧线。
       setAlignmentGuides(state, []);
       schedule(releasedKind === "pan" ? "viewport" : "input");
-      // 一次被消费的手势到此结束：未开门（被拒绝/横条动作/连线点空白）时是 no-op。
-      finishPerfGesture();
     }
   };
 
@@ -1097,7 +1027,6 @@ export function create2dInputFamily(core: InteractionCore) {
     const runtime = core.sceneAreaGestures();
     if (!runtime?.active()) return;
     runtime.cancel();
-    finishPerfGesture("cancelled");
   };
   const { onPointerCancel, onBlur, onVisibilityChange } = createCancellationHandlers(
     core, () => { cancelDragGesture(); cancelSceneAreaGesture(); }, () => aggregate.cancel()
@@ -1123,8 +1052,6 @@ export function create2dInputFamily(core: InteractionCore) {
       worldCamera.cancel();
       core.sceneAreaGestures()?.cancel();
       setCursor("");
-      // 卸载时结算未收尾的滚轮段（不丢事实，也不让定时器活到画布之外）。
-      onWheel.flushPerfBurst();
     },
     onPointerDown,
     onPointerMove,
@@ -1136,8 +1063,6 @@ export function create2dInputFamily(core: InteractionCore) {
     onBlur: () => { contextMenu.cancel(); setCursor(""); onBlur(); },
     onVisibilityChange: () => {
       setCursor("");
-      // 页面隐藏：视口帧不再画，滚轮段到此为止（不把隐藏期的空闲算进这次输入的耗时）。
-      onWheel.flushPerfBurst();
       onVisibilityChange();
     },
     /** 视口手势模块（供 controller 转发缩放按钮与预览提交）。 */

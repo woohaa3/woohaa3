@@ -43,7 +43,6 @@ import {
   readFrontendExtensionPreferences,
   watchFrontendExtensionPreferences
 } from "./services/extension-preferences/config-source.js";
-import { beginStartupSpan } from "./services/telemetry-primitives.js";
 import type { PreferenceStorage } from "./services/extension-preferences/codec.js";
 import { AppRouterStore, type AppHistoryAdapter } from "./navigation/app-router-store.js";
 import { resolveCanvasLocation } from "./canvas-location.js";
@@ -159,9 +158,6 @@ function extensionCatalogMetadata(metadata: readonly import("@woohaa3/contracts"
  * App scope 只拥有跨页面能力；Canvas 页面才创建 remote/session/runtime/plugins。
  */
 export async function startApp(options: StartAppOptions = {}): Promise<AppRuntime> {
-  // 启动阶段埋点（change: 2026-10-25-enhance-telemetry-performance-collection，task 3.4）。
-  // 计时器是零依赖原语：构建模式缺失时整体 no-op，不改变启动路径。
-  const finishAppScope = beginStartupSpan("app-scope");
   const history = options.history ?? browserHistory();
   const runtimeService = options.extensionRuntime ?? createExtensionRuntimeService();
   const app = await startFrontendRuntime({
@@ -180,7 +176,6 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     plugins: []
   });
 
-  finishAppScope();
   const router = app.ctx.appRouter as AppRouterStore;
   const connectivity = installAppHostConnectivity({ appCtx: app.ctx, runtime: runtimeService, ...(options.hostProbe ? { probe: options.hostProbe } : {}) });
   const catalog = app.ctx.canvasCatalog;
@@ -483,18 +478,7 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
     };
   };
 
-  /**
-   * 画布页 scope 的启动阶段（只有真正进入画布才算；复盘/历史页不产生这条事实，
-   * 否则"画布启动耗时"会被不相干的页面启动样本污染）。
-   */
-  const startCanvasPage = async (canvasId: string): Promise<FrontendRuntime> => {
-    const finishCanvasScope = beginStartupSpan("canvas-scope");
-    try {
-      return await startCanvasPageScope(canvasId);
-    } finally {
-      finishCanvasScope();
-    }
-  };
+  const startCanvasPage = startCanvasPageScope;
 
   const startPage = (location: AppPageLocation, resolved: ResolvedPage): Promise<FrontendRuntime> => {
     if (location.page === "task-monitor") {

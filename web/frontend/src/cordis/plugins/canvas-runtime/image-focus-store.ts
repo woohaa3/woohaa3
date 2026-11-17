@@ -27,7 +27,7 @@ export class ImageFocusStore {
   isPending = (): boolean => this.pending && this.targetId !== null;
   private targets: readonly string[] = [];
   private targetId: string | null = null;
-  private texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null = null;
+  private texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource; scope?: import('./canvas-scope.js').CanvasScope } | null = null;
   private readonly listeners = new Set<() => void>();
 
   get(): import("@woohaa3/contracts").BevyImageFocus | null {
@@ -62,12 +62,12 @@ export class ImageFocusStore {
     };
   }
 
-  setTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void {
+  setTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource; scope?: import('./canvas-scope.js').CanvasScope } | null): void {
     if (this.texture?.pixels !== texture?.pixels) releaseImagePixels(this.texture?.pixels);
     this.texture = texture;
   }
 
-  getTexture(): { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null {
+  getTexture(): { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource; scope?: import('./canvas-scope.js').CanvasScope } | null {
     return this.texture;
   }
 }

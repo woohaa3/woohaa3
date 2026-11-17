@@ -128,6 +128,13 @@ pub enum ControlOperation {
     Open {
         source_id: String,
         node_binding: Option<String>,
+        /// Canvas visit (renderer access token) the editor lease was taken under.
+        ///
+        /// Old hosts omit it: their frames keep the legacy "no visit" semantics. New hosts send
+        /// it so a frame opened under visit A can never be composited after the canvas switched
+        /// (or the renderer was recreated on the same canvas).
+        #[serde(default)]
+        node_visit: Option<String>,
         format: String,
         bytes: Vec<u8>,
     },
@@ -171,6 +178,9 @@ pub struct DocumentState {
     pub document_id: String,
     pub source_id: String,
     pub node_binding: Option<String>,
+    /// Visit recorded at open (`None` for old hosts / external files).
+    #[serde(default)]
+    pub node_visit: Option<String>,
     pub revision: u64,
     pub saved_revision: u64,
     pub source_size: [u32; 2],
@@ -178,6 +188,11 @@ pub struct DocumentState {
 impl DocumentState {
     pub fn dirty(&self) -> bool {
         self.revision != self.saved_revision
+    }
+    /// Frames of this document are only presentable while its recorded visit is current.
+    /// A document opened without a visit keeps the legacy semantics.
+    pub fn visit(&self) -> Option<&str> {
+        self.node_visit.as_deref()
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

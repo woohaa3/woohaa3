@@ -30,7 +30,6 @@ import type {
 import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
 
 import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
-import { beginStartupSpan } from "../../services/telemetry-primitives.js";
 import { createRuntimeViewport } from "./runtime-viewport.js";
 import { createRuntimeObserver } from "./runtime-observer.js";
 import {FocusDetailEncoder} from "./focus-details.js";
@@ -56,6 +55,7 @@ import type {
   BevyModule,
   BevyRuntime
 } from "./bevy-runtime-types.js";
+import { CanvasScopeCoordinator, scopedCanvasModule } from "./canvas-scope.js";
 
 export type {
   AxisDragConstraint,
@@ -169,7 +169,7 @@ function nextRuntimeGeneration(): number {
   return runtimeGeneration;
 }
 
-/** 渲染三阶段与实例数的累计计数（`perf.frame` 差分后求每帧均值）。 */
+/** 渲染三阶段与实例数的内存累计诊断，显式探针可差分读取。 */
 export type RenderStageCounters = {
   readonly stageQueueMs?: number;
   readonly stageQueueFrames?: number;
@@ -189,7 +189,7 @@ export type RenderStageCounters = {
 /**
  * 从运行侧工作诊断里取渲染三阶段的累计墙钟与提交实例数（仅 dev 提供）。
  *
- * `perf.frame` 的 `fps`/`frameExecMs` 只覆盖 JS 帧循环：画布掉帧而这两个数没动时，
+ * JS 帧循环诊断只覆盖前端：画布掉帧而前端读数没变化时，
  * 只能靠这里的 Queue/Prepare/Render 分段回答「多出来的时间花在渲染提交、资源准备，
  * 还是根本不在本进程的渲染阶段里」。`drawnInstances` 与 `drawCalls` 配对，用来分辨
  * 「draw call 少」与「一次 instanced draw 带上万个实例」。
@@ -270,11 +270,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
    * （fix: 打包的桌面分发版也要显示 FPS/DC）。规则与理由见 `frameCountersReadable`。
    */
   const frameCountersEnabled = frameCountersReadable(import.meta.env.DEV, target);
-  // 启动阶段埋点（change: 2026-10-25-enhance-telemetry-performance-collection，task 3.4）。
-  // `bevy-runtime` 是整段创建，`wasm-module` 只包模块装载与初始化：两者分开是因为前者含
-  // realm/iframe、supervisor 与镜像安装，后者是下载+实例化+首次 start，慢在哪一段必须能分开看。
-  const finishRuntimeSpan = beginStartupSpan("bevy-runtime");
-  const finishWasmModuleSpan = beginStartupSpan("wasm-module");
 
   const issues = new RuntimeIssues();
   let supervisor: RuntimeSupervisor | null = null;
@@ -294,11 +289,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     realm = await createRuntimeRealm(target, fault, options.signal);
     return protectWasmModule(realm.module, issues, () => candidate || callsAllowed());
   };
-  let module = await loadModule().catch((error: unknown) => {
-    finishWasmModuleSpan("failure");
-    finishRuntimeSpan("failure");
-    throw error;
-  });
+  let module = await loadModule();
+  let coordinator: CanvasScopeCoordinator | null = null;
   try {
     await module.default();
     options.signal?.throwIfAborted();
@@ -307,12 +299,12 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     // 初始化时校验当前必需 WASM 能力（change: 2026-10-07-remove-residual-compatibility）：
     // 缺失必需导出时明确失败，不回退旧注册/把能力缺失伪装成截图超时。
     assertRequiredCapabilities(module);
+    const scoped = scopedCanvasModule(module);
+    coordinator = scoped ? new CanvasScopeCoordinator(scoped) : null;
     if (!options.importModule) readRuntimeHealth(module.runtime_health!());
     module.start();
 
-  } catch (error) { finishWasmModuleSpan("failure"); finishRuntimeSpan("failure"); disposeRealm(); throw error; }
-  // 模块装载 + 实例化 + 首次 start：这一段结束时 `wasm-module` 才有意义（此后是场景/健康协议）。
-  finishWasmModuleSpan("success");
+  } catch (error) { disposeRealm(); throw error; }
 
   let disposed = false;
   /** 最近一次提交的快照（E2E/排障观察用；change: add-node-endpoint-hover）。 */
@@ -360,6 +352,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   const focusDetails=new FocusDetailEncoder();
   let retryVersion = 0;
   const retryListeners = new Set<() => void>();
+  const scopeListeners = new Set<() => void>();
+  const notifyScope = () => { for (const listener of scopeListeners) { try { listener(); } catch { /* Scope observers cannot interrupt the runtime. */ } } };
   /**
    * 有界模型 payload 准备调度（design D3 / 任务 6.1）。
    *
@@ -512,8 +506,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         const drawCalls3d = health.drawCalls3d;
         return { generation, renders: health.renders, updates: health.updates,
           ...(typeof drawCalls3d === "number" && Number.isSafeInteger(drawCalls3d) && drawCalls3d >= 0 ? { drawCalls3d } : {}),
-          // 渲染三阶段/实例数属于开发期归因：打包桌面版只要 FPS/DC，不把额外分段计数
-          // 带进生产遥测（口径与 `telemetry-performance` 的 dev 归因一致）。
+          // 开发构建附加内存中的分阶段计数；打包桌面版只提供 FPS/DC。
           ...(import.meta.env.DEV ? readRenderStageCounters(module) : {}) };
       } catch { return undefined; }
     } } : {}),
@@ -580,19 +573,49 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       interactionGeneration = accepted;
       if (scene) { lastScene = scene; supervisor?.accepted(scene.revision, accepted); }
     } }),
-    flushTextureReceipts: () => { if(module.poll_texture_receipts)textures.acceptReceipts(module.poll_texture_receipts()); },
-    textureApplied: (id,width,height,content,plane=false) => !module.poll_texture_receipts || textures.applied(plane?"plane":"node",id,width,height,content),
-    setTexture: (id, width, height, rgba, source) => textures.upload("node", id, width, height, rgba,
-      // 稳定内容身份让 Rust 侧按内容+尺寸共享同一 GPU 纹理，nodeId 只是绑定实例
-      // （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
-      () => isNativeImage(rgba) ? applyNativeImage(rgba,id,false,source?.sourceKey ?? "") : module.set_texture(id, width, height, rgba, source?.sourceKey ?? ""), source),
-    setImageFocusDetails:frame=>{
-      if(!module.set_image_focus_details) {if(frame)throw new Error("画布内核缺少图片细节纹理接口");return;}
-      focusDetails.upload(frame,(manifest,pixels)=>module.set_image_focus_details!(manifest,pixels));
+    flushTextureReceipts: () => {
+      if (coordinator) {
+        const scope = coordinator.snapshot();
+        if (scope) textures.acceptReceipts(scopedCanvasModule(module)!.poll_texture_receipts_scoped(scope.token));
+      } else if (module.poll_texture_receipts) textures.acceptReceipts(module.poll_texture_receipts());
     },
-    setModelMediaTexture: (id, width, height, rgba, source) => textures.upload("plane", id, width, height, rgba,
-      () => { if (!module.set_model_media_texture) throw new Error("缺少媒体平面纹理能力"); if (isNativeImage(rgba)) applyNativeImage(rgba,id,true,source?.sourceKey ?? "");
-        else module.set_model_media_texture(id, width, height, rgba); }, source),
+    textureApplied: (id,width,height,content,plane=false) => coordinator
+      ? !!coordinator.snapshot() && textures.applied(plane ? 'plane' : 'node',id,width,height,content)
+      : !module.poll_texture_receipts || textures.applied(plane ? 'plane' : 'node',id,width,height,content),
+    setTexture: (id, width, height, rgba, source) => {
+      const scope = source?.scope;
+      if (coordinator && (!scope || !coordinator.isCurrent(scope))) return false;
+      return textures.upload('node', id, width, height, rgba, () => {
+        if (coordinator && scope) {
+          if (isNativeImage(rgba)) applyNativeImage(rgba,id,false,source?.sourceKey ?? '',scope.token);
+          else scopedCanvasModule(module)!.set_texture_scoped(scope.token,id,width,height,rgba,source?.sourceKey ?? '');
+        } else if (isNativeImage(rgba)) applyNativeImage(rgba,id,false,source?.sourceKey ?? '');
+        else module.set_texture(id,width,height,rgba,source?.sourceKey ?? '');
+      }, source);
+    },
+    setImageFocusDetails: (frame, scope) => {
+      if (coordinator) {
+        if (!scope || !coordinator.isCurrent(scope)) throw new Error('画布作用域缺失或已过期');
+        focusDetails.upload(frame, (manifest, pixels) => scopedCanvasModule(module)!.set_image_focus_details_scoped(scope.token, manifest, pixels));
+      } else {
+        if (!module.set_image_focus_details) { if (frame) throw new Error('画布内核缺少图片细节纹理接口'); return; }
+        focusDetails.upload(frame, (manifest, pixels) => module.set_image_focus_details!(manifest, pixels));
+      }
+    },
+    setModelMediaTexture: (id, width, height, rgba, source) => {
+      const scope = source?.scope;
+      if (coordinator && (!scope || !coordinator.isCurrent(scope))) return false;
+      return textures.upload('plane', id, width, height, rgba, () => {
+        if (coordinator && scope) {
+          if (isNativeImage(rgba)) applyNativeImage(rgba,id,true,source?.sourceKey ?? '',scope.token);
+          else scopedCanvasModule(module)!.set_model_media_texture_scoped(scope.token,id,width,height,rgba);
+        } else {
+          if (!module.set_model_media_texture) throw new Error('缺少媒体平面纹理能力');
+          if (isNativeImage(rgba)) applyNativeImage(rgba,id,true,source?.sourceKey ?? '');
+          else module.set_model_media_texture(id,width,height,rgba);
+        }
+      }, source);
+    },
     registerModelResource,
     prepareAndRegisterModelResource,
     setModelPayloadLeases,
@@ -610,6 +633,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       payloadScheduler.drain();
     },
     setScene: (scene, resources) => {
+      const sceneScope = coordinator?.snapshot() ?? null; if (coordinator && (!sceneScope || sceneScope.canvasId !== scene.canvasId)) throw new Error('画布作用域缺失或与场景不匹配');
       // 先声明本帧引用的 descriptor（payload 由 lease 决定是否驻留；design D5）。
       payloadScheduler.beginFrame();
       if (resources) lastModelResources = resources;
@@ -632,7 +656,10 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       sceneDiagnostics.boundaryBytes += json.length;
       sceneDiagnostics.lastSceneJsonCodeUnits = json.length;
       // Rust 在接受点同步发布 interaction snapshot 并返回新的 generation。
-      interactionGeneration = measureSceneWork("wasmAcceptMs", now, () => module.set_scene(json));
+      interactionGeneration = measureSceneWork("wasmAcceptMs", now, () => {
+        if (!coordinator) return module.set_scene(json);
+        return scopedCanvasModule(module)!.set_scene_scoped(json, sceneScope!.token);
+      });
       // full 接受同时刷新 base 身份；纯视口增量沿用该身份直到下次 full。
       baseSceneGeneration = interactionGeneration;
       lastScene = positionMirror.reset(accepted);
@@ -796,11 +823,30 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       }, () => !disposed && captureGeneration === generation && (!supervisor || supervisor.phase === "running"));
       return frame;
     },
+    openCanvasScope: (canvasId) => {
+      if (disposed) throw new Error("Bevy runtime disposed");
+      if (supervisor && supervisor.phase !== "running") throw new Error("Bevy runtime is not running");
+      if (!coordinator) return null;
+      const previous = coordinator.snapshot();
+      const scope = coordinator.open(canvasId);
+      if (previous !== scope) { textures.reset(); focusDetails.reset(); notifyScope(); }
+      return scope;
+    },
+    currentCanvasScope: () => coordinator?.snapshot() ?? null,
+    subscribeCanvasScope: listener => { scopeListeners.add(listener); return () => { scopeListeners.delete(listener); }; },
+    canvasScopeMode: () => coordinator ? 'scoped' : 'legacy',
+    closeCanvasScope: (scope) => { const closed = coordinator ? coordinator.close(scope) : false; if (closed) notifyScope(); return closed; },
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      try {
+        const active = coordinator;
+        const scope = active?.snapshot() ?? null;
+        if (active && scope) active.close(scope);
+      } catch { /* 关闭作用域失败不得阻止其余资源清理。 */ }
       focusDetails.reset();
       retryListeners.clear();
+      scopeListeners.clear();
       supervisor?.dispose();
       if (healthTimer !== null) target.clearInterval(healthTimer);
       target.document?.removeEventListener("visibilitychange", visibilityChanged);
@@ -811,6 +857,8 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
   let healthTimer: ReturnType<typeof setInterval> | null = null;
   if (!options.importModule) {
     supervisor = new RuntimeSupervisor({ issues, recover: async () => {
+      const requiredScoped = coordinator !== null;
+      coordinator?.abandon();
       const previousInteraction = interactionGeneration;
       generation = nextRuntimeGeneration();
       focusDetails.reset();
@@ -822,6 +870,9 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         await replacement.default();
         if (disposed) { disposeRealm(); throw new Error("Runtime disposed"); }
         assertRequiredCapabilities(replacement);
+        const scoped = scopedCanvasModule(replacement);
+        if (requiredScoped && !scoped) throw new Error("渲染器恢复不得从 scoped 降级为 legacy");
+        const nextCoordinator = scoped ? new CanvasScopeCoordinator(scoped) : null;
         if (!replacement.runtime_health || !replacement.seed_runtime_generation) throw new Error("Bevy WASM 缺少恢复健康协议");
         replacement.seed_runtime_generation(previousInteraction);
         replacement.start();
@@ -854,7 +905,15 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           }));
           registeredKeys.add(key);
         }
-        const recoveredInteraction = lastScene ? replacement.set_scene(JSON.stringify(lastScene)) : 0;
+        let recoveredInteraction = 0;
+        if (lastScene) {
+          if (nextCoordinator) {
+            const handle = nextCoordinator.open(lastScene.canvasId);
+            recoveredInteraction = scoped!.set_scene_scoped(JSON.stringify(lastScene), handle.token);
+          } else {
+            recoveredInteraction = replacement.set_scene(JSON.stringify(lastScene));
+          }
+        }
         let remaining = 30000; let sampledAt = performance.now();
         while (!disposed && remaining > 0) {
           const now = performance.now();
@@ -863,7 +922,10 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
           if (realmFault) throw new Error(realmFault);
           const health = readRuntimeHealth(replacement.runtime_health());
           if (replacement.is_ready() && health.renders > 0 && (!lastScene || (health.appliedGeneration! >= recoveredInteraction && health.renderedGeneration! >= recoveredInteraction))) {
-            module = protectWasmModule(replacement, issues, callsAllowed); interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset();
+            module = protectWasmModule(replacement, issues, callsAllowed);
+            if (nextCoordinator) nextCoordinator.rebind(scopedCanvasModule(module)!);
+            coordinator = nextCoordinator;
+            interactionGeneration = recoveredInteraction; baseSceneGeneration = recoveredInteraction; textures.reset();
             // A replacement realm starts transparent with the startup curtain restored.
             // Its replayed themed scene has now rendered; reveal this realm as well.
             revealScheduled = false;
@@ -874,7 +936,7 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
         }
         throw new Error("渲染器重建未通过健康检查");
       } catch (error) { disposeRealm(); throw error; }
-    }, invalidate: () => { try { resourceFailures.retry(); } finally { runtime.retryRuntimeIssues?.(); } } });
+    }, invalidate: () => { try { resourceFailures.retry(); } finally { runtime.retryRuntimeIssues?.(); notifyScope(); } } });
     if (realmFault) { supervisor.fail(realmFault); }
     target.document.addEventListener("visibilitychange", visibilityChanged);
     healthTimer = target.setInterval(() => {
@@ -931,6 +993,6 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       runtime.queryDropTarget?.({ generation: interactionGeneration, x: point.x, y: point.y, excludedIds }) ??
       { ok: false, reason: "unsupported" }
   };
-  finishRuntimeSpan("success");
+
   return runtime;
 }

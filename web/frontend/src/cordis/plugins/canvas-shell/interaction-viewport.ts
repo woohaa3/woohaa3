@@ -7,7 +7,6 @@
 import { clampWoohaa3CanvasZoom, worldToCanvasPoint, worldToRendererPosition } from "@woohaa3/contracts";
 import { nodeSize } from "./hit-test.js";
 import { applyWheelToViewport, classifyWheelEvent, type NormalizedWheel } from "./input/wheel-gesture.js";
-import { createPerfInputRecorder } from "./input/perf-interaction.js";
 import { woohaa3CanvasStore } from "../../services/canvas-state/index.js";
 import type { InteractionCore, Viewport } from "./interaction-core.js";
 
@@ -16,25 +15,6 @@ const VIEWPORT_COMMIT_IDLE_MS = 120;
 
 export function createWheelViewport(core: InteractionCore) {
   const { canvas, state, target, schedule, activeViewport } = core;
-  /**
-   * 缩放控件（右下角按钮 / 取景）的输入埋点
-   * （change: 2026-10-25-enhance-telemetry-performance-collection，task 3.3）。
-   *
-   * 滚轮由 `input/wheel-entry.ts` 合并成段；这里是**一次点击触发的一次视口变更**，本身
-   * 就是一次被消费的输入，因此一次点击一条 `perf.interaction`。
-   */
-  const perf = createPerfInputRecorder();
-  const measuredZoom = (run: () => void): void => {
-    const started = perf.enter();
-    perf.start("zoom", started);
-    try {
-      run();
-    } finally {
-      perf.accumulateSince("viewport-apply", started);
-      perf.finish();
-    }
-  };
-
   const canvasCenter = (): { x: number; y: number } => {
     const rect = canvas.getBoundingClientRect();
     return { x: (rect.width || 1) / 2, y: (rect.height || 1) / 2 };
@@ -113,15 +93,13 @@ export function createWheelViewport(core: InteractionCore) {
   };
 
   const zoomBy = (factor: number) => {
-    measuredZoom(() => {
-      const base = activeViewport();
-      applyZoom(base.zoom * factor);
-    });
+    const base = activeViewport();
+    applyZoom(base.zoom * factor);
   };
 
-  const zoomTo = (zoom: number) => measuredZoom(() => applyZoom(zoom));
+  const zoomTo = (zoom: number) => applyZoom(zoom);
 
-  const zoomToFit = () => measuredZoom(() => {
+  const zoomToFit = () => {
     const canvasState = woohaa3CanvasStore.getState().canvas;
     if (!canvasState || canvasState.document.nodes.length === 0) {
       applyZoom(1);
@@ -190,7 +168,7 @@ export function createWheelViewport(core: InteractionCore) {
     core.commitViewport(next);
     state.viewportPreview = null;
     schedule("viewport");
-  });
+  };
 
   return { onWheel, zoomBy, zoomTo, zoomToFit, applyZoom, scheduleViewportCommit };
 }

@@ -1,5 +1,5 @@
 /** 图片聚焦的瞬时源像素纹理，与规范文档和宿主剪贴板无关。 */
-export type ImageFocusDetails={nodeId:string;width:number;height:number;tiles:readonly {x:number;y:number;width:number;height:number;pixels:Uint8Array}[];onUploadFailure?:()=>void};
+export type ImageFocusDetails={nodeId:string;width:number;height:number;tiles:readonly {x:number;y:number;width:number;height:number;pixels:Uint8Array}[];onUploadFailure?:()=>void;scope?:import('./canvas-scope.js').CanvasScope};
 type EncodedDetails={manifest:string;pixels:Uint8Array};
 export function encodeFocusDetails(frame:ImageFocusDetails|null):EncodedDetails {
   return encode(frame);

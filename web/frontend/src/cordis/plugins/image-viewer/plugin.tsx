@@ -30,6 +30,7 @@ export function imageViewerExtension(): Plugin.Function<void> {
     (ctx: Context) => {
       const getCanvas = () => workingCanvasOf(woohaa3CanvasStore.getState()) ?? woohaa3CanvasStore.getState().canvas;
       let session: ImageViewerSession | null = null;
+      let sessionScope: import('../canvas-runtime/canvas-scope.js').CanvasScope | undefined;
       let detachViewport: (() => void) | null = null;
       let removeWorkspace: (() => void) | null = null;
       let syncing = false;
@@ -45,11 +46,15 @@ export function imageViewerExtension(): Plugin.Function<void> {
         detachViewport = null;
         session?.dispose();
         session = null;
+        sessionScope = undefined;
       };
 
       const enter = (nodeId: string): void => {
         const resolved = resolveImageFocusTarget(getCanvas(), nodeId);
         if (!resolved) return;
+        const focusRuntime = ctx.canvasRuntime.runtime?.() ?? null;
+        const focusScope = focusRuntime?.currentCanvasScope?.() ?? undefined;
+        if (focusRuntime?.canvasScopeMode?.() === 'scoped' && !focusScope) return;
         exit();
         const controller = ctx.canvasRuntime.controller();
         const current = new ImageViewerSession({
@@ -60,12 +65,13 @@ export function imageViewerExtension(): Plugin.Function<void> {
           savedViewport: controller?.viewport() ?? { x: 0, y: 0, zoom: 1 },
           transition: ctx.canvasRuntime.focusTransitionPort(),
           runtime: {
-            setProjection: (projection) => ctx.canvasRuntime.setImageFocus(projection),
-            setTexture: (texture) => ctx.canvasRuntime.setImageFocusTexture(texture),
-            setPending: (pending) => ctx.canvasRuntime.setImageFocusPending(pending)
+            setProjection: (projection) => ctx.canvasRuntime.setImageFocus(projection, focusScope),
+            setTexture: (texture) => ctx.canvasRuntime.setImageFocusTexture(texture, focusScope),
+            setPending: (pending) => ctx.canvasRuntime.setImageFocusPending(pending, focusScope)
           }
         });
         session = current;
+        sessionScope = focusScope;
         detachViewport = ctx.canvasRuntime.registerImageViewportTarget(current.viewportTarget());
         void current.start();
       };
@@ -120,6 +126,33 @@ export function imageViewerExtension(): Plugin.Function<void> {
       };
       const unsubscribeNav = ctx.canvasNavigation.subscribe(reconcileFocus);
 
+      // runtime 实例替换时重绑 scope（旧 runtime 无 subscribe / subscribeCanvasScope 则空操作）。
+      // 只在 scope 真正变化时重开会话；旧 session dispose 仍携带 enter 时冻结的旧 scope。
+      let observedRuntime: ReturnType<typeof ctx.canvasRuntime.runtime> = null;
+      let unsubscribeScope: () => void = () => {};
+      const onScopeChange = (): void => {
+        const scope = observedRuntime?.currentCanvasScope?.();
+        const mode = ctx.canvasNavigation.getSnapshot().mode;
+        if (
+          scope
+          && mode.type === "node-focus"
+          && mode.kind === "image"
+          && !otherImageWorkspace()
+          && (!session || sessionScope !== scope)
+        ) enter(mode.nodeId);
+      };
+      const bindScopeRuntime = (): void => {
+        const newRuntime = ctx.canvasRuntime.runtime?.() ?? null;
+        if (newRuntime !== observedRuntime) {
+          unsubscribeScope();
+          observedRuntime = newRuntime;
+          unsubscribeScope = newRuntime?.subscribeCanvasScope?.(onScopeChange) ?? (() => {});
+        }
+        onScopeChange();
+      };
+      const unsubscribeRuntime = ctx.canvasRuntime.subscribe?.(bindScopeRuntime) ?? (() => {});
+      bindScopeRuntime();
+
       // 内容矩形变化（历史 drawer / 窗口尺寸）→ 重新适应窗口。
       const unsubscribeRect = ctx.canvasRuntime.subscribeFocusContentRect(() => session?.setRect());
 
@@ -170,6 +203,8 @@ export function imageViewerExtension(): Plugin.Function<void> {
         disposeParticipant();
         removeWorkspace?.();
         removeWorkspace = null;
+        unsubscribeScope();
+        unsubscribeRuntime();
         exit();
       }, "image-viewer-lifecycle");
     },

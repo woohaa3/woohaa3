@@ -12,14 +12,27 @@ mod model3d {
     }
 }
 
+mod isometric_grid {
+    pub fn canvas_camera_projection() -> bevy::prelude::OrthographicProjection {
+        bevy::prelude::OrthographicProjection::default_3d()
+    }
+}
+
+mod world_camera_preview {
+    pub const DIRECTOR_AREA_LAYER: usize = 9;
+}
+
 #[derive(Resource, Default)]
 struct CurrentScene(Scene);
 #[derive(Default)]
 struct Scene {
     model_focus: Option<()>,
+    image_focus: Option<()>,
+    video_focus: Option<()>,
+    world_camera_edit: Option<()>,
 }
 
-#[path = "../src/app/editor_overlay.rs"]
+#[path = "../src/host/app/editor_overlay.rs"]
 mod editor_overlay;
 
 mod tests {

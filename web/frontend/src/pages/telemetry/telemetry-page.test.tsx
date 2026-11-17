@@ -28,7 +28,7 @@ function status(): TelemetryStatus {
 }
 
 function event(id: number): TelemetryEventRecord {
-  return { id, name: "perf.interaction", result: "success", origin: "browser", occurredAt: 0, receivedAt: 1_700_000_000_000 };
+  return { id, name: "canvas.edit", result: "success", origin: "browser", occurredAt: 0, receivedAt: 1_700_000_000_000 };
 }
 
 function summary(overrides: Partial<TelemetrySummary> = {}): TelemetrySummary {
@@ -64,20 +64,12 @@ function render(overrides: Partial<TelemetryPageProps> & { query?: TelemetryQuer
 }
 
 describe("复盘页的分组与构建模式", () => {
-  it("筛选栏始终提供构建模式与分组两个选择器", () => {
+  it("removes performance controls and keeps business grouping", () => {
     const markup = render();
-    expect(markup).toContain("构建模式");
-    expect(markup).toContain("按构建模式筛选");
-    // 缺省值是"全部构建"/"按事件名"：下拉是 listbox，选项在弹层里，SSR 只出当前值。
-    expect(markup).toContain("全部构建");
+    expect(markup).not.toContain("按构建模式筛选");
+    expect(markup).not.toContain("全部构建");
     expect(markup).toContain("分组");
     expect(markup).toContain("按事件名");
-  });
-
-  it("选中的构建模式与分组回显在筛选栏上", () => {
-    const markup = render({ query: { window: "24h", mode: "production", groupBy: "kind" } });
-    expect(markup).toContain("发布构建");
-    expect(markup).toContain("按输入种类");
   });
 
   it("未分组时不渲染耗时榜（与窗口聚合重复）", () => {
@@ -85,15 +77,15 @@ describe("复盘页的分组与构建模式", () => {
     expect(markup).not.toContain('data-testid="telemetry-duration-ranking"');
   });
 
-  it("分组时聚合表多出分组列，并按 p95 给出耗时榜", () => {
+  it("business grouping keeps its table without a performance ranking", () => {
     const markup = render({
-      query: { window: "24h", groupBy: "kind" },
+      query: { window: "24h", groupBy: "source" },
       summary: summary({
-        groupBy: "kind",
+        groupBy: "source",
         rows: [
           {
-            name: "perf.interaction",
-            attributeValue: "pan",
+            name: "canvas.edit",
+            attributeValue: "local",
             count: 10,
             results: { success: 10, failure: 0, cancelled: 0, rejected: 0 },
             durationSamples: 10,
@@ -103,8 +95,8 @@ describe("复盘页的分组与构建模式", () => {
             topErrorCodes: []
           },
           {
-            name: "perf.interaction",
-            attributeValue: "zoom",
+            name: "canvas.edit",
+            attributeValue: "remote",
             count: 10,
             results: { success: 10, failure: 0, cancelled: 0, rejected: 0 },
             durationSamples: 10,
@@ -117,41 +109,38 @@ describe("复盘页的分组与构建模式", () => {
       })
     });
 
-    expect(markup).toContain('data-testid="telemetry-duration-ranking"');
-    expect(markup).toContain("按输入种类");
+    expect(markup).not.toContain('data-testid="telemetry-duration-ranking"');
+    expect(markup).toContain("按来源");
     // 表格有分组列，且两行都在。
     expect(markup).toContain('data-testid="telemetry-summary-group"');
-    expect(markup).toContain("pan");
-    expect(markup).toContain("zoom");
+    expect(markup).toContain("local");
+    expect(markup).toContain("remote");
 
-    // 耗时榜按 p95 降序：pan（30ms）在 zoom（8ms）之前。
-    const ranking = markup.slice(markup.indexOf('data-testid="telemetry-duration-ranking"'));
-    expect(ranking.indexOf("pan")).toBeLessThan(ranking.indexOf("zoom"));
   });
 
   it("分组命中在异常卡上带出维度名与取值（与「整体变慢」可区分）", () => {
     const anomaly: TelemetryAnomaly = {
       ruleId: "latency-regression",
       severity: "warn",
-      name: "perf.interaction",
-      attributeValue: "pan",
+      name: "canvas.edit",
+      attributeValue: "local",
       window: "24h",
       observed: 300,
       baseline: 100,
       samples: 20,
       evidence: {}
     };
-    const markup = render({ query: { window: "24h", groupBy: "kind" }, anomalies: [anomaly] });
+    const markup = render({ query: { window: "24h", groupBy: "source" }, anomalies: [anomaly] });
     expect(markup).toContain('data-testid="telemetry-anomaly-group"');
-    expect(markup).toContain("输入种类");
-    expect(markup).toContain("pan");
+    expect(markup).toContain("来源");
+    expect(markup).toContain("local");
   });
 
   it("没有分组成员的命中不画分组标记", () => {
     const anomaly: TelemetryAnomaly = {
       ruleId: "latency-regression",
       severity: "warn",
-      name: "perf.interaction",
+      name: "canvas.edit",
       window: "24h",
       observed: 300,
       baseline: 100,

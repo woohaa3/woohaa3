@@ -7,7 +7,7 @@ import { createNativeViewportChannel } from "./native-viewport-channel.js";
 import { nativeProtocolUrl } from "../../../desktop/native-protocol.js";
 import { nativeDrawableLayout } from "./native-surface-layout.js";
 
-type NativeBootstrap = { protocol: string; token: string; viewportAsync?: boolean };
+type NativeBootstrap = { protocol: string; token: string; viewportAsync?: boolean; canvasScope?: boolean };
 export function nativeBootstrap(target: typeof globalThis): NativeBootstrap | undefined {
   return (target as typeof globalThis & { __WOOHAA_NATIVE__?: NativeBootstrap }).__WOOHAA_NATIVE__;
 }
@@ -74,7 +74,7 @@ export async function createNativeRuntimeRealm(
     failed: () => fault("native-viewport")
   });
   const rpc = (method: string, ...args: unknown[]) => {
-    if (method === "set_scene" || method === "seed_runtime_generation") viewport.cancel();
+    if (method === "set_scene" || method === "set_scene_scoped" || method === "seed_runtime_generation") viewport.cancel();
     else if (method.startsWith("query_") || method === "set_positions" || method === "set_resource_states" || method === "request_shot_capture") {
       const generation = viewport.flush();
       if (generation !== null && method.startsWith("query_") && typeof args[0] === "string") {
@@ -97,8 +97,8 @@ export async function createNativeRuntimeRealm(
   target.addEventListener("resize", layout);
   layout();
 
-  const upload = (plane: boolean, id: string, width: number, height: number, rgba: Uint8Array, content = "") => {
-    const meta = encodeURIComponent(JSON.stringify({ plane, id, width, height, content }));
+  const upload = (plane: boolean, id: string, width: number, height: number, rgba: Uint8Array, content = "", scope?: string) => {
+    const meta = encodeURIComponent(JSON.stringify({ plane, id, width, height, content, ...(scope !== undefined ? { scope } : {}) }));
     const result = JSON.parse(request(`texture?meta=${meta}`, rgba).responseText) as { ok: boolean; error?: string };
     if (!result.ok) throw new Error(result.error ?? "Native texture upload failed");
   };
@@ -118,6 +118,19 @@ export async function createNativeRuntimeRealm(
       return Uint8Array.from(text, char => char.charCodeAt(0) & 255);
     }
   } as BevyModule;
+  if (bootstrap.canvasScope === true) Object.assign(module, {
+    begin_canvas_scope: (id: string) => rpc("begin_canvas_scope", id),
+    end_canvas_scope: (token: string) => rpc("end_canvas_scope", token),
+    set_scene_scoped: (json: string, token: string) => rpc("set_scene_scoped", json, token),
+    poll_texture_receipts_scoped: (token: string) => rpc("poll_texture_receipts_scoped", token),
+    set_texture_scoped: (token: string, id: string, w: number, h: number, bytes: Uint8Array, content: string) => upload(false, id, w, h, bytes, content, token),
+    set_model_media_texture_scoped: (token: string, id: string, w: number, h: number, bytes: Uint8Array) => upload(true, id, w, h, bytes, "", token),
+    set_image_focus_details_scoped: (token: string, manifest: string, bytes: Uint8Array) => {
+      const meta = encodeURIComponent(JSON.stringify({ scope: token, manifest }));
+      const result = JSON.parse(request(`focus-details?meta=${meta}`, bytes).responseText) as { ok: boolean; error?: string };
+      if (!result.ok) throw new Error(result.error ?? "Native focus upload failed");
+    }
+  });
   for (const name of [
     "is_ready", "rendered_revision", "base_scene_generation", "viewport_capability", "observer_capability", "position_capability", "scene_capability",
     "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",

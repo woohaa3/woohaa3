@@ -40,9 +40,9 @@ import { isDocumentFocusTarget } from "../../navigation/contracts.js";
 import { buildAttachInteractionOptions } from "./attach-interaction-options.js";
 import { AnimationPlaybackStore } from "./animation-playback-store.js";
 import { ImageFocusStore } from "./image-focus-store.js";
+import { releaseImagePixels } from "./image-worker/native-port.js";
 import { VideoFocusStore } from "./video-focus-store.js";
 import { ModelSceneOverrideStore } from "./model-scene-override-store.js";
-import { installPerfFrameWindow } from "./perf-frame-window.js";
 import {
   applyModelEditorFocusGesture,
   applyModelEditorShotGesture,
@@ -84,19 +84,31 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private modelFocus: ModelFocusProjection | null = null;
   /** 图片聚焦瞬时态（聚焦投影/目标/纹理；浏览器本地）。 */
   private readonly imageFocusStore = new ImageFocusStore();
-  setImageFocusDetails=(frame:import("./focus-details.js").ImageFocusDetails|null):void=>{
-    this.imageFocusStore.setDetails(frame);this.controllerInstance?.invalidate("image-focus-details");
+  private acceptsFocusScope(scope?: import("./canvas-scope.js").CanvasScope): boolean {
+    const runtime = this.runtimeInstance;
+    if (this.disposed) return false;
+    if (scope) return runtime?.canvasScopeMode?.() === "scoped" && runtime.currentCanvasScope?.() === scope;
+    return runtime?.canvasScopeMode?.() !== "scoped";
+  }
+  setImageFocusDetails=(frame:import("./focus-details.js").ImageFocusDetails|null, scope?: import("./canvas-scope.js").CanvasScope):void=>{
+    if (!this.acceptsFocusScope(scope)) return;
+    this.imageFocusStore.setDetails(frame && scope ? {...frame, scope} : frame);this.controllerInstance?.invalidate("image-focus-details");
   };
   registerImageViewportTarget = (target: import("../../focus/types.js").FocusViewportTarget): (() => void) =>
     this.imageFocusStore.registerViewportTarget(target);
-  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void => {
-    this.imageFocusStore.setTexture(texture);
+  setImageFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null, scope?: import("./canvas-scope.js").CanvasScope): void => {
+    if (!this.acceptsFocusScope(scope)) {
+      if (texture && texture.pixels !== this.imageFocusStore.getTexture()?.pixels) releaseImagePixels(texture.pixels);
+      return;
+    }
+    this.imageFocusStore.setTexture(texture && scope ? {...texture, scope} : texture);
     this.controllerInstance?.invalidate("image-focus-texture");
   };
   /** 视频聚焦瞬时态（聚焦投影/目标/纹理；浏览器本地）。 */
   private readonly videoFocusStore = new VideoFocusStore();
-  setVideoFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void => {
-    this.videoFocusStore.setTexture(texture);
+  setVideoFocusTexture = (texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null, scope?: import("./canvas-scope.js").CanvasScope): void => {
+    if (!this.acceptsFocusScope(scope)) return;
+    this.videoFocusStore.setTexture(texture && scope ? {...texture, scope} : texture);
     this.controllerInstance?.invalidate("video-focus-texture");
   };
   /** 当前编辑 gizmo/镜头工具瞬时态（浏览器本地；不进 ServerCanvas/命令）。 */
@@ -177,8 +189,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   private detach: (() => void) | null = null;
   private disposed = false;
   private loadPromise: Promise<BevyRuntime> | null = null;
-  /** 帧窗口（`perf.frame`）：DOM canvas 挂上后开，卸载/释放时关（design D4）。 */
-  private frameWindow: import("../../services/telemetry-performance.js").PerfFrameWindow | null = null;
   private readonly loadAbort = new AbortController();
   /**
    * 拖动吸附策略（内置插件 `alignment-guides` 注入）。
@@ -293,14 +303,18 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 图片目标是否合法（adapter 校验）。 */
   isImageFocusTargetValid = (nodeId: string): boolean => this.imageFocusStore.isTargetValid(nodeId);
   /** 由图片编辑 feature 推入/清除图片聚焦投影（浏览器本地，不写规范状态）。 */
-  setImageFocus = (projection: import("@woohaa3/contracts").BevyImageFocus | null): void => {
+  setImageFocus = (projection: import("@woohaa3/contracts").BevyImageFocus | null, scope?: import("./canvas-scope.js").CanvasScope): void => {
+    if (!this.acceptsFocusScope(scope)) return;
     this.imageFocusStore.set(projection);
     this.controllerInstance?.invalidate("image-focus");
   };
   /** 订阅图片聚焦投影变化。 */
   subscribeImageFocus = (listener: () => void): (() => void) => this.imageFocusStore.subscribe(listener);
   /** 编辑器接管画面之前，图片聚焦期间的画布导航按普通画布处理（见契约注释）。 */
-  setImageFocusPending = (pending: boolean): void => { this.imageFocusStore.setPending(pending); };
+  setImageFocusPending = (pending: boolean, scope?: import("./canvas-scope.js").CanvasScope): void => {
+    if (!this.acceptsFocusScope(scope)) return;
+    this.imageFocusStore.setPending(pending);
+  };
 
   // ── 视频聚焦（change: 2026-10-10-add-video-node-focus-workspace） ─────────────
 
@@ -313,7 +327,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
   /** 视频目标是否合法（adapter 校验）。 */
   isVideoFocusTargetValid = (nodeId: string): boolean => this.videoFocusStore.isTargetValid(nodeId);
   /** 由视频聚焦 feature 推入/清除视频聚焦投影（浏览器本地，不写规范状态）。 */
-  setVideoFocus = (projection: import("@woohaa3/contracts").BevyVideoFocus | null): void => {
+  setVideoFocus = (projection: import("@woohaa3/contracts").BevyVideoFocus | null, scope?: import("./canvas-scope.js").CanvasScope): void => {
+    if (!this.acceptsFocusScope(scope)) return;
     this.videoFocusStore.set(projection);
     this.controllerInstance?.invalidate("video-focus");
   };
@@ -341,8 +356,8 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
         setVideoFocusTargetId: (nodeId) => this.videoFocusStore.setTargetId(nodeId),
         hasModelFocus: () => this.modelFocus !== null,
         exitModelFocus: () => controller.exitModelFocus(),
-        clearImageFocus: () => this.setImageFocus(null),
-        clearVideoFocus: () => this.setVideoFocus(null),
+        clearImageFocus: () => this.setImageFocus(null, this.runtimeInstance?.currentCanvasScope?.() ?? undefined),
+        clearVideoFocus: () => this.setVideoFocus(null, this.runtimeInstance?.currentCanvasScope?.() ?? undefined),
         getHistoryFocus: () => this.historyFocus,
         setHistoryFocus: (nodeId) => {
           this.historyFocus = nodeId ? { nodeId } : null;
@@ -782,10 +797,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.controllerInstance = controller;
     this.syncWorldAnimation();
     const unsubscribeWorldSelection = nodeSelectionStore.subscribe(() => this.syncWorldAnimation());
-    // 帧窗口只在挂载后开：没有 DOM canvas 就没有帧，先开窗会让 fps 的分母包含等待时间
-    // （change: 2026-10-25-enhance-telemetry-performance-collection，design D4）。
-    this.frameWindow?.dispose();
-    this.frameWindow = installPerfFrameWindow(() => runtime.getFrameCounters?.() ?? null);
     const unsubscribe = this.options.subscribeModelScenes(() => {
       // prepared resource 就绪/替换不改变画布对象，但会改变内容身份与可准入性。
       this.modelContentVersion += 1;
@@ -810,9 +821,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
       unsubscribeMediaContent?.();
       disposeAttachedMedia();
       unsubscribeCanvas();
-      // 卸载即关闭窗口：残留的定时器会在没有画布时继续聚合，发出与用户所见无关的样本。
-      this.frameWindow?.dispose();
-      this.frameWindow = null;
       controller.dispose();
       textureSync.dispose();
       videoSessions.dispose();
@@ -843,8 +851,6 @@ export class CanvasRuntimeHost implements CanvasRuntimeService {
     this.disposed = true;
     this.somaMotions.dispose();
     this.detach?.();
-    this.frameWindow?.dispose();
-    this.frameWindow = null;
     this.loadAbort.abort();
     this.runtimeInstance?.dispose();
     this.controllerInstance = null;

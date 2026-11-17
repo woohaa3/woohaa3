@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PreparedSomaMotion } from '@woohaa3/contracts';
 import { Button } from '@woohaa3/ui/primitives';
-import { loadSomaMotion } from '../../cordis/services/soma-motion.js';
+import { loadSomaMotion } from './load.js';
 import { createSomaRenderer } from './renderer.js';
 
 export function SomaMotionPlayer({ url, fps, expectedFrameCount }: { url: string; fps: number; expectedFrameCount?: number }) {

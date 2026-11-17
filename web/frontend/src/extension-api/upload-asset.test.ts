@@ -71,7 +71,8 @@ describe("GLB 上传分类", () => {
     const add = commands[1];
     expect(add.type).toBe("node.add");
     if (add.type !== "node.add") return;
-    expect(add.node).toMatchObject({ id: "n1", type: "model3d", position: { x: 120, y: 80 } });
+    // 3D nodes have no 2D card position; their point is carried by the shared world instance.
+    expect(add.node).toMatchObject({ id: "n1", type: "model3d" });
     const data = add.nodeData as CanvasNodeData;
     expect(data.modelSourceKind).toBe("glb");
     expect(data.modelAssetId).toBe(asset.id);

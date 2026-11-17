@@ -1,0 +1,60 @@
+import { expect, it, vi } from "vitest";
+import { createVideoFrameSessions } from "./video-frame-session.js";
+import type { BevyRuntime } from "./bevy-runtime.js";
+import type { CanvasScope } from "./canvas-scope.js";
+import { fakeCanvas, fakeVideo, videoCanvas } from "./test-support/video-frame-session.js";
+
+it("rejects late poster across visits before the new session sync", async () => {
+  const a = Object.freeze({ canvasId: "a", token: "1", sequence: 1 });
+  const b = Object.freeze({ canvasId: "b", token: "2", sequence: 2 });
+  const again = Object.freeze({ canvasId: "a", token: "3", sequence: 3 });
+  let scope: CanvasScope = a;
+  const pending: Array<(image: { width: number; height: number }) => void> = [];
+  const loadPosterImage = vi.fn(() => new Promise<{ width: number; height: number }>(resolve => pending.push(resolve)));
+  const setTexture = vi.fn();
+  const runtime = { setTexture, currentCanvasScope: () => scope } as unknown as BevyRuntime;
+  const current = videoCanvas([{ id: "n1", outputAssetId: "asset-1" }], { posterUrl: "/api/media/sha256-" + "b".repeat(64) });
+  const sessions = createVideoFrameSessions({ runtime, getCanvas: () => current, createVideo: () => fakeVideo({ width: 0, height: 0 }), createCanvas: fakeCanvas, loadPosterImage });
+  sessions.sync();
+  expect(pending).toHaveLength(1);
+  scope = b;
+  pending[0]({ width: 80, height: 45 });
+  await Promise.resolve();
+  expect(setTexture).not.toHaveBeenCalled();
+  sessions.sync();
+  expect(pending).toHaveLength(2);
+  pending[1]({ width: 80, height: 45 });
+  await Promise.resolve();
+  expect(setTexture).toHaveBeenCalledTimes(1);
+  expect(setTexture.mock.calls[0][4].scope).toBe(b);
+  scope = again; sessions.sync();
+  expect(pending).toHaveLength(3);
+  pending[2]({ width: 80, height: 45 });
+  await Promise.resolve();
+  expect(setTexture).toHaveBeenCalledTimes(2);
+  expect(setTexture.mock.calls[1][4].scope).toBe(again);
+  sessions.dispose();
+});
+
+it("rejects a stale video frame and uploads new frames without a shared content identity", () => {
+  const a = Object.freeze({ canvasId: "a", token: "1", sequence: 1 });
+  const b = Object.freeze({ canvasId: "b", token: "2", sequence: 2 });
+  let scope: CanvasScope = a;
+  const setTexture = vi.fn();
+  const videos: ReturnType<typeof fakeVideo>[] = [];
+  const runtime = { setTexture, currentCanvasScope: () => scope } as unknown as BevyRuntime;
+  const current = videoCanvas([{ id: "n1", outputAssetId: "asset-1" }]);
+  const sessions = createVideoFrameSessions({ runtime, getCanvas: () => current,
+    createVideo: () => { const video = fakeVideo(); videos.push(video); return video; }, createCanvas: fakeCanvas, minUploadIntervalMs: 0 });
+  sessions.sync();
+  videos[0].emitLoaded();
+  scope = b;
+  videos[0].emitFrame();
+  expect(setTexture).not.toHaveBeenCalled();
+  sessions.sync();
+  expect(videos).toHaveLength(2);
+  videos[1].emitLoaded(); videos[1].emitFrame();
+  expect(setTexture).toHaveBeenCalledTimes(1);
+  expect(setTexture.mock.calls[0][4]).toEqual({ sourceKey: "", scope: b });
+  sessions.dispose();
+});

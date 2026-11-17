@@ -28,6 +28,7 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
   return definePlugin(
     (ctx: Context) => {
       let session: VideoFocusSession | null = null;
+      let sessionScope: import('../canvas-runtime/canvas-scope.js').CanvasScope | undefined;
       let target: VideoFocusTarget | null = null;
       let generation = 0;
       const captureFrames = new OpenCaptureFrames({
@@ -54,6 +55,9 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
       const enter = (nodeId: string): boolean => {
         const resolved = resolveVideoFocusTarget(getCanvas(), nodeId);
         if (!resolved) return false;
+        const focusRuntime = ctx.canvasRuntime.runtime?.() ?? null;
+        const focusScope = focusRuntime?.currentCanvasScope?.() ?? undefined;
+        if (focusRuntime?.canvasScopeMode?.() === 'scoped' && !focusScope) return false;
         const entering = ++generation;
         session?.dispose();
         const controller = ctx.canvasRuntime.controller();
@@ -64,14 +68,15 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
           target: resolved,
           getCanvas,
           rect: workspaceRect(),
-          runtime: ctx.canvasRuntime.runtime(),
+          runtime: focusRuntime,
           transition: ctx.canvasRuntime.focusTransitionPort(),
-          setProjection: (projection) => ctx.canvasRuntime.setVideoFocus(projection),
-          onTexture: (texture) => ctx.canvasRuntime.setVideoFocusTexture(texture),
+          setProjection: (projection) => ctx.canvasRuntime.setVideoFocus(projection, focusScope),
+          onTexture: (texture) => ctx.canvasRuntime.setVideoFocusTexture(texture, focusScope),
           savedViewport,
           restoreViewport: (viewport) => controllerRef?.restoreViewport(viewport)
         });
         session = current;
+        sessionScope = focusScope;
         target = resolved;
         const started = current.start();
         if (entering !== generation || session !== current) return false;
@@ -82,6 +87,7 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
         generation += 1;
         session?.dispose();
         session = null;
+        sessionScope = undefined;
         target = null;
       };
 
@@ -94,6 +100,24 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
         }
         if (!session || session.nodeId !== mode.nodeId) enter(mode.nodeId);
       });
+
+      let observedRuntime: ReturnType<typeof ctx.canvasRuntime.runtime> = null;
+      let unsubscribeScope: () => void = () => {};
+      const onScopeChange = () => {
+        const scope = observedRuntime?.currentCanvasScope?.();
+        const mode = ctx.canvasNavigation.getSnapshot().mode;
+        if (scope && mode.type === 'node-focus' && mode.kind === 'video' && (!session || sessionScope !== scope)) enter(mode.nodeId);
+      };
+      const bindScopeRuntime = () => {
+        const next = ctx.canvasRuntime.runtime?.() ?? null;
+        if (next !== observedRuntime) {
+          unsubscribeScope(); observedRuntime = next;
+          unsubscribeScope = next?.subscribeCanvasScope?.(onScopeChange) ?? (() => {});
+        }
+        onScopeChange();
+      };
+      const unsubscribeRuntime = ctx.canvasRuntime.subscribe?.(bindScopeRuntime) ?? (() => {});
+      bindScopeRuntime();
 
       // 有效视频焦点目标推给 adapter（isTargetValid）。
       const syncTargets = () => {
@@ -176,6 +200,8 @@ export function videoEditorExtension(_options: VideoEditorPluginOptions = {}): P
           removeOverlay();
           disposeParticipant();
           captureFrames.dispose();
+          unsubscribeScope();
+          unsubscribeRuntime();
           exit();
         },
         "video-editor-lifecycle"

@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import type { HostTelemetryService } from "@woohaa3/contracts";
+import type { HostTelemetryService, TelemetryEventInput } from "@woohaa3/contracts";
 import { createTelemetryService } from "../service.js";
 import type { TelemetrySettings } from "../settings.js";
 import { handleTelemetryRequest } from "./telemetry-api.js";
@@ -123,7 +123,7 @@ async function call(
   };
 }
 
-const VALID_EVENT = { name: "canvas.open", result: "success", origin: "browser" };
+const VALID_EVENT: TelemetryEventInput = { name: "canvas.open", result: "success", origin: "browser" };
 
 describe("路由命中", () => {
   it("未命中路径返回 false，响应不被写入", async () => {
@@ -290,14 +290,14 @@ describe("GET summary / anomalies / status", () => {
   it("summary 支持 groupBy；未知分组键返回 invalid-attribute（不静默降级成不分组）", async () => {
     const service = startService();
     service.emit({
-      name: "perf.interaction",
+      name: "canvas.edit",
       result: "success",
       origin: "browser",
       durationMs: 12,
       attributes: { mode: "dev", kind: "pan" }
     });
     service.emit({
-      name: "perf.interaction",
+      name: "canvas.edit",
       result: "success",
       origin: "browser",
       durationMs: 20,
@@ -362,14 +362,14 @@ describe("GET summary / anomalies / status", () => {
 
     // 成对且合法：按 mode 筛选后只统计该模式的样本。
     service.emit({
-      name: "perf.frame",
+      name: "canvas.save",
       result: "success",
       origin: "browser",
       durationMs: 6,
       attributes: { mode: "dev" }
     });
     service.emit({
-      name: "perf.frame",
+      name: "canvas.save",
       result: "success",
       origin: "browser",
       durationMs: 60,
@@ -408,4 +408,20 @@ describe("存储异常", () => {
     expect(result.status).toBe(500);
     expect(result.body).toEqual({ error: "unavailable" });
   });
+});
+
+it("rejects retired perf batches from old tabs while continuing business event intake", async () => {
+  const service = startService();
+  const retired: TelemetryEventInput[] = [
+    { ...VALID_EVENT, name: "perf.startup", attributes: { mode: "dev", stage: "app-scope" } },
+    { ...VALID_EVENT, name: "perf.interaction", attributes: { mode: "dev", kind: "pan" } },
+    { ...VALID_EVENT, name: "perf.segment", attributes: { mode: "dev", kind: "pan", stage: "hit-query" } },
+    { ...VALID_EVENT, name: "perf.frame", attributes: { mode: "dev" } },
+    { ...VALID_EVENT, name: "perf.lod", attributes: { mode: "dev", low: 1, medium: 0, high: 0 } }
+  ];
+  const response = await call(service, { method: "POST", url: "/api/telemetry/events", body: JSON.stringify({ events: [VALID_EVENT, ...retired] }) });
+  expect(response.body).toEqual({ accepted: 1, dropped: 5 });
+  for (const event of retired) service.emit(event);
+  await service.flush();
+  expect((await service.query()).events.map(event => event.name)).toEqual(["canvas.open"]);
 });

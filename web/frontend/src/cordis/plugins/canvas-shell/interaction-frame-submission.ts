@@ -32,7 +32,7 @@ export function createFrameSubmission(deps: {
     hover:[deps.state.hoveredNodeId,deps.state.hoveredPort,deps.state.hoveredEdgeId,deps.state.hoverPointer],
     selectedEdge:deps.state.selectedEdgeId
   });
-  const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null): string | null => {
+  const baselineBlock = (runtime: BevyRuntime, index: CanvasNodeIndex | null, reasons?: ReadonlySet<string>): string | null => {
     if (!baseline) return "no-baseline";
     if (baseline.runtime !== runtime) return "runtime-changed";
     if (baseline.index !== index) return "index-changed";
@@ -45,7 +45,11 @@ export function createFrameSubmission(deps: {
     if (deps.options.getModelFocus?.() || deps.options.getModelEditor?.() || deps.options.getImageFocus?.() || deps.options.getVideoFocus?.()) return "focus-active";
     if (deps.state.localSizes.size) return "local-sizes";
     if (deps.state.gesture.kind === "marquee") return "marquee";
-    if (baseline.transient !== transientNow()) return "transient-changed";
+    // Hover/pointer presentation changes are expected while the viewport pans. They
+    // do not invalidate the accepted scene or static geometry; selection/draft changes
+    // still carry their own non-viewport dirty reason and route through full submission.
+    const viewportOnly = reasons?.has("viewport") || reasons?.has("viewport-transition");
+    if (!viewportOnly && baseline.transient !== transientNow()) return "transient-changed";
     return null;
   };
   const fail = (error: unknown): Outcome => {
@@ -73,7 +77,7 @@ export function createFrameSubmission(deps: {
     const index=indexNow();
     const onlyPositions=!force && reasons.has("position-preview")
       && [...reasons].every(r=>r==="position-preview" || r==="viewport" || r==="viewport-transition");
-    const block = runtime && index ? baselineBlock(runtime, index) : runtime ? "index-unavailable" : "runtime-unavailable";
+    const block = runtime && index ? baselineBlock(runtime, index, reasons) : runtime ? "index-unavailable" : "runtime-unavailable";
     const editorUnchanged = JSON.stringify(baseline?.scene.modelEditor ?? null)
       === JSON.stringify(deps.options.getModelEditor?.() ?? null);
     if (runtime && index && baseline && runtime.setObserver && runtime.baseSceneGeneration?.()
@@ -190,8 +194,13 @@ export function createFrameSubmission(deps: {
       runtime.setScene(built.scene,built.resources);
       deps.options.textureSync?.acknowledgeResourceStates?.();
       fingerprint=nextFingerprint;
-      const previews=index && expandPositionPreviews(index,deps.state.localPositions);
-      baseline=index && previews ? {runtime,index,previews,scene:mirror.reset(built.scene),
+      // Building the scene may bind the working canvas and advance the edit-scope
+      // revision. Capture the post-build index identity so the accepted baseline
+      // matches the scene that was just submitted; otherwise the next viewport
+      // frame would falsely reject its stable index and rebuild the full scene.
+      const acceptedIndex = indexNow();
+      const previews=acceptedIndex && expandPositionPreviews(acceptedIndex,deps.state.localPositions);
+      baseline=acceptedIndex && previews ? {runtime,index:acceptedIndex,previews,scene:mirror.reset(built.scene),
         generation:runtime.generation?.() ?? 0,base:runtime.baseSceneGeneration?.() ?? 0,transient:transientNow()} : null;
       deps.options.onSceneSubmitted?.();
       return {error:null,retry:false};

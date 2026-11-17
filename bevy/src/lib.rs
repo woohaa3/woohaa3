@@ -9,95 +9,48 @@
 //! （`model3d::scene`）可在 native-renderer 下复用；
 //! 原生画布与浏览器通过 `canvas-core` 共用帧系统与 facade；WASM ABI 只在 `wasm` 下导出。
 
-mod frame_samples;
+mod contract;
+mod host;
+mod kernel;
+mod render;
+mod support;
+
+// Compatibility facade: the public crate paths remain stable while the source tree is grouped
+// by contract, kernel, render, host and support responsibilities.
+pub use contract::protocol;
+#[cfg(feature = "native-renderer")]
+pub use contract::renderer_protocol;
+pub use kernel::motion;
+pub use render::model3d;
+pub use render::shot_camera;
+
+#[cfg(feature = "canvas-core")]
+pub(crate) use host::app;
+#[cfg(feature = "canvas-core")]
+pub(crate) use host::bridge;
 #[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
-pub mod document_editor_textures;
-#[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
-pub mod document_editor_visibility;
+pub use host::bridge::{document_editor_textures, document_editor_visibility};
 #[cfg(feature = "canvas-core")]
-mod runtime_health;
+pub(crate) use host::bridge::{shot_capture_wire, texture_upload};
+#[cfg(feature = "native-renderer")]
+pub use host::video_encode;
 
-mod clock;
-mod generation_progress;
-pub mod protocol;
-mod startup_trace;
-pub mod theme;
-mod theme_generated;
-
-/// 动画节点独立播放会话/时钟（change: 2026-10-05-bind-model-animation-to-shots）。
-pub mod animation_session;
-/// 通用相机过渡状态机（change: refactor-bevy-reusable-components）。
-pub mod camera_transition;
-/// 画布节点 ECS 投影层与公共组件（change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs）。
-/// 组件在全部 feature 下编译（3D 模块复用 owner/part marker）；投影与批处理只在 `canvas-core`。
-/// 实体只活在当前 renderer 实例内：结构变化由唯一投影点处理，位置增量只更新组件，
-/// renderer 重建整体丢弃实体层级。第三方扩展最小接入方式见 `canvas_ecs/README.md`。
-mod canvas_ecs;
-/// 2D 共享纯几何与 interaction 查询（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）。
-/// 不依赖 Bevy/ECS/wasm，可在 native 下单独测试；`canvas2d` 渲染复用其布局与曲线函数。
-mod canvas_query;
-/// 画布级 3D 根逐像素深度的平局偏移：纯几何 + 线程本地已接受表
-/// （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D4）。
-mod depth_order;
-pub mod gizmo_layout;
-/// 配置化等距网格（change: refactor-bevy-reusable-components）。
-pub mod isometric_grid;
-/// 动画节点运动 IR 求值器（change: 2026-10-05-bind-model-animation-to-shots）。
-pub mod motion;
-/// 独立目标轨道相机（change: refactor-bevy-reusable-components）。
-pub mod orbit_camera;
-/// 预览渲染层/槽的统一分配与回收
-/// （change: 2026-10-23-scale-canvas-media-residency，design D6 / 任务 6.3）。
-pub mod preview_layers;
-mod preview_readiness;
-mod render_work;
-/// 通用 transform 动画插件（change: refactor-bevy-reusable-components）。
-pub mod transform_animation;
-/// 可复用 transform gizmo（change: refactor-bevy-reusable-components）。
-pub mod transform_gizmo;
+pub(crate) use kernel::canvas::{depth_order, ecs as canvas_ecs, preview_layers, preview_readiness, query as canvas_query, render_work, runtime as canvas_runtime};
+#[cfg(feature = "canvas-core")]
+pub(crate) use kernel::canvas::pick_index;
+pub use kernel::motion::{animation_session, camera_transition, gizmo_layout, isometric_grid, orbit_camera, transform_animation, transform_gizmo};
 
 #[cfg(feature = "canvas-core")]
-mod app;
+pub(crate) use render::canvas2d;
 #[cfg(feature = "canvas-core")]
-mod bridge;
-#[cfg(feature = "canvas-core")]
-mod canvas2d;
-mod scope_visual;
-/// 共享世界镜头的 3D 呈现与拾取（视锥、机位与地面锚点）。
-#[cfg(feature = "canvas-core")]
-mod world_camera;
-/// 共享世界镜头卡片上的实时取景（离屏相机 → 卡片 sprite）。
-#[cfg(feature = "canvas-core")]
-mod world_camera_preview;
-/// 共享世界镜头的单实例绑定渲染层路由（卡片预览 / 编辑预览 / 页面捕获共用）。
-#[cfg(feature = "canvas-core")]
-mod world_camera_binding;
+pub(crate) use render::world::{binding as world_camera_binding, camera as world_camera, capture as world_capture, history_preview, preview as world_camera_preview};
 #[cfg(any(feature = "canvas-core", feature = "native-renderer"))]
-mod world_camera_view;
-/// 页面内模型历史缩略图：同一 Bevy App 内一次性离屏渲染
-/// （change: 2026-10-26-move-generation-history-to-ai-center，design D6）。
-#[cfg(feature = "canvas-core")]
-mod history_preview;
-/// 页面内共享世界镜头捕获：同一 Bevy App 内一次性离屏渲染页面世界层（不含网格）。
-#[cfg(feature = "canvas-core")]
-mod world_capture;
-#[cfg(feature = "canvas-core")]
-#[cfg(feature = "canvas-core")]
-mod pick_index;
-#[cfg(feature = "canvas-core")]
-mod shot_capture_wire;
+pub(crate) use render::world::view as world_camera_view;
 
-#[cfg(feature = "native-renderer")]
-pub mod renderer_protocol;
-
-
-// `model3d` 的网格/相机依赖 bevy_render；其纯场景构建在 native-renderer 下也可复用。
-pub mod model3d;
-/// 可复用 shot camera ECS 模块（change: add-reusable-bevy-shot-camera）。
-pub mod shot_camera;
-/// 动态镜头视频编码（native-renderer only；浏览器 WASM 不编译）。
-#[cfg(feature = "native-renderer")]
-pub mod video_encode;
+pub(crate) use support::{clock, frame_samples, generation_progress, startup_trace, theme, theme_generated};
+pub(crate) use render::scope_visual;
+#[cfg(feature = "canvas-core")]
+pub(crate) use support::runtime_health;
 
 /// 跨语言 golden 测试用的纯函数门面（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。
 ///
@@ -194,14 +147,12 @@ fn wake_canvas() {
 }
 
 #[cfg(feature = "canvas-core")]
-mod texture_upload;
-#[cfg(feature = "canvas-core")]
 pub use texture_upload::{
-    poll_texture_receipts, set_image_focus_details, set_model_media_texture, set_resource_states, set_texture,
+    begin_canvas_scope, canvas_scope_current, end_canvas_scope, poll_texture_receipts, poll_texture_receipts_scoped, set_image_focus_details, set_image_focus_details_scoped, set_model_media_texture, set_model_media_texture_scoped, set_resource_states, set_texture, set_texture_scoped,
 };
 #[cfg(all(feature = "canvas-core", not(feature = "wasm")))]
 pub use texture_upload::{
-    set_model_media_texture_owned, set_texture_owned};
+    set_model_media_texture_owned, set_model_media_texture_scoped_owned, set_texture_owned, set_texture_scoped_owned};
 
 /// 提交一份完整渲染快照；通过校验后覆盖未消费的旧快照（latest-wins）。
 ///
@@ -214,6 +165,19 @@ pub use texture_upload::{
 #[cfg(feature = "canvas-core")]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
 pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
+    set_scene_inner(json, None)
+}
+
+/// 带作用域身份提交完整渲染快照。令牌先解析为 scope，再与场景画布身份核对。
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn set_scene_scoped(json: &str, token: &str) -> Result<u32, BoundaryError> {
+    let token = texture_upload::parse_canvas_scope(token)?;
+    set_scene_inner(json, Some(token))
+}
+
+#[cfg(feature = "canvas-core")]
+fn set_scene_inner(json: &str, scope: Option<u64>) -> Result<u32, BoundaryError> {
     wake_canvas();
     if json.len() > protocol::MAX_SCENE_BYTES {
         return Err(BoundaryError::from_str("Scene payload too large"));
@@ -225,6 +189,14 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
         return Err(BoundaryError::from_str(&format!(
             "Unknown model resource {missing}"
         )));
+    }
+    // 作用域核对在任何接受点之前：拒绝不得推进 generation，也不得改已接受 scene / 纹理队列。
+    if let Some(token) = scope {
+        if !bridge::texture_scope_matches_scene(token, &scene.canvas_id) {
+            return Err(BoundaryError::from_str("Stale canvas scope"));
+        }
+    } else if !bridge::texture_scope_legacy_allowed() {
+        return Err(BoundaryError::from_str("Scoped canvas requires scoped scene"));
     }
     // 接受点先结算 3D 根逐像素平局偏移：后续模型候选 AABB、徽章底座与根锚点都读同一份结果
     // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D3/D4）。
@@ -245,7 +217,13 @@ pub fn set_scene(json: &str) -> Result<u32, BoundaryError> {
         model_pick_camera(&scene),
     );
     canvas_query::gizmo::accept_gizmo_scene(&scene);
-    bridge::queue_scene(scene);
+    // 核对与提交在同一线程连续完成，中间不让出。
+    if let Some(token) = scope {
+        let accepted = bridge::queue_scoped_scene(token, scene);
+        debug_assert!(accepted);
+    } else {
+        bridge::queue_scene(scene);
+    }
     Ok(generation)
 }
 
@@ -761,4 +739,4 @@ pub use runtime_health::{
     benchmark_frames, benchmark_media, runtime_health, seed_runtime_generation,
 };
 
-pub mod canvas_activity;
+pub use support::canvas_activity;

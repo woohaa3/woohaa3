@@ -399,3 +399,18 @@ describe("客户端策略常量", () => {
     expect(TELEMETRY_CLIENT_LIMITS.flushThreshold).toBeLessThanOrEqual(TELEMETRY_CLIENT_LIMITS.bufferEvents);
   });
 });
+
+it("does not buffer or transmit retired performance samples", () => {
+  const fetch = fakeFetch();
+  const target = fakeTarget();
+  const client = createTelemetryClient({ fetchImpl: fetch.impl, target: target.target });
+  for (const name of ["perf.startup", "perf.interaction", "perf.segment", "perf.frame", "perf.lod"] as const) {
+    client.record(event({ name }));
+  }
+  client.record(event());
+  client.flush();
+  expect(fetch.calls).toHaveLength(1);
+  const body = JSON.parse(String(fetch.calls[0]?.init.body));
+  expect(body.events.map((item: TelemetryEventInput) => item.name)).toEqual(["canvas.edit"]);
+  client.dispose();
+});

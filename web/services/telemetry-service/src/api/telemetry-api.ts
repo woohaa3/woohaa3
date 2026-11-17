@@ -139,7 +139,7 @@ async function ingest(service: HostTelemetryService, req: IncomingMessage, res: 
     // 归一在这里先做一次，是为了能如实回报 `dropped`（`service.emit` 只返回 void）；
     // 对已归一的事件再归一一次是幂等的，不会改变形状。
     const event = normalizeTelemetryEvent(raw, { now: nowMs });
-    if (event === null) {
+    if (event === null || event.name.startsWith("perf.")) {
       dropped += 1;
       continue;
     }

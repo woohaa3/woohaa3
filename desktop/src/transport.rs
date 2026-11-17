@@ -12,6 +12,7 @@ use woohaa_bevy_canvas as canvas;
 /// （change: 2026-10-28-support-glb-model-nodes）。
 const MAX_CONTROL_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TEXTURE_BYTES: usize = 2048 * 2048 * 4;
+const MAX_FOCUS_BYTES: usize = 64 * 512 * 512 * 4;
 // Two bounded IPC workers isolate editor byte parsing/encoding from Tauri's UI loop.
 type EditorIpcJob = Box<dyn FnOnce() + Send + 'static>;
 fn editor_ipc_workers() -> &'static std::sync::mpsc::SyncSender<EditorIpcJob> {
@@ -196,6 +197,17 @@ pub fn control(body: &[u8]) -> Result<Value, String> {
         "position_capability" => json!(canvas::position_capability()),
         "set_resource_states" => json!(canvas::set_resource_states(arg(&req, 0)?).map_err(|e|e.to_string())?),
         "poll_texture_receipts" => json!(canvas::poll_texture_receipts()),
+        "begin_canvas_scope" => json!(canvas::begin_canvas_scope(arg(&req, 0)?).map_err(|e| e.to_string())?),
+        "end_canvas_scope" => {
+            canvas::end_canvas_scope(arg(&req, 0)?).map_err(|e| e.to_string())?;
+            Value::Null
+        }
+        "set_scene_scoped" => {
+            let accepted = canvas::set_scene_scoped(arg(&req, 0)?, arg(&req, 1)?).map_err(|e| e.to_string())?;
+            crate::metrics::navigation();
+            json!(accepted)
+        }
+        "poll_texture_receipts_scoped" => json!(canvas::poll_texture_receipts_scoped(arg(&req, 0)?).map_err(|e| e.to_string())?),
         "runtime_health" => json!(canvas::runtime_health()),
         "seed_runtime_generation" => {
             canvas::seed_runtime_generation(
@@ -301,6 +313,8 @@ pub fn texture(header: &str, bytes: Vec<u8>) -> Result<(), String> {
         /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
         #[serde(default)]
         content: String,
+        #[serde(default)]
+        scope: Option<String>,
     }
     if bytes.len() > MAX_TEXTURE_BYTES {
         return Err("Texture payload exceeds budget".into());
@@ -312,12 +326,21 @@ pub fn texture(header: &str, bytes: Vec<u8>) -> Result<(), String> {
     if meta.content.len() > 4096 {
         return Err("Texture content identity too large".into());
     }
-    let result = if meta.plane {
-        canvas::set_model_media_texture_owned(&meta.id, meta.width, meta.height, bytes)
-    } else {
-        canvas::set_texture_owned(&meta.id, meta.width, meta.height, bytes, &meta.content)
+    let result = match (meta.plane, meta.scope.as_deref()) {
+        (true, Some(scope)) => canvas::set_model_media_texture_scoped_owned(scope, &meta.id, meta.width, meta.height, bytes),
+        (false, Some(scope)) => canvas::set_texture_scoped_owned(scope, &meta.id, meta.width, meta.height, bytes, &meta.content),
+        (true, None) => canvas::set_model_media_texture_owned(&meta.id, meta.width, meta.height, bytes),
+        (false, None) => canvas::set_texture_owned(&meta.id, meta.width, meta.height, bytes, &meta.content),
     };
     result.map_err(|e| e.to_string())
+}
+
+pub fn scoped_focus(header: &str, bytes: Vec<u8>) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct Focus { scope: String, manifest: String }
+    if header.len() > 32768 || bytes.len() > MAX_FOCUS_BYTES { return Err("Focus payload exceeds budget".into()); }
+    let meta: Focus = serde_json::from_str(header).map_err(|e| e.to_string())?;
+    canvas::set_image_focus_details_scoped(&meta.scope, &meta.manifest, &bytes).map_err(|e| e.to_string())
 }
 
 pub fn capture(request_id: f64, generation: f64) -> Vec<u8> {
@@ -411,7 +434,7 @@ pub fn install(
                 );
                 return;
             }
-            if request.body().len() > if request.uri().path() == "/image-register" { woohaa_media_image::MAX_COMPRESSED_BYTES } else if request.uri().path()=="/editor-blob" { crate::editor_blobs::MAX_BLOB_BYTES } else { MAX_TEXTURE_BYTES } {
+            if request.body().len() > if request.uri().path() == "/image-register" { woohaa_media_image::MAX_COMPRESSED_BYTES } else if request.uri().path()=="/editor-blob" { crate::editor_blobs::MAX_BLOB_BYTES } else if request.uri().path()=="/focus-details" { MAX_FOCUS_BYTES } else { MAX_TEXTURE_BYTES } {
                 respond(
                     br#"{"ok":false,"error":"Native request exceeds budget"}"#.to_vec(),
                     "application/json",
@@ -566,16 +589,21 @@ pub fn install(
                     let handle = params.get("handle").map(String::as_str).unwrap_or("");
                     let id = params.get("id").map(String::as_str).unwrap_or("");
                     let content = params.get("content").map(String::as_str).unwrap_or("");
+                    let scope = params.get("scope").map(String::as_str);
                     if id.is_empty() || id.len()>256 || content.len()>4096 {
                         return respond(br#"{"ok":false,"error":"Invalid native image target"}"#.to_vec(), "application/json");
                     }
                     woohaa_media_image::jobs::native_jobs().image(handle).and_then(|image| {
-                        if params.get("plane").is_some_and(|v|v=="1") {
-                            canvas::set_model_media_texture_owned(id,image.width,image.height,image.pixels()).map_err(|e|e.to_string())
-                        } else {
-                            canvas::set_texture_owned(id,image.width,image.height,image.pixels(),content).map_err(|e|e.to_string())
-                        }
+                        match (params.get("plane").is_some_and(|v| v == "1"), scope) {
+                            (true, Some(scope)) => canvas::set_model_media_texture_scoped_owned(scope, id, image.width, image.height, image.pixels()),
+                            (false, Some(scope)) => canvas::set_texture_scoped_owned(scope, id, image.width, image.height, image.pixels(), content),
+                            (true, None) => canvas::set_model_media_texture_owned(id, image.width, image.height, image.pixels()),
+                            (false, None) => canvas::set_texture_owned(id, image.width, image.height, image.pixels(), content),
+                        }.map_err(|e| e.to_string())
                     }).map(|_|Value::Null)
+                } else if uri.path() == "/focus-details" {
+                    scoped_focus(params.get("meta").map(String::as_str).unwrap_or(""), request.into_body())
+                        .map(|_| Value::Null)
                 } else if uri.path() == "/texture" {
                     texture(
                         params.get("meta").map(String::as_str).unwrap_or(""),

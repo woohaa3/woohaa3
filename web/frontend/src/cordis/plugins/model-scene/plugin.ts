@@ -11,6 +11,8 @@ import { definePlugin } from "../../plugin.js";
 import { DEFAULT_CANVAS_ID } from "../../services/canvas-session.js";
 import { NodeResourceLoading } from "../../services/node-resource-loading.js";
 import { createModelScriptReports } from "./model-script-reports.js";
+import type { CanvasRuntimeService } from "../../contract/canvas-runtime.js";
+import type { CanvasScope } from "../canvas-runtime/canvas-scope.js";
 export const MODEL_SCENE_PLUGIN_ID = "model-scene";
 export type ModelSceneExtensionOptions = {
   canvasId?: string;
@@ -31,6 +33,11 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     const reports = createModelScriptReports(report => ctx.canvasRemote.reportModelScript(report));
     const schedule = options.schedule ?? queueMicrotask;
     let stopped = false, scheduled = false, running = false, rerun = false;
+    let lastCanvasId: string | null | undefined = undefined;
+    let canvasVisit = 0;
+    let observedRuntime: ReturnType<CanvasRuntimeService["runtime"]> = null;
+    let observedScope: CanvasScope | null = null;
+    let stopRuntimeScope = () => {};
     const readCanvas = () => ctx.canvasState.getCanvas();
     const identity = (canvas: ServerCanvas | null | undefined, node: ServerCanvas["document"]["nodes"][number] | undefined) => {
       if (!canvas || !node) return null;
@@ -74,6 +81,7 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         if (!current || applied.get(nodeId) === current.key) continue;
         const load = loading.track(nodeId, current.key);
         let result: NodePreparationResult;
+        const startedVisit = canvasVisit;
         try {
           result = options.applyModelScript
             ? { status: await options.applyModelScript(nodeId, String(current.context.data?.modelScript ?? ""), current.context.data?.modelScriptVersion) }
@@ -81,7 +89,13 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         } catch (error) {
           result = { status: `fail:execute:${error instanceof Error ? error.message : String(error)}` };
         }
-        if (stopped || currentIdentity(nodeId)?.key !== current.key) {
+        if (stopped || currentIdentity(nodeId)?.key !== current.key || startedVisit !== canvasVisit) {
+          result.release?.(); loading.remove(load); continue;
+        }
+        if (/^fail:execute:(?:no-runtime|no-scope|stale-scope)\b/.test(result.status)) {
+          // Runtime scope/recovery failures are transient. Leave the identity unapplied so
+          // the next runtime/scope notification retries the provider instead of pinning the
+          // node to a failure for the rest of this canvas visit.
           result.release?.(); loading.remove(load); continue;
         }
         releases.get(nodeId)?.(); releases.delete(nodeId);
@@ -93,15 +107,27 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
         // Presentation-only resources (a group's own appearance) never own canonical model status.
         if (current.provider.reportsStatus === false) continue;
         const data = ctx.canvasState.getCanvas()?.nodeData[nodeId];
-        if (!reports.hasPending(nodeId) && data?.modelScriptStatus === status &&
+        // Only a *live* queued outcome of this same visit may suppress a new status: the queue
+        // keys entries by (visit, node), so a stale entry from an earlier canvas visit or an
+        // earlier renderer scope can neither hide nor replace this visit's result.
+        if (!reports.hasPending(startedVisit, nodeId) && data?.modelScriptStatus === status &&
           (status === "ok" ? !data.modelScriptError : data.modelScriptError === result.status)) continue;
         reports.enqueue({ canvasId: options.canvasId ?? DEFAULT_CANVAS_ID, nodeId, status,
           ...(status === "failed" ? { message: result.status } : {}) },
-          () => !stopped && applied.get(nodeId) === current.key && currentIdentity(nodeId)?.key === current.key);
+          startedVisit,
+          () => !stopped && canvasVisit === startedVisit && applied.get(nodeId) === current.key && currentIdentity(nodeId)?.key === current.key);
       }
     };
     const trigger = () => {
       if (stopped) return;
+      const currentCanvasId = ctx.canvasState.getCanvas()?.id ?? null;
+      if (currentCanvasId !== lastCanvasId) {
+        lastCanvasId = currentCanvasId;
+        canvasVisit += 1;
+        // Queued reports belong to the visit that produced them; a new visit supersedes them.
+        reports.retain(visit => visit === canvasVisit);
+        for (const id of [...applied.keys()]) discard(id);
+      }
       const sources = new Map<string, string>();
       const canvas = readCanvas();
       for (const node of canvas?.document.nodes ?? []) {
@@ -127,6 +153,22 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     };
     const stopCanvas = ctx.canvasState.subscribe(trigger);
     const stopRegistry = registry.subscribe(trigger);
+    const canvasRuntime = (ctx.get("canvasRuntime" as never) as CanvasRuntimeService | undefined) ?? null;
+    const refreshRuntimeIdentity = (): void => {
+      const nextRuntime = canvasRuntime?.runtime?.() ?? null;
+      const nextScope = nextRuntime?.currentCanvasScope?.() ?? null;
+      if (nextRuntime === observedRuntime && nextScope === observedScope) return;
+      stopRuntimeScope();
+      observedRuntime = nextRuntime;
+      observedScope = nextScope;
+      stopRuntimeScope = nextRuntime?.subscribeCanvasScope?.(refreshRuntimeIdentity) ?? (() => {});
+      canvasVisit += 1;
+      reports.retain(visit => visit === canvasVisit);
+      for (const id of [...applied.keys()]) discard(id);
+      trigger();
+    };
+    const stopCanvasRuntime = canvasRuntime?.subscribe?.(refreshRuntimeIdentity) ?? (() => {});
+    refreshRuntimeIdentity();
     const provider: ModelScenesProvider = {
       getResources: () => scenes.snapshot(), isLoading: loading.isLoading,
       subscribe: listener => { const a = scenes.subscribe(listener), b = loading.subscribe(listener); return () => { a(); b(); }; }
@@ -134,10 +176,10 @@ export function modelSceneExtension(options: ModelSceneExtensionOptions = {}): P
     ctx.provide(MODEL_SCENES_SERVICE as never, provider as never);
     trigger();
     return () => {
-      stopped = true; reports.dispose(); stopCanvas(); stopRegistry(); loading.clear();
+      stopped = true; reports.dispose(); stopCanvas(); stopRegistry(); stopCanvasRuntime(); stopRuntimeScope(); loading.clear();
       for (const id of applied.keys()) discard(id);
     };
-  }, { name: MODEL_SCENE_PLUGIN_ID, inject: ["canvasRemote", "canvasState", "nodeImplementations"] });
+  }, { name: MODEL_SCENE_PLUGIN_ID, inject: ["canvasRemote", "canvasState", "nodeImplementations", "canvasRuntime"] });
 }
 
 export async function applyWithBevy(

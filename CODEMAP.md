@@ -1,5 +1,9 @@
 # Client code map
 
+## Canvas hot-path indexing (2026-11-16)
+
+`bevy/src/canvas2d/card_cache.rs` partitions cards into document-order blocks in one pass. `labels.rs` keys requests by role and owner, compares reused text components before writing, and stores colors as equivalent linear values. `draw_order.rs` computes all ghost and ordinary render ranks in linear time for `canvas_ecs/projection.rs`. The projection retains a discardable node-to-entity index and rebuilds it when an entity disappears or its identity changes. `app/state.rs` shares one node index for first-match lookups and last-match position updates. Broader dirty propagation and viewport working sets remain separate work.
+
 ## ModelScript static poses (2026-11-15)
 
 `web/contracts/src/canvas/model-executor-v2.ts` exposes `scene.pose(groupId, {rotation?, position?})`. The optional group `pose` is independent of bind TRS; repeated declarations replace each channel and zero clears it. SOMA permits joint rotation and Hips position while retaining exact bind/body identity checks. `model-static-pose.ts` owns pure channel composition, affine FK, CPU LBS and static geometry/foot-surface diagnostics. Membership anchors remain bind based; `canvas-service/world-authoring/authority.ts` uses posed geometry for display bounds. The read-only `world_model_pose` resource returns source/content versions, local geometry and declared animation coverage without changing playback.
@@ -189,3 +193,7 @@ Scope assistant feedback: Render Scene v41 carries transient `executingScopes` I
 `packages/execution-runtime/src/daemon.ts` resolves the handle and supplies `ExecutorRunContext.workspace.cwd`. Local, SDK and OAuth executors pass the same canvas root to their harnesses, keeping private configuration/credentials separate. Codex, Claude, DSH, OpenCode and CodeBuddy use native tools; no `workspace_*` MCP tools are registered. Remote API loops and Gemini ADK do not advertise native workspace support. Native file effects never count as canvas write receipts.
 
 `canvas-workspaces.ts` pins cwd until harness drain, preserves unknown occupancy after restart, and owns migration/cleanup. `web/backend/src/api/canvas-agent-workspaces-api.ts` and `web/frontend/src/cordis/plugins/settings/canvas-workspace-section.tsx` retain desktop settings; `desktop/src/workspace_fs.rs` owns native pick/open. See [usage](docs/agent-workspaces.md); real macOS/Windows package acceptance remains pending.
+
+Performance telemetry retirement: startup/input spans and periodic frame windows are removed.
+Business telemetry remains; perf.* schema/query support only decodes historical records, and new intake rejects perf.*.
+Runtime diagnostic counters remain in memory for explicit probes and external CDP profiling.

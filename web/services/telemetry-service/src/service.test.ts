@@ -316,9 +316,9 @@ describe("聚合", () => {
 
   it("groupBy 透传到存储并在结果里回带维度", async () => {
     const service = startService();
-    service.emit(makeInput({ name: "perf.interaction", durationMs: 12, attributes: { mode: "dev", kind: "pan" } }));
-    service.emit(makeInput({ name: "perf.interaction", durationMs: 30, attributes: { mode: "dev", kind: "pan" } }));
-    service.emit(makeInput({ name: "perf.interaction", durationMs: 4, attributes: { mode: "dev", kind: "zoom" } }));
+    service.emit(makeInput({ name: "canvas.edit", durationMs: 12, attributes: { mode: "dev", kind: "pan" } }));
+    service.emit(makeInput({ name: "canvas.edit", durationMs: 30, attributes: { mode: "dev", kind: "pan" } }));
+    service.emit(makeInput({ name: "canvas.edit", durationMs: 4, attributes: { mode: "dev", kind: "zoom" } }));
     await service.flush();
 
     const grouped = await service.summary("24h", undefined, { groupBy: "kind" });
@@ -333,8 +333,8 @@ describe("聚合", () => {
 
   it("属性筛选透传到列表查询", async () => {
     const service = startService();
-    service.emit(makeInput({ name: "perf.interaction", attributes: { mode: "dev", kind: "pan" } }));
-    service.emit(makeInput({ name: "perf.interaction", attributes: { mode: "dev", kind: "zoom" } }));
+    service.emit(makeInput({ name: "canvas.edit", attributes: { mode: "dev", kind: "pan" } }));
+    service.emit(makeInput({ name: "canvas.edit", attributes: { mode: "dev", kind: "zoom" } }));
     await service.flush();
 
     const page = await service.query({ attributeKey: "kind", attributeValue: "zoom" });
@@ -441,7 +441,7 @@ describe("异常规则接线", () => {
     for (const kind of ["pan", "zoom"] as const) {
       for (let index = 0; index < 20; index += 1) {
         service.emit(
-          makeInput({ name: "perf.interaction", durationMs: 100, attributes: { mode: "dev", kind } })
+          makeInput({ name: "canvas.edit", durationMs: 100, attributes: { mode: "dev", kind } })
         );
       }
     }
@@ -450,10 +450,10 @@ describe("异常规则接线", () => {
     clock = NOW - 2 * HOUR;
     // 当前：`pan` 涨到 300ms，`zoom` 不变。按事件名整体看会被摊平，按 kind 才能分开。
     for (let index = 0; index < 20; index += 1) {
-      service.emit(makeInput({ name: "perf.interaction", durationMs: 300, attributes: { mode: "dev", kind: "pan" } }));
+      service.emit(makeInput({ name: "canvas.edit", durationMs: 300, attributes: { mode: "dev", kind: "pan" } }));
     }
     for (let index = 0; index < 20; index += 1) {
-      service.emit(makeInput({ name: "perf.interaction", durationMs: 100, attributes: { mode: "dev", kind: "zoom" } }));
+      service.emit(makeInput({ name: "canvas.edit", durationMs: 100, attributes: { mode: "dev", kind: "zoom" } }));
     }
     await service.flush();
 

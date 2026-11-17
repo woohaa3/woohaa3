@@ -87,6 +87,14 @@ impl EditorCoordinator {
     pub fn layout(&self) -> Option<&EditorLayout> {
         self.layout.as_ref()
     }
+    /// Canvas visit the active document was opened under, if the host provided one.
+    ///
+    /// The desktop compositor has no CPU frame callback, so the owner thread re-checks this before
+    /// presenting: a stale visit must not composite a frame of the previous canvas.
+    pub fn canvas_visit(&self) -> Option<&str> {
+        let active = self.active.as_ref()?;
+        self.documents.get(active)?.visit()
+    }
     pub fn set_layout(&mut self, layout: EditorLayout) -> Result<(), EditorError> {
         layout.validate()?;
         if self.layout.as_ref().is_some_and(|old| {
@@ -714,6 +722,7 @@ impl EditorCoordinator {
                 ControlOperation::Open {
                     source_id,
                     node_binding,
+                    node_visit,
                     ..
                 },
                 OperationResult::Opened {
@@ -734,6 +743,7 @@ impl EditorCoordinator {
                         document_id: document_id.clone(),
                         source_id: source_id.clone(),
                         node_binding: node_binding.clone(),
+                        node_visit: node_visit.clone(),
                         revision: *revision,
                         saved_revision: *revision,
                         source_size: *source_size,
@@ -884,6 +894,7 @@ mod tests {
         ControlOperation::Open {
             source_id: source.into(),
             node_binding: None,
+            node_visit: None,
             format: "image".into(),
             bytes: vec![1],
         }
@@ -921,6 +932,36 @@ mod tests {
         );
         descriptor.api_major = 1;
         admit_provider(Some(&descriptor), &required).unwrap();
+    }
+    /// The compositor's access check reads the visit the active document was opened under, so the
+    /// coordinator must carry it through Open (and report nothing for old hosts / external files).
+    #[test]
+    fn open_records_the_canvas_visit_for_the_compositor_guard() {
+        let mut c = coordinator();
+        run(&mut c, 1, open("source"));
+        assert_eq!(c.canvas_visit(), None, "old hosts omit the visit");
+        run(
+            &mut c,
+            2,
+            ControlOperation::Open {
+                source_id: "source-2".into(),
+                node_binding: Some("node".into()),
+                node_visit: Some("7".into()),
+                format: "image".into(),
+                bytes: vec![1],
+            },
+        );
+        assert_eq!(c.canvas_visit(), Some("7"));
+        assert_eq!(c.documents()["d2"].node_visit.as_deref(), Some("7"));
+        // Switching back to the first document reports its own (absent) visit.
+        run(
+            &mut c,
+            3,
+            ControlOperation::Activate {
+                document_id: "d1".into(),
+            },
+        );
+        assert_eq!(c.canvas_visit(), None);
     }
     #[test]
     fn receipts_are_retained_until_explicit_acknowledgement() {
@@ -1058,6 +1099,7 @@ mod asynchronous_tests {
             operation: ControlOperation::Open {
                 source_id: "source".into(),
                 node_binding: None,
+                node_visit: None,
                 format: "image".into(),
                 bytes: vec![1],
             },
@@ -1108,12 +1150,14 @@ fn operation_bytes(op: &ControlOperation) -> usize {
         ControlOperation::Open {
             source_id,
             node_binding,
+            node_visit,
             format,
             bytes,
         } => bytes
             .len()
             .saturating_add(source_id.len())
             .saturating_add(node_binding.as_ref().map_or(0, String::len))
+            .saturating_add(node_visit.as_ref().map_or(0, String::len))
             .saturating_add(format.len()),
         ControlOperation::Command {
             document_id,
@@ -1174,6 +1218,7 @@ mod ordering_regressions {
                 document_id: "d".into(),
                 source_id: "original".into(),
                 node_binding: None,
+                node_visit: None,
                 revision: 1,
                 saved_revision: 1,
                 source_size: [2, 2],
@@ -1200,6 +1245,7 @@ mod ordering_regressions {
         ControlOperation::Open {
             source_id: source.into(),
             node_binding: None,
+            node_visit: None,
             format: "x".into(),
             bytes: vec![1; n],
         }
@@ -1455,6 +1501,7 @@ mod device_loss_regressions {
                 document_id: "d".into(),
                 source_id: "source".into(),
                 node_binding: Some("node".into()),
+                node_visit: None,
                 revision: 2,
                 saved_revision: 1,
                 source_size: [20, 20],
@@ -1525,6 +1572,7 @@ mod render_metadata_regressions {
                 document_id: "d".into(),
                 source_id: "source".into(),
                 node_binding: None,
+                node_visit: None,
                 revision: 1,
                 saved_revision: 1,
                 source_size: [2, 2],
@@ -1693,6 +1741,7 @@ mod frame_regressions {
                 document_id: "d".into(),
                 source_id: "source".into(),
                 node_binding: None,
+                node_visit: None,
                 revision: 1,
                 saved_revision: 1,
                 source_size: [100, 50],
@@ -1739,6 +1788,7 @@ mod frame_regressions {
                 document_id: "d".into(),
                 source_id: "source".into(),
                 node_binding: None,
+                node_visit: None,
                 revision: 1,
                 saved_revision: 1,
                 source_size: [100, 50],
@@ -1824,6 +1874,7 @@ mod revision_projection_tests {
             document_id: "d".into(),
             source_id: "source".into(),
             node_binding: None,
+            node_visit: None,
             revision: 1,
             saved_revision: 1,
             source_size: [10, 10],
@@ -1896,6 +1947,7 @@ mod provider_local_document_tests {
             document_id: id.into(),
             source_id: source.into(),
             node_binding: None,
+            node_visit: None,
             revision: 1,
             saved_revision: 1,
             source_size: [20, 10],
@@ -1924,6 +1976,7 @@ mod provider_local_document_tests {
             operation: ControlOperation::Open {
                 source_id: "host-source".into(),
                 node_binding: None,
+                node_visit: None,
                 format: "x".into(),
                 bytes: vec![1],
             },

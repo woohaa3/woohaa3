@@ -1,7 +1,7 @@
 // Real-app, hardware-only benchmark. Raw attempts remain even when assertions fail.
 import { chromium, type Page } from "@playwright/test";
 import { openReviewBrowser, test, expect } from "./review-browser.js";
-import { reviewBaseHost } from "./review-target.js";
+import { reviewBaseHost, reviewScheme } from "./review-target.js";
 import {mkdirSync,writeFileSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import os from 'node:os';
@@ -24,6 +24,7 @@ const HARNESS_VERSION='canonical-observed-v2';
 const INPUT_MS=Number(process.env.BENCH_INPUT_MS??32);
 const ZOOM_INPUT_MS=Number(process.env.BENCH_ZOOM_INPUT_MS??INPUT_MS);
 const ONLY_PHASE=process.env.BENCH_ONLY_PHASE;
+const REQUESTED_PHASES=process.env.BENCH_PHASES?.split(',').map((phase)=>phase.trim()).filter(Boolean);
 if(!Number.isFinite(INPUT_MS)||INPUT_MS<16)throw new Error('BENCH_INPUT_MS must be finite and at least 16');
 if(!Number.isFinite(ZOOM_INPUT_MS)||ZOOM_INPUT_MS<16)throw new Error('BENCH_ZOOM_INPUT_MS must be finite and at least 16');
 if(ONLY_PHASE!==undefined&&ONLY_PHASE!=='zoom')throw new Error('BENCH_ONLY_PHASE supports zoom only');
@@ -168,7 +169,7 @@ async function locate(page:Page,id:string){
 for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'text'}-r${cell.round}`,async({},info)=>{
  if(cell.quick)test.setTimeout(85_000);else if(cell.visualProbe)test.setTimeout(360_000);
  const browser=await openReviewBrowser(chromium,{headless:false,args:['--enable-unsafe-webgpu','--disable-background-timer-throttling','--disable-renderer-backgrounding']});
- const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,baseURL:`http://${reviewBaseHost}:${process.env.BENCH_PORT??4397}`});
+ const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1,baseURL:`${reviewScheme}://${reviewBaseHost}:${process.env.BENCH_PORT??4397}`,...(reviewScheme==='https'?{ignoreHTTPSErrors:true}: {})});
  const page=await context.newPage();
  let profileSession:any=null,profileTimer:any=null,profileData:any=null;
  if(process.env.BENCH_PROFILE==='1'){
@@ -198,7 +199,7 @@ for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'tex
   fixture.manifest.kind=cell.kind??'text';fixture.manifest.hash=createHash('sha256').update(JSON.stringify(fixture.canvas)).digest('hex');
   json(resolve(dir,'manifest.json'),fixture.manifest);
   await instrument(page);await page.addInitScript(viewport=>{(window as any).__benchInitialViewport=viewport;},fixture.manifest.initialViewport??{x:0,y:0,zoom:1});await seedYjsCanvas(page,'woohaa3-default-canvas',[],{canvas:fixture.canvas});
-  const start=Date.now();await page.goto('/');await waitForCanvasSession(page);
+  const start=Date.now();await page.goto('/?canvasId=woohaa3-default-canvas');await waitForCanvasSession(page);
   await page.waitForFunction(()=> (window as any).__bevyRuntime?.isReady?.() && (window as any).__canvasLocate,null,{timeout:90000});
   const cdp=await browser.newBrowserCDPSession();const sys=await cdp.send('SystemInfo.getInfo');await cdp.detach();
   const gpu=await page.evaluate(async()=>{const adapter=await (navigator as any).gpu?.requestAdapter();return adapter?{info:{vendor:adapter.info?.vendor,architecture:adapter.info?.architecture,device:adapter.info?.device,description:adapter.info?.description},fallback:adapter.info?.isFallbackAdapter??adapter.isFallbackAdapter}:null;});
@@ -213,6 +214,7 @@ for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'tex
   await page.waitForFunction((n)=>{const w=window as any;return w.__bevyRuntime.lastScene()?.nodes.length===n && JSON.parse(w.__bevyRuntime.rawHealth()).renderedGeneration>=w.__bevyRuntime.interactionGeneration();},cell.nodes,{timeout:90000});
   await page.waitForTimeout(WARMUP);
   if(!cell.quick)await page.waitForFunction(()=>{const w=window as any;const r=w.__canvasResidency?.snapshot();return (!r||r.channels.every((c:any)=>!(c.inFlight||c.pending||c.draining))) && !w.__canvasRenderError?.();},null,{timeout:60000});
+  if(cell.kind?.startsWith('image')){await page.waitForFunction(expected=>{const w=window as any,s=w.__bevyRuntime.lastScene(),v=s?.viewport,r=document.querySelector('#bevy-canvas')?.getBoundingClientRect();if(!s||!v||!r)return false;return s.nodes.filter((n:any)=>n.type==='image'&&n.texture&&!n.mediaLoading&&n.x*v.zoom+v.x<r.width&&(n.x+n.width)*v.zoom+v.x>0&&n.y*v.zoom+v.y<r.height&&(n.y+n.height)*v.zoom+v.y>0).length===expected;},cell.visible,{timeout:60000});await page.waitForTimeout(1500);}
   result.ready=await snapshot(page);
   expect(result.ready.visibleCount,'initial intersecting node count').toBe(cell.visible);
   if(cell.layout==='fit-grid')expect(result.ready.fullyVisibleCount,'initial fully visible node count').toBe(cell.visible);
@@ -226,7 +228,30 @@ for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'tex
   await page.mouse.click(point.x,point.y);
   await expect.poll(()=>page.evaluate(()=> (window as any).__canvasSelection().nodeIds)).toContain(point.id);}
   await resetViewport(page);
-  for(const name of (cell.quick?['idle','pan','drag','hover']:ONLY_PHASE?[ONLY_PHASE]:cell.nodes?['idle','pan','zoom','drag','hover']:['idle','pan','zoom','hover'])){
+  if(cell.focusProbe&&cell.kind?.startsWith('image')){
+   const target=await page.evaluate(()=>{const w=window as any,n=w.__bevyRuntime.lastScene().nodes[0],v=w.__canvasViewport(),r=document.querySelector('#bevy-canvas')!.getBoundingClientRect();return {id:n.id,x:r.left+(n.x+n.width/2)*v.zoom+v.x,y:r.top+(n.y+n.height/2)*v.zoom+v.y};});
+   await page.mouse.dblclick(target.x,target.y);
+   await page.waitForFunction(id=>{const w=window as any,s=w.__bevyRuntime.lastScene(),h=JSON.parse(w.__bevyRuntime.rawHealth());return s?.imageFocus?.nodeId===id&&h.renderedGeneration>=w.__bevyRuntime.interactionGeneration();},target.id,{timeout:30000});
+   await page.waitForTimeout(2000);
+   result.focusProbe=await page.evaluate(()=>{const w=window as any,s=w.__bevyRuntime.lastScene();return {imageFocus:s.imageFocus,viewport:s.viewport,health:JSON.parse(w.__bevyRuntime.rawHealth()),renderError:w.__canvasRenderError?.()};});
+   await page.screenshot({path:resolve(dir,'image-focus.png')});
+   await page.keyboard.press('Escape');
+   await page.waitForFunction(()=>{const w=window as any,s=w.__bevyRuntime.lastScene(),h=JSON.parse(w.__bevyRuntime.rawHealth());return s&&!s.imageFocus&&h.renderedGeneration>=w.__bevyRuntime.interactionGeneration();},null,{timeout:30000});
+   await page.waitForTimeout(1500);
+   await page.screenshot({path:resolve(dir,'image-focus-exit.png')});
+  }
+  if((cell.dragProbe||cell.multiDragProbe)&&cell.nodes>0){
+   const start=await page.evaluate(multi=>{const w=window as any,nodes=w.__bevyRuntime.lastScene().nodes,targets=(multi?[0,1,16]:[0]).map(index=>nodes[index].id),n=nodes[0],v=w.__canvasViewport(),r=document.querySelector('#bevy-canvas')!.getBoundingClientRect();return {id:n.id,targets,x:r.left+n.x*v.zoom+v.x+Math.min(50,n.width*v.zoom/2),y:r.top+n.y*v.zoom+v.y+Math.min(20,n.height*v.zoom/2),positions:targets.map((id:string)=>({id,position:w.__canvasCanonical.document.nodes.find((item:any)=>item.id===id).position})),positionSubmits:w.__canvasSceneDiagnostics.snapshot().positionSubmits};},Boolean(cell.multiDragProbe));
+   if(cell.multiDragProbe){await page.evaluate(ids=>(window as any).__canvasSetSelection(ids),start.targets);await expect.poll(()=>page.evaluate(()=>(window as any).__canvasSelection().nodeIds)).toEqual(expect.arrayContaining(start.targets));}
+   await page.mouse.move(start.x,start.y);await page.mouse.down();
+   for(const [dx,dy] of [[8,4],[16,8],[24,12],[32,16]]){await page.mouse.move(start.x+dx,start.y+dy);await page.waitForTimeout(200);}
+   await page.mouse.up();await page.mouse.move(700,700);
+   await page.waitForFunction(initial=>{const w=window as any,h=JSON.parse(w.__bevyRuntime.rawHealth());return h.renderedGeneration>=w.__bevyRuntime.interactionGeneration()&&initial.every(({id,position}:any)=>{const c=w.__canvasCanonical.document.nodes.find((n:any)=>n.id===id),n=w.__bevyRuntime.lastScene()?.nodes.find((n:any)=>n.id===id);return c&&n&&Math.hypot(c.position.x-position.x,c.position.y-position.y)>1&&Math.abs(n.x-c.position.x)<.01&&Math.abs(n.y-c.position.y)<.01;});},start.positions,{timeout:30000});
+   await page.waitForTimeout(1000);
+   result.dragProbe=await page.evaluate(({targets,positionSubmits})=>{const w=window as any;return {targets:targets.map((id:string)=>{const c=w.__canvasCanonical.document.nodes.find((n:any)=>n.id===id),n=w.__bevyRuntime.lastScene().nodes.find((item:any)=>item.id===id);return {id,canonicalPosition:c.position,renderPosition:{x:n.x,y:n.y}};}),positionSubmits:w.__canvasSceneDiagnostics.snapshot().positionSubmits-positionSubmits,health:JSON.parse(w.__bevyRuntime.rawHealth())};},{targets:start.targets,positionSubmits:start.positionSubmits});
+   await page.screenshot({path:resolve(dir,'drag-fixed.png')});
+  }
+  for(const name of (REQUESTED_PHASES ?? (cell.quick?['idle','pan','drag','hover']:ONLY_PHASE?[ONLY_PHASE]:cell.nodes?['idle','pan','zoom','drag','hover']:['idle','pan','zoom','hover']))){
    await resetViewport(page);
    if(cell.quick&&profileSession)await profileSession.send('Profiler.start');
    result.phases.push(await phase(page,name,()=>name==='idle'?page.waitForTimeout(DURATION):motion(page,name,DURATION),dir,name==='drag'?(effect)=>verifyDragCanonical(page,effect):undefined));
@@ -245,7 +270,7 @@ for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'tex
   if(cell.visualProbe&&cell.nodes>0&&!ONLY_PHASE){
    await resetViewport(page);
    const overview=fixture.manifest.initialViewport??{x:0,y:0,zoom:1};
-   const anchor=await page.evaluate(index=>{const w=window as any,n=w.__bevyRuntime.lastScene().nodes[index],v=w.__canvasViewport(),r=document.querySelector('#bevy-canvas')!.getBoundingClientRect();return {nodeId:n.id,x:r.left+(n.x+n.width/2)*v.zoom+v.x,y:r.top+(n.y+n.height/2)*v.zoom+v.y,canvas:{left:r.left,top:r.top,width:r.width,height:r.height}};},Math.min(cell.nodes-1,Math.floor(Math.ceil(cell.visible/20)/2)*20+10));
+   const anchor=await page.evaluate(()=>{const w=window as any,v=w.__canvasViewport(),r=document.querySelector('#bevy-canvas')!.getBoundingClientRect();const candidates=w.__bevyRuntime.lastScene().nodes.map((n:any)=>({nodeId:n.id,x:r.left+(n.x+n.width/2)*v.zoom+v.x,y:r.top+(n.y+n.height/2)*v.zoom+v.y})).filter((p:any)=>p.x>r.left+40&&p.x<r.right-40&&p.y>r.top+40&&p.y<r.bottom-40);if(!candidates.length)throw new Error('No visible node can anchor the zoom probe');return {...candidates[Math.floor(candidates.length/2)],canvas:{left:r.left,top:r.top,width:r.width,height:r.height}};});
    expect(anchor.x).toBeGreaterThan(anchor.canvas.left+40);expect(anchor.x).toBeLessThan(anchor.canvas.left+anchor.canvas.width-40);
    expect(anchor.y).toBeGreaterThan(anchor.canvas.top+40);expect(anchor.y).toBeLessThan(anchor.canvas.top+anchor.canvas.height-40);
    const ticks=Math.round(Math.log(1/overview.zoom)/Math.log(1.1));
@@ -270,7 +295,9 @@ for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'tex
     expect(after.viewport.zoom).toBeCloseTo(expectedZoom,4);
     return {cycle,target,anchor,expectedZoom,inputIntervalMs:64,expectedEvents:ticks,scheduledEvents:schedule.length,schedule,pointerPositionMs:start-transitionStart,dispatchElapsedMs,eventFlowAndRenderedSettleMs:Date.now()-transitionStart,timingDefinition:'wall-clock pointer positioning and real wheel dispatch through matching accepted viewport and rendered generation; dispatch lateness starts after pointer positioning; not GPU presentation or isolated input latency',snapshot:after};
    };
-   result.phases.push(await phase(page,'details-zoom',async()=>{const observation=await wheelTransition('details',0);await page.screenshot({path:resolve(dir,'details.png')});return observation;},dir));
+   result.phases.push(await phase(page,'details-zoom',()=>wheelTransition('details',0),dir));
+   if(cell.kind?.startsWith('image'))await page.waitForTimeout(1500);
+   await page.screenshot({path:resolve(dir,'details.png')});
    result.phases.push(await phase(page,'details-idle',()=>page.waitForTimeout(DURATION),dir));
    result.phases.push(await phase(page,'overview-detail-roundtrip',async()=>{const observations=[];observations.push(await wheelTransition('overview',-1));for(let i=0;i<3;i++){observations.push(await wheelTransition('details',i));observations.push(await wheelTransition('overview',i));}return {method:'real mouse wheel ±100, fixed screen anchor, 1.1 zoom steps',observations,inputIntervalMs:64,expectedEvents:ticks*7,scheduledEvents:observations.reduce((sum,o)=>sum+o.scheduledEvents,0)};},dir));
    // Verify the actual final wheel return before any exact/programmatic reset.
@@ -291,7 +318,7 @@ for(const cell of CELLS){test(`N${cell.nodes}-V${cell.visible}-${cell.kind??'tex
    result.roundtripSelection=await page.evaluate(()=> (window as any).__canvasSelection());
    json(resolve(dir,'run.json'),result);
   }
-  if(cell.nodes>0&&!ONLY_PHASE&&!cell.quick){await resetViewport(page);
+  if(cell.nodes>0&&!ONLY_PHASE&&!cell.quick&&!REQUESTED_PHASES){await resetViewport(page);
   const ids=[fixture.targets.distant[0],fixture.targets.origin[0],fixture.targets.distant[0],fixture.targets.origin[0],fixture.targets.distant[0],fixture.targets.origin[0]];
   const locates:any[]=[];
   result.phases.push(await phase(page,'locate',async()=>{for(const id of ids){locates.push(await locate(page,id));await page.waitForTimeout(500);}},dir));

@@ -39,7 +39,7 @@ photocraft-ui-egui = { path = "vendor/photocraft/crates/ui-egui", optional = tru
 eframe = { version = "0.36", default-features = false, features = ["wgpu"], optional = true }
 egui = { version = "0.36", default-features = false, optional = true }
 parking_lot = { version = "0.12", optional = true }
-rfd = { version = "0.16", optional = true }
+rfd = { version = "0.16", default-features = false, features = ["xdg-portal", "tokio", "wayland"], optional = true }
 tempfile = { version = "3", optional = true }
 woohaa-media-image = { path = "../media-image" }
 woohaa_recording_supervisor = { path = "supervisor" }
@@ -86,7 +86,7 @@ tauri = { version = "=2.12.3", default-features = false, features = ["wry", "com
 tauri-plugin-notification = "2.7.0"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = { version = "2", default-features = false, features = ["xdg-portal"] }
 # 壳层日志走官方插件（change: unify-host-client-logging，design D7）：
 # 平台日志目录、轮转与级别过滤由它提供，不再自研文件写入。
 tauri-plugin-log = "2"

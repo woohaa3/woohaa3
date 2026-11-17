@@ -21,7 +21,7 @@ import type { CommandResultPayload } from "@woohaa3/contracts/canvas-yjs";
 import { ReadonlyCanvasProvider, type ReadonlyProviderState } from "./yjs/readonly-provider.js";
 import type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
 import type { CanvasRemoteService } from "../contracts.js";
-import { activeTelemetryClient, beginStartupSpan, stableTelemetryErrorCode, telemetryNow, type TelemetryClient } from "./telemetry-primitives.js";
+import { activeTelemetryClient, stableTelemetryErrorCode, telemetryNow, type TelemetryClient } from "./telemetry-primitives.js";
 
 export type { CanvasSession, CanvasSessionStatus } from "../contracts.js";
 
@@ -118,7 +118,6 @@ export function installCanvasEditTestHooks(edit: CanvasEditService): void {
 }
 
 let testSeq = 0;
-
 
 /** 同步尚未建立时的 Yjs 状态（正在连接远程）。 */
 const IDLE_REMOTE: CanvasSyncStatus = {
@@ -253,14 +252,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   // —— 遥测埋点（可选；change: 2026-10-20-add-local-client-telemetry，design D3/D7）——
   // 硬约束：埋点不得进入业务路径。`record()` 同步返回、不 await、不抛错；客户端缺失即 no-op。
   const sessionStartedAt = telemetryNow();
-  /**
-   * 会话打开阶段（`perf.startup` / `session-open`）：
-   * change: 2026-10-25-enhance-telemetry-performance-collection，task 3.4。
-   *
-   * 与 `canvas.open` 刻意分开：后者是"用户打开画布这件事"的成败与总耗时，这条只回答
-   * "会话建立这一段墙钟走了多久"，两个口径都能被独立对比。
-   */
-  const finishSessionOpen = beginStartupSpan("session-open");
+
   const telemetry = (): TelemetryClient | undefined => options.telemetry ?? activeTelemetryClient();
   /**
    * 会话级标识：所有画布动作都带上同一个 session 与 canvas。
@@ -289,7 +281,7 @@ export async function createCanvasSession(options: CreateCanvasSessionOptions): 
   const settleOpen = (result: "success" | "failure" | "cancelled", errorCode?: string): void => {
     if (openSettled) return;
     openSettled = true;
-    finishSessionOpen(result === "success" ? "success" : "failure");
+
     recordTelemetry({
       name: "canvas.open",
       result,

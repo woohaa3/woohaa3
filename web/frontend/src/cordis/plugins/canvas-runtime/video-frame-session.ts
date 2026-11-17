@@ -131,6 +131,7 @@ export type VideoFrameSessions = {
   dispose(): void;
 };
 type Session = {
+  scope: import('./canvas-scope.js').CanvasScope | null;
   nodeId: string;
   sourceUrl: string;
   posterUrl: string | null;
@@ -167,6 +168,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   const firstFrameTimeout = options.firstFrameTimeoutMs ?? VIDEO_FIRST_FRAME_TIMEOUT_MS;
   const residency = options.residency;
   const sessions = new Map<string, Session>();
+  let activeScope = options.runtime.currentCanvasScope?.() ?? null;
   const uploads = new MediaOperationBoundary(options.runtime);
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
   /** 首帧等待队列：只有真正完成/失败/超时/取消清理后才腾出名额。 */
@@ -257,7 +259,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   };
   /** 会话仍然有效（未被替换/移除/dispose）且 source generation 未过期。 */
   const isCurrent = (session: Session, sourceGeneration: number): boolean =>
-    !disposed && !session.detached && sessions.get(session.nodeId) === session && session.generation === sourceGeneration;
+    !disposed && !session.detached && sessions.get(session.nodeId) === session && session.generation === sourceGeneration && (options.runtime.currentCanvasScope?.() ?? null) === session.scope;
   /** 绘制并上传一帧真实画面；返回是否成功上传。 */
   const uploadRealFrame = (session: Session, sourceGeneration: number): boolean => {
     if (!isCurrent(session, sourceGeneration) || options.isSuspended?.()) return false;
@@ -280,7 +282,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       // 实时帧**不能**携带稳定内容身份：内容身份在 Rust 侧表示「同内容同尺寸可共享、像素不变」，
       // 视频每帧像素都变，带 `sourceUrl` 会让第二帧起被当成已驻留内容而跳过上传，
       // 画布上的视频就停在首帧（真实缺陷：hover 视频不播放）。以独占纹理逐帧覆盖。
-      return options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels) !== false;
+      return options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels, session.scope ? {sourceKey:'',scope:session.scope} : undefined) !== false;
     });
     if (!accepted) { loading.setLoading(session.load, false); return false; }
     session.hasRealFrame = true;
@@ -321,7 +323,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
         );
           if (!raster) throw new Error("视频封面无法读取像素");
           const accepted = options.runtime.setTexture(session.nodeId, raster.width, raster.height, raster.pixels,
-            { sourceKey: posterUrl, preserveFailure: true }) !== false;
+            { sourceKey: posterUrl, preserveFailure: true, ...(session.scope ? {scope:session.scope} : {}) }) !== false;
           if (accepted) { session.hasPosterTexture = true; notify(); }
           return accepted;
         });
@@ -447,6 +449,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     video.crossOrigin = "anonymous";
     createdCount += 1;
     const session: Session = {
+      scope: options.runtime.currentCanvasScope?.() ?? null,
       nodeId,
       sourceUrl: url,
       posterUrl,
@@ -519,6 +522,17 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   return {
     sync() {
       if (disposed) return;
+      const nextScope = options.runtime.currentCanvasScope?.() ?? null;
+      if (nextScope !== activeScope) {
+        activeScope = nextScope;
+        staticQueue.length = 0;
+        for (const session of sessions.values()) detachSession(session);
+        sessions.clear();
+        for (const nodeId of [...staticActive.keys()]) releaseStatic(nodeId);
+        pendingRestores.clear(); overriddenTextures.clear();
+        uploads.retainNodes(new Set()); loading.clear();
+        hovered = null; boundCanvas = null; boundStructure = ''; boundSources = null;
+      }
       const retry = options.runtime.retryVersion?.() ?? 0;
       const retrying = retry !== retryVersion;
       retryVersion = retry;

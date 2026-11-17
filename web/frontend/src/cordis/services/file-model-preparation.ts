@@ -24,6 +24,7 @@ import {
   type NodePreparationResult
 } from "@woohaa3/contracts";
 import { readCanonicalMedia } from "./media-remote.js";
+import type { CanvasScope } from "../plugins/canvas-runtime/canvas-scope.js";
 
 /** 纹理解码后总字节上限（8 张 1024² RGBA 仍有充足余量）。 */
 const MAX_DECODED_TEXTURE_BYTES = 64 * 1024 * 1024;
@@ -36,8 +37,10 @@ export type FileModelRuntimePort = {
       width: number,
       height: number,
       rgba: Uint8Array,
-      source?: string
+      source?: string | { sourceKey?: string; scope?: CanvasScope }
     ): boolean | void;
+    currentCanvasScope?: () => CanvasScope | null;
+    canvasScopeMode?: () => "scoped" | "legacy";
   } | null;
 };
 
@@ -92,6 +95,12 @@ export function createFileModelPreparation(deps: {
       const release = (): void => {
         if (controllers.get(context.node.id) === controller) controllers.delete(context.node.id);
       };
+      const startedRuntime = deps.runtime()?.runtime() ?? null;
+      const startedScope = startedRuntime?.currentCanvasScope?.() ?? null;
+      if (startedRuntime?.canvasScopeMode?.() === "scoped" && !startedScope) {
+        release();
+        return { status: "fail:execute:no-scope:画布作用域尚未就绪" };
+      }
 
       let bytes: Uint8Array;
       try {
@@ -123,10 +132,13 @@ export function createFileModelPreparation(deps: {
         // 这里按短间隔等待（而不是直接失败并且永不重试），让首屏加载与刷新后恢复都能完成。
         const runtime = parsed.textures.length > 0
           ? await waitForRuntime(deps, signal)
-          : deps.runtime()?.runtime() ?? null;
+          : startedRuntime;
         if (signal.aborted) return { status: "fail:load:aborted" };
         if (parsed.textures.length > 0 && !runtime) {
           return { status: "fail:execute:no-runtime:画布运行时尚未就绪" };
+        }
+        if (runtime?.canvasScopeMode?.() === "scoped" && !startedScope) {
+          return { status: "fail:execute:no-scope:纹理准备开始时画布作用域尚未就绪" };
         }
         let decodedBytes = 0;
         for (const texture of parsed.textures) {
@@ -141,14 +153,18 @@ export function createFileModelPreparation(deps: {
           if (decodedBytes > MAX_DECODED_TEXTURE_BYTES) {
             return { status: "fail:load:texture-budget:纹理总大小超过上限" };
           }
+          if (runtime?.canvasScopeMode?.() === "scoped" && runtime.currentCanvasScope?.() !== startedScope) {
+            return { status: "fail:execute:stale-scope:画布作用域已切换，丢弃过期纹理" };
+          }
           try {
-            runtime?.setModelMediaTexture(
+            const accepted = runtime?.setModelMediaTexture(
               `${MODEL_TEXTURE_ID_PREFIX}${texture.id}`,
               decoded.width,
               decoded.height,
               decoded.rgba,
-              texture.id
+              startedScope ? { sourceKey: texture.id, scope: startedScope } : texture.id
             );
+            if (accepted === false) return { status: "fail:execute:stale-scope:纹理上传作用域已过期" };
           } catch {
             return { status: "fail:execute:texture-upload:纹理上传失败" };
           }
@@ -170,7 +186,7 @@ export function createFileModelPreparation(deps: {
 async function waitForRuntime(
   deps: { runtime: () => FileModelRuntimePort | null },
   signal: AbortSignal
-): Promise<{ setModelMediaTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: string): boolean | void } | null> {
+): Promise<ReturnType<FileModelRuntimePort["runtime"]>> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const runtime = deps.runtime()?.runtime() ?? null;

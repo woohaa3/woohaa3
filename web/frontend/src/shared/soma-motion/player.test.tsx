@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { PreparedSomaMotion } from '@woohaa3/contracts';
 import { SomaMotionPlayer } from './player.js';
 const mocks = vi.hoisted(() => ({ load: vi.fn(), sample: vi.fn(), dispose: vi.fn() }));
-vi.mock('../../cordis/services/soma-motion.js', () => ({ loadSomaMotion: mocks.load }));
+vi.mock('./load.js', () => ({ loadSomaMotion: mocks.load }));
 vi.mock('./renderer.js', () => ({ createSomaRenderer: () => ({ sample: mocks.sample, dispose: mocks.dispose }) }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const motion = { durationSeconds: 2, fps: 30 } as PreparedSomaMotion;

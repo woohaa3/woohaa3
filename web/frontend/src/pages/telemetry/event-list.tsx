@@ -13,7 +13,6 @@
 import { useEffect, useState } from "react";
 import {
   TELEMETRY_EVENT_NAMES,
-  TELEMETRY_PERF_MODES,
   TELEMETRY_RESULTS,
   TELEMETRY_WINDOWS,
   type TelemetryAttributeKey,
@@ -34,7 +33,6 @@ import {
   formatLocalTime,
   groupByLabel,
   localTimeZoneName,
-  perfModeLabel,
   resultLabel
 } from "./format.js";
 import { GROUP_BY_OPTIONS } from "./format.js";
@@ -44,7 +42,7 @@ const ALL = "__all__";
 
 const NAME_OPTIONS: readonly ListboxOption[] = [
   { value: ALL, label: "全部事件" },
-  ...TELEMETRY_EVENT_NAMES.map((name) => ({ value: name, label: `${eventNameLabel(name)}（${name}）` }))
+  ...TELEMETRY_EVENT_NAMES.filter((name) => !name.startsWith("perf.")).map((name) => ({ value: name, label: `${eventNameLabel(name)}（${name}）` }))
 ];
 
 const RESULT_OPTIONS: readonly ListboxOption[] = [
@@ -52,11 +50,6 @@ const RESULT_OPTIONS: readonly ListboxOption[] = [
   ...TELEMETRY_RESULTS.map((result) => ({ value: result, label: resultLabel(result) }))
 ];
 
-/** 构建模式筛选：只列三个封闭取值，缺省"全部"。 */
-const MODE_OPTIONS: readonly ListboxOption[] = [
-  { value: ALL, label: "全部构建" },
-  ...TELEMETRY_PERF_MODES.map((mode) => ({ value: mode, label: perfModeLabel(mode) }))
-];
 
 /** 分组维度：第一项是"不分组"（按事件名）。 */
 const GROUP_BY_OPTIONS_LIST: readonly ListboxOption[] = [
@@ -75,7 +68,6 @@ export function EventFilters({
   onWindowChange,
   onNameChange,
   onResultChange,
-  onModeChange,
   onGroupByChange,
   onErrorCodeApply,
   onClear
@@ -89,7 +81,6 @@ export function EventFilters({
   onWindowChange: (window: TelemetryWindow) => void;
   onNameChange: (name: TelemetryEventName | undefined) => void;
   onResultChange: (result: TelemetryResult | undefined) => void;
-  onModeChange: (mode: TelemetryPerfMode | undefined) => void;
   onGroupByChange: (groupBy: TelemetryAttributeKey | undefined) => void;
   onErrorCodeApply: (errorCode: string | undefined) => void;
   onClear: () => void;
@@ -133,15 +124,6 @@ export function EventFilters({
             value={result ?? ALL}
             options={RESULT_OPTIONS}
             onValueChange={(next) => onResultChange(next === ALL ? undefined : (next as TelemetryResult))}
-          />
-        </div>
-        <div className="telemetry__field">
-          <span>构建模式</span>
-          <SelectInput
-            label="按构建模式筛选"
-            value={mode ?? ALL}
-            options={MODE_OPTIONS}
-            onValueChange={(next) => onModeChange(next === ALL ? undefined : (next as TelemetryPerfMode))}
           />
         </div>
         <div className="telemetry__field">

@@ -23,7 +23,6 @@ export function createWorldObjectPress(deps: {
   worldGround: WorldGroundGestureFamily;
   worldCamera: WorldCameraGestureFamily;
   beginGesture: () => void;
-  beginPerfGesture: (kind: string) => void;
 }) {
   return (event: PointerEvent, nodeId: string, preset?: PressSelectionPlan): void => {
     const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
@@ -63,7 +62,6 @@ export function createWorldObjectPress(deps: {
       : deps.worldGround.begin(event, nodeId));
     if (started) {
       deps.beginGesture();
-      deps.beginPerfGesture("drag");
     }
     deps.schedule();
     event.preventDefault();

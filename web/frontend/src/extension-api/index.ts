@@ -77,6 +77,7 @@ export type {
   CanvasRemoteService,
   CanvasRunRequest,
   CanvasRunResult,
+  CanvasRuntimeScope,
   CanvasRuntimeService,
   CanvasRuntimeStatus,
   CanvasCatalogItemActionProps,

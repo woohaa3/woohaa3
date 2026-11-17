@@ -14,7 +14,7 @@
  * 2026-10-25-enhance-telemetry-performance-collection，design D6），不再是有损投影。
  */
 
-/** 事件名白名单。新增一个名字等于新增一类可复盘事实，必须同时补异常规则与文档。 */
+/** Event/query vocabulary. perf.* is retained only to decode historical records; new intake rejects it. */
 export const TELEMETRY_EVENT_NAMES = [
   "canvas.open",
   "canvas.save",

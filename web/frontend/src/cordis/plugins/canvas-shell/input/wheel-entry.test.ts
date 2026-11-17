@@ -2,12 +2,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createWheelEntryHandler } from "./wheel-entry.js";
 import type { InteractionCore } from "../interaction-core.js";
 import type { TelemetryEventInput } from "@woohaa3/contracts";
-import { setTelemetryBuildModeForTesting, setTelemetryClientForTesting } from "../../../services/telemetry-primitives.js";
+import { setTelemetryClientForTesting } from "../../../services/telemetry-primitives.js";
 
 afterEach(() => {
   vi.resetAllMocks();
   setTelemetryClientForTesting(undefined);
-  setTelemetryBuildModeForTesting(undefined);
 });
 
 /** 采集客户端假件：把事件收进数组，便于断言"发了什么/什么都没发"。 */
@@ -55,39 +54,14 @@ it("blocks viewport zoom on modal, focused model and video focus", () => {
   expect(onWheel).not.toHaveBeenCalled();
 });
 
-it("被门禁拒绝的滚轮不产生 perf.interaction", () => {
-  setTelemetryBuildModeForTesting("dev");
+it("consumes repeated wheel input without emitting performance events or installing timers", () => {
   const sink = telemetrySink();
   setTelemetryClientForTesting(sink);
-  const onWheel = vi.fn();
-  const core = coreOf({ modalActive: () => true });
-  createWheelEntryHandler(core, { onWheel } as never)({ preventDefault: vi.fn() } as unknown as WheelEvent);
-  expect(onWheel).not.toHaveBeenCalled();
-  expect(sink.events).toHaveLength(0);
-});
-
-it("被视口消费的滚轮产生一条 perf.interaction 与 viewport-apply 分段", () => {
-  setTelemetryBuildModeForTesting("dev");
-  const sink = telemetrySink();
-  setTelemetryClientForTesting(sink);
-  const onWheel = vi.fn(() => ({ kind: "pan", source: "trackpad" }));
-  createWheelEntryHandler(coreOf(), { onWheel } as never)({ preventDefault: vi.fn() } as unknown as WheelEvent);
-
-  const interactions = sink.events.filter((event) => event.name === "perf.interaction");
-  const segments = sink.events.filter((event) => event.name === "perf.segment");
-  expect(interactions).toHaveLength(1);
-  // 触控板平移在契约里是 `wheel-pan`，与按住空格的 `pan` 区分开。
-  expect(interactions[0]?.attributes).toMatchObject({ mode: "dev", kind: "wheel-pan" });
-  expect(segments).toHaveLength(1);
-  expect(segments[0]?.attributes?.stage).toBe("viewport-apply");
-});
-
-it("分类判定不是视口手势时不产生事件", () => {
-  setTelemetryBuildModeForTesting("dev");
-  const sink = telemetrySink();
-  setTelemetryClientForTesting(sink);
-  const onWheel = vi.fn(() => null);
-  createWheelEntryHandler(coreOf(), { onWheel } as never)({ preventDefault: vi.fn() } as unknown as WheelEvent);
-  expect(onWheel).toHaveBeenCalled();
-  expect(sink.events).toHaveLength(0);
+  const setTimeout = vi.fn();
+  const onWheel = vi.fn(() => ({ kind: "zoom", source: "mouse" }));
+  const handler = createWheelEntryHandler(coreOf({ target: { setTimeout } }), { onWheel } as never);
+  for (let i = 0; i < 100; i++) handler({ preventDefault: vi.fn() } as unknown as WheelEvent);
+  expect(onWheel).toHaveBeenCalledTimes(100);
+  expect(sink.events).toEqual([]);
+  expect(setTimeout).not.toHaveBeenCalled();
 });

@@ -101,16 +101,13 @@ export const PERF_MODE_LABELS: Readonly<Record<TelemetryPerfMode, string>> = {
  * 业务维度，它们在性能复盘里没有"拆开看"的意义，全部列出来只会让下拉框变成技术清单。
  */
 export const GROUP_BY_LABELS: Readonly<Partial<Record<TelemetryAttributeKey, string>>> = {
-  mode: "构建模式",
-  kind: "输入种类",
-  stage: "阶段",
   code: "错误码",
   phase: "阶段（旧口径）",
   status: "状态",
   source: "来源"
 };
 
-/** 性能复盘推荐的分组维度顺序：先"哪类输入"，再"哪一段"，最后"哪个构建"。 */
+/** Business event grouping; performance analysis is an explicit Routine. */
 export const GROUP_BY_OPTIONS: readonly TelemetryAttributeKey[] = TELEMETRY_ATTRIBUTE_KEYS.filter(
   (key) => GROUP_BY_LABELS[key] !== undefined
 );

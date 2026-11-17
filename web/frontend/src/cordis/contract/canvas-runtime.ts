@@ -16,6 +16,12 @@ export type WorldAnimationState = {
 
 export type CanvasRuntimeStatus = { phase: "booting" | "ready" | "error"; error: string | null };
 
+/**
+ * Renderer visit identity（画布访问）。结构由 `canvas-scope.ts` 的 `CanvasScope` 实现；这里只给
+ * 扩展公共面导出结构类型，旧宿主不提供该能力（可选方法）。
+ */
+export type CanvasRuntimeScope = Readonly<{ canvasId: string; token: string; sequence: number }>;
+
 /** 上下文菜单瞬时状态（change: unify-canvas-presentation-navigation 后由 Canvas Navigation 持有）。 */
 export type CanvasMenuState =
   | {
@@ -143,11 +149,11 @@ export interface CanvasRuntimeService {
   /** 当前图片聚焦投影；未聚焦返回 null（change: 图片聚焦编辑）。 */
   imageFocusProjection(): import("@woohaa3/contracts").BevyImageFocus | null;
   /** 由图片编辑 feature 推入/清除图片聚焦投影（change: 图片聚焦编辑）。 */
-  setImageFocus(projection: import("@woohaa3/contracts").BevyImageFocus | null): void;
+  setImageFocus(projection: import("@woohaa3/contracts").BevyImageFocus | null, scope?: import("../plugins/canvas-runtime/canvas-scope.js").CanvasScope): void;
   /** 把图片取景作为画布输入的当前目标；返回注销函数。 */
   registerImageViewportTarget(target: import("../focus/types.js").FocusViewportTarget): () => void;
-  setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null): void;
-  setImageFocusDetails(frame:import("../plugins/canvas-runtime/focus-details.js").ImageFocusDetails|null):void;
+  setImageFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null, scope?: import("../plugins/canvas-runtime/canvas-scope.js").CanvasScope): void;
+  setImageFocusDetails(frame:import("../plugins/canvas-runtime/focus-details.js").ImageFocusDetails|null, scope?: import("../plugins/canvas-runtime/canvas-scope.js").CanvasScope):void;
   /**
    * 图片聚焦已进入、但编辑器还没接管画面（引擎或首帧未就绪）。
    *
@@ -155,7 +161,7 @@ export interface CanvasRuntimeService {
    * 画布处理（否则图片聚焦的“取景目标缺失”分支会把滚轮吃掉，表现为画布卡死）。
    * 首帧提交、退出聚焦或覆盖层卸载时清除。
    */
-  setImageFocusPending(pending: boolean): void;
+  setImageFocusPending(pending: boolean, scope?: import("../plugins/canvas-runtime/canvas-scope.js").CanvasScope): void;
   /** 订阅图片聚焦投影变化（change: 图片聚焦编辑）。 */
   subscribeImageFocus(listener: () => void): () => void;
   /** 有效视频焦点目标（adapter 目标校验；change: 2026-10-10-add-video-node-focus-workspace）。 */
@@ -165,8 +171,8 @@ export interface CanvasRuntimeService {
   /** 当前视频聚焦投影；未聚焦返回 null（change: 2026-10-10-add-video-node-focus-workspace）。 */
   videoFocusProjection(): import("@woohaa3/contracts").BevyVideoFocus | null;
   /** 由视频聚焦 feature 推入/清除视频聚焦投影（change: 2026-10-10-add-video-node-focus-workspace）。 */
-  setVideoFocus(projection: import("@woohaa3/contracts").BevyVideoFocus | null): void;
-  setVideoFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void;
+  setVideoFocus(projection: import("@woohaa3/contracts").BevyVideoFocus | null, scope?: import("../plugins/canvas-runtime/canvas-scope.js").CanvasScope): void;
+  setVideoFocusTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null, scope?: import("../plugins/canvas-runtime/canvas-scope.js").CanvasScope): void;
   /** 订阅视频聚焦投影变化（change: 2026-10-10-add-video-node-focus-workspace）。 */
   subscribeVideoFocus(listener: () => void): () => void;
   /** 投影右侧实际占用区域（CSS content rect）；0 表示无遮挡。 */
@@ -305,6 +311,13 @@ export interface CanvasRuntimeService {
   alignmentGuidesVersion?(): number;
   /** 当前已接受的 interaction generation（供对象 picking 的 generation 守卫）。 */
   interactionGeneration(): number;
+  /**
+   * 当前画布访问身份；旧宿主或作用域能力缺失时返回 null。
+   *
+   * 原生文档编辑器（桌面合成）没有 CPU 帧回调，需要把打开文档时的访问身份随 Open 下发，
+   * 由桌面壳在合成前校验。
+   */
+  currentCanvasScope?(): CanvasRuntimeScope | null;
   /**
    * 暂停活动动画播放头（编辑对象前调用；change: 2026-10-09-add-film-set-object-motion-and-editing）。
    * 无活动播放或未接线时为 no-op。

@@ -27,7 +27,7 @@ await __canvasPerfProbe.sample("returned-after-60s"); // 返回空场等 60 秒�
 | JS `sceneBuilds` / `sceneSubmits` / `modelPrepareCount` 持续增长 | 场景重复失效、模型重复准备或业务订阅未停止 |
 | 工作量和 CPU 阶段恢复，但 FPS 持续较低 | 在同一真机追加浏览器 Performance trace 或原生 profiler，检查帧间等待、主线程、驱动与系统调度 |
 
-`renderFps` 与性能徽标同源（Bevy PostCleanup），不是 GPU present；不同来源的耗时不可相加。资源预算中的 GPU bytes 是估算，不能当实测显存。`perf.frame` 本机遥测仍按原有 60 秒窗口聚合，本脚本不把短窗伪装成该事件；需要同时复盘时，在采完现场后查看 `/telemetry` 或 `/api/telemetry/events?window=1h&names=perf.frame&names=perf.lod&limit=200`。
+`renderFps` 与性能徽标同源（Bevy PostCleanup），不是 GPU present；不同来源的耗时不可相加。资源预算中的 GPU bytes 是估算，不能当实测显存。持续性能遥测已经移除；需要精确调用栈时显式录制 CDP CPU profile 或 Chrome Performance trace。
 
 工具只在客户端内部运行；真实 GPU + headed Chromium + performance WASM / production frontend。它不会调用在线生成服务或触碰用户画布。浏览器与宿主每个 attempt 重建，E2E 服务使用独立临时 SQLite、内存媒体存储和确定性 provider。基准专用宿主关闭可选后端 Agent/付费 Provider 扩展，保留真实 Canvas/Media/Task 路径。
 

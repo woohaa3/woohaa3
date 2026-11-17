@@ -4,7 +4,7 @@
  * 从 `contracts.ts` façade 拆分（change: 2026-09-28-split-frontend-god-plugins，task 1.5）。
  */
 import type { ComponentType, ReactNode } from "react";
-import type { AppThemeSnapshot, CanvasSummary, CanvasTaskCatalog, ServerCanvas } from "@woohaa3/contracts";
+import type { CanvasSummary, ServerCanvas } from "@woohaa3/contracts";
 import type { CanvasSyncStatus } from "../services/canvas-state/index.js";
 import type { CanvasContextMenuItem } from "../plugins/canvas-menu/canvas-context-menu.js";
 import type {
@@ -12,14 +12,10 @@ import type {
   DialogCloseResult,
   DialogDefinition,
   DialogInstance,
-  DialogHostApi,
-  OpenDialogRequest,
-  OpenDialogResult
+  DialogHostApi
 } from "../services/dialogs/types.js";
 export type { DialogCloseGuard, DialogCloseResult } from "../services/dialogs/types.js";
 import type { DialogRenderer } from "../services/dialogs/renderer-registry.js";
-import type { SelectionSnapshot } from "../services/selection-store.js";
-import type { ParameterPatch } from "../services/parameter-preview.js";
 
 export type { CanvasSyncStatus };
 
@@ -743,101 +739,4 @@ export interface SlotsService {
   version(): number;
 }
 
-export type InputScope = "modal" | "menu" | "editor";
-
-export interface InputScopesService {
-  /** 注册一个门禁谓词（例如 modal 打开时返回 true）。 */
-  addGate(gate: () => boolean): () => void;
-  /** 注册到指定 scope 的门禁谓词；返回注销函数（change: unify-canvas-presentation-navigation）。 */
-  addScope(scope: InputScope, gate: () => boolean): () => void;
-  isActive(scope: InputScope): boolean;
-  /** modal/menu/editor 任一激活时，画布 pointer/keyboard/paste/drop 门禁为 true。 */
-  blocksCanvas(): boolean;
-  /**
-   * 聚焦相机输入门禁（change: fix-model-focus-navigation-and-camera-parity，design D6）。
-   *
-   * focus 期间只有真正的 modal Dialog 才阻断主观察相机缩放/观察；非模态的 editor/history
-   * panel 与菜单 MUST NOT 抢走 focus canvas 上的滚轮/捏合/键盘飞行。
-   */
-  blocksFocusInput(): boolean;
-}
-
-export interface SelectionService {
-  getSnapshot(): SelectionSnapshot;
-  subscribe(listener: () => void): () => void;
-  setFromRuntime(
-    raw: { nodeIds: readonly string[]; primaryNodeId: string | null; editingFocus: boolean },
-    validNodeIds: ReadonlySet<string>
-  ): void;
-  setKeyboardActive(active: boolean): void;
-  reset(): void;
-}
-
-export type ParameterPreviewEntry = { patch: ParameterPatch; deadline: number };
-
-export interface ParameterPreviewService {
-  set(nodeId: string, patch: ParameterPatch, deadline?: number): void;
-  get(nodeId: string): ParameterPatch | undefined;
-  resolve(nodeId: string): void;
-  clearAll(): void;
-  entries(): ReadonlyMap<string, ParameterPreviewEntry>;
-  subscribe(listener: () => void): () => void;
-}
-
-export type CatalogState =
-  | { status: "loading" }
-  | { status: "ready"; catalog: CanvasTaskCatalog }
-  | { status: "error"; error: string };
-
-export interface TaskCatalogService {
-  getState(): CatalogState;
-  subscribe(listener: () => void): () => void;
-  load(force?: boolean): Promise<void>;
-  /** 站点生成插件/模型策略变化时使目录失效并重取（change: 2026-10-04-...，任务 3.2）。 */
-  invalidate(): void;
-}
-
-/** Canvas 上空闲占位（feature-owned capability；目前仅保留菜单关闭）。 */
-export interface CanvasMenuService {
-  close(): void;
-}
-
-/**
- * Theme Service（change: unify-application-theme-tokens）。
- *
- * 页面级唯一主题 owner：持有当前合法 snapshot、投影 `--app-*` variables、管理本地选择
- * 生命周期。实现见 `services/theme/service.ts`（AppThemeService），但契约只依赖
- * `@woohaa3/contracts` 的纯类型，避免平台 Service 反向依赖 feature。
- */
-export interface ThemeService {
-  /** 当前主题 snapshot（订阅后读取；同一引用的原子对象）。 */
-  getSnapshot(): AppThemeSnapshot;
-  /** 订阅主题变化；返回退订函数。 */
-  subscribe(listener: () => void): () => void;
-  /** 用完整 preset 原子替换；非法输入整体拒绝并保留上一主题。 */
-  setPreset(preset: unknown): { ok: true } | { ok: false; error: string };
-  /** 按 id 选择已注册 preset。 */
-  select(presetId: string): { ok: true } | { ok: false; error: string };
-  /** 注册可由本地选择引用的具名 preset。 */
-  registerPreset(presetId: string, preset: unknown): void;
-  /** 已注册、可供 `select` 选择的 preset id。 */
-  presetIds(): readonly string[];
-  /** 把当前 snapshot 写到主题根容器；返回撤销函数。 */
-  applyTo(root: HTMLElement): () => void;
-  /** 最近一次非法切换的诊断（成功切换后清空）。 */
-  diagnostic(): string | null;
-  /** 释放：撤销订阅与根容器，不遗留 document 级监听。 */
-  dispose(): void;
-}
-
-export type {
-  DialogDefinition,
-  DialogInstance,
-  DialogHostApi,
-  OpenDialogRequest,
-  OpenDialogResult,
-  DialogRenderer
-};
-
-export type { DialogRendererProps } from "../services/dialogs/renderer-registry.js";
-export type { StoredAsset } from "@woohaa3/contracts";
+export * from "./platform-services.js";

@@ -23,6 +23,13 @@ export type BevyModule = {
   benchmark_frames?: (enabled?: boolean) => string;
   benchmark_media?: (enabled?: boolean) => string;
   seed_runtime_generation?: (previous: number) => void;
+  begin_canvas_scope?: (canvasId:string)=>string;
+  end_canvas_scope?: (token:string)=>void;
+  set_scene_scoped?: (json:string,token:string)=>number;
+  set_texture_scoped?: (token:string,id:string,width:number,height:number,rgba:Uint8Array,content:string)=>void;
+  set_model_media_texture_scoped?: (token:string,id:string,width:number,height:number,rgba:Uint8Array)=>void;
+  set_image_focus_details_scoped?: (token:string,manifest:string,rgba:Uint8Array)=>void;
+  poll_texture_receipts_scoped?: (token:string)=>string;
   set_scene: (json: string) => number;
   set_resource_states?: (json: string) => number;
   set_texture: (id: string, width: number, height: number, rgba: Uint8Array, content?: string) => void;
@@ -252,7 +259,7 @@ export type BevyRuntime = {
   flushTextureReceipts?(): void;
   textureApplied?(id: string, width: number, height: number, content: string, plane?: boolean): boolean;
   setTexture(id: string, width: number, height: number, rgba: import("@woohaa3/contracts").ImagePixelSource, source?: import("./texture-upload-boundary.js").TextureUploadSource): boolean | void;
-  setImageFocusDetails?(frame:import("./focus-details.js").ImageFocusDetails|null):void;
+  setImageFocusDetails?(frame:import("./focus-details.js").ImageFocusDetails|null,scope?: import('./canvas-scope.js').CanvasScope):void;
   /** 上传片场媒体平面纹理（键为全局唯一 planeId；change: 2026-10-08-make-film-set-model-only）。 */
   setModelMediaTexture(id: string, width: number, height: number, rgba: import("@woohaa3/contracts").ImagePixelSource, source?: import("./texture-upload-boundary.js").TextureUploadSource): boolean | void;
   /**
@@ -420,5 +427,19 @@ export type BevyRuntime = {
     width: number;
     height: number;
   }): Promise<import("./world-capture-poll.js").WorldCaptureFrame | null>;
+  /** 打开当前画布作用域。旧 ABI 没有 scope 能力时返回 null。 */
+  openCanvasScope?(canvasId: string): import("./canvas-scope.js").CanvasScope | null;
+  currentCanvasScope?(): import('./canvas-scope.js').CanvasScope | null;
+  subscribeCanvasScope?(listener: () => void): () => void;
+  canvasScopeMode?(): 'legacy' | 'scoped';
+  /** 关闭当前作用域。不是当前作用域，或旧 ABI，返回 false。 */
+  closeCanvasScope?(scope: import("./canvas-scope.js").CanvasScope): boolean;
+  /**
+   * 只读查询另一画布访问是否仍是渲染器当前访问（不改任何状态）。
+   *
+   * 原生文档编辑器（桌面合成）没有 CPU 帧回调，改由桌面壳在合成前用 `document_editor_canvas_access`
+   * 查询同一份身份；该端口用于前端侧断言与诊断。
+   */
+  canvasAccessCurrent?(scope: import("./canvas-scope.js").CanvasScope): boolean | null;
   dispose(): void;
 };

@@ -17,14 +17,16 @@ describe("node-catalog", () => {
       "image",
       "model3d",
       "video",
-      "audio"
+      "audio",
+      "motion"
     ]);
     expect(NODE_TEMPLATES.map((entry) => entry.label)).toEqual([
       "文本",
       "图片",
       "3D 模型",
       "视频",
-      "音频"
+      "音频",
+      "动作"
     ]);
     expect(findNodeTemplate("model")?.nodeType).toBe("model3d");
     expect(findNodeTemplate("model3d")?.nodeType).toBe("model3d");
@@ -39,7 +41,8 @@ describe("node-catalog", () => {
       "image",
       "model3d",
       "video",
-      "audio"
+      "audio",
+      "motion"
     ]);
     expect(findNodeTemplate("shot")).toBeNull();
     expect(findNodeTemplate("generate")).toBeNull();

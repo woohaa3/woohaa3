@@ -24,7 +24,6 @@ import { localTimeZoneName } from "./format.js";
 import {
   AnomalyOverview,
   CountTrend,
-  DurationRanking,
   TelemetryFooter,
   TelemetryNotices,
   WindowSummaryTable
@@ -146,7 +145,6 @@ export function TelemetryPage({
           <div className="telemetry__main">
             <AnomalyOverview anomalies={anomalies} window={query.window} {...(query.groupBy ? { groupBy: query.groupBy } : {})} />
             <WindowSummaryTable summary={summary} />
-            <DurationRanking summary={summary} />
             <CountTrend summary={summary} />
 
             <section className="telemetry__section" data-testid="telemetry-events-section">
@@ -164,7 +162,6 @@ export function TelemetryPage({
                 onWindowChange={(window) => changeFilters({ window })}
                 onNameChange={(name) => changeFilters({ name: name ?? "" })}
                 onResultChange={(result) => changeFilters({ result: result ?? "" })}
-                onModeChange={(mode) => changeFilters({ mode: mode ?? "" })}
                 onGroupByChange={(groupBy) => changeFilters({ groupBy: groupBy ?? "" })}
                 onErrorCodeApply={(next) => {
                   // 错误码是页面本地筛选：先清游标与选中项，再交给适配层重取。

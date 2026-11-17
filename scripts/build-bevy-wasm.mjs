@@ -81,6 +81,8 @@ const REQUIRED_OUTPUTS = [glueName, wasmName, dtsName];
 
 const modelBatchStrategy = process.env.WOOHAA_STATIC_BATCH_STRATEGY ?? "spatial";
 const renderDrawDiagnostics = process.env.WOOHAA_RENDER_DRAW_DIAGNOSTICS ?? "1";
+const canvasReference = process.env.WOOHAA_CANVAS_REFERENCE ?? "0";
+if (!["0", "1"].includes(canvasReference)) throw new Error("WOOHAA_CANVAS_REFERENCE must be 0 or 1");
 
 /** 手工维护的稳定类型面；与 Rust `#[wasm_bindgen]` 导出一致。 */
 const STABLE_DTS = `// wasm-bindgen 生成的 Bevy 运行时 glue 的稳定类型面
@@ -634,7 +636,8 @@ function main() {
 				"--features",
 				[
 					renderer.backend === "webgpu" ? "wasm-webgpu" : "wasm-webgl2",
-					...(modelBatchStrategy === "explicit" ? ["explicit-instancing"] : [])
+					...(modelBatchStrategy === "explicit" ? ["explicit-instancing"] : []),
+					...(canvasReference === "1" ? ["canvas-reference"] : [])
 				].join(","),
 				...(plan.release ? ["--release"] : [])
 			],

@@ -24,7 +24,6 @@ import { createFrameSubmission } from "./interaction-frame-submission.js";
 import { gestureLabel } from "./gesture-label.js";
 import { createModelFocusFacade } from "./interaction-model-focus-facade.js";
 import { createInteractionFrameLoop } from "./interaction-frame-loop.js";
-import { beginStartupSpan } from "../../services/telemetry-primitives.js";
 import { sharedCanvasNodeIndex, indexNodeSize } from "./canvas-node-index.js";
 import { errorDetail } from "../canvas-runtime/runtime-issues.js";
 import { advanceTransientState } from "./interaction-frame-prelude.js";
@@ -61,6 +60,11 @@ export function installInteractionController(options: InteractionControllerOptio
   const focusInputBlocked = options.isFocusInputBlocked ?? modalActive;
   const textureSync: TextureUploader | null = options.textureSync ?? null;
   let disposed = false;
+  let heldScope: { runtime: import('../canvas-runtime/bevy-runtime-types.js').BevyRuntime; handle: import('../canvas-runtime/canvas-scope.js').CanvasScope } | null = null;
+  const closeHeldScope = () => {
+    const previous = heldScope; heldScope = null;
+    if (previous) { try { previous.runtime.closeCanvasScope?.(previous.handle); } catch { /* Old renderer may already be unavailable. */ } }
+  };
   /**
    * 场景失效信号（change: optimize-model-scene-snapshot-hot-path，design D3；
    * change: 2026-10-10-optimize-canvas-interaction-hot-path，design D2）。
@@ -206,28 +210,7 @@ export function installInteractionController(options: InteractionControllerOptio
     aggregateConnect: aggregateProjectionRef.current?.() ?? null
     };
   };
-  /**
-   * 首个完整场景构建是否已计时。
-   *
-   * `perf.startup` 的 `scene-build` 只记第一次：之后的构建是同一次会话里的增量重建，混进来会
-   * 让"启动有多慢"随用户操作次数变化（task 3.4）。
-   */
-  let firstSceneBuildMeasured = false;
-  const buildSceneWithResources = () => {
-    const build = () => buildSceneWithResourcesModule(options, surfaceSize, frameState());
-    if (firstSceneBuildMeasured) return build();
-    // 第一次完整构建包含模型资源装配与全表投影，是启动路径上唯一可分离的"建场"成本。
-    const finish = beginStartupSpan("scene-build");
-    try {
-      return build();
-    } catch (error) {
-      finish("failure");
-      throw error;
-    } finally {
-      firstSceneBuildMeasured = true;
-      finish();
-    }
-  };
+  const buildSceneWithResources = () => buildSceneWithResourcesModule(options, surfaceSize, frameState());
 
   const frameSubmission = createFrameSubmission({
     options, state, viewport: activeViewport, surface: surfaceSize,
@@ -402,16 +385,22 @@ export function installInteractionController(options: InteractionControllerOptio
   let lastHoverOwner = "";
   let appliedScopeRevision = -1;
   let appliedScope = canvasEditScopeStore.getSnapshot();
+  let appliedScopeCanvasId: string | null = null;
   const reconcileEditScope = () => {
     const revision = canvasEditScopeStore.getRevision();
     if (revision === appliedScopeRevision) return;
+    const firstObservation = appliedScopeRevision < 0;
     appliedScopeRevision = revision;
     const scope = canvasEditScopeStore.getSnapshot();
     const scopeChanged = scope["2d"] !== appliedScope["2d"] || scope["3d"] !== appliedScope["3d"];
+    const canvasId = workingCanvasOf(woohaa3CanvasStore.getState())?.id ?? null;
+    const canvasChanged = canvasId !== appliedScopeCanvasId;
+    appliedScopeCanvasId = canvasId;
     appliedScope = scope;
-    // Binding the first canvas increments the store revision even when the
-    // effective default scope stays the same; it must not cancel a viewport pan.
-    if (!scopeChanged) return;
+    // The first controller frame establishes the already-authoritative scope
+    // baseline. Only a later scope transition cancels transient input and forces
+    // a full scene; initial observation must not turn the first wheel into a full.
+    if (firstObservation || canvasChanged || !scopeChanged) return;
     const canvasState = workingCanvasOf(woohaa3CanvasStore.getState());
     if (!canvasState) return;
     // A scope switch invalidates every in-flight spatial preview. Hidden and
@@ -433,6 +422,16 @@ export function installInteractionController(options: InteractionControllerOptio
   const performFrame = (force: boolean) => {
     // dispose 后不得继续构建或提交（含无 rAF 环境下的同步 flush/invalidate）。
     if (disposed) return;
+    const currentCanvas = workingCanvasOf(woohaa3CanvasStore.getState());
+    const scopeRuntime = options.getRuntime();
+    if (currentCanvas?.id && scopeRuntime?.openCanvasScope) {
+      const handle = scopeRuntime.openCanvasScope(currentCanvas.id);
+      if (!handle) closeHeldScope();
+      else if (heldScope?.runtime !== scopeRuntime || heldScope.handle !== handle) {
+        closeHeldScope();
+        heldScope = { runtime: scopeRuntime, handle };
+      }
+    } else closeHeldScope();
     reconcileEditScope();
     frameLoop.step("viewport-notify", notifyViewport, undefined);
     // 节点屏幕投影通知（节点顶部操作横条锚定）：视口/拖动/改尺寸帧级变化在此随唯一帧结算。
@@ -496,8 +495,7 @@ export function installInteractionController(options: InteractionControllerOptio
     // A cold query or synchronous subscriber can request a flush while this scene
     // is still being built. Finish its acceptance before retrying on the next frame.
     if (frameExecuting) { markInvalidated("input"); return; }
-    // 帧耗时在所有构建里都计时（change: 2026-10-25-enhance-telemetry-performance-collection，
-    // design D4：`perf.frame` 是产品事实，不是开发期采集）。
+    // In-memory diagnostics only; no periodic sampling or telemetry export.
     const started = target.performance.now();
     const previous = frameExecuting; frameExecuting = true;
     try {
@@ -870,6 +868,7 @@ export function installInteractionController(options: InteractionControllerOptio
     setAlignmentSnapPolicy: (policy) => { alignmentSnapRef.current = policy; },
     dispose() {
       disposed = true;
+      closeHeldScope();
       const hooks = target as unknown as { __worldGroundPreview?: InteractionController };
       if (hooks.__worldGroundPreview === controller) delete hooks.__worldGroundPreview;
       disposeDiagnostics();

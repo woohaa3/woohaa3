@@ -22,11 +22,14 @@ import { MediaOperationBoundary } from "./media-operation-boundary.js";
 import { errorDetail } from "./runtime-issues.js";
 import type { ServerCanvas, StoredAsset } from "@woohaa3/contracts";
 import type { BevyRuntime } from "./bevy-runtime.js";
-import { rasterizeDrawable, defaultRasterCanvasFactory, type RasterCanvasFactory } from "./media-raster.js";
+import { defaultRasterCanvasFactory, type RasterCanvasFactory } from "./media-raster.js";
 import { NodeResourceLoading, type NodeResourceLoad } from "../../services/node-resource-loading.js";
 import { appPublicUrl } from "../../services/app-base-path.js";
 import { withMediaCanvasHint } from "../../services/paths.js";
-import { selectThumbnailTier, THUMBNAIL_TIERS, type ThumbnailTier } from "./residency/policy.js";
+import { THUMBNAIL_TIERS, type ThumbnailTier } from "./residency/policy.js";
+import { TEXTURE_MAX_DIMENSION, rasterizeTexture, textureErrorOf } from "./texture-sync-helpers.js";
+export { TEXTURE_MAX_DIMENSION } from "./texture-constants.js";
+import type { PendingTextureEntry } from "./texture-sync-pending.js";
 import { canvasStructureKey } from "./residency/projection.js";
 import type { CanvasResourceCoordinator, ResidencyPurpose } from "./residency/index.js";
 import {
@@ -39,7 +42,6 @@ import {
  * 纹理最长边上限（像素）。纹理尺寸**保持图片自身宽高比**（不填充、不裁剪），
  * 因此 Bevy 侧 contain 后图片必然顶住内容框的某一轴边缘、无多余边距。
  */
-export const TEXTURE_MAX_DIMENSION = 1024;
 let nextFocusSource = 0;
 
 /** 单个节点在本帧的准入信息（由页面资源协调器提供）。 */
@@ -61,7 +63,7 @@ export type TextureSyncOptions = {
    * 与规范资产一样走同一解码/上传路径，使 ghost 卡片内能显示本地图片。
    */
   getPreviewUrls?: () => ReadonlyMap<string, string>;
-  getFocusTexture?: () => { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource } | null;
+  getFocusTexture?: () => { nodeId: string; width: number; height: number; pixels: import("@woohaa3/contracts").ImagePixelSource; scope?: import('./canvas-scope.js').CanvasScope } | null;
   getFocusDetails?:()=>import("./focus-details.js").ImageFocusDetails|null;
   /** 解码函数：URL → 图像；测试可注入。 */
   loadImage?: (url: string) => Promise<HTMLImageElement>;
@@ -93,6 +95,7 @@ export type TextureUploader = {
 
 /** 一份已解码/已上传的图片内容（按内容身份共享，nodeId 只持引用）。 */
 type ContentEntry = {
+  scope: import('./canvas-scope.js').CanvasScope | null;
   /** 内容身份：受控 URL（含画布提示）在单次 attach 内已足够稳定；不含 nodeId。 */
   key: string;
   url: string;
@@ -145,21 +148,19 @@ type NodeEntry = {
  * 只能画背景（表现为「先变灰再出现」）。这里保留当前绑定，等目标内容真正解码并上传
  * 成功后才原子替换；失败或用户缩放回原档时继续显示旧图。
  */
-type PendingEntry = {
-  url: string;
-  contentKey: string;
-  tier: ThumbnailTier;
-  load: NodeResourceLoad;
-};
-
 export function createTextureSync(options: TextureSyncOptions): TextureUploader {
   const loadImage = options.loadImage;
+  const setFocusDetails = (frame: import('./focus-details.js').ImageFocusDetails | null, scope: import('./canvas-scope.js').CanvasScope | undefined) => {
+    const send = options.runtime.setImageFocusDetails;
+    if (!send) { if (frame) throw new Error('画布内核缺少图片细节纹理接口'); return; }
+    if (scope) send(frame, scope); else send(frame);
+  };
   const createCanvas = options.createCanvas ?? defaultRasterCanvasFactory;
   const residency = options.residency;
   /** nodeId → 当前正在显示的绑定信息。 */
   const entries = new Map<string, NodeEntry>();
   /** nodeId → 后台准备中的目标绑定；上传成功前不替换 `entries`。 */
-  const pendingEntries = new Map<string, PendingEntry>();
+  const pendingEntries = new Map<string, PendingTextureEntry>();
   /** contentKey（内容身份 + 尺寸档）→ 共享解码内容。 */
   const contents = new Map<string, ContentEntry>();
   const resourceDirty = new Set<string>();
@@ -172,6 +173,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     resourceDirty.add(id);
   };
   const clearUploaded = () => { for (const id of uploaded) setUploaded(id, false); };
+  let activeScope = options.runtime.currentCanvasScope?.() ?? null;
   let runtimeGeneration = options.runtime.generation?.() ?? 0;
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
   let disposed = false;
@@ -312,7 +314,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       // `prepareImageResource` 只在字节落地后才申请 `image`（解码）名额，避免把 Worker
       // 名额耗在等 RTT 上。注入 `loadImage`（DOM 预览路径）本身是解码，按 `image` 计入。
       const raster = loadImage
-        ? rasterize(await loadImage(url), createCanvas, tier)
+        ? rasterizeTexture(await loadImage(url), createCanvas, tier)
         : await prepareImageResource(url, tier, signal, residency
             ? { purpose, key: attemptKey, fetched: true }
             : { purpose });
@@ -338,7 +340,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
           abortable: false,
           run: ({ lease }) => decode(lease.signal)
         }).then((outcome) => {
-          if (outcome.status !== "settled") throw errorOf(outcome);
+          if (outcome.status !== "settled") throw textureErrorOf(outcome);
         })
       : decode();
     void run
@@ -456,7 +458,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     const entry: NodeEntry = { url, contentKey: key, tier, load, sent: false };
     entries.set(nodeId, entry);
     resourceDirty.add(nodeId);
-    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
+    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key, scope: activeScope };
     contents.set(key, target);
     // 先准入再创建：解码本身也经 image 通道（并发 + 真实在途计数）。
     startDecode(target, url, tier, admissionOf(nodeId).purpose, key);
@@ -480,7 +482,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       content.nodes.add(nodeId);
       return;
     }
-    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key };
+    const target: ContentEntry = { key, url, tier, ready: false, nodes: new Set([nodeId]), decodeKey: key, scope: activeScope };
     contents.set(key, target);
     startDecode(target, url, tier, admissionOf(nodeId).purpose, key);
   };
@@ -545,6 +547,19 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       resourceDirty.clear();
     },
     sync() {
+      const nextScope = options.runtime.currentCanvasScope?.() ?? null;
+      if (nextScope !== activeScope) {
+        activeScope = nextScope;
+        for (const content of contents.values()) {
+          residency?.cancel(content.decodeKey);
+          if (content.retryTimer !== undefined) globalThis.clearTimeout(content.retryTimer);
+          releaseImagePixels(content.pixels);
+        }
+        contents.clear(); entries.clear(); pendingEntries.clear();
+        clearUploaded(); loading.clear(); uploads.retainNodes(new Set());
+        boundCanvas = null; boundDesired = null; boundStructure = '';
+        previousOverride = null; previousDetails = undefined; overrideUploaded = false;
+      }
       options.runtime.flushTextureReceipts?.();
       if (disposed) return;
       const canvas = options.getCanvas();
@@ -639,7 +654,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       if (override && override !== previousOverride) {
         focusSource = `focus:${override.nodeId}:${++nextFocusSource}`;
         const accepted = uploads.run(`focus:${override.nodeId}`, override, override.nodeId,
-          () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels, { sourceKey: focusSource }) !== false);
+          () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels, { sourceKey: focusSource, ...(override.scope ? {scope:override.scope} : {}) }) !== false);
         overrideUploaded = !!accepted;
         if (accepted) {
           const original = entries.get(override.nodeId);
@@ -658,9 +673,9 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         const accepted=uploads.run(`focus-details:${nodeId}`,details,nodeId,()=>{
           if(details) {
             if(!options.runtime.setImageFocusDetails)throw new Error("画布内核缺少图片细节纹理接口");
-            try {options.runtime.setImageFocusDetails(details);}
-            catch(error){options.runtime.setImageFocusDetails(null);throw error;}
-          } else options.runtime.setImageFocusDetails?.(null);
+            try {setFocusDetails(details, details.scope);}
+            catch(error){setFocusDetails(null, details.scope);throw error;}
+          } else setFocusDetails(null, activeScope ?? undefined);
           return true;
         });
         previousDetails=details;
@@ -684,7 +699,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
         const accepted = uploads.run(`image:${id}`, content, id,
           () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
-            { sourceKey: content.url, preserveFailure: id === override?.nodeId }) !== false);
+            { sourceKey: content.url, preserveFailure: id === override?.nodeId, ...(content.scope ? { scope: content.scope } : {}) }) !== false);
         if (!accepted) {
           loading.setLoading(pending.load, false);
           continue;
@@ -723,7 +738,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
         const accepted = uploads.run(`image:${id}`, content, id,
           () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
-            { sourceKey: content.url, preserveFailure: id === override?.nodeId }) !== false);
+            { sourceKey: content.url, preserveFailure: id === override?.nodeId, ...(content.scope ? { scope: content.scope } : {}) }) !== false);
         if (accepted) {
           // Publish eligibility so the scene accepts the queued texture; loading waits for the owner-thread receipt.
           entry.submitted=true; setUploaded(id, true); changed=true;
@@ -759,7 +774,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     isLoading: loading.isLoading,
     dispose() {
       disposed = true;
-      uploads.run("focus-details:dispose",null,previousDetails?.nodeId??"",()=>options.runtime.setImageFocusDetails?.(null));
+      uploads.run("focus-details:dispose",null,previousDetails?.nodeId??"",()=>setFocusDetails(null, activeScope ?? undefined));
       previousDetails=null;
       uploads.retainNodes(new Set());
       for (const id of entries.keys()) options.runtime.clearRuntimeIssue?.(`decode:image:${id}`);
@@ -780,24 +795,4 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       acknowledged.clear();
     }
   };
-}
-
-function errorOf(outcome: { status: string; error?: unknown }): Error {
-  return outcome.error instanceof Error ? outcome.error : new Error(`图片准备${outcome.status}`);
-}
-
-/**
- * 把图片按**自身宽高比**缩放到最长边 `maxDimension` 内并取 RGBA。
- *
- * 关键：纹理尺寸 = 图片自身尺寸（等比缩放），**不填充、不裁剪**。这样 Bevy 在节点
- * 内容框内 contain 后，媒体必然顶住某一轴的两条边，不会出现「无论节点多宽都有左右边距」。
- */
-function rasterize(
-  image: HTMLImageElement,
-  createCanvas: RasterCanvasFactory,
-  maxDimension: number = TEXTURE_MAX_DIMENSION
-): { pixels: import("@woohaa3/contracts").ImagePixelSource; width: number; height: number } | null {
-  // 保留既有公开 helper 语义：档位不能超过 Bevy 纹理硬上限。
-  const limit = Math.min(selectThumbnailTier(maxDimension), TEXTURE_MAX_DIMENSION);
-  return rasterizeDrawable(image, { width: image.width, height: image.height }, createCanvas, limit);
 }

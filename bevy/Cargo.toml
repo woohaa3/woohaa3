@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # Opt-in comparison renderer; default production stays on spatial/automatic.
 explicit-instancing = []
+# Verification-only reference: full projection/dirty blocks and full 2D workset.
+canvas-reference = ["canvas-core"]
 default = ["wasm-webgpu"]
 # 浏览器与原生宿主共用画布系统；平台事件循环由各 adapter 提供。
 canvas-core = [

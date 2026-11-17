@@ -388,7 +388,9 @@ export async function installCanvasPageServices(
     // canvasRuntime 由页面插件注入；install 阶段只捕获惰性读取。
     runtime: () => (ctx.get("canvasRuntime" as never) as {
       runtime(): {
-        setModelMediaTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: string): boolean | void;
+        setModelMediaTexture(id: string, width: number, height: number, rgba: Uint8Array, source?: string | { sourceKey?: string; scope?: import("./plugins/canvas-runtime/canvas-scope.js").CanvasScope }): boolean | void;
+        currentCanvasScope?: () => import("./plugins/canvas-runtime/canvas-scope.js").CanvasScope | null;
+        canvasScopeMode?: () => "scoped" | "legacy";
       } | null;
     } | undefined) ?? null
   });

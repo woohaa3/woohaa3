@@ -35,7 +35,6 @@ import {
   bucketTotals,
   failureRate,
   isEmptySummary,
-  rankByDuration,
   sortAnomalies,
   sortSummaryRows,
   type TelemetryNotice
@@ -228,56 +227,6 @@ export function WindowSummaryTable({ summary }: { summary: TelemetrySummary | nu
             </tbody>
           </table>
         </div>
-      )}
-    </section>
-  );
-}
-
-/**
- * 分组耗时榜（change: 2026-10-25-enhance-telemetry-performance-collection，design D5）。
- *
- * 回答的是复盘时最先问的那句话：**哪一类输入/哪一个阶段最慢**。所以排序用 p95 而不是计数
- * ——计数高只说明"发生得多"，不能说明"卡"。没有耗时样本的组排在最后并显示「无样本」：
- * 把缺样本当 0ms 会让"没测到"看起来像"很快"。
- *
- * 只在 `groupBy` 存在时渲染：未分组时这张表与「窗口聚合」内容重复，多一块只会增加噪音。
- */
-export function DurationRanking({ summary }: { summary: TelemetrySummary | null }) {
-  if (!summary || summary.groupBy === undefined) return null;
-  const rows = rankByDuration(summary.rows);
-  return (
-    <section className="telemetry__section" data-testid="telemetry-duration-ranking">
-      <header className="telemetry__section-head">
-        <h2>耗时榜</h2>
-        <span className="telemetry__section-hint">
-          按{groupByLabel(summary.groupBy)} · p95 从高到低 · {formatCount(rows.length)} 组
-        </span>
-      </header>
-      {rows.length === 0 ? (
-        <p className="telemetry__empty" data-testid="telemetry-duration-ranking-empty">
-          当前窗口没有可排名的分组样本。
-        </p>
-      ) : (
-        <ol className="telemetry__ranking">
-          {rows.map((row, index) => (
-            <li
-              key={`${row.name}:${row.attributeValue ?? ""}`}
-              className="telemetry__ranking-row"
-              data-testid="telemetry-duration-row"
-            >
-              <span className="telemetry__ranking-index">{index + 1}</span>
-              <span className="telemetry__ranking-group">{row.attributeValue ?? "—"}</span>
-              <span className="telemetry__ranking-name">{eventNameLabel(row.name)}</span>
-              <span className="telemetry__ranking-value">
-                p95 {formatDuration(row.durationP95)}
-                <span className="telemetry__ranking-sub">
-                  p50 {formatDuration(row.durationP50)} · max {formatDuration(row.durationMax)} ·{" "}
-                  {formatCount(row.durationSamples)} 样本 · {formatCount(row.count)} 条
-                </span>
-              </span>
-            </li>
-          ))}
-        </ol>
       )}
     </section>
   );

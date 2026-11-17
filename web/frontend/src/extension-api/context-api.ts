@@ -70,7 +70,7 @@ export type {
   CanvasSyncStatus
 } from "../cordis/contract/platform.js";
 export type { AuthoringGenerationComponent, AuthoringGenerationProps } from "../cordis/contract/authoring.js";
-export type { CanvasRuntimeService, CanvasRuntimeStatus } from "../cordis/contract/canvas-runtime.js";
+export type { CanvasRuntimeScope, CanvasRuntimeService, CanvasRuntimeStatus } from "../cordis/contract/canvas-runtime.js";
 export type { CanvasSession, CanvasSessionStatus, CanvasSessionPhase } from "../cordis/contract/session.js";
 export type {
   ModelExecutionStatus,

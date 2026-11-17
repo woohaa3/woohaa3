@@ -280,7 +280,8 @@ export function createTelemetryService(options: {
       // 存储不可用或本机记录关闭：静默丢弃。业务不该因此拿到异常，也不该被要求判断。
       if (closed || !store || !readLocalEnabled()) return;
       const event = normalizeTelemetryEvent(input, { now: now() });
-      if (event === null) {
+      // Retired continuous performance telemetry, including batches from an old tab.
+      if (event === null || event.name.startsWith("perf.")) {
         droppedInvalid += 1;
         return;
       }

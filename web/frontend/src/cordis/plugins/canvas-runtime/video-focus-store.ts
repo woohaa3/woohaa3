@@ -9,7 +9,7 @@ export class VideoFocusStore {
   private projection: import("@woohaa3/contracts").BevyVideoFocus | null = null;
   private targets: readonly string[] = [];
   private targetId: string | null = null;
-  private texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null = null;
+  private texture: { nodeId: string; width: number; height: number; pixels: Uint8Array; scope?: import('./canvas-scope.js').CanvasScope } | null = null;
   private readonly listeners = new Set<() => void>();
 
   get(): import("@woohaa3/contracts").BevyVideoFocus | null {
@@ -45,11 +45,11 @@ export class VideoFocusStore {
     };
   }
 
-  setTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array } | null): void {
+  setTexture(texture: { nodeId: string; width: number; height: number; pixels: Uint8Array; scope?: import('./canvas-scope.js').CanvasScope } | null): void {
     this.texture = texture;
   }
 
-  getTexture(): { nodeId: string; width: number; height: number; pixels: Uint8Array } | null {
+  getTexture(): { nodeId: string; width: number; height: number; pixels: Uint8Array; scope?: import('./canvas-scope.js').CanvasScope } | null {
     return this.texture;
   }
 

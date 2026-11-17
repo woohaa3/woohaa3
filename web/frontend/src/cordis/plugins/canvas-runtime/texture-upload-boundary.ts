@@ -2,7 +2,7 @@ import { isNativeImage } from "./image-worker/native-port.js";
 import { BEVY_TEXTURE_MAX_DIMENSION } from "./media-raster.js";
 import { errorDetail, type RuntimeIssues } from "./runtime-issues.js";
 
-export type TextureUploadSource = { sourceKey: string; nodeId?: string; preserveFailure?: boolean };
+export type TextureUploadSource = { sourceKey: string; nodeId?: string; preserveFailure?: boolean; scope?: import('./canvas-scope.js').CanvasScope };
 
 /** Cache rejected source/quality until content changes or the user retries. */
 export class TextureUploadBoundary {

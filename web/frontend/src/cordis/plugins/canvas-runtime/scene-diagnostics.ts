@@ -162,9 +162,7 @@ export function noteFrameStep(operation: string, ms: number): void {
 /**
  * v4: time wire encoding and synchronous acceptance, including rejected calls.
  *
- * 计时在所有构建里都做（change: 2026-10-25-enhance-telemetry-performance-collection，D4）：
- * `perf.frame` 要上报窗口内的 wire 编码次数与同步接受耗时之和，而它是产品事实，不是开发期
- * 采集。代价只是两次单调时钟读取，不改变返回值或异常。
+ * In-memory diagnostics for explicit probes and benchmark runs; never persisted or uploaded.
  */
 export function measureSceneWork<T>(key: "stringifyMs" | "wasmAcceptMs", now: () => number, run: () => T): T {
   const started = now();

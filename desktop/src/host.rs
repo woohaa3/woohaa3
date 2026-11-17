@@ -371,7 +371,7 @@ mod platform {
             .and_then(|value| value["version"].as_str().map(str::to_owned))
             .filter(|value| !value.is_empty());
         let bootstrap = format!(
-            "window.__WOOHAA_NATIVE__ = {{ token: {0}, protocol: 'woohaa-native-v1', viewportAsync: true, platform: {1}, diagnosticsVerbose: {2}, performanceCapture: {3} }};\
+            "window.__WOOHAA_NATIVE__ = {{ token: {0}, protocol: 'woohaa-native-v1', viewportAsync: true, canvasScope: true, platform: {1}, diagnosticsVerbose: {2}, performanceCapture: {3} }};\
              window.__WOOHAA_DESKTOP__ = {{ token: {0}, protocol: 'woohaa-window-v1', platform: {1}, version: {4} }};",
             serde_json::to_string(&token).unwrap(),
             serde_json::to_string(std::env::consts::OS).unwrap(),

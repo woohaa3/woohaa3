@@ -200,6 +200,8 @@ pub(crate) enum PreparedControl {
     Layout(EditorLayout),
     Input(Vec<NativeEditorInput>),
     Ack(u64),
+    /// Read-only check whether a canvas visit token is still the one the renderer renders.
+    CanvasAccess(String),
     Shutdown,
 }
 pub(crate) fn prepare(method: &str, argument: Option<&str>) -> Result<PreparedControl, String> {
@@ -256,6 +258,9 @@ pub(crate) fn prepare(method: &str, argument: Option<&str>) -> Result<PreparedCo
             PreparedControl::Input(events)
         }
         "document_editor_ack" => PreparedControl::Ack(parse(argument)?),
+        "document_editor_canvas_access" => {
+            PreparedControl::CanvasAccess(argument.ok_or("missing canvas access token")?.to_owned())
+        }
         "document_editor_shutdown" => PreparedControl::Shutdown,
         _ => return Err("unsupported editor operation".into()),
     })
@@ -368,6 +373,11 @@ pub(crate) fn control_prepared(request: PreparedControl) -> Result<ControlReply,
                 if let Some(receipt)=retained {if acknowledged {crate::editor_blobs::revoke(&receipt);}}
                 Ok(ControlReply::Small(json!({"ok":acknowledged})))
             }
+            PreparedControl::CanvasAccess(token) => {
+                // Read-only: never mutates the scope, its queues or the canvas wake state.
+                let current = woohaa_bevy_canvas::canvas_scope_current(&token).map_err(|error| error.to_string())?;
+                Ok(ControlReply::Small(json!({"ok":true,"current":current})))
+            }
             PreparedControl::Shutdown => {
                 if let Some(editor) = state.editor.as_mut() { editor.shutdown().map_err(error)?; }
                 state.editor = None;
@@ -377,8 +387,20 @@ pub(crate) fn control_prepared(request: PreparedControl) -> Result<ControlReply,
     })
 }
 pub(crate) fn owns_presentation() -> bool {
-    RUNTIME.with(|state| state.borrow().editor.as_ref().is_some_and(|editor| editor.visible()))
+    RUNTIME.with(|state| {
+        state
+            .borrow()
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.visible())
+    })
 }
+/// Read-only: is this canvas visit still the identity the renderer renders? An unparsable token
+/// is a stale visit as well (a forged or truncated identity must never composite).
+fn canvas_visit_current(token: &str) -> bool {
+    woohaa_bevy_canvas::canvas_scope_current(token).unwrap_or(false)
+}
+
 pub(crate) fn tick(app: &mut bevy::prelude::App) {
     RUNTIME.with(|state| {
         let mut state = state.borrow_mut();
@@ -400,7 +422,17 @@ pub(crate) fn tick(app: &mut bevy::prelude::App) {
         let frame = editor.advance_frame(time);
         crate::metrics::sample("native_editor.owner_cycle_ms", pump.elapsed());
         let visible=editor.visible();
-        if visible { if let Some(layout) = &layout { crate::canvas_suspension::sync_window(app, layout); } }
+        // Native shared textures bypass the Web capture channel, so the visit that opened the
+        // document is re-checked here, before any window/compositor work for this frame. A frame
+        // whose visit is no longer current is not composited and its document target is cleared;
+        // the previous (different) visit's projection is left untouched.
+        let visit_current = if visible {
+            let visit = state.editor.as_ref().and_then(|editor| editor.canvas_visit().map(str::to_owned));
+            visit.as_deref().is_none_or(canvas_visit_current)
+        } else {
+            true
+        };
+        if visible && visit_current { if let Some(layout) = &layout { crate::canvas_suspension::sync_window(app, layout); } }
         if visible && layout.is_some() {
             if let Some(accepted) = state.oldest_input.take() {
                 crate::metrics::sample(
@@ -411,6 +443,11 @@ pub(crate) fn tick(app: &mut bevy::prelude::App) {
         }
         let node_binding=frame.as_ref().ok().and_then(|frame|frame.as_ref()).and_then(|frame|state.editor.as_ref()?.documents().get(&frame.document_id)?.node_binding.clone());
         match frame {
+            _ if !visit_current => {
+                // Keep the snapshot truthful without presenting anything for the stale visit.
+                let snapshot = state.frame_snapshot.get_or_insert_with(|| json!({}));
+                snapshot["renderStatus"] = json!("stale-visit");
+            }
             Ok(Some(frame)) => {
                 // Provider phase durations are reported after the frame. Keep them
                 // in the numeric log/snapshot rather than inventing trace positions.
@@ -551,6 +588,19 @@ mod tests {
             json!([3, 4, 255])
         );
         assert_eq!(Arc::strong_count(&receipt), 1);
+    }
+    /// The compositor guard must fail closed: only the visit the renderer currently renders may
+    /// composite. An unparsable or truncated token is stale, never "assume current".
+    #[test]
+    fn compositor_visit_guard_rejects_stale_and_garbage_tokens() {
+        let visit = woohaa_bevy_canvas::begin_canvas_scope("photocraft-a").unwrap();
+        assert!(canvas_visit_current(&visit), "the opening visit is current");
+        // Switching canvases retires the old visit; the same token must never composite again.
+        woohaa_bevy_canvas::begin_canvas_scope("photocraft-b").unwrap();
+        assert!(!canvas_visit_current(&visit), "a previous visit must not composite");
+        for garbage in ["", "0", "not-a-token", &visit[..visit.len().saturating_sub(1)]] {
+            assert!(!canvas_visit_current(garbage), "{garbage:?} must not composite");
+        }
     }
     #[test]
     fn runtime_assets_reject_paths_outside_the_injected_root() {

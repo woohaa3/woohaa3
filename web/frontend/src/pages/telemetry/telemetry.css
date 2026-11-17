@@ -293,64 +293,6 @@
   white-space: nowrap;
 }
 
-/**
- * 分组耗时榜。
- *
- * 用有序列表而不是表格：这一块要回答的是"排名第几"，序号是内容的一部分；
- * 每条一行、五行信息（组/事件/p95/细节），用 grid 对齐比塞进 6 列表格更好读。
- */
-.telemetry__ranking {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.telemetry__ranking-row {
-  display: grid;
-  grid-template-columns: 28px minmax(80px, 140px) minmax(100px, 1fr) minmax(220px, 2fr);
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 1px solid var(--app-web-border);
-  border-radius: 6px;
-  background: var(--app-web-surface);
-  font-size: 13px;
-}
-
-.telemetry__ranking-index {
-  color: var(--app-web-text-muted);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-}
-
-.telemetry__ranking-group {
-  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.telemetry__ranking-name {
-  color: var(--app-web-text-muted);
-  white-space: nowrap;
-}
-
-.telemetry__ranking-value {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  font-variant-numeric: tabular-nums;
-}
-
-.telemetry__ranking-sub {
-  font-size: 11px;
-  color: var(--app-web-text-muted);
-}
-
 .telemetry__secondary {
   display: block;
   font-size: 11px;

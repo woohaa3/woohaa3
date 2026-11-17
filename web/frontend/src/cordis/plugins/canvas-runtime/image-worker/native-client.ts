@@ -61,9 +61,11 @@ export function createNativeImagePort(request: (path: string, body?: Uint8Array)
       return await prepareBytesImpl(await readBytes(url,signal),edge,signal);
     },
     prepareBytes(bytes,edge,signal) { return prepareBytesImpl(bytes,edge,signal); },
-    apply(image,id,plane,content) {
+    apply(image,id,plane,content,scope) {
       if(disposed || image.generation!==generation || !handles.has(image.handle))throw new Error('native-image-stale');
-      call(`image-apply?${new URLSearchParams({handle:image.handle,id,plane:plane?'1':'0',content})}`);
+      const params=new URLSearchParams({handle:image.handle,id,plane:plane?'1':'0',content});
+      if(scope!==undefined)params.set('scope',scope);
+      call(`image-apply?${params}`);
     },
     release(image) {if(image.generation===generation)release(image.handle);}
   };

@@ -44,6 +44,7 @@ it("native texture uploads send the original byte view, including its slice boun
     send(body: unknown) { sent.push(body); }
   };
   const realm = await createNativeRuntimeRealm(target, vi.fn());
+  expect(realm.module).not.toHaveProperty("begin_canvas_scope");
   const backing = new Uint8Array([99, 1, 2, 3, 4, 88]);
   const pixels = backing.subarray(1, 5);
   try {
@@ -57,7 +58,81 @@ it("native texture uploads send the original byte view, including its slice boun
   } finally {
     realm.dispose();
   }
+  Object.assign((target as unknown as { __WOOHAA_NATIVE__: Record<string, unknown> }).__WOOHAA_NATIVE__, { canvasScope: true });
+  const scoped = await createNativeRuntimeRealm(target, vi.fn());
+  try {
+    const scopedModule = scoped.module as unknown as Record<string, unknown>;
+    expect([
+      "begin_canvas_scope",
+      "end_canvas_scope",
+      "set_scene_scoped",
+      "set_texture_scoped",
+      "set_model_media_texture_scoped",
+      "set_image_focus_details_scoped",
+      "poll_texture_receipts_scoped",
+    ].map(name => typeof scopedModule[name])).toEqual([
+      "function", "function", "function", "function", "function", "function", "function",
+    ]);
+  } finally {
+    scoped.dispose();
+  }
 });
+
+it("scoped texture uploads keep canvas scope in URL meta and the original pixel view", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountBevyCanvas(host);
+  const target = nativeTarget();
+  Object.assign((target as unknown as { __WOOHAA_NATIVE__: Record<string, unknown> }).__WOOHAA_NATIVE__, { canvasScope: true });
+  const urls: string[] = [];
+  const sent: unknown[] = [];
+  (target as unknown as { XMLHttpRequest: unknown }).XMLHttpRequest = class {
+    status = 200;
+    responseText = JSON.stringify({ ok: true, value: null });
+    open(_method: string, url: string) { urls.push(String(url)); }
+    setRequestHeader() {}
+    overrideMimeType() {}
+    send(body: unknown) { sent.push(body); }
+  };
+  const realm = await createNativeRuntimeRealm(target, vi.fn());
+  const pixels = new Uint8Array([9, 1, 2, 3, 4, 9]).subarray(1, 5);
+  try {
+    const api = realm.module as unknown as Record<string, any>;
+    api.set_texture_scoped("123", "node", 1, 1, pixels, "asset");
+    api.set_image_focus_details_scoped("123", "manifest", pixels);
+    const lastUrls = urls.slice(-2);
+    const lastBodies = sent.slice(-2);
+    expect(lastUrls).toHaveLength(2);
+    expect(lastBodies).toHaveLength(2);
+    for (const url of lastUrls) {
+      expect(decodeUrlMeta(url)).toEqual(expect.objectContaining({ scope: "123" }));
+    }
+    expect(decodeUrlMeta(lastUrls[1])).toEqual(expect.objectContaining({
+      scope: "123",
+      manifest: "manifest",
+    }));
+    for (const body of lastBodies) {
+      expect(body).toBe(pixels);
+      expect(Array.from(body as Uint8Array)).toEqual([1, 2, 3, 4]);
+    }
+  } finally {
+    realm.dispose();
+  }
+});
+
+function decodeUrlMeta(url: string): Record<string, unknown> {
+  const query = url.includes("?") ? url.slice(url.indexOf("?") + 1).split("#")[0] : "";
+  const raw = new URLSearchParams(query).get("meta");
+  if (raw == null) throw new Error(`missing meta in ${url}`);
+  let text = raw.includes("%") ? decodeURIComponent(raw) : raw;
+  if (!text.trimStart().startsWith("{")) {
+    const normalized = text.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    text = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+  }
+  return JSON.parse(text);
+}
 
 it.runIf(typeof SharedArrayBuffer !== "undefined")("shared pixel views are copied to an XHR-compatible snapshot", async () => {
   const host = document.createElement("div");

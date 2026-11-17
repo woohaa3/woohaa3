@@ -8,6 +8,7 @@ import { createEmptyWoohaa3ServerCanvas, type ServerCanvas } from "@woohaa3/cont
 import { createTextureSync, TEXTURE_MAX_DIMENSION } from "./texture-sync.js";
 import type { BevyRuntime } from "./bevy-runtime.js";
 import { IMAGE_RETRY_DELAYS_MS, ImageLoadError } from "./image-load.js";
+import type { CanvasScope } from "./canvas-scope.js";
 
 function canvas(withAsset: boolean, nodeType: "image" | "video" = "image"): ServerCanvas {
   const base = createEmptyWoohaa3ServerCanvas("c1");
@@ -303,6 +304,72 @@ describe("createTextureSync", () => {
     sync.dispose();
   });
 
+  it("dispose 后晚到的普通图片光栅不再上传，新实例仍可上传同一节点", async () => {
+    // 注入点是 loadImage + createCanvas，光栅结果是 Uint8Array。
+    // releaseImagePixels 对非原生像素直接返回；这里没有原生资源注入点，不能断言 native release。
+    let resolveA: ((image: HTMLImageElement) => void) | undefined;
+    const urlsA: string[] = [];
+    const rasterA = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn((_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }))
+    };
+    const setTextureA = vi.fn();
+    const syncA = createTextureSync({
+      runtime: { setTexture: setTextureA } as unknown as BevyRuntime,
+      getCanvas: () => canvas(true),
+      loadImage: (url) => {
+        urlsA.push(url);
+        return new Promise<HTMLImageElement>((resolve) => { resolveA = resolve; });
+      },
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => rasterA })
+    });
+    syncA.sync();
+    expect(urlsA).toEqual(["/api/media/sha256-x?canvas=c1"]);
+    expect(resolveA).toEqual(expect.any(Function));
+    expect(rasterA.drawImage).not.toHaveBeenCalled();
+    expect(setTextureA).not.toHaveBeenCalled();
+    syncA.dispose();
+
+    const uploadsB: Array<{ id: string; width: number; height: number }> = [];
+    let resolveB: ((image: HTMLImageElement) => void) | undefined;
+    const urlsB: string[] = [];
+    const rasterB = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn((_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }))
+    };
+    const syncB = createTextureSync({
+      runtime: {
+        setTexture: (id: string, width: number, height: number) => {
+          uploadsB.push({ id, width, height });
+        }
+      } as unknown as BevyRuntime,
+      getCanvas: () => canvas(true),
+      loadImage: (url) => {
+        urlsB.push(url);
+        return new Promise<HTMLImageElement>((resolve) => { resolveB = resolve; });
+      },
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => rasterB })
+    });
+    syncB.sync();
+    expect(urlsB).toEqual(["/api/media/sha256-x?canvas=c1"]);
+    expect(resolveB).toEqual(expect.any(Function));
+
+    resolveA!(fakeImage());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(rasterA.drawImage).toHaveBeenCalledTimes(1);
+    expect(rasterA.getImageData).toHaveBeenCalledTimes(1);
+    syncA.sync();
+    expect(setTextureA).not.toHaveBeenCalled();
+
+    resolveB!(fakeImage(100, 60));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(rasterB.drawImage).toHaveBeenCalledTimes(1);
+    expect(rasterB.getImageData).toHaveBeenCalledTimes(1);
+    syncB.sync();
+    expect(uploadsB).toEqual([{ id: "n1", width: 100, height: 60 }]);
+    syncB.dispose();
+  });
+
   it("视频节点不再由图片路径解码（交由 video-frame-session 负责）", async () => {
     (globalThis as unknown as { document: unknown }).document = {
       createElement: () => {
@@ -497,5 +564,41 @@ it("资源增量在 ACK 前保留、合并中间状态，完整基线 ACK 无须
   expect(sync.resourceStateChanges?.()).toEqual([]);
   current = canvas(true); sync.sync();
   expect(sync.resourceStateChanges?.()).toEqual([{ id: "n1", texture: false, mediaLoading: true }]);
+  sync.dispose();
+});
+
+it("keeps asynchronous image decodes in their originating visit across A B A", async () => {
+  const a = Object.freeze({canvasId:'a',token:'1',sequence:1});
+  const b = Object.freeze({canvasId:'b',token:'2',sequence:2});
+  const again = Object.freeze({canvasId:'a',token:'3',sequence:3});
+  let scope: CanvasScope = a;
+  const setTexture = vi.fn();
+  const pending: Array<(image: HTMLImageElement) => void> = [];
+  const loadImage = vi.fn(() => new Promise<HTMLImageElement>(resolve => pending.push(resolve)));
+  const {context} = fakeCanvasContext();
+  const current = canvas(true);
+  const runtime = {setTexture,currentCanvasScope:()=>scope} as unknown as BevyRuntime;
+  const sync = createTextureSync({runtime,getCanvas:()=>current,loadImage,
+    createCanvas:()=>({width:0,height:0,getContext:()=>context})});
+  sync.sync();
+  expect(pending).toHaveLength(1);
+  scope = b; sync.sync();
+  expect(pending).toHaveLength(2);
+  pending[1](fakeImage());
+  await new Promise(resolve=>setTimeout(resolve,0));
+  sync.sync();
+  expect(setTexture).toHaveBeenCalledTimes(1);
+  expect(setTexture.mock.calls[0][4].scope).toBe(b);
+  pending[0](fakeImage());
+  await new Promise(resolve=>setTimeout(resolve,0));
+  sync.sync();
+  expect(setTexture).toHaveBeenCalledTimes(1);
+  scope = again; sync.sync();
+  expect(pending).toHaveLength(3);
+  pending[2](fakeImage());
+  await new Promise(resolve=>setTimeout(resolve,0));
+  sync.sync();
+  expect(setTexture).toHaveBeenCalledTimes(2);
+  expect(setTexture.mock.calls[1][4].scope).toBe(again);
   sync.dispose();
 });
