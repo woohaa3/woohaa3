@@ -59,6 +59,11 @@ export type CanvasNodeData = Woohaa3CanvasJsonObject & {
    */
   codexImageImport?: boolean;
   /**
+   * 节点不是模型任务的产物（比如扩展用本地计算写入的图片）：选中时不打开模型执行面板。
+   * 中性标记，不绑定具体扩展。
+   */
+  suppressModelPanel?: boolean;
+  /**
    * 浏览器本地历史预览的失败信息。
    *
    * 只在 node-history 的 `ExecutionPreview` 渲染投影中写入：选中失败/取消归档时，卡片正文
