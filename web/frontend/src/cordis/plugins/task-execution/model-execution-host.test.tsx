@@ -412,18 +412,37 @@ describe("model choice persistence", () => {
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({ nodeId, modelKey: expected }));
   });
 
-  it("keeps an unavailable identity and offers an explicit model recovery without starting a run", async () => {
+  it("keeps the regular panel shape for an offline identity and only blocks execution", async () => {
     const canvas = canvasWithVideoNode(); canvas.nodeData[NODE_ID]!.preferredModelKey = "removed-model";
+    canvas.nodeData[NODE_ID]!.prompt = "镜头缓推";
     woohaa3CanvasStore.getState().hydrate(canvas);
     const run = vi.fn();
     const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
       writable runClient={{ run } as never} dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
       registry={registryWithPanel()} draftStore={createModelDraftStore()} />);
     expect(host.textContent).toContain("removed-model");
-    expect(host.textContent).toContain("下线");
+    expect(host.textContent).toContain("已从任务目录下线");
+    // 面板保持常规外观：提示词、参考区、来源与模型、主操作都在，只是主操作被禁用。
+    expect(host.querySelector(".mc-panel")).not.toBeNull();
+    expect(host.querySelector(".node-execution-dock__diagnostic")).toBeNull();
     expect(host.querySelector('button[aria-label="来源与模型"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="prompt-submit-hint"]')).not.toBeNull();
+    expect(host.querySelector<HTMLButtonElement>(".mc-panel__send")?.disabled).toBe(true);
+    // 已下线身份不可执行：仍不回落到其它模型，也不发起任务。
     expect(host.querySelector('[data-testid="video-panel"]')).toBeNull();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("keeps the offline reason visible when the canvas is read-only", async () => {
+    const canvas = canvasWithVideoNode(); canvas.nodeData[NODE_ID]!.preferredModelKey = "removed-model";
+    woohaa3CanvasStore.getState().hydrate(canvas);
+    const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
+      writable={false} runClient={{} as never} dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
+      registry={registryWithPanel()} draftStore={createModelDraftStore()} />);
+    // 只读时不重复「画布只读」这类会话级原因，但模型下线是节点自己的原因，仍要可见。
+    expect(host.textContent).toContain("已从任务目录下线");
+    expect(host.textContent).not.toContain("画布当前只读，无法执行任务");
+    expect(host.querySelector<HTMLButtonElement>(".mc-panel__send")?.disabled).toBe(true);
   });
   it("keeps the failed choice and prompt without a retry control, then follows canonical undo", async () => {
     let panel: ModelPanelProps | undefined;

@@ -10,7 +10,7 @@ import type {
   CanvasReferenceMediaKind,
   ServerCanvas
 } from "@woohaa3/contracts";
-import { decodeWorldCamera, worldCameraShotContext } from "@woohaa3/contracts";
+import { decodeWorldCamera, worldCameraShotContext, TASK_KIND_TO_MODEL_TYPE } from "@woohaa3/contracts";
 import { catalogBlockingReasons, catalogStateBlockingReasons, capabilityForModel } from "./catalog-projection.js";
 import { resolveNodeReferenceInputs } from "./input-resolution.js";
 import { modelParameterBlockingReasons, readGenerationMode, validateGenerationModeInputs } from "@woohaa3/contracts";
@@ -52,6 +52,27 @@ export function dedupe(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
 
+/**
+ * 已下线模型身份的阻止原因。
+ *
+ * 节点保留原模型身份、草稿、参数与结果，只阻止新提交。同类模型还有可用项时引导用户重选；
+ * 整个类型的模型都没了就不能让用户去选一个不存在的东西，文案改为只陈述事实。
+ *
+ * 文案同时用于阻止原因列表与「只读时仍要展示模型下线」的过滤，因此只有这一份措辞。
+ */
+export function offlineModelReason(modelKey: string, alternativesAvailable: boolean): string {
+  return alternativesAvailable
+    ? `所选模型 ${modelKey} 已从任务目录下线，请重新选择模型`
+    : `所选模型 ${modelKey} 不在任务目录中，当前没有可用的同类模型`;
+}
+
+/** 目录里是否还有该面板类型的可用模型（决定能否引导用户重选）。 */
+export function hasModelsForPanel(catalog: CanvasTaskCatalog | null, panelKind: NodePanelKind): boolean {
+  if (!catalog) return false;
+  const modelType = TASK_KIND_TO_MODEL_TYPE[panelKind];
+  return catalog.models.some((entry) => entry.modelType === modelType);
+}
+
 export type ResolveBlockingReasonsInput = {
   panelKind: NodePanelKind | null;
   nodeId: string;
@@ -87,7 +108,8 @@ export function resolveBlockingReasons(input: ResolveBlockingReasonsInput): stri
   if (catalog?.available && catalog.models.length > 0 && panelKind) {
     const capability = capabilityForModel(catalog, panelKind, model);
     if (!capability) {
-      reasons.push(model ? `所选模型 ${model} 当前不可用，请重新选择模型` : "该节点没有可用模型");
+      // 已下线的身份仍留在节点上（身份、草稿、参数、结果都保留），只阻止新提交。
+      reasons.push(model ? offlineModelReason(model, hasModelsForPanel(catalog, panelKind)) : "该节点没有可用模型");
     } else if (canvas) {
       const resolution = resolveNodeReferenceInputs({
         canvas,

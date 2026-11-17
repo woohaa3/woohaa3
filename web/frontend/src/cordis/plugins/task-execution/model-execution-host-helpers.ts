@@ -3,7 +3,7 @@
  * （change: 2026-09-29-add-pluggable-model-interactions，任务 4.1）。
  */
 import type { CanvasSession } from "../../contracts.js";
-import type { CanvasTaskCatalogModel, CanvasTaskModelType, ServerCanvas } from "@woohaa3/contracts";
+import type { ServerCanvas } from "@woohaa3/contracts";
 import { randomId } from "@woohaa3/contracts";
 import { planConnectEdge } from "../../../extension-api/command-planner.js";
 import type { ModelReferenceItem } from "../../contract/model-interaction.js";
@@ -82,22 +82,6 @@ export function mentionTypeFor(
   if (item.mediaKind === "video") return "input_video";
   if (item.mediaKind === "audio") return "input_audio";
   return "input_image";
-}
-
-/** catalog 模型不可用时的占位（仅用于诊断展示，不带任何可执行身份）。 */
-export function placeholderModel(modelKey: string, modelType: CanvasTaskModelType): CanvasTaskCatalogModel {
-  return {
-    modelKey,
-    providerId: "",
-    providerModelId: modelKey,
-    modelType,
-    title: modelKey,
-    interaction: { id: "generic-model", version: 1 },
-    inputSchema: {},
-    defaultInput: {},
-    bindings: [],
-    taskTimeoutMs: 0
-  };
 }
 
 /** 当前 DOM 中 panel-local 浮层是否打开（Escape 判定）。 */

@@ -53,6 +53,8 @@ import {
 } from "./catalog-projection.js";
 import {
   computePickerCandidates,
+  hasModelsForPanel,
+  offlineModelReason,
   resolveBlockingReasons,
   resolveModelMcpServerUrl,
   resolveSelectedModelKey
@@ -70,11 +72,12 @@ import {
   canMentionReference,
   fillReferenceSlot,
   mentionTypeFor,
-  placeholderModel,
   readPanelLocalSurface,
   changeReferences
 } from "./model-execution-host-helpers.js";
-import type { ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
+import { OfflineModelPanel } from "./offline-model-panel.js";
+import type { ModelPanelRenderers, ModelReferenceItem, ModelSubmitOutcome } from "../../contract/model-interaction.js";
+import type { CanvasTaskInputBinding } from "@woohaa3/contracts";
 import type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
 import type { ExecutionOrigin } from "./execution-launch.js";
 export type { ModelExecutionHostProps } from "./node-execution-panel-types.js";
@@ -189,7 +192,6 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const mediaPreparing = useNodeMediaPreparing(canvasId ?? "", context?.nodeId ?? "");
 
   const panelKind = context?.panelKind ?? null;
-  const modelType = panelKind ? modelTypeForPanelKind(panelKind) : null;
   const typedModels = useMemo(
     () => (catalog && panelKind ? allModelsForPanel(catalog, panelKind) : []),
     [catalog, panelKind]
@@ -302,7 +304,15 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   // 展示用阻止原因：会话只读（断线）时面板不重复枚举「网络已断开 / 目录尚未加载」这类
   // 会话级状态——左下角同步状态控件的常驻 tooltip 已经承载该信息。主操作仍由 `readOnly`
   // 真正禁用，提交门禁仍使用完整 `blockingReasons`。
-  const displayBlockingReasons = readOnly ? [] : blockingReasons;
+  //
+  // 「模型已下线」不是会话级状态，只读时也要保留：它是节点自己不能生成的原因，
+  // 左下角状态控件说不出来。
+  const offlineReason = targetModelKey && catalog && panelKind
+    ? offlineModelReason(targetModelKey, hasModelsForPanel(catalog, panelKind))
+    : null;
+  const displayBlockingReasons = readOnly
+    ? blockingReasons.filter((reason) => reason === offlineReason)
+    : blockingReasons;
 
   const diagnostic = useMemo<ModelInteractionDiagnostic | null>(() => {
     if (!context || !panelKind) return null;
@@ -313,11 +323,9 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       if (typedModels.length === 0) return null;
       return { kind: "legacy-ambiguous", message: "无法解析当前节点的模型，请重新选择模型" };
     }
-    if (!model) {
-      return { kind: "catalog-offline", model: placeholderModel(targetModelKey, modelType!) };
-    }
+    // 模型已下线不是交互插件问题：面板照常渲染，由阻止原因说明不可执行。
     return null;
-  }, [catalog, context, model, panelKind, targetModelKey, modelType, typedModels]);
+  }, [catalog, context, panelKind, targetModelKey, typedModels]);
 
   const submitCoordinator = useMemo(
     () =>
@@ -333,10 +341,26 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   );
   const executionMessage = submitError ?? (referenceError?.nodeId === context?.nodeId ? referenceError?.message : null);
 
+  /**
+   * 当前模型的参考输入能力。
+   *
+   * 已下线模型的参考能力**未知**，这里返回 `undefined` 而不是空数组：空数组的语义是「这个模型
+   * 不接受任何参考」，会把每张已有参考图都标成「所选模型不接受该角色」——那种假错误正是用户
+   * 看到「面板变了」的一部分。未知时只展示参考本身，不替模型下判断。
+   */
+  const modelReferenceBindings = useMemo<CanvasTaskInputBinding[] | undefined>(() => {
+    if (!catalog || !panelKind || !targetModelKey) return undefined;
+    return capabilityForModel(catalog, panelKind, targetModelKey)?.bindings;
+  }, [catalog, panelKind, targetModelKey]);
+
   const references = useMemo<ModelReferenceItem[]>(() => {
     if (!canvas || !context || !panelKind || !catalog || !targetModelKey) return [];
-    const bindings = capabilityForModel(catalog, panelKind, targetModelKey)?.bindings ?? [];
-    const projection = resolveReferenceItems({ canvas, nodeId: context.nodeId, bindings });
+    // 能力未知（模型下线）时不做能力判断，只投影参考本身：已有参考仍要可见、可 @ 引用。
+    const projection = resolveReferenceItems({
+      canvas,
+      nodeId: context.nodeId,
+      ...(modelReferenceBindings ? { bindings: modelReferenceBindings } : {})
+    });
     return projection.items.map((item) => ({
       sourceNodeId: item.sourceNodeId,
       slotId: item.slotId,
@@ -346,7 +370,7 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       ...(item.mediaKind ? { mediaKind: item.mediaKind } : {}),
       ...(item.previewUrl ? { previewUrl: item.previewUrl } : {})
     }));
-  }, [catalog, canvas, context, panelKind, targetModelKey]);
+  }, [catalog, canvas, context, panelKind, targetModelKey, modelReferenceBindings]);
 
   const mentionCandidates = useMemo(
     () =>
@@ -568,15 +592,14 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
       if (mounted.current && write === referenceWrite.current) setReferenceError({ nodeId: context.nodeId, message });
     });
   };
-  const referenceBindings = catalog ? capabilityForModel(catalog, panelKind, targetModelKey)?.bindings ?? [] : [];
   const referencesSlot = (
     <NodeExecutionReferences
       items={
         canvas
-          ? resolveReferenceItems({ canvas, nodeId: context.nodeId, bindings: referenceBindings }).items
+          ? resolveReferenceItems({ canvas, nodeId: context.nodeId, ...(modelReferenceBindings ? { bindings: modelReferenceBindings } : {}) }).items
           : []
       }
-      candidates={computePickerCandidates(canvas, context.nodeId, { bindings: referenceBindings })}
+      candidates={computePickerCandidates(canvas, context.nodeId, modelReferenceBindings ? { bindings: modelReferenceBindings } : {})}
       presentation={presentation}
       disabled={readOnly || pendingSelection}
       pickerOpen={pickerOpen}
@@ -600,6 +623,27 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
   const binding = definition?.bindings
     ? definition.bindings({ nodeId: context.nodeId, modelKey: targetModelKey, canvas })
     : undefined;
+
+  const panelRenderers: ModelPanelRenderers = {
+    modelSelector: () => <MediaConfiguration key={draftNodeId} models={typedModels} modelKey={targetModelKey} sourceId={sourceId} space={space} purpose={panelKind ?? "media"} service={agentService} disabled={readOnly || pendingSelection} onValidation={setSourceError} onManage={() => dialogs.open({ dialogId: "settings" })} onSelect={(key, source) => patchDraft({ parameters: { model: key, serviceConnectionId: source } })} />,
+    references: () => referencesSlot,
+    promptEditor: ({ value, onChange, disabled, placeholder, onSubmit }) => (
+      <MentionEditor
+        value={value}
+        onChange={onChange}
+        onSubmit={onSubmit}
+        candidates={mentionCandidates}
+        disabled={disabled}
+        placeholder={placeholder}
+        ariaLabel="提示词"
+        isMac={isMacPlatform(typeof navigator !== "undefined" ? navigator : undefined)}
+        readOnly={readOnly}
+        blocked={displayBlockingReasons.length > 0}
+        {...(snippetTrigger ? { snippetTrigger } : {})}
+      />
+    ),
+    ...(panelPromptSkill ? { promptSkill: panelPromptSkill } : {})
+  };
 
   const body = (
     <div
@@ -653,30 +697,36 @@ export function ModelExecutionHost(rawProps: ModelExecutionHostProps) {
             submit={handleSubmit}
             requestPresentation={submitIntent}
             {...(binding?.actions || panelActions ? { actions: { ...binding?.actions, ...panelActions } } : {})}
-            renderers={{
-              modelSelector: () => <MediaConfiguration key={draftNodeId} models={typedModels} modelKey={targetModelKey} sourceId={sourceId} space={space} purpose={panelKind ?? "media"} service={agentService} disabled={readOnly || pendingSelection} onValidation={setSourceError} onManage={() => dialogs.open({ dialogId: "settings" })} onSelect={(key, source) => patchDraft({ parameters: { model: key, serviceConnectionId: source } })} />,
-              references: () => referencesSlot,
-              promptEditor: ({ value, onChange, disabled, placeholder, onSubmit }) => (
-                <MentionEditor
-                  value={value}
-                  onChange={onChange}
-                  onSubmit={onSubmit}
-                  candidates={mentionCandidates}
-                  disabled={disabled}
-                  placeholder={placeholder}
-                  ariaLabel="提示词"
-                  isMac={isMacPlatform(typeof navigator !== "undefined" ? navigator : undefined)}
-                  readOnly={readOnly}
-                  blocked={displayBlockingReasons.length > 0}
-                  {...(snippetTrigger ? { snippetTrigger } : {})}
-                />
-              ),
-              ...(panelPromptSkill ? { promptSkill: panelPromptSkill } : {})
-            }}
+            renderers={panelRenderers}
           />
         </ModelPanelErrorBoundary>
       ) : model ? (
         <ModelInteractionDiagnosticView diagnostic={{ kind: "missing-plugin", model }} />
+      ) : catalog && targetModelKey ? (
+        /**
+         * 已下线模型：面板按常规外观继续渲染，只是主操作由阻止原因禁用。
+         * 整块换成诊断卡片会让提示词、参考素材和模型入口一起消失，用户看到的是"面板变了"
+         * 而不是"这个模型暂时不能生成"（用户反馈 2026-11-16）。
+         */
+        <div className="model-panel">
+          <OfflineModelPanel
+            panelKind={panelKind!}
+            modelKey={targetModelKey}
+            catalogModels={typedModels}
+            presentation={expanded ? "expanded" : "compact"}
+            status={effectiveStatus}
+            {...(taskState.progress !== undefined ? { progress: taskState.progress } : {})}
+            {...(taskState.errorMessage !== undefined ? { errorMessage: taskState.errorMessage } : {})}
+            prompt={draftPrompt}
+            parameters={parameters}
+            blockingReasons={displayBlockingReasons}
+            readOnly={readOnly}
+            renderers={panelRenderers}
+            references={referencesSlot}
+            onDraftChange={patchDraft}
+            requestPresentation={submitIntent}
+          />
+        </div>
       ) : readOnly ? null : (
         <ExecutionPanelShell ariaLabel="节点执行面板（目录不可用）" className="mc-panel--catalog-fallback">
           <div className="mc-panel__grid">
