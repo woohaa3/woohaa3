@@ -92,7 +92,7 @@ pub(crate) fn sync_textures(
         let handle = match texture_store.resolve(content, texture_px) {
             TextureAction::Reused(shared) => shared,
             TextureAction::Fresh => {
-                let image = Image::new(
+                let mut image = Image::new(
                     Extent3d {
                         width,
                         height,
@@ -103,6 +103,9 @@ pub(crate) fn sync_textures(
                     TextureFormat::Rgba8UnormSrgb,
                     RenderAssetUsages::default(),
                 );
+                if super::video_diagnostics::enabled() {
+                    image.texture_descriptor.usage |= bevy::render::render_resource::TextureUsages::COPY_SRC;
+                }
                 match existing.clone().filter(|_| !replace_shared) {
                     // 同尺寸的既有纹理：原地覆盖，保留 handle 与 Sprite。
                     Some((entity, _, _)) => {

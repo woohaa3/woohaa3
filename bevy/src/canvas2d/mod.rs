@@ -41,6 +41,8 @@ mod shared_key;
 pub(crate) mod text_presentation;
 mod texture_store;
 mod textures;
+pub(crate) mod video_diagnostics;
+mod video_draw_diagnostics;
 pub(crate) mod world_camera_connector;
 
 /// 共享纯布局函数（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm）：渲染与查询复用
