@@ -18,7 +18,7 @@ export async function createNativeRuntimeRealm(
 ): Promise<RuntimeRealm> {
   signal?.throwIfAborted();
   const bootstrap = nativeBootstrap(target);
-  if (bootstrap?.protocol !== "woohaa-native-v1") throw new Error("桌面画布协议不匹配");
+  if (bootstrap?.protocol !== "woohaa-native-v1") throw new Error("桌面画布协议不匹配：客户端与随包渲染器版本不一致，请重启 App");
   const canvas = target.document.getElementById("bevy-canvas") as HTMLCanvasElement | null;
   if (!canvas?.parentElement) throw new Error("画布输入表面尚未挂载");
   const host = canvas.parentElement;

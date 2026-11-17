@@ -1,6 +1,8 @@
 # Ark Provider
 
-后端扩展把火山方舟收成一个 Provider：文本走 Chat Completions，图片走 Seedream，视频走 Seedance。模型目录是内置的公开 Model ID；某个模型要能执行，还得在配置里写上它的推理接入点（`ep-`）。请求里的 `model` 用接入点 ID。
+后端扩展把火山方舟收成一个 Provider：文本走 Chat Completions，图片走 Seedream，视频走 Seedance。模型目录是内置的公开 Model ID。图片侧已覆盖 Seedream 5.5 / 5.0 pro / 5.0 flash / 5.0 lite / 4.5 / 4.0。
+
+**填上 API Key 就能用，推理接入点不是必需的**：方舟允许直接拿公开 Model ID 发起请求，所以目录里的模型全部可执行。只有想把调用绑到自己的限流/计费策略时，才需要为具体模型填 `ep-` 接入点——填了优先用接入点，没填就用 Model ID。
 
 它是本机宿主插件树扩展层的插件。全部配置都在 `providers.ark` 里，设置页「模型 Provider」中的 Ark 卡片按这份声明生成表单。密钥类字段（`secret`）写进本地密钥文件 `web/woohaa.secrets.yml`（0600），其余写进 `web/woohaa.config.yml`；密钥不进入前端，设置页只显示「已配置 / 未配置」。
 
@@ -11,7 +13,7 @@
 | `apiKey`（密钥） | 火山方舟 API Key | `ARK_VIDEO_API_KEY` |
 | `baseUrl` | API 根路径，默认 `https://ark.cn-beijing.volces.com/api/v3`。如果值以 `/contents/generations/tasks` 结尾，会自动去掉，用来接住以前的视频任务地址 | `ARK_VIDEO_GENERATION_URL` |
 
-设置页「模型接入点」按目录列出文本、图像和视频模型。勾选要用的模型，再填写它的推理接入点（`ep-` 开头）。没勾选或留空的模型不注册。`ARK_VIDEO_SEEDANCE2_0_MODEL` / `ARK_VIDEO_SEEDANCE2_5_MODEL` 会锁定对应模型的接入点。
+设置页「模型接入点」按目录列出文本、图像和视频模型。这些字段**全部可以留空**：留空就用公开 Model ID 直接调用；填 `ep-` 开头就改为走推理接入点。`ARK_VIDEO_SEEDANCE2_0_MODEL` / `ARK_VIDEO_SEEDANCE2_5_MODEL` 会锁定对应模型的接入点。
 
 ## 即梦（Seedream）的图片参数
 
@@ -19,10 +21,26 @@
 
 - 比例选具体画幅（1:1、16:9…）时，按该版本的官方像素表下发 `WIDTHxHEIGHT`，这才是真正固定宽高比；
 - 比例选「自适应」（默认）时只下发分辨率档位，由模型结合提示词决定宽高——即官方推荐的「方式 1」；
-- 图层拆分（仅 5.0 pro / flash）只接受档位，此时比例控件隐藏；
-- 4.0 的官方文档只列出一组像素值、没有按档位拆分，所以不提供比例控件，只用档位。
+- 图层拆分（仅 5.5 / 5.0 pro / flash）只接受档位，此时比例控件隐藏；5.5 还可设 `max_images`（2–100）与文字图层 OCR。
 
-组图（`sequential_image_generation`）只在 lite / 4.x 上出现，5.0 pro / flash 只出单图。
+**官方像素表按版本族分组，不能混用**：同一档位在不同族里是不同像素值。5.5 / 5.0 pro / flash 的 2K 16:9 是 `2816x1584`，而 5.0 lite / 4.5 的 2K 16:9 是 `2848x1600`；4.0 的 1K 又是单独一套（16:9 = `1280x720`）。选错表会让「固定宽高比」失效。
+
+组图（`sequential_image_generation`）只在 lite / 4.x 上出现，5.5 与 5.0 pro / flash 只出单图。
+
+### 逐版本字段边界（传错直接 400）
+
+很多字段不是「填了就有用」，而是**这个版本压根不认**。这些开关都放在卡片的 `features` 里，Provider 只负责读：
+
+| 能力 | 5.5 | 5.0 pro | 5.0 flash | 5.0 lite | 4.5 | 4.0 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_format` 字段 | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| 透明背景 | ✓（文生图也可） | ✓（仅单张透明图生图） | ✓（同左） | ✗ | ✗ | ✗ |
+| 图层拆分 `layer_decomposition_options` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| 极速提示词优化 `mode: fast` | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ |
+| 联网搜索 `tools` | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| 流式 `stream` | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+
+`output_format` 那两行是关键：4.5 / 4.0 只出 JPEG，且**连 `output_format: "jpeg"` 也拒**（`the parameter output_format is not supported by the current model`），所以面板对它们不展示「输出格式」控件，请求体也一个字符都不带。
 
 ## 图片素材库
 

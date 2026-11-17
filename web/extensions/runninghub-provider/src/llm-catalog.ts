@@ -10,9 +10,15 @@
  */
 import { isAgentReasoningEffort, reasoningEffortsForModel, type AgentReasoningEffort, type GenerationModelDefinition } from "@woohaa3/contracts";
 import fixture from "../data/llm-models.json";
+import cnFixture from "../data/llm-models.cn.json";
 import { RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
+import type { RunningHubRegion } from "./region.js";
 
-/** 文字模型独立端点（与媒体任务 API 不同域）；由扩展声明给服务来源投影。 */
+/**
+ * 文字模型独立端点的国际站默认值（与媒体任务 API 不同域）。
+ *
+ * 插件按 API Key 识别出的区域覆盖：国际站 `llm.runninghub.ai`，国内站 `llm.runninghub.cn`。
+ */
 export const RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.ai/v1";
 /** 官方文字目录；公开只读，不需要 Key。 */
 export const RUNNINGHUB_LLM_CATALOG_URL = `${RUNNINGHUB_LLM_BASE_URL}/models`;
@@ -124,8 +130,10 @@ export function parseRunningHubLanguageCatalog(payload: unknown): RunningHubLang
 }
 
 /** 进程内已发布目录：初始为脱敏 fixture，完整刷新成功后原子替换。 */
-let published: RunningHubLanguageModel[] = fixtureModels();
+let published: RunningHubLanguageModel[] = fixtureModels("ai");
 let revision = 1;
+/** 当前 fixture 所属区域；只用于换 Key 后区域变化时重置，不覆盖同区域的刷新结果。 */
+let fixtureRegion: RunningHubRegion = "ai";
 
 export function languageCatalog(): readonly RunningHubLanguageModel[] {
   return published;
@@ -141,15 +149,36 @@ export function setRunningHubLanguageModels(models: readonly RunningHubLanguageM
   revision += 1;
 }
 
-/** 测试用：回到入库 fixture。 */
-export function resetRunningHubLanguageModels(): void {
-  published = fixtureModels();
+/** 测试用：回到指定区域的入库 fixture。 */
+export function resetRunningHubLanguageModels(region: RunningHubRegion = "ai"): void {
+  fixtureRegion = region;
+  published = fixtureModels(region);
   revision += 1;
 }
 
-function fixtureModels(): RunningHubLanguageModel[] {
-  const parsed = parseRunningHubLanguageCatalog(fixture);
-  return parsed.ok ? parsed.models : [];
+/**
+ * 切换到站点区域对应的入库目录。
+ *
+ * 同区域重复调用不会清掉用户刚刷新过的目录；区域变化时用新站点的 fixture 替换，避免国内站
+ * 继续展示国际站独有的文字模型。
+ */
+export function ensureRunningHubLanguageRegion(region: RunningHubRegion): void {
+  if (fixtureRegion === region) return;
+  fixtureRegion = region;
+  published = fixtureModels(region);
+  revision += 1;
+}
+
+function fixtureModels(region: RunningHubRegion): RunningHubLanguageModel[] {
+  const source = region === "cn" ? cnFixture : fixture;
+  const parsed = parseRunningHubLanguageCatalog(source);
+  if (parsed.ok) return parsed.models;
+  // CN fixture 损坏时退回国际站目录，宁可多显示模型也不要发布空目录。
+  if (region === "cn") {
+    const fallback = parseRunningHubLanguageCatalog(fixture);
+    return fallback.ok ? fallback.models : [];
+  }
+  return [];
 }
 
 /** 显式刷新：失败时返回原因，调用方保留当前目录。 */

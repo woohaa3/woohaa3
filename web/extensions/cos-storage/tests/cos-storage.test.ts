@@ -226,7 +226,7 @@ describe("配置归一化（缺项不再抛错）", () => {
     expect(exposers[0]).toMatchObject({
       exposerId: "cos", label: "COS / S3 对象存储", ownerExtensionId: "cos-storage",
       requiresReplica: true, targetBackendId: "cos",
-      temporaryHosting: { category: "provider", priority: 100, validitySeconds: 900 }
+      temporaryHosting: { category: "provider", priority: 100 }
     });
     expect(exposers[0]!.temporaryHosting!.ready!()).toBe(true);
     registered[0]!.presign = async (key, options) => `https://signed.invalid/${key}?expires=${options?.expiresSeconds}`;

@@ -162,6 +162,44 @@ describe("宿主 runtime adapter", () => {
     expect(fallback).not.toHaveBeenCalled();
     expect(emitted).toEqual([]);
   });
+
+  it("下发回合时将 adapter 的 acquireExecutable 租约解析结果写入 payload 并在结束后释放", async () => {
+    const stateDir = tempDir();
+    let receivedPayload: Record<string, unknown> | undefined;
+    const daemon = await startExecutorDaemon({
+      socketPath: path.join(stateDir, "executor.sock"),
+      stateDir,
+      token: "token",
+      workspaceKey: "workspace",
+      defaultExecutor: "echo",
+      executors: [{
+        id: "echo",
+        kind: "any",
+        async run(turn) {
+          receivedPayload = turn.payload as Record<string, unknown>;
+          return { status: "succeeded", result: { outcome: { status: "succeeded" } } };
+        }
+      }]
+    });
+    cleanups.push(() => daemon.close());
+    let released = false;
+    const base = adapter(vi.fn());
+    base.acquireExecutable = async () => ({
+      entry: "/custom/bin/codex",
+      release: () => { released = true; }
+    });
+    const wrapped = createRuntimeConversationAdapter(base, {
+      socketPath: daemon.socketPath,
+      token: "token",
+      workspaceKey: "workspace",
+      executor: "echo",
+      bridge: { socketPath: path.join(stateDir, "bridge.sock"), token: "bridge", workspaceKey: "workspace" }
+    });
+    const outcome = await wrapped.run(runInput([]));
+    expect(outcome).toMatchObject({ status: "succeeded" });
+    expect(receivedPayload?.executable).toBe("/custom/bin/codex");
+    expect(released).toBe(true);
+  });
 });
 
 

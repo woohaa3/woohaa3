@@ -342,7 +342,18 @@ export async function finishInstall(ctx: ManagerContext, job: Job, packageFile: 
         // 已隔离的扩展重装失败：指针与版本证据回退到隔离前的状态，只额外标记“清理要再做一遍”，
         // 避免记录停在“已提交新版本、实际没起来”的半新状态。
         commit(draft => { draft.extensions[extensionId] = {...existing, quarantineCleanupPending:true}; });
-      } else if (existing) switchPointer(extensionId, existing.current, "reload-failed-rollback", "system", version);
+      } else if (existing) {
+        switchPointer(extensionId, existing.current, "reload-failed-rollback", "system", version);
+        // 指针已经回到旧版本。热切换或浏览器发布可能已经换上新目录，再装回旧目录，
+        // 避免记录是旧版本、进程和发布目录却停在失败的新版本。
+        if (previousDirectory) {
+          try {
+            await reload(extensionId, previousDirectory, hasBackend, { previousDirectory: versionDir, hotSwappable });
+          } catch (restoreError) {
+            log({ event: "extension-upgrade-rollback-failed", extensionId, message: restoreError instanceof Error ? restoreError.message : String(restoreError) });
+          }
+        }
+      }
       else commit((draft) => {
         delete draft.extensions[extensionId];
       });

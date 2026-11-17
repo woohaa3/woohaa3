@@ -62,16 +62,40 @@ export type IdentityRegistryEntry = {
  *
  * **这条规则必须与 `dsh-plugins/woohaa-attach` 的 `resolveRegistryDir` 完全一致**——那边是
  * 读取方，本文件是写入方，两边算不出同一个目录就等于没有登记表。改动时两处一起改。
+ *
+ * 「没有 uid 就不加后缀」是两端最容易走偏的一处：读取方曾经在没有 `getuid` 时兜成 `0`，
+ * 于是 Windows 上写入方写 `instances`、读取方找 `instances-0`，登记表形同不存在。Windows 的
+ * `tmpdir()` 本身就按用户隔离（`C:\Users\<user>\AppData\Local\Temp`），不需要 uid 后缀。
  * @param home - 运行目录（测试注入用）；缺省按平台推导。
  * @returns 登记目录绝对路径。
  */
 export function resolveRegistryDir(home?: string): string {
   if (home !== undefined) return path.join(home, REGISTRY_DIR_NAME);
-  const runtime = process.env.XDG_RUNTIME_DIR?.trim();
+  return registryDirFrom({
+    xdgRuntimeDir: process.env.XDG_RUNTIME_DIR,
+    // 没有 getuid 的平台（Windows）传 undefined：不加后缀。
+    uid: typeof process.getuid === "function" ? process.getuid() : undefined,
+    tmpdir: os.tmpdir()
+  });
+}
+
+/**
+ * 登记目录这条规则的**唯一实现**，供写入方与读取方共用。
+ *
+ * 两端各写一份判断的历史教训见 {@link resolveRegistryDir} 的注释；判定本身没有平台分支，
+ * 所以只要有一处算错就整体失效。这里把「uid 存在与否 → 有没有后缀」抽成一个纯函数，
+ * 让它能被两边各自的测试逐字钉住。
+ * @param input - 运行目录、syscall 提供的 uid（可为空）与 tmpdir。
+ * @returns 登记目录绝对路径（未做 path.normalize）。
+ */
+export function registryDirFrom(input: {
+  xdgRuntimeDir?: string | undefined;
+  uid?: number | undefined;
+  tmpdir: string;
+}): string {
+  const runtime = input.xdgRuntimeDir?.trim();
   if (runtime) return path.join(runtime, REGISTRY_DIR_NAME);
-  // Windows 的 tmpdir 本身按用户隔离，不必再加 uid；POSIX 的 /tmp 是共享的。
-  const uid = typeof process.getuid === "function" ? String(process.getuid()) : "";
-  return path.join(os.tmpdir(), "woohaa3", uid === "" ? "instances" : `instances-${uid}`);
+  return path.join(input.tmpdir, "woohaa3", input.uid === undefined ? "instances" : `instances-${input.uid}`);
 }
 
 /** 一条登记的完整文件路径。 */

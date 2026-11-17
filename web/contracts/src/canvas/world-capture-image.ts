@@ -10,6 +10,7 @@
  * JPEG and WebP. Unknown or malformed input returns `null` and the caller must reject
  * the image instead of assuming a 1x1 or the requested output size.
  */
+import { readImageMediaType } from "../media/image-type.js";
 
 export type WorldCaptureImageDimensions = {
   readonly width: number;
@@ -22,6 +23,21 @@ export function isInspectableWorldCaptureContentType(contentType: string): boole
     || contentType === "image/jpeg"
     || contentType === "image/jpg"
     || contentType === "image/webp";
+}
+
+export type WorldCaptureImageType = "image/png" | "image/jpeg" | "image/webp";
+
+/**
+ * Identify the encoded image family from its signature, ignoring any declared media type.
+ *
+ * Generated results are not always labelled correctly: a provider that returns base64
+ * without `mediaType` is recorded as the `image/png` default even when the bytes are JPEG
+ * or WebP. Callers that must read the real payload (image headers, model image inputs)
+ * should resolve the type from bytes and use that instead of the label.
+ */
+export function readWorldCaptureImageType(bytes: Uint8Array): WorldCaptureImageType | null {
+  const type = readImageMediaType(bytes);
+  return type === "image/png" || type === "image/jpeg" || type === "image/webp" ? type : null;
 }
 
 /**

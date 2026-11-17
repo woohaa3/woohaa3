@@ -145,4 +145,51 @@ describe("local-agent daemon executor", () => {
     }, context(stateDir, []));
     expect(outcome).toMatchObject({ status: "failed", error: { code: "role-not-found" } });
   });
+
+  it("优先使用宿主在 payload 中下发的权威可执行路径", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "woohaa3-local-executor-"));
+    cleanups.push(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+    let spawnedCommand = "";
+    const transport: LocalAgentTransport = {
+      id: "opencode-server",
+      probe: async () => ({ ok: true }),
+      run: async () => ({ ok: true, outcome: { status: "succeeded" } })
+    };
+    const executor = createLocalAgentExecutor({
+      transports: { "opencode-server": transport },
+      executableFor: () => "/fallback/bin"
+    });
+    const runCtx = context(stateDir, []);
+    runCtx.processes.ensure = async (input) => {
+      spawnedCommand = input.command;
+      return {
+        key: `${input.adapterId}\u0000${input.owner}\u0000${input.connectionId}`,
+        adapterId: input.adapterId,
+        owner: input.owner,
+        connectionId: input.connectionId,
+        kind: input.kind,
+        loopbackUrl: "http://127.0.0.1:1",
+        stdioPath: null,
+        pid: 1,
+        startedAt: Date.now()
+      };
+    };
+    const outcome = await executor.run({
+      turnId: "turn",
+      requestId: "request",
+      kind: "agent",
+      prepared: prepared(),
+      payload: {
+        owner: "owner",
+        canvasId: "canvas",
+        conversationId: "conversation",
+        intent: { action: "discuss", canvasId: "canvas", prompt: "hello" },
+        connection: { connectionId: "connection", adapterId: "opencode-server", configRevision: 1, credentialEpoch: 1 },
+        record: record(),
+        executable: "/host/provided/custom-bin"
+      }
+    }, runCtx);
+    expect(outcome).toMatchObject({ status: "succeeded" });
+    expect(spawnedCommand).toBe("/host/provided/custom-bin");
+  });
 });

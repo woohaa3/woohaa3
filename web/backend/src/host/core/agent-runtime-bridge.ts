@@ -55,7 +55,7 @@ export type AgentRuntimeBridgeOptions = {
   socketPath: string;
   token: string;
   workspaceKey: string;
-  /** 运行时目录（桥身份 `host-bridge.json` 与 host key 的位置）；缺省取 socket 所在目录。 */
+  /** 运行时目录（桥身份 `host-bridge.json` 与 host key 的位置）；Unix socket 缺省取所在目录。 */
   runtimeDir?: string;
   tools: ApplicationToolDelegationFacade;
   canvasRead(input: { subject: string; canvasId: string }): Promise<ServerCanvas>;
@@ -158,7 +158,9 @@ export async function createAgentRuntimeBridge(options: AgentRuntimeBridgeOption
   const byTurn = new Map<string, (method: string, params: unknown) => Promise<unknown>>();
   const log = options.logger ?? (() => undefined);
   const now = options.now ?? (() => Date.now());
-  const runtimeDir = options.runtimeDir ?? path.dirname(options.socketPath);
+  const runtimeDir = options.runtimeDir ?? (process.platform === "win32" ? "" : path.dirname(options.socketPath));
+  // `\\.\pipe\` 是 IPC 命名空间，不能用 dirname 推导出的路径保存身份文件。
+  if (!runtimeDir) throw new Error("Windows Host bridge 需要真实的运行时目录");
   fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 
   // 身份跨宿主重启复用：旧 daemon 仍带着上一进程签发的桥 token/key。

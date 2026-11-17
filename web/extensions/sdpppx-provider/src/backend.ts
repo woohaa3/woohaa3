@@ -133,14 +133,11 @@ export function createSdpppxProviderPlugin(
       let catalogRevision = 0;
       let refreshPromise: Promise<SdpppxResult<SdpppxModelRefreshResult>> | null = null;
       let balanceCache: { userId: string; at: number; value: SdpppxBalance | null } | null = null;
-      let recommendUploadProvider: string | null = null;
 
       const uploads: SdpppxReferenceUploader = createSdpppxReferenceUploader({
         config,
         session,
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-        now,
-        recommendUploadProvider: () => recommendUploadProvider,
         log: (event) => log(event)
       });
 
@@ -153,9 +150,6 @@ export function createSdpppxProviderPlugin(
         now,
         ...(options.jobRepository ? { jobRepository: options.jobRepository } : {}),
         ...(options.pollIntervalMs !== undefined ? { pollIntervalMs: options.pollIntervalMs } : {}),
-        onRecommendUploadProvider: (provider) => {
-          recommendUploadProvider = provider;
-        },
         log: (event) => log(event)
       });
 
@@ -192,7 +186,6 @@ export function createSdpppxProviderPlugin(
         models.splice(0, models.length);
         catalogRevision += 1;
         balanceCache = null;
-        recommendUploadProvider = null;
         uploads.clear();
         runtime.clear();
         syncRegistration();
@@ -366,6 +359,7 @@ export function createSdpppxProviderPlugin(
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(options.mediaUpload ? { upload: options.mediaUpload } : {}),
         ...(options.mediaProbe ? { probe: options.mediaProbe } : {}),
+        onUploaded: (url) => uploads.rememberUrl(url),
         log: (event) => log(event)
       });
       ctx.effect(() => ctx.exposer.register(temporary));

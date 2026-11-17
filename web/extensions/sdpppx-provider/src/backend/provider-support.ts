@@ -5,7 +5,7 @@
  * 注入 fetch，便于单测。结果地址只从 `outputs` 结构里取，避免把提示词里的 URL 当媒体。
  */
 import type { GenerationPrepareInput } from "@woohaa3/contracts";
-import { SDPPPX_RAW_PARAMS_FIELD, type SdpppxInputSchema } from "./schema.js";
+import type { SdpppxInputSchema } from "./schema.js";
 
 export const IMAGE_DOWNLOAD_TIMEOUT_MS = 60_000;
 export const IMAGE_MAX_BYTES = 32 * 1024 * 1024;
@@ -150,14 +150,13 @@ export type ReferenceAllowlist = { isUploaded(url: string): boolean };
  * 把面板输入按模板 schema 组装成远端 payload。
  *
  * - 只透传 schema 声明的字段；
- * - prompt 落在部署配置的字段名上；
+ * - 模板声明了 prompt 字段时，把画布解析出的提示词写回该字段；
  * - 参考素材按 `referenceFields` 的媒体类型与多值能力落位，名单外地址直接拒绝；
- * - `rawParams` 最后覆盖，允许模板的未识别字段逃生。
+ * - 不支持 rawParams：未识别字段不进入面板，也不从客户端直传。
  */
 export function buildSdpppxPayload(
   input: GenerationPrepareInput,
   schema: SdpppxInputSchema,
-  promptField: string,
   uploads: ReferenceAllowlist
 ): RecordValue {
   const properties = isRecord(schema.inputSchema.properties)
@@ -165,14 +164,13 @@ export function buildSdpppxPayload(
     : {};
   const payload: RecordValue = {};
   for (const key of Object.keys(properties)) {
-    if (key === SDPPPX_RAW_PARAMS_FIELD) continue;
     const value = input.parameters[key];
     if (value !== undefined && value !== null && value !== "") {
       payload[key] = value;
     }
   }
-  if (schema.promptRequirement !== "none" && input.prompt.trim() !== "") {
-    payload[promptField] = input.prompt.trim();
+  if (schema.hasPromptField && input.prompt.trim() !== "") {
+    payload[schema.promptField] = input.prompt.trim();
   }
 
   if (input.references.length > 0) {
@@ -201,18 +199,5 @@ export function buildSdpppxPayload(
     }
   }
 
-  const raw = textOf(input.parameters[SDPPPX_RAW_PARAMS_FIELD]);
-  if (raw) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new SdpppxProviderError("原样参数不是合法 JSON", "sdpppx-task-failed");
-    }
-    if (!isRecord(parsed)) {
-      throw new SdpppxProviderError("原样参数必须是 JSON 对象", "sdpppx-task-failed");
-    }
-    Object.assign(payload, parsed);
-  }
   return payload;
 }

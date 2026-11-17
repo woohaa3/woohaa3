@@ -138,7 +138,6 @@ export function decodeSdpppxSnapshot(value: unknown): SdpppxSessionSnapshot | nu
       bridgeHost: textOf(config.bridgeHost) ?? null,
         templateModelTypes: stringMap(config.templateModelTypes),
       promptField: textOf(config.promptField) ?? "prompt",
-      uploadProvider: textOf(config.uploadProvider) ?? "",
       taskTimeoutMs: numberValue(config.taskTimeoutMs) ?? 0
     },
     session: parseSessionView(record.session),

@@ -14,7 +14,6 @@ import { reloadApplication } from "../../app-error-boundary.js";
 export type ModelInteractionDiagnostic =
   | { kind: "missing-plugin"; model: CanvasTaskCatalogModel }
   | { kind: "interaction-mismatch"; model: CanvasTaskCatalogModel; current: { id: string; version: number } }
-  | { kind: "catalog-offline"; model: CanvasTaskCatalogModel }
   | { kind: "legacy-ambiguous"; message: string }
   | { kind: "render-error"; model: CanvasTaskCatalogModel; message: string };
 
@@ -24,8 +23,6 @@ export function interactionDiagnosticMessage(diagnostic: ModelInteractionDiagnos
       return `模型「${diagnostic.model.title}」需要的交互插件（${diagnostic.model.interaction.id}@${diagnostic.model.interaction.version}）未安装，无法执行`;
     case "interaction-mismatch":
       return `模型「${diagnostic.model.title}」的交互配置已变化（catalog ${diagnostic.model.interaction.id}@${diagnostic.model.interaction.version}，当前 ${diagnostic.current.id}@${diagnostic.current.version}），请刷新后重新选择`;
-    case "catalog-offline":
-      return `模型「${diagnostic.model.title}」已从任务目录下线，无法执行`;
     case "legacy-ambiguous":
       return diagnostic.message;
     case "render-error":

@@ -224,6 +224,8 @@ export function createLocalAgentExtension(
           value: {
             ...instance,
             runtimeExecutor: "local-agent",
+            acquireExecutable: () => executables.acquire(adapter.adapterId),
+            resolveExecutable: () => executables.executableFor(adapter.adapterId),
             run: async () => ({ status: "failed", error: { code: "runtime-required", message: "本机 Agent 必须经独立执行器调用" } }),
             cancel: undefined,
             query: undefined

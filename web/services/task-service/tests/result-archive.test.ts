@@ -71,6 +71,7 @@ function record(overrides: Partial<PptaskTaskRecord> = {}): PptaskTaskRecord {
 }
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+const JPEG = new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1]);
 
 describe("落库前归档（result-archive）", () => {
   it("state 与 result 携带同一份字节时只 import 一次，两处都换成稳定引用", async () => {
@@ -181,11 +182,75 @@ describe("落库前归档（result-archive）", () => {
     expect(bytesFromBase64Descriptor({ type: "base64", data: ok }, 3)).toBeNull();
   });
 
-  it("多产物结果不归档（不静默丢弃第二份产物）", async () => {
+  it("多产物结果逐张归档：每份都 import，落库写 outputs（图层拆分的主路径）", async () => {
     const { client, imports } = makeClient();
     const archive = createResultArchiver({ mediaClient: client });
-    expect(await archive(record({ result: { images: [PNG, new Uint8Array([1, 2, 3])] } }))).toBeUndefined();
-    expect(imports).toHaveLength(0);
+    const layer2 = new Uint8Array([1, 2, 3]);
+    // 内容相同也要按 provider 顺序各占一项：outputs 的序号就是 draw order。
+    const payload = record({ result: { images: [PNG, layer2], providerMetadata: { ark: { images: [] } } } });
+
+    const archived = await archive(payload);
+
+    expect(imports).toHaveLength(2);
+    // 主产物仍落在顶层 `media`（isGenerationStableMediaResult 只认它）。
+    expect(archived?.result).toMatchObject({
+      media: { storageKey: IMAGE_KEY, contentType: "image/png", size: PNG.length },
+      providerMetadata: { ark: { images: [] } }
+    });
+    const outputs = (archived?.result as { outputs: Array<Record<string, unknown>> }).outputs;
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0]).toMatchObject({ index: 0, storageKey: IMAGE_KEY, size: PNG.length });
+    expect(outputs[1]).toMatchObject({ index: 1 });
+    // 二进制数组必须已经不在了，否则 JSON.stringify 仍会把它展开成 13 倍的索引对象。
+    expect((archived?.result as Record<string, unknown>).images).toBeUndefined();
+    expect((payload.result as { images: unknown[] }).images).toHaveLength(2);
+  });
+
+  it("多产物有一张转存失败时整体保留字节（不落半套引用）", async () => {
+    let calls = 0;
+    const client = {
+      verify: async () => ({ exists: true, matches: true }),
+      sign: async () => "https://cos.example/signed",
+      importFromUrl: async () => mediaMetadata(),
+      importBytes: async () => {
+        calls += 1;
+        if (calls === 2) throw new Error("storage down");
+        return mediaMetadata();
+      }
+    } as unknown as MediaClient;
+    const logs: Array<Record<string, unknown>> = [];
+    const archive = createResultArchiver({ mediaClient: client, logger: (event) => logs.push(event) });
+    const payload = record({ result: { images: [PNG, new Uint8Array([1, 2, 3])] } });
+
+    expect(await archive(payload)).toBeUndefined();
+    // 入参一份都不能少：字节是 URL 过期后唯一的退路。
+    expect((payload.result as { images: unknown[] }).images).toHaveLength(2);
+    expect(logs.map((event) => event.event)).toContain("task-result-archive-failed");
+  });
+
+  it("归档事件带 outputs 计数，便于在日志里认出图层拆分", async () => {
+    const { client } = makeClient();
+    const logs: Array<Record<string, unknown>> = [];
+    const archive = createResultArchiver({ mediaClient: client, logger: (event) => logs.push(event) });
+    await archive(record({ result: { images: [PNG, new Uint8Array([9])] } }));
+
+    const archived = logs.find((event) => event.event === "task-result-archived");
+    expect(archived).toMatchObject({ outputs: 2, modelType: "image" });
+  });
+
+  it("URL 产出的图片按字节签名落库，不被默认的 image/png 覆盖", async () => {
+    const { client, imports } = makeClient();
+    const archive = createResultArchiver({ mediaClient: client });
+    // URL 结果的 providerMetadata 只有地址没有类型，类型推断会退回默认 image/png。
+    const payload = record({
+      result: { images: [JPEG], providerMetadata: { tokenhub: { images: [{ url: "https://files.example/a.jpeg" }] } } }
+    });
+
+    const archived = await archive(payload);
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0]).toMatchObject({ contentType: "image/jpeg" });
+    expect(archived?.result).toMatchObject({ media: { contentType: "image/jpeg" } });
   });
 });
 
@@ -236,6 +301,97 @@ describe("SQLite 落库边界", () => {
     db.close();
     expect(row.r).toBeLessThan(4096);
     expect(row.s).toBeLessThan(4096);
+  });
+
+  it("图层拆分（多产物）落库：列体积仍是 KB 级，输出逐张留稳定引用", async () => {
+    const { client, imports } = makeClient();
+    const file = tempDb();
+    const store = createSqliteTaskStore({
+      path: file,
+      transformPayload: createResultArchiver({ mediaClient: client })
+    });
+    await store.submit({
+      key: "run-layers",
+      providerId: "ark",
+      params: { modelType: "image", modelId: "doubao-seedream-5-5-261028" },
+      context: { canvasId: "canvas-1" },
+      now: new Date(1000)
+    });
+    const claimed = (await store.claimDue({ now: new Date(2000), leaseUntil: new Date(9000) }))!;
+    // 8 张 512KB 图层 ≈ 4MB 载荷。修复前每字节展开成 13 字符的 `{"n":v}`，state/result 各存
+    // 一份 → 单行超过 100MB，save 的同步序列化足以卡死事件循环。
+    const layers = Array.from({ length: 8 }, (_, index) => new Uint8Array(512 * 1024).fill(index + 1));
+
+    await store.save({
+      ...claimed,
+      result: { images: layers, providerMetadata: { ark: { images: [] } } },
+      state: { jobId: "job-1", record: { id: "job-1", state: "succeeded", result: { images: layers, providerMetadata: { ark: { images: [] } } } } }
+    });
+
+    expect(imports).toHaveLength(8);
+    const saved = await store.find("run-layers");
+    expect((saved?.result as { outputs?: unknown[] }).outputs).toHaveLength(8);
+    expect((saved?.result as Record<string, unknown>).images).toBeUndefined();
+    store.close();
+
+    const { DatabaseSync } = loadNodeSqlite();
+    const db = new DatabaseSync(file);
+    const row = db
+      .prepare("SELECT length(state_json) AS s, length(result_json) AS r FROM task_records WHERE key = ?")
+      .get("run-layers") as { s: number; r: number };
+    db.close();
+    // 4MB 载荷若未归档会是数十 MB；归档后只剩 8 条引用。
+    expect(row.r).toBeLessThan(8192);
+    expect(row.s).toBeLessThan(8192);
+  });
+
+  it("归档记录的 outputs 由消费端按引用 adopt，不再回读字节", async () => {
+    const { client, imports } = makeClient();
+    const file = tempDb();
+    const store = createSqliteTaskStore({
+      path: file,
+      transformPayload: createResultArchiver({ mediaClient: client })
+    });
+    await store.submit({ key: "run-2", providerId: "ark", params: { modelType: "image" }, now: new Date(1000) });
+    const claimed = (await store.claimDue({ now: new Date(2000), leaseUntil: new Date(9000) }))!;
+    await store.save({ ...claimed, result: { images: [PNG, new Uint8Array([1, 2, 3])] } });
+    expect(imports).toHaveLength(2);
+
+    // 重启对账读同一条记录：应当只拿到稳定引用，不再有可搬的字节。
+    const { readRawBinarySources } = await import("../src/worker/media-materialization.js");
+    const sources = readRawBinarySources(await store.find("run-2"), "image");
+    store.close();
+    expect(sources).toHaveLength(2);
+    expect(sources.every((source) => source.kind === "media")).toBe(true);
+  });
+
+  it("没有订阅者时不深拷贝记录（事件循环不再被 structuredClone 占住）", async () => {
+    const { client } = makeClient();
+    const store = createSqliteTaskStore({
+      path: tempDb(),
+      transformPayload: createResultArchiver({ mediaClient: client })
+    });
+    await store.submit({ key: "k", providerId: "ark", params: { modelType: "image" }, now: new Date(1000) });
+    const claimed = (await store.claimDue({ now: new Date(2000), leaseUntil: new Date(9000) }))!;
+
+    const seen: Array<{ state?: unknown; result?: unknown }> = [];
+    const unsubscribe = store.subscribe((record) => seen.push(record));
+    const layers = Array.from({ length: 4 }, (_, index) => new Uint8Array(256 * 1024).fill(index + 1));
+    const started = performance.now();
+    await store.save({ ...claimed, result: { images: layers } });
+    const elapsed = performance.now() - started;
+
+    // 有订阅者：必须给的是拷贝，订阅方改不到库里的状态。
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.result).not.toBe(undefined);
+    expect(elapsed).toBeLessThan(2000);
+
+    unsubscribe();
+    const before = performance.now();
+    await store.save({ ...claimed, result: { images: layers }, status: "completed" });
+    // 没有订阅者：一次 save 不应该再有整条记录的深拷贝开销。
+    expect(performance.now() - before).toBeLessThan(2000);
+    store.close();
   });
 
   it("变换抛错时按原值落库（瘦身不能阻断持久化）", async () => {

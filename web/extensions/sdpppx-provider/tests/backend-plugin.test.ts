@@ -325,7 +325,6 @@ describe("SDPPPX host plugin assembly", () => {
     expect(exposer?.temporaryHosting).toMatchObject({
       category: "provider",
       priority: 10,
-      validitySeconds: null,
       constraints: { mediaKinds: ["image", "video"], maxBytes: 20 * 1024 * 1024 }
     });
     expect(exposer?.temporaryHosting?.ready?.()).toBe(false);
@@ -369,10 +368,15 @@ describe("SDPPPX host plugin assembly", () => {
     expect(exposers.has("sdpppx-temporary")).toBe(false);
   });
 
-  it("既有模板上传协议未被改写：注册对象仍走 uploadReference", async () => {
+  it("参考素材上传统一走 /media/upload，不再调用 /tasks/upload", async () => {
     const { fetchImpl, calls } = createFetch(({ url }) => {
       if (url.includes("/rest/v1/tasks_template")) return jsonResponse([]);
-      if (url.includes("/tasks/upload")) return jsonResponse({ url: "https://sdpppx.example.com/uploaded.png" });
+      if (url.includes("/media/upload")) {
+        return jsonResponse({
+          code: 0,
+          data: { url: "https://sdpppx.example.com/uploaded.png", media_type: "image/png", size: 3 }
+        });
+      }
       return textResponse("unexpected", { status: 500 });
     });
     const { ctx, provider } = createContext();
@@ -391,11 +395,13 @@ describe("SDPPPX host plugin assembly", () => {
       storageKey: "media/sha256-a.png"
     });
     expect(uploaded).toMatchObject({ url: "https://sdpppx.example.com/uploaded.png" });
-    const uploadCalls = calls.filter(call => call.url.includes("/tasks/upload"));
+    const uploadCalls = calls.filter(call => call.url.includes("/media/upload"));
     expect(uploadCalls).toHaveLength(1);
-    expect(uploadCalls[0]!.url).toContain("provider=grsai");
-    expect((uploadCalls[0]!.init.headers as Record<string, string>)["X-Tenant-ID"]).toBeTruthy();
-    // 没有调用新的 /media/upload。
-    expect(calls.some(call => call.url.includes("/media/upload"))).toBe(false);
+    expect(uploadCalls[0]!.url).not.toContain("provider=");
+    expect(uploadCalls[0]!.url).not.toContain("filename=");
+    const headers = uploadCalls[0]!.init.headers as Record<string, string>;
+    expect(headers["X-Tenant-ID"]).toBeUndefined();
+    expect(headers.authorization).toBe("Bearer access-1");
+    expect(calls.some(call => call.url.includes("/tasks/upload"))).toBe(false);
   });
 });

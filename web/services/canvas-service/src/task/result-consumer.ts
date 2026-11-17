@@ -250,31 +250,53 @@ export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRec
     ) {
       const mediaKind = item.result.mediaKind;
       const taskKind = `${mediaKind}-generation`;
-      const mainAsset: StoredAsset = {
-        id: `asset-${item.runId}`,
-        title: "生成资产",
+      /** 一份产物 → 一个稳定资产。多产物时序号决定画布卡片顺序与 provenance。 */
+      const assetOf = (
+        entry: { storageKey: string; checksum?: string; contentType?: string; size?: number },
+        outputIndex: number,
+        id: string
+      ): StoredAsset => ({
+        id,
+        title: outputIndex === 0 ? "生成资产" : `生成资产 ${outputIndex}`,
         mediaKind,
         source: "generated",
         status: "ready",
         createdAt: item.createdAt,
-        url: `/api/media/${item.result.storageKey}`,
-        ...(item.result.durationSeconds !== undefined
-          ? { durationSeconds: item.result.durationSeconds }
+        url: `/api/media/${entry.storageKey}`,
+        ...(outputIndex === 0 && item.result!.durationSeconds !== undefined
+          ? { durationSeconds: item.result!.durationSeconds }
           : {}),
         provenance: {
           taskNodeId: item.nodeId,
           taskKind,
           runId: item.runId,
-          outputIndex: 0
+          outputIndex
         },
         metadata: {
-          storageKey: item.result.storageKey,
-          checksum: item.result.checksum,
-          contentType: item.result.contentType ?? defaultContentType(mediaKind),
-          ...(item.result.motion ? {motion:item.result.motion,fps:item.result.motion.fps} : {}),
-          size: item.result.size ?? 0
+          storageKey: entry.storageKey,
+          checksum: entry.checksum ?? "",
+          contentType: entry.contentType ?? defaultContentType(mediaKind),
+          ...(outputIndex === 0 && item.result!.motion
+            ? { motion: item.result!.motion, fps: item.result!.motion.fps }
+            : {}),
+          size: entry.size ?? 0
         }
-      };
+      });
+      const mainAsset = assetOf(
+        {
+          storageKey: item.result.storageKey,
+          ...(item.result.checksum !== undefined ? { checksum: item.result.checksum } : {}),
+          ...(item.result.contentType !== undefined ? { contentType: item.result.contentType } : {}),
+          ...(item.result.size !== undefined ? { size: item.result.size } : {})
+        },
+        0,
+        `asset-${item.runId}`
+      );
+      // 多产物：每张都落成独立资产（缺 checksum 的条目不可用，跳过而不是伪造）。
+      const extras = (item.result.outputs ?? [])
+        .filter((entry) => entry.index > 0 && entry.storageKey && entry.checksum)
+        .map((entry) => assetOf(entry, entry.index, `asset-${item.runId}-${entry.index}`));
+      const assets = [mainAsset, ...extras];
       const poster = item.result.poster;
       const posterAsset: StoredAsset | undefined =
         mediaKind === "video" && poster?.storageKey && poster.checksum
@@ -305,6 +327,7 @@ export function toExecutionRecord(item: TaskExecutionDetail): PptaskExecutionRec
         output: {
           mediaKind,
           asset: mainAsset,
+          ...(assets.length > 1 ? { assets } : {}),
           ...(posterAsset ? { posterAsset } : {}),
           ...(item.result.durationSeconds !== undefined
             ? { durationSeconds: item.result.durationSeconds }

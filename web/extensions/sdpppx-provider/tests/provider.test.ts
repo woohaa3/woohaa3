@@ -45,6 +45,7 @@ function setup(handler: Parameters<typeof createFetch>[0], options: { now?: () =
   const uploads: SdpppxReferenceUploader = {
     upload: vi.fn(async () => ({ url: "https://upload.example/x.png" })),
     isUploaded: (url: string) => allowed.has(url),
+    rememberUrl: (url: string) => { allowed.add(url); },
     clear: () => allowed.clear(),
     size: () => allowed.size
   };
@@ -70,7 +71,6 @@ function describeHandler(cancelable = true) {
       return jsonResponse({
         formSchema: FORM_SCHEMA,
         formValues: { size: "512" },
-        recommendUploadProvider: "grsai",
         cancelable
       });
     }
@@ -100,13 +100,12 @@ describe("describeModel", () => {
     const { runtime, calls } = setup(describeHandler());
     const first = await runtime.describeModel("tpl-1", "image");
     expect(first.title).toBe("图片模板");
-    expect(first.promptRequirement).toBe("required");
+    expect(first.promptRequirement).toBe("none");
     expect(first.cancel).toBe("remote");
-    expect(first.defaultInput).toMatchObject({ size: "512", prompt: "" });
+    expect(first.defaultInput).toMatchObject({ size: "512" });
 
     await runtime.describeModel("tpl-1", "image");
     expect(calls.filter((call) => call.url.includes("/tasks/describe"))).toHaveLength(1);
-    expect(runtime.recommendUploadProvider()).toBe("grsai");
   });
 
   it("cancelable=false 时降级为本地取消；describe 失败返回最小 schema", async () => {
@@ -115,8 +114,8 @@ describe("describeModel", () => {
 
     const failing = setup(() => textResponse("boom", { status: 500 }));
     const described = await failing.runtime.describeModel("tpl-1", "image");
-    expect(described.promptRequirement).toBe("required");
-    expect((described.inputSchema?.properties as Record<string, unknown>).prompt).toBeDefined();
+    expect(described.promptRequirement).toBe("none");
+    expect(described.inputSchema?.properties).toEqual({});
     expect(described.title).toBe("图片模板");
   });
 });
@@ -137,7 +136,7 @@ describe("prepareInput", () => {
     }
   ];
 
-  it("只透传 schema 字段，prompt 落位，rawParams 最后覆盖；参考素材写入对应字段", async () => {
+  it("只透传 schema 字段，prompt 来自画布解析并落位；参考素材写入对应字段", async () => {
     const { runtime, allowed } = setup(describeHandler());
     allowed.add("https://upload.example/a.png");
     allowed.add("https://upload.example/b.mp4");
@@ -145,21 +144,30 @@ describe("prepareInput", () => {
       providerModelId: "tpl-1",
       modelType: "image",
       prompt: "  一只猫 ",
-      parameters: {
-        size: "512",
-        junk: "should-not-pass",
-        rawParams: JSON.stringify({ size: "1024", extra: 1 })
-      },
+      parameters: { size: "512", junk: "should-not-pass" },
       references
     });
     expect(prepared.__sdpppxTemplateId).toBe("tpl-1");
     expect(prepared.__sdpppxPayload).toEqual({
-      size: "1024",
+      size: "512",
       prompt: "一只猫",
-      extra: 1,
       image: "https://upload.example/a.png",
       video: ["https://upload.example/b.mp4"]
     });
+  });
+
+  it("临时图床上传地址写入允许名单后可作为参考素材提交", async () => {
+    const { runtime, uploads } = setup(describeHandler());
+    const url = "https://cos.example.com/media/temporary.png";
+    uploads.rememberUrl(url);
+    const prepared = await runtime.prepareInput({
+      providerModelId: "tpl-1",
+      modelType: "image",
+      prompt: "p",
+      parameters: {},
+      references: [{ ...references[0]!, url }]
+    });
+    expect(prepared.__sdpppxPayload).toMatchObject({ image: url });
   });
 
   it("参考素材不在上传允许名单时拒绝提交（避免把本机签名地址发给远端）", async () => {
@@ -192,18 +200,6 @@ describe("prepareInput", () => {
     expect(runtime).toBeDefined();
   });
 
-  it("rawParams 不是 JSON 对象时拒绝提交", async () => {
-    const { runtime } = setup(describeHandler());
-    await expect(
-      runtime.prepareInput({
-        providerModelId: "tpl-1",
-        modelType: "image",
-        prompt: "p",
-        parameters: { rawParams: "[1,2]" },
-        references: []
-      })
-    ).rejects.toMatchObject({ code: SDPPPX_ERROR_CODES.taskFailed });
-  });
 });
 
 describe("异步 operation", () => {

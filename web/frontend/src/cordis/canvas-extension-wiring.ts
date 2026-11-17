@@ -12,6 +12,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { createExtensionFaultService } from "./extension-faults.js";
 import { createApplicationExtensionEntryReconciler, type ApplicationExtensionEntryReconciler } from "./extension-entry/reconciler.js";
 import { createExtensionReleaseAdoption } from "./extension-entry/release-adoption.js";
+import { replaceDocumentIfHostChanged } from "./extension-entry/host-document.js";
 import type { ApplicationExtensionFrontendEntryRegistry } from "./extension-entry/contract.js";
 import type { ExtensionRuntimeService } from "./extension-runtime/service.js";
 import type { ApplicationExtensionStatusService } from "./services/application-extension-status.js";
@@ -34,6 +35,8 @@ export function createPageExtensionReconciler(
      * 惰性取值：reconciler 建于 scope 启动早期，scope runtime 此时还不存在。
      */
     reloadExtension?: (() => ((extensionId: string) => Promise<unknown>) | undefined) | undefined;
+    /** 新发布被采纳后的换页；缺省对照入口 HTML 的宿主主脚本。测试可注入。 */
+    replaceDocument?: () => Promise<unknown>;
   }
 ): ApplicationExtensionEntryReconciler {
   const reconciler = createApplicationExtensionEntryReconciler({ registry: input.registry, ctx, logger: input.logger });
@@ -55,8 +58,13 @@ export function createPageExtensionReconciler(
     ...(input.logger ? { logger: input.logger } : {})
   });
   // 先于调用方的状态订阅登记：每次状态变化先观察发布指针，再由调用方 reconcile。
+  const replaceDocument = input.replaceDocument ?? replaceDocumentIfHostChanged;
   const unsubscribe = input.status.subscribe(() => {
-    void adoption.observe(input.status.getSnapshot().extensionRelease);
+    void adoption.observe(input.status.getSnapshot().extensionRelease).then((adopted) => {
+      // 扩展实例可以热换；宿主入口脚本变了就必须换整页，否则旧页面继续按旧菜单逻辑跑。
+      // 同一发布重复通知不再换页。
+      if (adopted) void replaceDocument();
+    });
   });
   return {
     ...reconciler,

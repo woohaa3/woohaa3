@@ -81,7 +81,13 @@ export function createTextPreviewRenderer() {
   };
 }
 
-/** alert renderer：从 payload.actionKey 解析异步动作；无动作即纯确认。 */
+/**
+ * alert renderer：从 payload.actionKey 解析异步动作；无动作即纯确认。
+ *
+ * 成功路径必须由本渲染器按 instanceId 关闭自己：`AlertDialog` 成功后**保持 busy 等 Host 关闭**
+ * （防止关闭前被再次触发），如果这里不关，弹窗会永远停在 busy——确认/取消/Escape/遮罩全部失效，
+ * 表现为「点了确认就卡死」。失败路径相反：`AlertDialog` 自己退出 busy 并显示错误，这里不能关。
+ */
 export function createAlertRenderer(dialogs: DialogsService) {
   return function AlertRenderer({ instance, requestClose, setBusy }: DialogRendererProps) {
     const payload = instance.payload as AlertPayload;
@@ -96,7 +102,12 @@ export function createAlertRenderer(dialogs: DialogsService) {
         danger={payload.danger}
         onCancel={requestClose}
         onBusyChange={setBusy}
-        onConfirm={async () => (action ? action() : { ok: true })}
+        onConfirm={async () => {
+          const result = action ? await action() : { ok: true as const };
+          // 迟到结果不得关掉后来打开或已被替换的弹窗：只关仍是自己的那一层。
+          if (result.ok && dialogs.top()?.instanceId === instance.instanceId) dialogs.close(instance.instanceId);
+          return result;
+        }}
       />
     );
   };

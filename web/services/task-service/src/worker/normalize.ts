@@ -9,7 +9,7 @@
  * - image：`{ images: Uint8Array[] }`（URL/base64 已在 provider 内用受控 fetch 归一到 bytes）
  * - language：`{ content: [{ type: 'text', text }] }`
  */
-import { CANVAS_TASK_LIMITS, inferMediaKindFromType, type CanvasTaskModelType } from "@woohaa3/contracts";
+import { CANVAS_TASK_LIMITS, inferMediaKindFromType, readImageMediaType, type CanvasTaskModelType } from "@woohaa3/contracts";
 
 export type ProviderRunResult =
   | { kind: "text"; text: string }
@@ -52,7 +52,7 @@ export function normalizeProviderResult(
     if (bytes.byteLength > limit) {
       return { reason: `provider 返回的媒体超过上限 ${limit} 字节` };
     }
-    const contentType = readProviderMediaType(record) ?? defaultContentTypeFor(kind);
+    const contentType = (kind === "image" ? readImageMediaType(bytes) : null) ?? readProviderMediaType(record) ?? defaultContentTypeFor(kind);
     if (kind === "image") return { kind, bytes, contentType };
     if (kind === "audio") return { kind, bytes, contentType };
     return {
@@ -164,7 +164,7 @@ function extractText(record: Record<string, unknown>): string | null {
   return null;
 }
 
-/** providerMetadata 里记录的原始 mediaType（litellm 会保留首个输出的类型）。 */
+/** providerMetadata 里记录的原始媒体类型（litellm 会保留首个输出的类型；适配器也可能写 `mimeType`）。 */
 function readProviderMediaType(record: Record<string, unknown>): string | undefined {
   const metadata = asRecord(record.providerMetadata);
   if (!metadata) return undefined;
@@ -173,7 +173,7 @@ function readProviderMediaType(record: Record<string, unknown>): string | undefi
     const images = entry?.images;
     if (!Array.isArray(images)) continue;
     const first = asRecord(images[0]);
-    const mediaType = first?.mediaType;
+    const mediaType = first?.mediaType ?? first?.mimeType;
     if (typeof mediaType === "string" && mediaType !== "") return mediaType;
   }
   return undefined;

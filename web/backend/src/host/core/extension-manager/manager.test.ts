@@ -380,6 +380,27 @@ describe("Extension Manager", () => {
     expect(installations(h.managedRoot).extensions.demo.current).toBe("1.0.0");
   });
 
+  it("升级发布失败时回到旧版本，并重新发布旧目录", async () => {
+    await setup();
+    const published: Array<Record<string, unknown>> = [];
+    const h = await harness({
+      acceptUntrusted: true,
+      publishBrowserRelease: async (change) => {
+        const directory = (change as { upsert?: Array<{ directory: string }> }).upsert?.[0]?.directory ?? "";
+        if (directory.endsWith(`${path.sep}1.1.0`)) throw new Error("新版本发布失败");
+        published.push(change);
+        return { releaseId: `r${published.length}`, href: `/extension-releases/r${published.length}.json`, changed: true };
+      }
+    });
+    expect((await installFile(h, packTree(extensionTree({ version: "1.0.0" }), null).file)).outcome).toBe("installed");
+    const failed = await installFile(h, packTree(extensionTree({ version: "1.1.0" }), null).file);
+    expect(failed.failure?.code).toBe("MARKETPLACE_PREFLIGHT_FAILED");
+    expect(installations(h.managedRoot).extensions.demo.current).toBe("1.0.0");
+    const directories = published.map((change) => (change as { upsert?: Array<{ directory: string }> }).upsert?.[0]?.directory);
+    expect(directories.every((directory) => directory?.endsWith(`${path.sep}1.0.0`))).toBe(true);
+    expect(directories).toHaveLength(2);
+  });
+
   it("升级保留 previous，手动回滚只切指针且幂等", async () => {
     await setup();
     const h = await harness({ acceptUntrusted: true });

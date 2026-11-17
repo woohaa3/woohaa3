@@ -29,6 +29,29 @@ describe("展开图片生成反馈", () => {
   });
 });
 
+describe("promptRequirement: none", () => {
+  it("不渲染提示词输入框与提示词阻止原因，仍可提交", () => {
+    const noneModel = {
+      ...model,
+      promptRequirement: "none" as const,
+      inputSchema: { type: "object", properties: {} },
+      defaultInput: {}
+    };
+    const html = renderToStaticMarkup(
+      <GenericModelPanel
+        {...props}
+        model={noneModel}
+        catalogModels={[noneModel]}
+        status="idle"
+        draft={{ prompt: "", parameters: {} }}
+      />
+    );
+    expect(html).not.toContain("mc-panel__prompt-box");
+    expect(html).not.toContain("请先输入提示词");
+    expect(html).toContain("mc-panel__sectioned-layout--no-prompt");
+  });
+});
+
 describe("generic 面板参数投影", () => {
   it("复用共享投影并保留 x-pptask-control / x-pptask-adaptive 语义", () => {
     const semanticModel = {

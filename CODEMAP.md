@@ -4,6 +4,15 @@
 
 `bevy/src/canvas2d/card_cache.rs` partitions cards into document-order blocks in one pass. `labels.rs` keys requests by role and owner, compares reused text components before writing, and stores colors as equivalent linear values. `draw_order.rs` computes all ghost and ordinary render ranks in linear time for `canvas_ecs/projection.rs`. The projection retains a discardable node-to-entity index and rebuilds it when an entity disappears or its identity changes. `app/state.rs` shares one node index for first-match lookups and last-match position updates. Broader dirty propagation and viewport working sets remain separate work.
 
+## Default image viewer preparation (2026-11-16)
+
+`web/frontend/src/cordis/plugins/image-viewer/prepared-cache.ts` owns the page-local browser
+RGBA LRU (48 MiB / eight complete URL-and-edge variants). The viewer plugin passes it to
+canonical and history preparation and disposes it with the page; native handles retain
+their renderer ownership. `media-image/src/lib.rs` uses a 64 KiB sRGB encoding lookup in
+linear-light alpha-aware resampling, bounded to one channel code value of transfer-function
+error. Neither optimization changes source assets or persisted canvas state.
+
 ## ModelScript static poses (2026-11-15)
 
 `web/contracts/src/canvas/model-executor-v2.ts` exposes `scene.pose(groupId, {rotation?, position?})`. The optional group `pose` is independent of bind TRS; repeated declarations replace each channel and zero clears it. SOMA permits joint rotation and Hips position while retaining exact bind/body identity checks. `model-static-pose.ts` owns pure channel composition, affine FK, CPU LBS and static geometry/foot-surface diagnostics. Membership anchors remain bind based; `canvas-service/world-authoring/authority.ts` uses posed geometry for display bounds. The read-only `world_model_pose` resource returns source/content versions, local geometry and declared animation coverage without changing playback.

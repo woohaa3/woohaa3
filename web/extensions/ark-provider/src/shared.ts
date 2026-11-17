@@ -3,7 +3,7 @@
  *
  * 只含身份、目录和静态描述；执行协议在本扩展 `src/provider/`（复用 pptask core/shared toolkit）。
  * 前后端均可导入。
- * 目录列出已知模型；只有配置了推理接入点（`ep-`）的模型才注册、才可执行。
+ * 目录列出已知模型，全部按公开 Model ID 注册即可执行；推理接入点（`ep-`）是可选覆盖。
  */
 import type { ApplicationExtensionMetadata, GenerationModelDefinition } from "@woohaa3/contracts";
 import {
@@ -46,7 +46,12 @@ export function endpointsFromConfig(config: object): { endpoints: ArkEndpointMap
   return { endpoints, errors };
 }
 
-/** 每个目录模型一个接入点字段，设置页按模型列出，留空表示不用。 */
+/**
+ * 每个目录模型一个接入点字段。
+ *
+ * **全部留空也能用**：这时请求体直接发公开 Model ID。填了 `ep-` 就优先用接入点
+ * （便于把调用绑到自己的限流/计费策略上）。
+ */
 export function arkEndpointFields(): Record<string, {
   kind: "string";
   reload: "hot";
@@ -62,13 +67,22 @@ export function arkEndpointFields(): Record<string, {
     kind: "string" as const,
     reload: "hot" as const,
     label: model.title,
-    description: model.id,
+    // 留空 = 直接用公开 Model ID 调用。
+    description: `${model.id}（留空则直接用此 Model ID 调用；填 ep- 则改为走推理接入点）`,
     ...(legacy[model.id] ? { legacyEnv: legacy[model.id] } : {})
   }]));
 }
 
-/** 目录里的每个模型都注册。填了推理接入点的才可执行。 */
-export function arkModelDefinitions(endpoints: ArkEndpointMap): GenerationModelDefinition[] {
+/**
+ * 目录里的每个模型都注册。
+ *
+ * `executable` 留给宿主按「Provider 是否可用」（API Key 就绪）与模型自身开关决定；
+ * 这里**不因缺推理接入点而降级**：公开 Model ID 可以直接调用，接入点只是可选覆盖。
+ *
+ * 参数保留是为了让调用方能继续把已解析的接入点表传进来（将来若需要在模型行上
+ * 暴露接入点归属，可以从这里取），当前不影响可执行性。
+ */
+export function arkModelDefinitions(_endpoints: ArkEndpointMap): GenerationModelDefinition[] {
   return ARK_CATALOG.map((model) => {
     const description = describeArkModel(model.id);
     return {
@@ -80,7 +94,8 @@ export function arkModelDefinitions(endpoints: ArkEndpointMap): GenerationModelD
       ...(description.defaultInput ? { defaultInput: description.defaultInput } : {}),
       promptRequirement: promptRequirement(model),
       cancel: "unsupported" as const,
-      executable: Boolean(endpoints[model.id])
+      // 接入点只决定「请求体里的 model 用哪个 ID」，不是可执行的前提。
+      executable: true
     };
   });
 }
@@ -94,8 +109,8 @@ function promptRequirement(model: ArkCatalogModel): "required" | "optional" {
 export const ARK_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: ARK_PLUGIN_ID,
   name: "Ark Provider",
-  description: "火山方舟文本、图片与视频生成 Provider。填写 API Key，并为要用的模型配置推理接入点后才可执行。",
-  version: "1.0.2",
+  description: "火山方舟文本、图片与视频生成 Provider。填 API Key 即可用公开 Model ID 调用；如需绑定自定义限流/计费，再为模型填推理接入点。",
+  version: "1.1.2",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "ark-provider-config", schemaVersion: 1 },

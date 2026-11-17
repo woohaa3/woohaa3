@@ -3,6 +3,7 @@ import { devPrincipalIdFromEnv } from "../base/access.js";
 import { createSiteProviderSource } from "./service-connection-sources.js";
 import { createAgentRuntimeBridge } from "./agent-runtime-bridge.js";
 import { randomBytes } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { createAssistantTextPort } from "../../ports/assistant-text.js";
 import { createImageDirectorPort } from "../../ports/image-director-scene.js";
@@ -240,6 +241,7 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
     const executorSocket = env.WOOHAA3_AGENT_RUNTIME_SOCKET?.trim() ?? "";
     const executorToken = env.WOOHAA3_AGENT_RUNTIME_TOKEN?.trim() ?? "";
     const executorWorkspace = env.WOOHAA3_AGENT_WORKSPACE_KEY?.trim() ?? "";
+    const executorRuntimeDir = env.WOOHAA3_AGENT_RUNTIME_DIR?.trim() ?? "";
     let agentRuntime: import("@woohaa3/application-service").HostRuntimeOptions | undefined;
     if (executorSocket && executorToken && executorWorkspace) {
       const socketDir = path.dirname(executorSocket);
@@ -250,8 +252,12 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       const runtimeCanvas = createExtensionNodeFacade(ctx.canvas, "agent-runtime-bridge");
       const bridge = await createAgentRuntimeBridge({
         socketPath: bridgeSocket,
+        // Windows 命名管道不是文件目录，桥身份必须落在执行器的真实状态目录。
+        runtimeDir: executorRuntimeDir || undefined,
         token: bridgeToken,
         workspaceKey: executorWorkspace,
+        // Windows 的桥端点是命名管道，dirname 会落到 `\\.\pipe`，不能在那里写身份文件。
+        runtimeDir: process.platform === "win32" ? path.join(os.tmpdir(), "woohaa-host-bridge") : undefined,
         tools: roleAuthoring.tools,
         canvasRead: ({ subject, canvasId }) => runtimeCanvas.read({ subject, canvasId, permission: "read" }),
         mediaRead: async ({ storageKey, canvasId }) => {

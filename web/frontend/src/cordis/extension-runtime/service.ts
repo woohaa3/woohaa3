@@ -86,6 +86,11 @@ export type ExtensionRuntimeService = {
    * 目录尚未固定、或该 id 不在目录里时返回 `changed: false`（不抛错）。
    */
   refreshEntry(extensionId: string): Promise<{ changed: boolean; artifactId: string | null }>;
+  /**
+   * 把某一条装回升级前的产物。新版本加载失败时用：目录不再停在失败的那一版。
+   * 不抛错；该 id 不在目录里时忽略。
+   */
+  restoreEntry(extensionId: string, releaseEntry: ExtensionBrowserReleaseEntry): void;
   /** 自页面打开以来已发布、但当前页面仍在用旧版本的扩展（升级/卸载）；重开画布后生效。 */
   staleExtensionIds(): readonly string[];
   dispose(): void;
@@ -234,6 +239,15 @@ export function createExtensionRuntimeService(
       }
       return { changed: result.changed, artifactId: nextEntry?.artifactId ?? null };
     },
+    restoreEntry(extensionId, releaseEntry) {
+      if (disposed || !runtime) return;
+      const result = replaceReleaseEntry(runtime, extensionId, releaseEntry, artifactLoader);
+      runtime = result.runtime;
+      if (result.changed) {
+        stale.delete(extensionId);
+        log({ event: "extension-restore-entry", extensionId, artifactId: releaseEntry.artifactId });
+      }
+    },
     staleExtensionIds: () => [...stale].sort(),
     async repin(releaseHref) {
       if (disposed) throw new ExtensionLoadError("evaluation", "extension runtime 已释放", false);
@@ -256,6 +270,24 @@ export function createExtensionRuntimeService(
       stale.clear();
     }
   };
+}
+
+/**
+ * 升级重装：先把目录切到新产物，再加载。加载失败则把目录装回升级前的那一条，
+ * 调用方因此不会卸掉仍在跑的旧实例。
+ */
+export async function resolveUpgradedPlugin(
+  runtime: Pick<ExtensionRuntimeService, "entry" | "refreshEntry" | "loadDescriptor" | "restoreEntry">,
+  extensionId: string
+): Promise<Awaited<ReturnType<ExtensionRuntimeService["loadDescriptor"]>>> {
+  const previous = runtime.entry(extensionId)?.releaseEntry ?? null;
+  const refreshed = await runtime.refreshEntry(extensionId);
+  try {
+    return await runtime.loadDescriptor(extensionId);
+  } catch (error) {
+    if (refreshed.changed && previous) runtime.restoreEntry(extensionId, previous);
+    throw error;
+  }
 }
 
 /** 同步 HTML 上的发布 link（没有 document 的环境直接跳过）。 */

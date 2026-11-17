@@ -134,6 +134,16 @@ export async function startWebHostServer({
     env.BACKEND_PORT = String(actualPort);
   }
 
+  // 实例登记：把「我是谁、我在哪」写进约定目录，同机其他工具（例如 DSH 的 woohaa-attach 插件）
+  // 读一个目录就知道这件事，不必扫端口。必须在 listen 成功之后：端口为 0 时只有此刻才知道真实值。
+  // 登记的是**页面地址**（带 basePath 时也一样），外部工具据此打开画布而不是 404。
+  const mountPrefix = basePath === '/' ? '' : basePath.replace(/\/+$/, '');
+  try {
+    backend.publishOrigin?.(`http://${host}:${actualPort}${mountPrefix}`);
+  } catch (error) {
+    process.stderr.write(`[web-host] 实例登记失败：${error?.message ?? error}\n`);
+  }
+
   let closing;
   return {
     origin: `http://${host}:${actualPort}`,

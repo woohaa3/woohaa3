@@ -61,12 +61,32 @@ export const HOST_SERVICE_ABI = Object.freeze({
   services: 1,
   /** `ctx.telemetry`：遥测核心。 */
   telemetry: 1,
-  /** `ctx.capabilities`：能力注册表（可选面）。 */
-  capabilities: 1,
+  /**
+   * `ctx.capabilities`：能力注册表（可选面）。
+   *
+   * **2**：`register` 从「(id, value) 两个位置参数」改为单个
+   * `{ id, version, value }` 对象（change: 2026-11-13-add-extension-capability-abi）。
+   * 这是破坏性变更——按位置传参的旧调用会在注册期抛「capability id 必须是非空字符串」，
+   * 整个扩展激活回滚（2026-11-16 现场：`remote-server` 因此没激活，它承载的 `server`
+   * 存储后端随之缺席，远端画布的媒体被一致报成 404）。声明旧版本的插件必须同步改调用形状。
+   */
+  capabilities: 2,
   /** `ctx.mediaFormats`：可编辑媒体格式注册（可选面）。 */
   mediaFormats: 1,
   /** `ctx.agentRoles`：Agent 角色注册（可选面）。 */
   agentRoles: 1,
+  /**
+   * `ctx.authoringTools`：受信后端扩展向 Director 区域贡献 MCP 工具（可选面）。
+   *
+   * 首版登记为 1：它此前已在 `HostExtensionContext` 上暴露但漏登记，插件无从声明依赖。
+   */
+  authoringTools: 1,
+  /**
+   * `ctx.diagnostics`：宿主诊断缓冲（可选面，只读投影）。
+   *
+   * 首版登记为 1：与 `authoringTools` 一样是「已在上下文上暴露但漏登记」的补齐。
+   */
+  diagnostics: 1,
   /** `ctx.executors`：独立执行模块注册（可选面）。 */
   executors: 1
 } as const satisfies HostServiceRequirement);

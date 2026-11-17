@@ -23,7 +23,6 @@ const CONFIG = {
   bridgeHost: "project.supabase.co",
   templateModelTypes: { "tpl-2": "video" as const },
   promptField: "prompt",
-  uploadProvider: "grsai",
   taskTimeoutMs: 600000
 };
 

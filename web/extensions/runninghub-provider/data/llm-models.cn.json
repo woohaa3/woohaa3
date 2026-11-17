@@ -1,0 +1,646 @@
+{
+  "source": "https://llm.runninghub.cn/v1/models",
+  "fetchedAt": "2026-11-16",
+  "note": "脱敏后的官方文字目录快照：只保留解析所需的身份与逐模型能力字段。模型集合与价格不进产品常量，刷新时以官方接口为准。",
+  "object": "list",
+  "data": [
+    {
+      "id": "qwen/qwen3.8-flash-next",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": false,
+        "contextCache": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": false,
+        "contextCache": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5.3-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": false,
+        "contextCache": true,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash-vision-exp",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5.3",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "reasoning": true,
+        "streaming": true,
+        "toolChoice": "auto-only",
+        "contextCache": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "reasoningAlwaysOn": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "glm/glm-5.2",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "contextCache": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "glm/glm-5.1",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "glm/glm-5-turbo",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-max",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.7-max",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "reasoning": true,
+        "streaming": true,
+        "webSearch": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "glm/glm-5v-turbo",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "vision": true,
+        "thinking": true,
+        "streaming": true,
+        "multimodal": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "file"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-omni-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "thinking": true,
+        "streaming": true,
+        "webSearch": false,
+        "audioInput": true,
+        "audioOutput": false,
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "qwen/qwen3.7-plus",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.6-plus",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3.1-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true,
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-evolving",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "batch": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": {
+          "provider": "volcengine",
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "limit": 50,
+          "enabled": true,
+          "defaultMaxToolCalls": 2,
+          "maxKeyword": 3,
+          "defaultLimit": 10,
+          "defaultMaxKeyword": 2,
+          "maxToolCalls": 3
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.1-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": {
+          "provider": "volcengine",
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "limit": 50,
+          "enabled": true,
+          "defaultMaxToolCalls": 2,
+          "maxKeyword": 3,
+          "defaultLimit": 10,
+          "defaultMaxKeyword": 2,
+          "maxToolCalls": 3
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.1-turbo",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "web_search": {
+          "provider": "volcengine",
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "limit": 50,
+          "enabled": true,
+          "defaultMaxToolCalls": 2,
+          "maxKeyword": 3,
+          "defaultLimit": 10,
+          "defaultMaxKeyword": 2,
+          "maxToolCalls": 3
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.1-lite",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "free": false,
+        "tools": true,
+        "video": true,
+        "vision": true,
+        "document": true,
+        "thinking": true,
+        "streaming": true,
+        "audioInput": false,
+        "web_search": {
+          "provider": "volcengine",
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "limit": 50,
+          "enabled": true,
+          "defaultMaxToolCalls": 2,
+          "maxKeyword": 3,
+          "defaultLimit": 10,
+          "defaultMaxKeyword": 2,
+          "maxToolCalls": 3
+        },
+        "contextCache": true,
+        "input_modalities": [
+          "text",
+          "image",
+          "video",
+          "document"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.0-pro",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": false,
+        "vision": true,
+        "streaming": true,
+        "audioInput": false,
+        "web_search": {
+          "provider": "volcengine",
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "limit": 50,
+          "enabled": true,
+          "defaultMaxToolCalls": 2,
+          "maxKeyword": 3,
+          "defaultLimit": 10,
+          "defaultMaxKeyword": 2,
+          "maxToolCalls": 3
+        },
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "bytedance/doubao-seed-2.0-code",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 262144,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "web_search": {
+          "provider": "volcengine",
+          "sources": [
+            "douyin",
+            "moji",
+            "search_engine",
+            "toutiao"
+          ],
+          "limit": 50,
+          "enabled": true,
+          "defaultMaxToolCalls": 2,
+          "maxKeyword": 3,
+          "defaultLimit": 10,
+          "defaultMaxKeyword": 2,
+          "maxToolCalls": 3
+        },
+        "structuredOutputs": false
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1048576,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.6-flash",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 1000000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "minimax/minimax-m2.7",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 204800,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    },
+    {
+      "id": "qwen/qwen3.6-max-preview",
+      "object": "model",
+      "owned_by": "runninghub",
+      "created": 1794848661,
+      "context_length": 256000,
+      "capabilities": {
+        "chat": true,
+        "tools": true,
+        "vision": false,
+        "streaming": true,
+        "audioInput": false,
+        "structuredOutputs": true
+      }
+    }
+  ]
+}

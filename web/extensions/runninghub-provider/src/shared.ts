@@ -16,8 +16,14 @@ import modelsData from "../data/models.json";
 export * from "./shared/identity.js";
 import { RUNNINGHUB_PLUGIN_ID, RUNNINGHUB_PROVIDER_ID } from "./shared/identity.js";
 import { runningHubCardSchema } from "./model-cards.js";
+import type { RunningHubRegion } from "./region.js";
 
-/** 受控 API 地址（写死在插件内，MUST NOT 由用户输入）。全球站（CN 节点已下线）。 */
+/**
+ * 受控 API 地址默认值（国际站，MUST NOT 由用户输入）。
+ *
+ * 实际地址由 API Key 识别出的站点区域派生；这里只保留国际站默认，供直接构造 registration
+ * 的测试和区域未确认时的降级路径使用。
+ */
 export const DEFAULT_RUNNINGHUB_API_BASE = "https://www.runninghub.ai/openapi/v2";
 
 export type RunningHubMediaKind = "image" | "video" | "audio";
@@ -82,6 +88,23 @@ let cachedRegistry: RunningHubRegistry | undefined;
 
 /** 刷新得到的运行期清单（`undefined` = 用入库清单）。 */
 let runtimeModels: RunningHubLogicalModel[] | undefined;
+
+/** 运行期清单对应的站点区域；区域变化时旧清单必须失效。 */
+let runtimeRegion: RunningHubRegion | undefined;
+
+/**
+ * 切换当前站点区域。
+ *
+ * 只重置运行期清单与缓存，不修改入库的 `data/models.json`：换 Key 后区域变化时不能继续
+ * 用上一个站点过滤过的清单；同区域重复调用保留用户刚刷新过的结果。
+ */
+export function setRunningHubRegion(region: RunningHubRegion): void {
+  if (runtimeRegion === region) return;
+  runtimeRegion = region;
+  runtimeModels = undefined;
+  liveOnlyIds = new Set();
+  cachedRegistry = undefined;
+}
 
 /**
  * 公开清单没收录、但站点目录页仍在售的模型 id（刷新时算出）。
@@ -269,7 +292,7 @@ export const RUNNINGHUB_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   name: "RunningHub Provider",
   description: "RunningHub Provider：图片／视频生成、官方文字模型与临时图床。",
   // 2.2.0：官方文字目录与独立端点、临时图床提供商候选。
-  version: "2.2.6",
+  version: "2.3.3",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "runninghub-provider-config", schemaVersion: 1 },

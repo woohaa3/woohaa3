@@ -21,8 +21,6 @@ export const DEFAULT_SDPPPX_AUTHING_SCENE = "WXAPP_AUTH";
 
 export const DEFAULT_SDPPPX_PROMPT_FIELD = "prompt";
 
-export const DEFAULT_SDPPPX_UPLOAD_PROVIDER = "grsai";
-
 export const DEFAULT_SDPPPX_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 前端 surface 身份：登录与账号管理弹窗。 */
@@ -99,7 +97,6 @@ export type SdpppxConfigSummary = {
   bridgeHost: string | null;
   templateModelTypes: Record<string, "image" | "video">;
   promptField: string;
-  uploadProvider: string;
   taskTimeoutMs: number;
 };
 
@@ -168,7 +165,6 @@ export const EMPTY_SDPPPX_CONFIG_SUMMARY: SdpppxConfigSummary = {
   bridgeHost: null,
   templateModelTypes: {},
   promptField: DEFAULT_SDPPPX_PROMPT_FIELD,
-  uploadProvider: DEFAULT_SDPPPX_UPLOAD_PROVIDER,
   taskTimeoutMs: DEFAULT_SDPPPX_TASK_TIMEOUT_MS
 };
 
@@ -185,7 +181,7 @@ export const SDPPPX_PLUGIN_METADATA: ApplicationExtensionMetadata = {
   extensionId: SDPPPX_PLUGIN_ID,
   name: "SDPPPX",
   description: "sdpppx 微信扫码登录与租户模板生成。登录后把当前租户的模板投影为生成模型。",
-  version: "0.1.1",
+  version: "0.1.6",
   managementScope: "site",
   host: "backend",
   configSchema: { schemaId: "sdpppx-provider-config", schemaVersion: 1 },

@@ -152,7 +152,8 @@ export class CanvasRunService {
       return { ok: false, code: EMPTY_UPSTREAM_TEXT_CODE, message: EMPTY_UPSTREAM_TEXT_MESSAGE };
     }
     const resolvedPrompt = promptResolution.text;
-    if (resolvedPrompt.trim().length === 0) {
+    // promptRequirement: none 的模型没有面板提示词；允许无提示词提交，参数由 schema 决定。
+    if (model.promptRequirement !== "none" && resolvedPrompt.trim().length === 0) {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
 
@@ -218,7 +219,7 @@ export class CanvasRunService {
       return { ok: false, code: "invalid-mention", message: compiled.message };
     }
     let providerPrompt = compiled.providerText;
-    if (providerPrompt.trim().length === 0) {
+    if (model.promptRequirement !== "none" && providerPrompt.trim().length === 0) {
       return { ok: false, code: "empty-prompt", message: "请先输入提示词" };
     }
     const taskInputs: CanvasTaskInput[] = [...compiled.inputs];

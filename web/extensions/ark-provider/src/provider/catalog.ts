@@ -11,6 +11,7 @@
 export const ARK_PROVIDER_ID = 'ark';
 export const ARK_DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 export const ARK_SEEDREAM_5_PRO_MODEL = 'doubao-seedream-5-0-pro-260628';
+export const ARK_SEEDREAM_5_5_MODEL = 'doubao-seedream-5-5-261028';
 
 export type ArkKind = 'language' | 'image' | 'video';
 export type ArkImageFamily = 'pro' | 'sequential';
@@ -143,6 +144,7 @@ export const ARK_CATALOG: readonly ArkCatalogModel[] = [
   language('deepseek-v4-1-flash-260910', 'DeepSeek V4.1 Flash'),
   language('deepseek-v4-pro-ga-260813', 'DeepSeek V4 Pro'),
   language('deepseek-v4-flash-ga-260731', 'DeepSeek V4 Flash'),
+  image('doubao-seedream-5-5-261028', 'Seedream 5.5', PRO_IMAGE),
   image('doubao-seedream-5-0-pro-260628', 'Seedream 5.0 Pro', PRO_IMAGE),
   image('doubao-seedream-5-0-flash-260915', 'Seedream 5.0 Flash', PRO_IMAGE),
   image('doubao-seedream-5-0-260128', 'Seedream 5.0 Lite', SEQUENTIAL_IMAGE),

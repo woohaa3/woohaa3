@@ -2,16 +2,17 @@
  * 模板 `formSchema` → 宿主输入 schema 的白名单转换。
  *
  * sdpppx 的模板表单是 Formily schema（`type: "object"` + `properties`），字段类型与组件组合
- * 远比宿主输入面板能表达的丰富。这里**只映射已知可表达的字段**，其余字段不丢：它们统一由
- * 一个 `rawParams` JSON 字段兜底，提交时最后合并并覆盖同名字段。
+ * 远比宿主输入面板能表达的丰富。这里**只映射已知可表达的字段**；未识别字段不渲染，只记入
+ * `unknownFields` 供诊断。宿主面板不提供 rawParams。
+ *
+ * prompt 不在面板里渲染：model 的 `promptRequirement` 固定为 `none`，提示词由画布上游文字
+ * 节点解析；模板声明了 prompt 字段时，`prepareInput` 仍会把解析到的 prompt 写回该字段。
  *
  * 转换结果同时保留参考字段的位置（`referenceFields`），`prepareInput` 据此把上传后的 URL
  * 写回模板真正读取的字段，而不是猜一个 `images` 之类的通用键名。
  */
 import type { PromptRequirement } from "@woohaa3/contracts";
 import { DEFAULT_SDPPPX_PROMPT_FIELD } from "../shared.js";
-
-export const SDPPPX_RAW_PARAMS_FIELD = "rawParams";
 
 export type SdpppxReferenceField = {
   key: string;
@@ -24,10 +25,14 @@ export type SdpppxInputSchema = {
   inputSchema: Record<string, unknown>;
   defaultInput: Record<string, unknown>;
   promptRequirement: PromptRequirement;
+  /** 模板里的提示词字段名；`hasPromptField` 为 false 时不写 payload。 */
+  promptField: string;
+  /** 模板声明了提示词字段；面板不渲染它，但提交时仍写入解析到的 prompt。 */
+  hasPromptField: boolean;
   referenceFields: SdpppxReferenceField[];
-  /** 被收敛到 `rawParams` 的字段名（诊断与设置面板展示用）。 */
+  /** 无法映射、因而不会出现在面板里的字段名（诊断用）。 */
   unknownFields: string[];
-  /** 成功映射的字段数（不含 prompt 与 rawParams 兜底）。 */
+  /** 成功映射的字段数（不含 prompt）。 */
   mappedFields: number;
 };
 
@@ -35,7 +40,7 @@ export type SdpppxSchemaInput = {
   formSchema: unknown;
   formValues?: unknown;
   promptField?: string;
-  /** describe 失败时为 true：只给最小 prompt + rawParams，不猜字段。 */
+  /** describe 失败时为 true：不猜字段，只保留空输入 schema。 */
   minimal?: boolean;
 };
 
@@ -139,27 +144,23 @@ function copyBounds(source: RecordValue, target: RecordValue): void {
   }
 }
 
-function promptSchema(title: string): RecordValue {
-  return {
-    type: "string",
-    title,
-    "x-component": "Input.TextArea",
-    "x-component-props": { rows: 4 }
-  };
-}
-
-function rawParamsSchema(): RecordValue {
-  return {
-    type: "string",
-    title: "原样参数（JSON）",
-    description: "模板里无法识别的字段可在此粘贴 JSON；提交时最后合并，并覆盖同名字段。",
-    "x-component": "Input.TextArea",
-    "x-component-props": { rows: 3 }
-  };
-}
-
 function isRequiredField(name: string, field: RecordValue, required: ReadonlySet<string>): boolean {
   return field.required === true || required.has(name);
+}
+
+const PROMPT_TITLES = new Set(["提示词", "prompt"]);
+
+/**
+ * 识别模板里的提示词字段。
+ *
+ * 模板实际会用 `2_prompt` 这类带前缀的 key，标题仍是「提示词」；只按配置的
+ * `SDPPPX_PROMPT_FIELD`（缺省 `prompt`）匹配会把它当成普通参数渲染出来。
+ */
+function isPromptField(key: string, field: RecordValue | undefined, configured: string): boolean {
+  if (key === configured) return true;
+  const lower = key.toLowerCase();
+  if (lower === "prompt" || lower.endsWith("_prompt") || lower.endsWith("-prompt")) return true;
+  return PROMPT_TITLES.has(textOf(field?.title)?.toLowerCase() ?? "");
 }
 
 /**
@@ -173,7 +174,8 @@ function convertField(
   const title = textOf(field.title) ?? key;
   const description = textOf(field.description);
   const items = itemsOf(field);
-  const base: RecordValue = { title };
+  // 模板字段是模型的主参数：全部进入 common，不藏进「高级参数」。
+  const base: RecordValue = { title, "x-pptask-presentation": { section: "common" } };
   if (description) base.description = description;
   if (isRequiredField(key, field, required)) base.required = true;
   if (field.default !== undefined) base.default = field.default;
@@ -261,11 +263,10 @@ function convertField(
 }
 
 /**
- * 转换模板表单。`minimal` 只用于 describe 失败/超时：一个 prompt + rawParams，绝不猜字段。
+ * 转换模板表单。`minimal` 只用于 describe 失败/超时：不猜字段，面板只剩模型选择与提交。
  */
 export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSchema {
   const promptField = textOf(input.promptField) ?? DEFAULT_SDPPPX_PROMPT_FIELD;
-  const rawField = SDPPPX_RAW_PARAMS_FIELD;
   const unknownFields: string[] = [];
   const referenceFields: SdpppxReferenceField[] = [];
   const properties: RecordValue = {};
@@ -281,11 +282,18 @@ export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSch
       : []
   );
   const formValues = isRecord(input.formValues) ? input.formValues : {};
+  let detectedPromptField = promptField;
+  let hasPromptField = false;
 
   if (!input.minimal) {
     for (const [key, rawFieldValue] of Object.entries(rawProperties)) {
-      if (key === rawField) continue;
       const field = isRecord(rawFieldValue) ? rawFieldValue : undefined;
+      // prompt 由画布上游文字节点解析，不在宿主参数面板里重复展示。
+      if (isPromptField(key, field, promptField)) {
+        if (!hasPromptField) detectedPromptField = key;
+        hasPromptField = true;
+        continue;
+      }
       if (!field) {
         unknownFields.push(key);
         continue;
@@ -294,10 +302,6 @@ export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSch
       if (!converted) {
         unknownFields.push(key);
         continue;
-      }
-      // prompt 是长文本：即使模板只标了普通 string，也用多行输入。
-      if (key === promptField && converted.property.type === "string") {
-        converted.property["x-component"] = "Input.TextArea";
       }
       properties[key] = converted.property;
       mappedFields += 1;
@@ -308,29 +312,9 @@ export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSch
     }
   }
 
-  // describe 失败时仍给一个可填的 prompt；模板 schema 里没有该字段时不渲染 prompt——否则
-  // 用户填了也会被丢掉。这类模型的 promptRequirement 是 `none`，只能走 rawParams。
-  const hasPrompt = !input.minimal && Object.prototype.hasOwnProperty.call(properties, promptField);
-  if (input.minimal) {
-    properties[promptField] = promptSchema("提示词");
-    if (!required.includes(promptField)) required.push(promptField);
-    defaultInput[promptField] = "";
-  } else if (hasPrompt) {
-    const promptProperty = properties[promptField] as RecordValue;
-    if (promptProperty.required === true && !required.includes(promptField)) required.push(promptField);
-    if (defaultInput[promptField] === undefined) defaultInput[promptField] = "";
-  }
-
-  properties[rawField] = rawParamsSchema();
-  defaultInput[rawField] = "";
-
-  const promptRequirement: PromptRequirement = input.minimal
-    ? "required"
-    : hasPrompt
-      ? required.includes(promptField)
-        ? "required"
-        : "optional"
-      : "none";
+  // 面板不提供提示词输入框与 rawParams：sdpppx 模型的提示词只从画布上游文字节点解析，
+  // 模板声明了 prompt 字段时由 prepareInput 写入 payload。
+  const promptRequirement: PromptRequirement = "none";
 
   return {
     inputSchema: {
@@ -340,6 +324,8 @@ export function buildSdpppxInputSchema(input: SdpppxSchemaInput): SdpppxInputSch
     },
     defaultInput,
     promptRequirement,
+    promptField: detectedPromptField,
+    hasPromptField,
     referenceFields,
     unknownFields,
     mappedFields

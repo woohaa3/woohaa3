@@ -169,16 +169,18 @@ export function createArkProviderPlugin(deps: ArkPluginDependencies = {}): Exten
     Config: ARK_CONFIG,
     health: (config) => {
       const hasKey = (config.apiKey ?? "").trim() !== "";
-      const { endpoints, errors } = endpointsFromConfig(config);
-      if (hasKey && errors.length === 0 && Object.keys(endpoints).length > 0) return undefined;
+      // 接入点不是必需项：公开 Model ID 可以直接调用，所以只把「未配 Key」与
+      // 「接入点格式非法」当作降级原因，不再要求必须填接入点。
+      const { errors } = endpointsFromConfig(config);
+      if (hasKey && errors.length === 0) return undefined;
       const message = !hasKey
         ? "未配置 API Key，Ark 模型当前不可执行"
-        : errors[0] ?? "还没有为模型填写推理接入点";
+        : errors[0]!;
       return {
         state: "degraded" as const,
         diagnostics: [
           {
-            code: hasKey ? "provider-models-unconfigured" : "provider-credentials-missing",
+            code: hasKey ? "provider-config-invalid" : "provider-credentials-missing",
             message
           }
         ]

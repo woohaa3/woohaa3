@@ -85,8 +85,8 @@ describe("RunningHub prepareInput（任务 1.4 / design D1b/D4）", () => {
     expect(prepared.providerOptions.runninghub.input).toMatchObject({
       prompt: "a cat",
       resolution: "2k",
-      width: 2848,
-      height: 1600,
+      width: 2816,
+      height: 1584,
       imageUrls: ["https://a/1.png"]
     });
   });
@@ -125,7 +125,7 @@ describe("RunningHub 插件装载", () => {
     for (const input of [{ apiKey: "secret" }, {}]) {
       const config = RUNNINGHUB_CONFIG["~standard"].validate(input);
       if (!("value" in config)) throw new Error("config invalid");
-      createRunningHubProviderPlugin().apply(ctx, config.value);
+      await createRunningHubProviderPlugin({ region: "ai" }).apply(ctx, config.value);
     }
     expect(registered.map((provider) => provider.available)).toEqual([true, false]);
   });
@@ -155,7 +155,7 @@ describe("RunningHub 插件装载", () => {
     } as never;
     const parsed = RUNNINGHUB_CONFIG["~standard"].validate({ apiKey: "secret" });
     if (!("value" in parsed)) throw new Error("config invalid");
-    createRunningHubProviderPlugin().apply(ctx, parsed.value);
+    await createRunningHubProviderPlugin({ region: "ai" }).apply(ctx, parsed.value);
     expect(registered[0]).toMatchObject({ exposerId: "runninghub-temporary", temporaryHosting: { category: "provider" } });
     expect(registered[0]!.temporaryHosting!.ready()).toBe(true);
   });
@@ -256,7 +256,7 @@ describe("RunningHub API 模型执行（任务 4.2 / design D1b）", () => {
     });
     // payload：prompt + 上游认的字段；比例 + 档位在插件里已翻成像素，面板参数不再原样透传。
     expect(startedUrl).toBe("https://www.runninghub.ai/openapi/v2/seedream-v5-pro/text-to-image");
-    expect(startedBody).toMatchObject({ prompt: "a cat", resolution: "2k", width: 2848, height: 1600 });
+    expect(startedBody).toMatchObject({ prompt: "a cat", resolution: "2k", width: 2816, height: 1584 });
     expect((result as { images: Uint8Array[] }).images[0]).toEqual(new Uint8Array([9, 9]));
 
     // API 模型不支持远端取消：实现里没有 doCancel（仅 App 有）。
@@ -283,8 +283,8 @@ describe("RunningHub API 模型执行（任务 4.2 / design D1b）", () => {
       prompt: "a cat",
       resolution: "2K",
       outputFormat: "jpeg",
-      width: 1600,
-      height: 2848
+      width: 1584,
+      height: 2816
     });
     expect(startedBody).not.toHaveProperty("aspectRatio");
   });

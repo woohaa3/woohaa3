@@ -32,6 +32,13 @@ describe("resolveSelectionContext", () => {
     expect(resolveSelectionContext(canvas, "img-codex")).toBeNull();
   });
 
+  it("带 suppressModelPanel 标记的图片节点不打开生成面板", () => {
+    const canvas = canvasFixture({
+      nodes: [{ id: "img-local", type: "image", data: { suppressModelPanel: true, outputAssetId: "asset-1" } }]
+    });
+    expect(resolveSelectionContext(canvas, "img-local")).toBeNull();
+  });
+
   it("选中图片节点 → image-generation，数据来自规范 nodeData", () => {
     const context = resolveSelectionContext(CANVAS, "img-1");
     expect(context).toEqual({

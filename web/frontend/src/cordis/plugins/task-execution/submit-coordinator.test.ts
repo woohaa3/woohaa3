@@ -93,6 +93,26 @@ describe("提交式协调器（任务 6.2；change: formalize-frontend-event-bus
     expect((await submitting).ok).toBe(true); expect(phases).toEqual(["started", "accepted"]);
   });
 
+  it("promptRequirement: none 的模型允许空提示词提交", async () => {
+    const none = catalog();
+    none.models[0] = { ...none.models[0]!, promptRequirement: "none" };
+    const run = vi.fn(async () => ({ ok: true as const, runId: "run-none", jobId: "job-none" }));
+    const coordinator = createSubmitCoordinator({
+      store: { getState: () => ({ canvas: canvasWithNode() }) },
+      client: { run, cancel: async () => ({ ok: true }) }
+    });
+    const outcome = await coordinator.submit({
+      nodeId: "text-1",
+      modelKey: "gemini-2.5-flash",
+      prompt: "",
+      parameters: {},
+      catalog: none,
+      expectedModelType: "image"
+    });
+    expect(outcome).toMatchObject({ ok: true, runId: "run-none" });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it("transport exceptions settle the page rejection and stop launch without automatic retry", async () => {
     const phases: string[] = [], rejections: unknown[] = [];
     const coordinator = createSubmitCoordinator({

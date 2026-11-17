@@ -17,6 +17,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ModelExecutionHost } from "./model-execution-host.js";
 import { createModelDraftStore } from "./model-draft.js";
+import { canvasModelParameterStore, canvasModelParametersKey } from "./canvas-model-parameters.js";
 import { nodeDraftStore } from "./drafts.js";
 import type { ModelPanelProps } from "../../contract/model-interaction.js";
 import { catalogFixture, canvasFixture } from "./test-support/fixtures.js";
@@ -302,6 +303,86 @@ describe("ModelExecutionHost 视频参数门禁", () => {
   });
 });
 
+describe("画布内同模型参数沿用", () => {
+  const CANVAS_KEY = canvasModelParametersKey("page", "canvas-1");
+
+  it("提交被受理后，同画布的另一个节点打开同模型时沿用上次参数", async () => {
+    canvasModelParameterStore.clear(CANVAS_KEY);
+    let panel: ModelPanelProps | undefined;
+    const registry = new ModelInteractionService();
+    registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.draft.prompt}</output>; } });
+    const catalog = videoCatalog({ defaults: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 } });
+    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const mountHost = (nodeId: string) => mount(
+      <ModelExecutionHost canvasId="canvas-1" selectedNodeId={nodeId} session={{} as never} runClient={{} as never} writable
+        dialogs={new DialogService()} catalog={new StubCatalogService(catalog)} registry={registry}
+        draftStore={createModelDraftStore()} submitCoordinator={{ submit, cancel: vi.fn() }} />
+    );
+    await mountHost(NODE_ID);
+    await act(async () => {
+      await panel!.submit({ prompt: "一段动画", parameters: { aspectRatio: "9:16", resolution: "1080p", durationSeconds: 9 } });
+    });
+    expect(submit).toHaveBeenCalledOnce();
+
+    // 另一个节点、同一模型：没有自己的草稿，应回放该画布内该模型的上次参数。
+    const second = "video-node-2";
+    await act(async () => root!.unmount());
+    root = null;
+    document.body.innerHTML = "";
+    woohaa3CanvasStore.getState().hydrate(canvasFixture({ nodes: [
+      { id: NODE_ID, type: "video", data: { prompt: "镜头缓推", preferredModelKey: "video-model" } },
+      { id: second, type: "video", data: { preferredModelKey: "video-model" } },
+    ] }));
+    await mountHost(second);
+    expect(panel!.draft.parameters).toMatchObject({ aspectRatio: "9:16", resolution: "1080p", durationSeconds: 9 });
+  });
+
+  it("本节点已有草稿时草稿优先，不被偏好覆盖", async () => {
+    canvasModelParameterStore.clear(CANVAS_KEY);
+    canvasModelParameterStore.record(CANVAS_KEY, "video-model", { aspectRatio: "9:16", resolution: "1080p", durationSeconds: 9 });
+    let panel: ModelPanelProps | undefined;
+    const registry = new ModelInteractionService();
+    registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.draft.prompt}</output>; } });
+    await mount(
+      <ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never} runClient={{} as never} writable
+        dialogs={new DialogService()} catalog={new StubCatalogService(videoCatalog())} registry={registry}
+        draftStore={createModelDraftStore()} submitCoordinator={{ submit: vi.fn(), cancel: vi.fn() }} />
+    );
+    await act(async () => panel!.patchDraft({ parameters: { model: "video-model", aspectRatio: "1:1", resolution: "720p", durationSeconds: 5 } }));
+    expect(panel!.draft.parameters).toMatchObject({ aspectRatio: "1:1", durationSeconds: 5 });
+  });
+
+  it("切换模型时优先回放目标模型在该画布上的上次参数", async () => {
+    canvasModelParameterStore.clear(CANVAS_KEY);
+    canvasModelParameterStore.record(CANVAS_KEY, "second-model", { aspectRatio: "1:1", resolution: "2k", durationSeconds: 7 });
+    let panel: ModelPanelProps | undefined;
+    const registry = new ModelInteractionService();
+    registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.draft.prompt}</output>; } });
+    const catalog = catalogFixture([
+      { modelKey: "video-model", modelType: "video", interaction: { id: "test-panel", version: 1 }, inputSchema: {
+        type: "object", properties: {
+          aspectRatio: { type: "string", enum: ["16:9", "9:16", "1:1"], default: "16:9" },
+          resolution: { type: "string", enum: ["720p", "1080p", "2k"], default: "720p" },
+          durationSeconds: { type: "number", minimum: 5, maximum: 12, default: 5, unit: "秒" },
+        } }, defaultInput: {} },
+      { modelKey: "second-model", modelType: "video", interaction: { id: "test-panel", version: 1 }, inputSchema: {
+        type: "object", properties: {
+          aspectRatio: { type: "string", enum: ["16:9", "9:16", "1:1"], default: "16:9" },
+          resolution: { type: "string", enum: ["720p", "1080p", "2k"], default: "720p" },
+          durationSeconds: { type: "number", minimum: 5, maximum: 12, default: 5, unit: "秒" },
+        } }, defaultInput: {} },
+    ]);
+    await mount(
+      <ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never} runClient={{} as never} writable
+        dialogs={new DialogService()} catalog={new StubCatalogService(catalog)} registry={registry}
+        draftStore={createModelDraftStore()} submitCoordinator={{ submit: vi.fn(), cancel: vi.fn() }} />
+    );
+    await act(async () => panel!.patchDraft({ parameters: { model: "second-model" } }));
+    expect(panel!.model.modelKey).toBe("second-model");
+    expect(panel!.draft.parameters).toMatchObject({ aspectRatio: "1:1", resolution: "2k", durationSeconds: 7 });
+  });
+});
+
 describe("model choice persistence", () => {
   it.each<{ name: string; data: CanvasNodeData; expected: string }>([
     { name: "新建图片", data: {}, expected: "first-image" },
@@ -331,18 +412,37 @@ describe("model choice persistence", () => {
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({ nodeId, modelKey: expected }));
   });
 
-  it("keeps an unavailable identity and offers an explicit model recovery without starting a run", async () => {
+  it("keeps the regular panel shape for an offline identity and only blocks execution", async () => {
     const canvas = canvasWithVideoNode(); canvas.nodeData[NODE_ID]!.preferredModelKey = "removed-model";
+    canvas.nodeData[NODE_ID]!.prompt = "镜头缓推";
     woohaa3CanvasStore.getState().hydrate(canvas);
     const run = vi.fn();
     const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
       writable runClient={{ run } as never} dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
       registry={registryWithPanel()} draftStore={createModelDraftStore()} />);
     expect(host.textContent).toContain("removed-model");
-    expect(host.textContent).toContain("下线");
+    expect(host.textContent).toContain("已从任务目录下线");
+    // 面板保持常规外观：提示词、参考区、来源与模型、主操作都在，只是主操作被禁用。
+    expect(host.querySelector(".mc-panel")).not.toBeNull();
+    expect(host.querySelector(".node-execution-dock__diagnostic")).toBeNull();
     expect(host.querySelector('button[aria-label="来源与模型"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="prompt-submit-hint"]')).not.toBeNull();
+    expect(host.querySelector<HTMLButtonElement>(".mc-panel__send")?.disabled).toBe(true);
+    // 已下线身份不可执行：仍不回落到其它模型，也不发起任务。
     expect(host.querySelector('[data-testid="video-panel"]')).toBeNull();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("keeps the offline reason visible when the canvas is read-only", async () => {
+    const canvas = canvasWithVideoNode(); canvas.nodeData[NODE_ID]!.preferredModelKey = "removed-model";
+    woohaa3CanvasStore.getState().hydrate(canvas);
+    const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={NODE_ID} session={{} as never}
+      writable={false} runClient={{} as never} dialogs={new DialogService()} catalog={new StubCatalogService(CATALOG)}
+      registry={registryWithPanel()} draftStore={createModelDraftStore()} />);
+    // 只读时不重复「画布只读」这类会话级原因，但模型下线是节点自己的原因，仍要可见。
+    expect(host.textContent).toContain("已从任务目录下线");
+    expect(host.textContent).not.toContain("画布当前只读，无法执行任务");
+    expect(host.querySelector<HTMLButtonElement>(".mc-panel__send")?.disabled).toBe(true);
   });
   it("keeps the failed choice and prompt without a retry control, then follows canonical undo", async () => {
     let panel: ModelPanelProps | undefined;

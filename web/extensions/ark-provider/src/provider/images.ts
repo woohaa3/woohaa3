@@ -8,9 +8,13 @@ import {
   resolutionField,
   seedreamPixelSize,
   seedreamBackgroundField,
+  seedreamLayerDecompositionOptions,
+  seedreamPromptOptimizeModes,
   seedreamSizePresetFor,
   seedreamSupportsAspectRatio,
+  seedreamSupportsOutputFormatParameter,
   seedreamSupportsTransparentBackground,
+  seedreamTransparentBackgroundFromText,
   type PresetCard,
   type SeedreamSizePreset,
 } from '@woohaa3/contracts';
@@ -41,6 +45,15 @@ function requireArkImageCard(modelId: string): PresetCard {
     throw new Error(`Unsupported Ark model: ${modelId} (missing preset card)`);
   }
   return card;
+}
+
+/** 目录里的图片模型必须有即梦版本语义：没有就说明能力无从得知，直接报不可用而不是猜。 */
+function requireSeedreamPreset(modelId: string): SeedreamSizePreset {
+  const preset = seedreamSizePresetFor(modelId);
+  if (preset === undefined) {
+    throw new Error(`Unsupported Ark model: ${modelId} (missing preset card)`);
+  }
+  return preset;
 }
 
 function referenceLimit(card: PresetCard): number {
@@ -102,6 +115,11 @@ export function buildArkSeedreamRequestBody(
   }
 
   const size = resolveSeedreamSize(model, input, spec.family, layerDecomposition);
+  // 输出格式：卡片只窄化到该版本真能产出的值（4.5 / 4.0 只有 jpeg）。
+  // 但“能产出 jpeg”不等于“能收 output_format 字段”：4.5 / 4.0 传这个字段本身就 400
+  // （`the parameter output_format is not supported by the current model`，连 jpeg 也拒），
+  // 所以能否下发由卡片的 `features.outputFormatParameter` 决定，不是无条件拼进 body。
+  const acceptsOutputFormat = seedreamSupportsOutputFormatParameter(requireSeedreamPreset(model));
   const outputFormat = normalizeEnum(
     input.output_format ?? input.outputFormat ?? 'jpeg',
     outputFormats(card),
@@ -115,17 +133,17 @@ export function buildArkSeedreamRequestBody(
   const body: Record<string, unknown> = {
     model,
     size,
-    output_format: outputFormat,
     response_format: responseFormat,
     watermark: input.watermark == null ? true : Boolean(input.watermark),
   };
+  if (acceptsOutputFormat) body.output_format = outputFormat;
   if (prompt) body.prompt = prompt;
   if (images.length) body.image = images.length === 1 ? images[0] : images;
 
   if (spec.layerDecomposition) body.layer_decomposition = layerDecomposition;
   // 透明背景的版本判定只有一份：卡片 `seedream` 块的 `transparentBackground`。
-  // Ark 目录的 `layerDecomposition` 只是「pro 家族」分组，不表达透明能力（两者今天恰好
-  // 覆盖同一批模型，但不能用它代指）。
+  // Ark 目录的 `layerDecomposition` 只是「pro 家族」分组，不表达透明能力。
+  const preset = requireSeedreamPreset(model);
   if (supportsTransparentBackground(model)) {
     const background = normalizeEnum(
       input.background ?? 'opaque',
@@ -133,28 +151,79 @@ export function buildArkSeedreamRequestBody(
       'background',
     );
     if (background === 'transparent') {
-      // 官方：透明只在图生图、且只输入 1 张带透明通道的图片时生效，输出必须是 PNG。
-      if (images.length !== 1 || layerDecomposition) {
-        throw new Error('ark Seedream transparent background requires single-image editing mode');
-      }
-      if (outputFormat !== 'png') {
-        throw new Error('ark Seedream transparent background requires output_format=png');
+      // 上游实测（2026-11-16）：`background` 与 `layer_decomposition` 互斥，一起下发直接 400 ——
+      //   The parameter `background` ... is not supported with layer_decomposition.
+      // 图层拆分分支由下面的 `if (!layerDecomposition)` 整个跳过，不在这里拦，否则旧草稿里
+      // 残留的 `transparent` 会让用户看到一条与操作无关的报错（面板也已经隐藏该控件）。
+      if (!layerDecomposition) {
+        // 5.5 支持文生图与图生图都出原生 RGBA；5.0 pro / flash 只能「图生图 + 1 张透明 PNG」。
+        const fromText = seedreamTransparentBackgroundFromText(preset);
+        if (!fromText && images.length !== 1) {
+          throw new Error('ark Seedream transparent background requires single-image editing mode');
+        }
+        if (acceptsOutputFormat && outputFormat !== 'png') {
+          throw new Error('ark Seedream transparent background requires output_format=png');
+        }
       }
     }
+    // 图层拆分时整个字段都不下发：上游两个参数互斥，带上就 400。
     if (!layerDecomposition) body.background = background;
   } else if (input.background === 'transparent') {
     throw new Error('ark Seedream does not support transparent background');
   }
 
+  // 图层拆分的高级参数：只有 5.5 认 `layer_decomposition_options`，
+  // 5.0 pro / flash 传了会被上游拒（`invalid parameter`）。
+  if (layerDecomposition) applyLayerDecompositionOptions(body, input, preset);
+
   if (spec.family === 'sequential') applySequential(body, input, images.length);
+  // 提示词优化模式按模型放行：官方只有 5.0 pro 与 4.0 有「极速模式」，
+  // 其余版本（含 5.5 / flash / lite / 4.5）传 fast 直接 400。
   const optimizeMode = (input.optimize_prompt_options as Record<string, unknown> | undefined)?.mode
     ?? input.optimizePromptMode;
   if (optimizeMode != null && optimizeMode !== '') {
+    const modes = seedreamPromptOptimizeModes(preset);
     body.optimize_prompt_options = {
-      mode: normalizeEnum(optimizeMode, ['standard', 'fast'] as const, 'optimize_prompt_options.mode'),
+      mode: normalizeEnum(optimizeMode, modes, 'optimize_prompt_options.mode'),
     };
   }
   return body;
+}
+
+/**
+ * 5.5 的图层拆分高级参数：`max_images`（含底图，[2, 100]）与 `text_recognition`。
+ *
+ * 其他版本没有这个对象，调用方已按 `layerDecompositionOptions` 是否存在把守。
+ */
+function applyLayerDecompositionOptions(
+  body: Record<string, unknown>,
+  input: Record<string, unknown>,
+  preset: SeedreamSizePreset,
+): void {
+  const options = seedreamLayerDecompositionOptions(preset);
+  const requestedMax = input.layerDecompositionMaxImages ?? input.maxImages;
+  const textRecognition = input.layerTextRecognition ?? input.textRecognition;
+  if (options === undefined) {
+    if (requestedMax != null || textRecognition != null) {
+      throw new Error('ark Seedream layer decomposition options are only supported by Seedream 5.5');
+    }
+    return;
+  }
+  const payload: Record<string, unknown> = {};
+  if (requestedMax != null && requestedMax !== '') {
+    const value = positiveInt(requestedMax, options.defaultMaxImages);
+    if (value < options.minImages || value > options.maxImages) {
+      throw new Error(`ark Seedream 5.5 layer decomposition max_images must be ${options.minImages}-${options.maxImages}`);
+    }
+    payload.max_images = value;
+  }
+  if (textRecognition != null) {
+    if (!options.textRecognition) {
+      throw new Error('ark Seedream does not support layer decomposition text_recognition');
+    }
+    payload.text_recognition = Boolean(textRecognition);
+  }
+  if (Object.keys(payload).length > 0) body.layer_decomposition_options = payload;
 }
 
 export function describeArkImage(modelId: string, model: ArkCatalogModel): PptaskDescription {
@@ -191,15 +260,49 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
         }
       : {}),
     size: resolutionField({ tiers: imageSizes, fallback: defaultImageSize, title: '图片分辨率' }),
-    outputFormat: selectSchema('输出格式', outputFormats(card), 'jpeg'),
+    // `output_format` 只有 5.x 认：4.5 / 4.0 只能出 jpeg 且连这个字段都拒，
+    // 给它们摆一个只有一项／根本发不出去的「输出格式」只会误导，直接不展示。
+    ...(seedream !== undefined && seedreamSupportsOutputFormatParameter(seedream)
+      ? { outputFormat: selectSchema('输出格式', outputFormats(card), 'jpeg') }
+      : {}),
     watermark: { type: 'boolean', title: '水印', default: true, 'x-component': 'Switch' },
   };
   if (spec.layerDecomposition) {
     properties.layerDecomposition = { type: 'boolean', title: '图层拆分', default: false, 'x-component': 'Switch' };
+    // 5.5 额外认 `layer_decomposition_options`（最多 100 张、富文本 OCR）；
+    // 5.0 pro / flash 只有光杆布尔值，不展示这两项。
+    const layerOptions = seedream === undefined ? undefined : seedreamLayerDecompositionOptions(seedream);
+    if (layerOptions !== undefined) {
+      properties.layerDecompositionMaxImages = {
+        type: 'number',
+        title: '最多输出图片数',
+        default: layerOptions.defaultMaxImages,
+        minimum: layerOptions.minImages,
+        maximum: layerOptions.maxImages,
+        'x-component': 'NumberPicker',
+        'x-hidden-when': [{ field: 'layerDecomposition', equals: false }],
+      };
+      if (layerOptions.textRecognition) {
+        properties.layerTextRecognition = {
+          type: 'boolean',
+          title: '文字图层 OCR',
+          default: false,
+          'x-component': 'Switch',
+          'x-hidden-when': [{ field: 'layerDecomposition', equals: false }],
+        };
+      }
+    }
   }
   if (supportsTransparentBackground(modelId)) {
     // 与网关链路共用卡片目录的投影：透明选项自带「输出必须是 PNG」的联动。
-    properties.background = seedreamBackgroundField();
+    // 图层拆分与 `background` 在上游互斥（实测 400：`is not supported with
+    // layer_decomposition`），所以拆分开着时直接隐藏这个控件，不摆一个注定不能用的选项。
+    properties.background = spec.layerDecomposition
+      ? {
+          ...seedreamBackgroundField(),
+          'x-hidden-when': [{ field: 'layerDecomposition', equals: true }],
+        }
+      : seedreamBackgroundField();
   }
   if (spec.family === 'sequential') {
     properties.sequentialImageGeneration = selectSchema('组图', ['disabled', 'auto'], 'disabled');
@@ -228,9 +331,17 @@ export function describeArkImage(modelId: string, model: ArkCatalogModel): Pptas
       urls: [],
       ...(supportsRatio ? { aspectRatio: 'auto' } : {}),
       size: defaultImageSize,
-      outputFormat: 'jpeg',
+      ...(seedream !== undefined && seedreamSupportsOutputFormatParameter(seedream)
+        ? { outputFormat: 'jpeg' }
+        : {}),
       watermark: true,
       ...(spec.layerDecomposition ? { layerDecomposition: false } : {}),
+      ...(spec.layerDecomposition && seedream !== undefined && seedreamLayerDecompositionOptions(seedream) !== undefined
+        ? {
+            layerDecompositionMaxImages: seedreamLayerDecompositionOptions(seedream)!.defaultMaxImages,
+            ...(seedreamLayerDecompositionOptions(seedream)!.textRecognition ? { layerTextRecognition: false } : {}),
+          }
+        : {}),
       ...(supportsTransparentBackground(modelId) ? { background: 'opaque' } : {}),
       ...(spec.family === 'sequential' ? { sequentialImageGeneration: 'disabled', sequentialMaxImages: 4 } : {}),
     },

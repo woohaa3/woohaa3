@@ -12,11 +12,19 @@
  * 不再从库里搬字节。
  *
  * 两条硬约束：
- * 1. **宁可大，不可丢**：转存失败原样保留字节（URL 过期/失败时的唯一退路、重启对账也靠它）；
- * 2. **只处理受支持的形状**：单产物的 image/audio；video 仍只走地址路径（大对象不按字节转存）。
+ * 1. **宁可大，不可丢**：任一张转存失败就整体保留原始字节（URL 过期/失败时的唯一退路、
+ *    重启对账也靠它）；
+ * 2. **只处理受支持的形状**：image/audio/motion 的字节；video 仍只走地址路径（大对象不按
+ *    字节转存）。
+ *
+ * **多产物是必须支持的主路径**（2026-11-17 现场）：图层拆分（Seedream 5.5
+ * `layer_decomposition`）一次返回 1 张底图 + N 个图层，早先的「只归档单产物」判断让整条
+ * 链路退化成把原始字节写进 SQLite —— 24.2MB 字节 × 13 倍 JSON 膨胀 × state/result 两份
+ * = 640MB 单行，`JsonStore.save` 的同步序列化把事件循环卡死 112 秒（前端表现为「正在重连
+ * 本地服务器」）。现在逐张归档、写 `outputs`，单行回到 KB 级。
  */
 import { createHash } from "node:crypto";
-import { CANVAS_TASK_LIMITS, isGenerationStableMediaResult } from "@woohaa3/contracts";
+import { CANVAS_TASK_LIMITS, isGenerationStableMediaResult, readImageMediaType } from "@woohaa3/contracts";
 import type { MediaClient } from "../clients/media-client.js";
 import type { TaskPayloadSnapshot, TaskPayloadTransform } from "../repository/sqlite-task-store.js";
 import { bytesFromBase64Descriptor, readProviderContentType } from "./media-materialization.js";
@@ -59,9 +67,10 @@ const DEFAULT_CACHE_LIMIT = 64;
 export function createResultArchiver(options: ResultArchiveOptions): TaskPayloadTransform {
   const client = options.mediaClient;
   const cacheLimit = options.cacheLimit ?? DEFAULT_CACHE_LIMIT;
-  // taskKey → 已归档内容的摘要与引用。worker 的恢复快照与任务 result 常是同一份字节，
-  // 只应产生一次 import；job repository 每次 get 都会 clone，所以按内容摘要而不是对象引用命中。
-  const archived = new Map<string, { digest: string; media: ArchivedMedia }>();
+  // taskKey → (内容摘要 → 引用)。worker 的恢复快照与任务 result 常是同一份字节，只应产生
+  // 一次 import；job repository 每次 get 都会 clone，所以按内容摘要而不是对象引用命中。
+  // 多产物时同一任务有多份字节，内层按摘要区分。
+  const archived = new Map<string, Map<string, ArchivedMedia>>();
 
   return async function archivePayload(payload: TaskPayloadSnapshot) {
     if (!client) return undefined;
@@ -71,15 +80,20 @@ export function createResultArchiver(options: ResultArchiveOptions): TaskPayload
     // 视频大对象只接受地址；按字节归档会把 64MB 上限的对象再放大成 base64。
     if (!kind || kind === "video") return undefined;
 
-    const resultBytes = firstMediaBytes(payload.result, kind);
-    const stateBytes = firstMediaBytes(stateResult, kind);
-    if (!resultBytes && !stateBytes) return undefined;
+    const resultItems = mediaItemsOf(payload.result, kind);
+    const stateItems = mediaItemsOf(stateResult, kind);
+    if (resultItems.length === 0 && stateItems.length === 0) return undefined;
+    // 条目数不一致说明 result 与快照不是同一份输出（旧记录/部分写入）：按大的那份归档，
+    // 但只替换条目数一致的一侧，避免凭空造出对方没有的产物。
+    const items = resultItems.length > 0 ? resultItems : stateItems;
 
     try {
-      const media = await archiveBytes(payload, kind, resultBytes ?? stateBytes!);
+      const media = await archiveItems(payload, kind, items);
+      const archiveable = media.length > 0;
+      if (!archiveable) return undefined;
       return {
-        state: stateBytes ? withArchivedState(payload.state, stateResult, media) : payload.state,
-        result: resultBytes ? withArchivedResult(payload.result, media) : payload.result
+        state: stateItems.length === items.length ? withArchivedState(payload.state, stateResult, media) : payload.state,
+        result: resultItems.length === items.length ? withArchivedResult(payload.result, media) : payload.result
       };
     } catch (error) {
       options.logger?.({
@@ -91,6 +105,26 @@ export function createResultArchiver(options: ResultArchiveOptions): TaskPayload
     }
   };
 
+  /** 逐张归档；任一张失败整体抛出（调用方保留原始字节，绝不落半套引用）。 */
+  async function archiveItems(
+    payload: TaskPayloadSnapshot,
+    kind: BinaryModelType,
+    items: readonly Uint8Array[]
+  ): Promise<ArchivedMedia[]> {
+    const archivedMedia: ArchivedMedia[] = [];
+    for (const bytes of items) archivedMedia.push(await archiveBytes(payload, kind, bytes));
+    if (archivedMedia.length > 0) {
+      options.logger?.({
+        event: "task-result-archived",
+        taskKey: payload.key,
+        size: archivedMedia.reduce((total, entry) => total + entry.size, 0),
+        modelType: kind,
+        ...(archivedMedia.length > 1 ? { outputs: archivedMedia.length } : {})
+      });
+    }
+    return archivedMedia;
+  }
+
   async function archiveBytes(
     payload: TaskPayloadSnapshot,
     kind: BinaryModelType,
@@ -98,13 +132,17 @@ export function createResultArchiver(options: ResultArchiveOptions): TaskPayload
   ): Promise<ArchivedMedia> {
     if (!client) throw new Error("Media 未装配");
     const digest = digestBytes(bytes);
-    const known = archived.get(payload.key);
-    if (known && known.digest === digest) return known.media;
+    const known = archived.get(payload.key)?.get(digest);
+    if (known) return known;
 
     const canvasId = readCanvasId(payload.context);
+    const declaredContentType = readProviderContentType(payload.result ?? readStateResult(payload.state), kind);
+    // URL 产出的 providerMetadata 只有地址，类型只能退回默认 image/png；落库前按字节签名
+    // 纠正成真实格式，否则后续按记录类型解析图片会失败。
+    const sniffedImageType = kind === "image" ? readImageMediaType(bytes) : null;
     const metadata = await client.importBytes({
       bytesBase64: Buffer.from(bytes).toString("base64"),
-      contentType: readProviderContentType(payload.result ?? readStateResult(payload.state), kind),
+      contentType: sniffedImageType ?? declaredContentType,
       maxBytes: maxBytesFor(kind),
       ...(canvasId ? { canvasId } : {})
     });
@@ -119,18 +157,14 @@ export function createResultArchiver(options: ResultArchiveOptions): TaskPayload
     if (!isGenerationStableMediaResult({ media })) {
       throw new Error(`Media 返回的引用不是稳定键：${media.storageKey}`);
     }
-    archived.set(payload.key, { digest, media });
+    const perTask = archived.get(payload.key) ?? new Map<string, ArchivedMedia>();
+    perTask.set(digest, media);
+    archived.set(payload.key, perTask);
     while (archived.size > cacheLimit) {
       const oldest = archived.keys().next().value;
       if (oldest === undefined) break;
       archived.delete(oldest);
     }
-    options.logger?.({
-      event: "task-result-archived",
-      taskKey: payload.key,
-      size: metadata.size,
-      modelType: kind
-    });
     return media;
   }
 }
@@ -143,7 +177,7 @@ function readStateResult(state: unknown): unknown {
 }
 
 /** 引擎快照：只替换 `state.record.result`，jobId / operation / transitions 原样保留（恢复要用）。 */
-function withArchivedState(state: unknown, result: unknown, media: ArchivedMedia): unknown {
+function withArchivedState(state: unknown, result: unknown, media: readonly ArchivedMedia[]): unknown {
   const next: Record<string, unknown> = isRecord(state) ? { ...state } : {};
   const record: Record<string, unknown> = isRecord(next.record) ? { ...next.record } : {};
   record.result = withArchivedResult(result, media);
@@ -154,10 +188,12 @@ function withArchivedState(state: unknown, result: unknown, media: ArchivedMedia
 /**
  * 把 `result` 换成稳定媒体引用：删掉二进制数组、保留 providerMetadata 等小字段。
  *
- * `isGenerationStableMediaResult` 只认顶层 `media`，所以 materializer / 重启对账无需改动
- * 判定逻辑就能接住这份记录。
+ * `isGenerationStableMediaResult` 只认顶层 `media`（= 主产物），所以 materializer / 重启
+ * 对账无需改动判定逻辑就能接住这份记录；多产物另写在 `outputs`，由画布投影逐张落卡片。
  */
-function withArchivedResult(result: unknown, media: ArchivedMedia): unknown {
+function withArchivedResult(result: unknown, media: readonly ArchivedMedia[]): unknown {
+  const primary = media[0];
+  if (!primary) return result;
   const rest: Record<string, unknown> = isRecord(result) ? { ...result } : {};
   delete rest.images;
   delete rest.audios;
@@ -167,23 +203,42 @@ function withArchivedResult(result: unknown, media: ArchivedMedia): unknown {
   // to `audios`.  Keeping it would retain the full payload in SQLite even after the
   // descriptor is archived, so remove the duplicate together with the list.
   delete rest.audio;
-  rest.media = media;
+  rest.media = primary;
+  if (media.length > 1) {
+    rest.outputs = media.map((entry, index) => ({
+      index,
+      storageKey: entry.storageKey,
+      ...(entry.locator !== undefined ? { locator: entry.locator } : {}),
+      contentType: entry.contentType,
+      size: entry.size,
+      ...(entry.checksum !== undefined ? { checksum: entry.checksum } : {})
+    }));
+  } else {
+    delete rest.outputs;
+  }
   return rest;
 }
 
 /**
- * 取待归档的字节：只认「单产物」形状（`images` / `audios` 长度为 1 且首项是二进制）。
+ * 取待归档的**全部**字节（provider 输出顺序）。
  *
- * 多产物结果不归档 —— 当前执行链路只用第一份，静默丢掉其余产物比多占空间更糟。
+ * 图层拆分等多产物结果是主路径，不再是「只认长度为 1」的特例。任何一项拿不到字节就整体
+ * 放弃归档（返回空数组）：只归档一部分会让落库结果既不是完整字节、也不是完整引用。
  * 旧记录反序列化后的 `{"0":n,...}` 索引对象也不在这里重建：那是历史数据，重存一次不值得
  * 再扫几百万个 key（已归档的记录不会再回到这条路径）。
  */
-function firstMediaBytes(result: unknown, kind: BinaryModelType): Uint8Array | undefined {
-  if (!isRecord(result)) return undefined;
+function mediaItemsOf(result: unknown, kind: BinaryModelType): Uint8Array[] {
+  if (!isRecord(result)) return [];
   const key = kind === "image" ? "images" : kind === "audio" ? "audios" : kind === "motion" ? "motions" : "videos";
   const list = result[key];
-  if (!Array.isArray(list) || list.length !== 1) return undefined;
-  return asBytes(list[0], maxBytesFor(kind));
+  if (!Array.isArray(list) || list.length === 0) return [];
+  const items: Uint8Array[] = [];
+  for (const entry of list) {
+    const bytes = asBytes(entry, maxBytesFor(kind));
+    if (!bytes || bytes.byteLength === 0) return [];
+    items.push(bytes);
+  }
+  return items;
 }
 
 /** 内容摘要只用于进程内去重（同一任务 state/result 各一份同样字节）。 */

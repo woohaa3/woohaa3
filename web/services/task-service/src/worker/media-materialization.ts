@@ -5,7 +5,10 @@
  * 不变式：所有二进制生成结果先经 Media Service 转存为稳定对象，之后才写 succeeded；
  * 转存失败记录为 failed，绝不落 succeeded。**受控下载地址只是取字节的一种来源**：本地
  * provider 的输出字节已经落在 durable 记录里，URL 转存失败时先用同一份字节再转存一次
- * （见 materializeBinaryResult），provider 临时地址的抖动不得把已生成的结果判死。
+ * （见 materializeOutputs），provider 临时地址的抖动不得把已生成的结果判死。
+ *
+ * **一次生成可能给多张产物**（图层拆分：1 张底图 + N 个图层）。转存按全量逐张进行，
+ * 结果写进 `result.outputs`；只关心一份结果的消费方仍读顶层字段（= 主产物）。
  */
 import type { ExecutionRecord } from "@sdppp/pptask-worker-server/history";
 import type { PptaskTaskStore } from "@sdppp/pptask-worker-server";
@@ -13,8 +16,10 @@ import {
   CANVAS_TASK_LIMITS,
   isGenerationStableMediaResult,
   isSomaMotionMetadata,
+  readImageMediaType,
   type GenerationStableMediaResult,
   type TaskResultSummary,
+  type TaskResultOutput,
   type MediaMetadata
 } from "@woohaa3/contracts";
 import { projectExecutionRecord, readDurationFromRecord } from "./execution-projection.js";
@@ -289,46 +294,120 @@ function stableModelType(record: ExecutionRecord): BinaryModelType {
   return record.modelType === "video" || record.modelType === "audio" || record.modelType === "motion" ? record.modelType : "image";
 }
 
-/** 受控转存 provider 二进制输出（URL 或 bytes）；成功写稳定 metadata，失败写 failed。 */
-export async function materializeBinaryResult(
+/**
+ * 一份待转存的二进制来源：受控地址、durable 记录里的字节，或已归档的稳定引用。
+ *
+ * `media` 分支是图层拆分等多产物结果的常态：落库前已经归档（见 worker/result-archive.ts），
+ * 这里只需要按引用 verify-and-adopt，不搬字节。
+ */
+export type OutputSource =
+  | { kind: "url"; url: string }
+  | { kind: "bytes"; bytesBase64: string; contentType: string }
+  | { kind: "media"; media: StableMediaRef };
+
+/** 已归档条目的稳定身份（`GenerationStableMediaResult.media` 的位置与 metadata 子集）。 */
+export type StableMediaRef = {
+  storageKey: string;
+  locator?: string;
+  contentType: string;
+  size: number;
+  checksum?: string;
+};
+
+/**
+ * 受控转存 provider 的**全部**二进制输出；成功写稳定 metadata，失败写 failed。
+ *
+ * 图层拆分（Seedream 5.5 `layer_decomposition`）一次给 1 张底图 + N 个图层，每张都是独立
+ * PNG。只转存第一张会让画布只拿到一张图（真实缺陷：Live2D 拆分出来是一块白底板，全部
+ * 图层被丢弃）。这里逐张转存并写进 `result.outputs`，`outputs[0]` 同时作为主产物落在顶层
+ * 字段，单产物消费方行为不变。
+ *
+ * 失败边界：**主产物失败 = 任务失败**（保持既有语义，绝不落「无产物 succeeded」）；非主产物
+ * 单张失败只记日志并从 `outputs` 里省略，不让一个图层的 CDN 抖动毁掉整套结果。
+ */
+export async function materializeOutputs(
   options: MaterializationContext,
   record: ExecutionRecord,
   association: Partial<TaskAssociation> | undefined,
-  input:
-    | { kind: "url"; url: string; modelType: BinaryModelType; posterUrl?: string }
-    | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: "image" | "audio" | "motion" },
-  durationSeconds?: number
+  input: {
+    modelType: BinaryModelType;
+    sources: readonly OutputSource[];
+    posterUrl?: string;
+    durationSeconds?: number;
+    /** 全部来源都是 provider 地址时，失败后是否回退 durable 字节（内部递调用置 false 防环）。 */
+    allowStoreFallback?: boolean;
+  }
 ): Promise<void> {
   const modelType = input.modelType;
   const maxBytes = maxBytesFor(modelType);
   // 画布作用域：同一次材料化的主媒体与视频海报都属于同一张画布。
   const canvasId = await readCanvasIdForMaterialization(options, record, association);
   const scope = canvasId ? { canvasId } : {};
+  const sources = input.sources;
+  if (sources.length === 0) {
+    projectFailedMedia(options, record, association, modelType, {
+      name: "MediaImportError",
+      message: `provider ${modelType} 结果缺少可转存来源`,
+      code: "media-source-missing"
+    });
+    return;
+  }
+  /**
+   * 单份来源落到稳定媒体：地址走受控下载，字节走内容寻址，已归档条目只做 verify-and-adopt。
+   *
+   * 三条分支共用一个循环，`outputs` 的序号因此始终等于 provider 输出顺序。
+   */
+  const importOneSource = async (source: OutputSource): Promise<MediaMetadata> => {
+    if (source.kind === "url") return options.mediaClient!.importFromUrl({ url: source.url, maxBytes, ...scope });
+    if (source.kind === "bytes") {
+      return options.mediaClient!.importBytes({
+        bytesBase64: source.bytesBase64,
+        contentType: source.contentType,
+        maxBytes,
+        ...scope
+      });
+    }
+    // 已归档（多产物落库前转存过）：按引用核验，不搬字节。
+    return adoptStableObject(options, source.media.storageKey, source.media, scope);
+  };
   try {
-    const metadata =
-      input.kind === "url"
-        ? await options.mediaClient!.importFromUrl({ url: input.url, maxBytes, ...scope })
-        : await options.mediaClient!.importBytes({
-            bytesBase64: input.bytesBase64,
-            contentType: input.contentType,
-            maxBytes,
-            ...scope
-          });
+    const imported: Array<MediaMetadata | undefined> = [];
+    let primaryError: unknown;
+    for (const [index, source] of sources.entries()) {
+      try {
+        imported[index] = await importOneSource(source);
+      } catch (error) {
+        if (index === 0) primaryError = error;
+        else options.logger?.({ event: "media-output-item-failed", taskKey: record.id, code: safeMediaFailure(error, modelType).code });
+      }
+    }
+    const metadata = imported[0];
+    if (!metadata) throw primaryError ?? new Error(`provider ${modelType} 首个结果转存失败`);
     // 视频海报/末帧：作为独立图片对象转存。
     let poster: MediaMetadata | undefined;
-    if (input.kind === "url" && input.posterUrl) {
+    if (input.posterUrl) {
       poster = await options.mediaClient!.importFromUrl({
         url: input.posterUrl,
         maxBytes: maxBytesFor("image"),
         ...scope
       });
     }
-    options.logger?.({ event: "media-output-imported", taskKey: record.id });
+    const outputs = imported.flatMap((entry, index) => (entry ? [outputFromMedia(entry, index)] : []));
+    const importedCount = outputs.length;
+    options.logger?.({
+      event: "media-output-imported",
+      taskKey: record.id,
+      ...(importedCount > 1 ? { pending: importedCount } : {})
+    });
     projectExecutionRecord(
       options.history,
       record,
       association,
-      resultFromMedia(metadata, { poster, durationSeconds: durationSeconds ?? readDurationFromRecord(record) }),
+      resultFromMedia(metadata, {
+        poster,
+        durationSeconds: input.durationSeconds ?? readDurationFromRecord(record),
+        ...(importedCount > 1 ? { outputs } : {})
+      }),
       "succeeded"
     );
   } catch (error) {
@@ -338,27 +417,32 @@ export async function materializeBinaryResult(
     // 一致，同一地址二次下载超时 → 任务 failed）。与重启对账的「优先字节，其次地址」对齐：
     // URL 失败后先用同一份字节再转存一次。视频不回退：大对象只接受地址（见
     // materializeBinaryBytesFromStore）。
-    if (input.kind === "url" && modelType !== "video") {
-      const adopted = await importStoredBytesAfterUrlFailure(options, record, association, modelType, maxBytes, scope, error);
+    const allUrls = sources.every((source) => source.kind === "url");
+    if (allUrls && modelType !== "video" && input.allowStoreFallback !== false) {
+      const adopted = await importStoredBytesAfterUrlFailure(options, record, association, modelType, error);
       if (adopted) return;
     }
     const failure = safeMediaFailure(error, modelType);
     options.logger?.({ event: "media-output-import-failed", taskKey: record.id, code: failure.code, ...(failure.status !== undefined ? { status: failure.status } : {}) });
     // 转存失败：succeeded 不得落地，记录为失败（provider 已执行，但结果未持久化）。
-    projectExecutionRecord(
-      options.history,
-      record,
-      association,
-      { mediaKind: modelType },
-      "failed",
-      {
-        name: "MediaImportError",
-        message: failure.message,
-        ...(failure.status !== undefined ? { status: failure.status } : {}),
-        code: failure.code
-      }
-    );
+    projectFailedMedia(options, record, association, modelType, {
+      name: "MediaImportError",
+      message: failure.message,
+      ...(failure.status !== undefined ? { status: failure.status } : {}),
+      code: failure.code
+    });
   }
+}
+
+/** 统一的「二进制结果转存失败」终态写法：绝不落「无产物的 succeeded」。 */
+function projectFailedMedia(
+  options: MaterializationContext,
+  record: ExecutionRecord,
+  association: Partial<TaskAssociation> | undefined,
+  modelType: BinaryModelType,
+  error: { name: string; message: string; status?: number; code?: string }
+): void {
+  projectExecutionRecord(options.history, record, association, { mediaKind: modelType }, "failed", error);
 }
 
 /**
@@ -374,12 +458,10 @@ async function importStoredBytesAfterUrlFailure(
   record: ExecutionRecord,
   association: Partial<TaskAssociation> | undefined,
   modelType: "image" | "audio" | "motion",
-  maxBytes: number,
-  scope: { canvasId?: string },
   urlError: unknown
 ): Promise<boolean> {
-  const stored = await readStoredBinarySource(options.taskStore, record.id, modelType).catch(() => undefined);
-  if (!stored) {
+  const stored = await readStoredBinarySources(options.taskStore, record.id, modelType).catch(() => [] as StoredBinarySources);
+  if (stored.length === 0) {
     options.logger?.({
       event: "media-output-import-bytes-unavailable",
       taskKey: record.id,
@@ -388,31 +470,51 @@ async function importStoredBytesAfterUrlFailure(
     return false;
   }
   try {
-    if (stored.kind === "media") {
-      // 落库前已归档（SqliteTaskStore 的负载变换）：按稳定引用 verify-and-adopt，不搬字节。
-      await materializeStableMediaResult(options, record, association, stored.media);
-      options.logger?.({ event: "media-output-adopted-from-store", taskKey: record.id });
-      return true;
-    }
-    const metadata = await options.mediaClient!.importBytes({
-      bytesBase64: stored.bytesBase64,
-      contentType: stored.contentType,
-      maxBytes,
-      ...scope
+    // 落库前已归档（SqliteTaskStore 的负载变换）：按稳定引用 verify-and-adopt，不搬字节；
+    // 未归档记录走字节转存。两条都交给 materializeOutputs，多产物一次转全。
+    await materializeOutputs(options, record, association, { modelType, sources: stored });
+    options.logger?.({
+      event: stored.every((entry) => entry.kind === "media") ? "media-output-adopted-from-store" : "media-output-imported-from-store",
+      taskKey: record.id
     });
-    options.logger?.({ event: "media-output-imported-from-store", taskKey: record.id });
-    projectExecutionRecord(
-      options.history,
-      record,
-      association,
-      resultFromMedia(metadata, { durationSeconds: readDurationFromRecord(record) }),
-      "succeeded"
-    );
     return true;
   } catch (error) {
     options.logger?.({ event: "media-output-import-bytes-failed", taskKey: record.id, code: safeMediaFailure(error, modelType).code });
     return false;
   }
+}
+
+/** 单产物转存的兼容入口（绝大多数 provider 只给一份结果）。 */
+export async function materializeBinaryResult(
+  options: MaterializationContext,
+  record: ExecutionRecord,
+  association: Partial<TaskAssociation> | undefined,
+  input:
+    | { kind: "url"; url: string; modelType: BinaryModelType; posterUrl?: string }
+    | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: "image" | "audio" | "motion" },
+  durationSeconds?: number
+): Promise<void> {
+  await materializeOutputs(options, record, association, {
+    modelType: input.modelType,
+    sources: [
+      input.kind === "url"
+        ? { kind: "url", url: input.url }
+        : { kind: "bytes", bytesBase64: input.bytesBase64, contentType: input.contentType }
+    ],
+    ...(input.kind === "url" && input.posterUrl ? { posterUrl: input.posterUrl } : {}),
+    ...(durationSeconds !== undefined ? { durationSeconds } : {})
+  });
+}
+
+/** 一份已转存的媒体 → 多产物数组里的一项（序号即 provider 输出顺序）。 */
+export function outputFromMedia(metadata: MediaMetadata, index: number): TaskResultOutput {
+  return {
+    index,
+    storageKey: metadata.storageKey,
+    ...(metadata.contentType ? { contentType: metadata.contentType } : {}),
+    size: metadata.size,
+    ...(metadata.checksum ? { checksum: metadata.checksum } : {})
+  };
 }
 
 /** provider 以 base64/bytes 返回：从 durable task store 的原始 result 取字节后转存。 */
@@ -439,8 +541,8 @@ export async function materializeBinaryBytesFromStore(
     );
     return;
   }
-  const stored = await readStoredBinarySourceWithRetry(options.taskStore, record.id, modelType);
-  if (!stored) {
+  const stored = await readStoredBinarySourcesWithRetry(options.taskStore, record.id, modelType);
+  if (stored.length === 0) {
     // 二进制任务既没有可转存来源、也没有稳定结果：不得落「无产物 succeeded」。
     projectExecutionRecord(
       options.history,
@@ -456,52 +558,41 @@ export async function materializeBinaryBytesFromStore(
     );
     return;
   }
-  if (stored.kind === "media") {
-    // 记录里已是稳定媒体引用（落库前已归档，见 worker/result-archive.ts）：verify-and-adopt。
-    // 这条路径就是 2.2GB 那个缺陷的修复落点：字节不再从 SQLite 读回来再 base64 传一遍。
-    await materializeStableMediaResult(options, record, association, stored.media);
-    return;
-  }
-  await materializeBinaryResult(options, record, association, {
-    kind: "bytes",
-    bytesBase64: stored.bytesBase64,
-    contentType: stored.contentType,
-    modelType
-  });
+  // 已归档的多产物在这里一次性走引用核验；未归档记录按字节逐张转存。
+  // 这条路径就是 2.2GB / 640MB 那两个缺陷的修复落点：字节不再从 SQLite 读回来再 base64 传一遍。
+  await materializeOutputs(options, record, association, { modelType, sources: stored });
 }
 
-/** durable 记录里的二进制来源：真实字节，或已归档的稳定媒体引用。 */
-export type StoredBinarySource =
-  | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: BinaryModelType }
-  | { kind: "media"; media: GenerationStableMediaResult["media"] };
+/** durable 记录里的二进制来源：已归档的稳定引用，或未归档的原始字节（可以是多份）。 */
+export type StoredBinarySources = OutputSource[];
 
 /** 有界重试读取来源：worker 的 `saveTask` 紧随 succeeded 广播之后。 */
-async function readStoredBinarySourceWithRetry(
+async function readStoredBinarySourcesWithRetry(
   taskStore: PptaskTaskStore,
   taskKey: string,
   modelType: BinaryModelType
-): Promise<StoredBinarySource | undefined> {
+): Promise<StoredBinarySources> {
   const deadline = Date.now() + 5_000;
   for (;;) {
-    const stored = await readStoredBinarySource(taskStore, taskKey, modelType);
-    if (stored) return stored;
-    if (Date.now() > deadline) return undefined;
+    const stored = await readStoredBinarySources(taskStore, taskKey, modelType);
+    if (stored.length > 0) return stored;
+    if (Date.now() > deadline) return [];
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 
 /**
- * 读 durable 记录里的二进制来源。
+ * 读 durable 记录里的二进制来源（全部产物）。
  *
- * 落地方式有两种：新记录在落库前已把字节归档成 `{ media }`（见 worker/result-archive.ts），
+ * 落地方式有两种：新记录在落库前已把字节归档成稳定引用（见 worker/result-archive.ts），
  * 老记录仍可能带原始字节（JSON 往返后是 `{"0":n,...}`）。两条都要认，否则升级后旧任务
  * 无法对账、新任务会走到「没有可转存来源」。
  */
-export async function readStoredBinarySource(
+export async function readStoredBinarySources(
   taskStore: PptaskTaskStore,
   taskKey: string,
   modelType: BinaryModelType
-): Promise<StoredBinarySource | undefined> {
+): Promise<StoredBinarySources> {
   const raw = await taskStore.find(taskKey).catch(() => null);
   // pptask persists the execution snapshot and the display result in separate
   // columns.  A terminal notification can race the second save, leaving only
@@ -510,8 +601,7 @@ export async function readStoredBinarySource(
   // without an asset and the retry window cannot recover it once the result
   // column is never written (old worker versions did this on shutdown).
   const result = raw?.result ?? readStateResult(raw?.state);
-  if (isGenerationStableMediaResult(result)) return { kind: "media", media: result.media };
-  return bytesFromResult(result, modelType);
+  return readRawBinarySources({ result }, modelType);
 }
 
 function readStateResult(state: unknown): unknown {
@@ -519,37 +609,93 @@ function readStateResult(state: unknown): unknown {
   return state.record.result;
 }
 
-/** 从 durable task store 的原始 result 恢复首份二进制字节与类型（重启终态对账也用它）。 */
-export async function readRawBinaryBytes(
-  taskStore: PptaskTaskStore,
-  taskKey: string,
-  modelType: BinaryModelType
-): Promise<{ kind: "bytes"; bytesBase64: string; contentType: string; modelType: BinaryModelType } | undefined> {
-  const stored = await readStoredBinarySource(taskStore, taskKey, modelType);
-  return stored?.kind === "bytes" ? stored : undefined;
+/**
+ * 已归档记录的稳定引用（不搬字节）：优先 `outputs[]`（多产物），否则顶层 `media`。
+ *
+ * `outputs` 的项与 `GenerationStableMediaResult.media` 同形，可以直接进
+ * `materializeOutputs` 的 `media` 分支做 verify-and-adopt。
+ */
+function archivedStableSources(result: unknown): OutputSource[] {
+  if (!isRecord(result)) return [];
+  const outputs = result.outputs;
+  if (Array.isArray(outputs) && outputs.length > 0) {
+    const sources: OutputSource[] = [];
+    for (const entry of outputs) {
+      if (!isRecord(entry) || typeof entry.storageKey !== "string" || entry.storageKey === "") continue;
+      const contentType = typeof entry.contentType === "string" ? entry.contentType : "";
+      const size = typeof entry.size === "number" && Number.isFinite(entry.size) ? entry.size : 0;
+      sources.push({
+        kind: "media",
+        media: {
+          storageKey: entry.storageKey,
+          contentType,
+          size,
+          ...(typeof entry.locator === "string" && entry.locator !== "" ? { locator: entry.locator } : {}),
+          ...(typeof entry.checksum === "string" && entry.checksum !== "" ? { checksum: entry.checksum } : {})
+        }
+      });
+    }
+    if (sources.length > 0) return sources;
+  }
+  const stable = isGenerationStableMediaResult(result) ? result.media : undefined;
+  if (!stable) return [];
+  return [{
+    kind: "media",
+    media: {
+      storageKey: stable.storageKey,
+      contentType: stable.contentType,
+      size: stable.size,
+      ...(stable.locator !== undefined ? { locator: stable.locator } : {}),
+      ...(stable.checksum !== undefined ? { checksum: stable.checksum } : {})
+    }
+  }];
 }
 
-function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBinarySource | undefined {
+/**
+ * 从 durable task store 的原始 result 恢复**全部**二进制来源（重启终态对账也用它）。
+ *
+ * 两种落地形态都要认：
+ * - 已归档（新记录，见 worker/result-archive.ts）：`outputs[]` 是稳定引用，逐项
+ *   verify-and-adopt，不搬字节；只有一份产物时退回顶层 `media`。
+ * - 未归档（旧记录或归档失败）：`images` / `audios` 里的原始字节，JSON 往返后是
+ *   `{"0":n,...}`。
+ *
+ * 图层拆分一次落多份，只取第一份会让重启后的对账把整套结果降级成一张图（2026-11-17 现场）。
+ */
+export function readRawBinarySources(
+  task: { result?: unknown; state?: unknown } | null | undefined,
+  modelType: BinaryModelType
+): OutputSource[] {
+  if (!task) return [];
+  const result = task.result ?? readStateResult(task.state);
+  const archived = archivedStableSources(result);
+  if (archived.length > 0) return archived;
   const container = isRecord(result) ? (result as Record<string, unknown>) : undefined;
-  if (!container) return undefined;
+  if (!container) return [];
   const list = Array.isArray(container.motions) ? container.motions : Array.isArray(container.videos)
     ? container.videos
     : Array.isArray(container.audios)
       ? container.audios
       : container.images;
-  if (!Array.isArray(list) || list.length === 0) return undefined;
+  if (!Array.isArray(list) || list.length === 0) return [];
 
   const maxBytes = maxBytesFor(modelType);
-  const bytes = toUint8Array(list[0], maxBytes);
-  if (!bytes || bytes.byteLength === 0) return undefined;
-  if (bytes.byteLength > maxBytes) return undefined;
-
-  return {
-    kind: "bytes",
-    bytesBase64: Buffer.from(bytes).toString("base64"),
-    contentType: readProviderContentType(result, modelType),
-    modelType
-  };
+  const fallbackContentType = readProviderContentType(result, modelType);
+  const sources: OutputSource[] = [];
+  for (const item of list) {
+    const bytes = toUint8Array(item, maxBytes);
+    if (!bytes || bytes.byteLength === 0 || bytes.byteLength > maxBytes) break;
+    const descriptor = bytesFromBase64Descriptor(item, maxBytes);
+    // 字节是唯一权威事实：provider 只给地址时 `readProviderContentType` 只能退回默认
+    // image/png，实际字节可能是 JPEG/WebP，按默认值落库会让下游按错误类型解析。
+    const sniffed = modelType === "image" ? readImageMediaType(bytes) : null;
+    sources.push({
+      kind: "bytes",
+      bytesBase64: Buffer.from(bytes).toString("base64"),
+      contentType: sniffed ?? descriptor?.mediaType ?? fallbackContentType
+    });
+  }
+  return sources;
 }
 
 /**
@@ -598,7 +744,8 @@ export function readProviderContentType(raw: unknown, modelType: BinaryModelType
     ? (modelType === "image" ? container.images : modelType === "audio" ? container.audios : modelType === "motion" ? container.motions : container.videos)
     : undefined;
   const directFirst = Array.isArray(direct) ? direct[0] : undefined;
-  const directMediaType = isRecord(directFirst) ? directFirst.mediaType : undefined;
+  // provider 结果里这个字段叫法不一致：runtime/provider 用 `mediaType`，Replicate 这类适配器用 `mimeType`。
+  const directMediaType = isRecord(directFirst) ? directFirst.mediaType ?? directFirst.mimeType : undefined;
   if (typeof directMediaType === "string" && (directMediaType.startsWith(`${modelType}/`) || modelType === "motion" && directMediaType === "application/x-npz")) return directMediaType;
   const metadata = isRecord(raw) ? (raw as { providerMetadata?: unknown }).providerMetadata : undefined;
   if (isRecord(metadata)) {
@@ -611,7 +758,7 @@ export function readProviderContentType(raw: unknown, modelType: BinaryModelType
           ? list.audios
           : list.videos;
       const first = Array.isArray(candidate) ? candidate[0] : undefined;
-      const mediaType = isRecord(first) ? first.mediaType : undefined;
+      const mediaType = isRecord(first) ? first.mediaType ?? first.mimeType : undefined;
       if (typeof mediaType === "string" && mediaType.startsWith(`${modelType}/`)) return mediaType;
     }
   }
@@ -645,7 +792,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** 供 submit 路径在 Media import 后写稳定结果 metadata 的辅助。 */
 export function resultFromMedia(
   metadata: MediaMetadata,
-  extras?: { poster?: MediaMetadata; durationSeconds?: number; mediaKind?: BinaryModelType; motion?: TaskResultSummary["motion"]; fps?: number }
+  extras?: {
+    poster?: MediaMetadata;
+    durationSeconds?: number;
+    mediaKind?: BinaryModelType;
+    motion?: TaskResultSummary["motion"];
+    fps?: number;
+    /** 多产物（图层拆分等）；单产物调用方不传，历史里也就不出现这个字段。 */
+    outputs?: readonly TaskResultOutput[];
+  }
 ): TaskResultSummary {
   const mediaKind = extras?.mediaKind ?? (metadata.contentType === "application/x-npz" ? "motion" :
     metadata.mediaKind === "video" || metadata.mediaKind === "audio" || metadata.mediaKind === "image"
@@ -672,6 +827,7 @@ export function resultFromMedia(
             checksum: extras.poster.checksum
           }
         }
-      : {})
+      : {}),
+    ...(extras?.outputs && extras.outputs.length > 1 ? { outputs: [...extras.outputs] } : {})
   };
 }

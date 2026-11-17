@@ -60,19 +60,26 @@ export {
   SEEDREAM_ASPECT_RATIOS,
   SEEDREAM_CARDS,
   SEEDREAM_SIZE_PRESETS,
+  SEEDREAM_SIZE_TABLES,
   SEEDREAM_UNKNOWN_VERSION,
   seedreamBackgroundField,
   seedreamFamilySchema,
   seedreamGatewayResolutions,
+  seedreamLayerDecompositionOptions,
   seedreamPixelSize,
+  seedreamPromptOptimizeModes,
   seedreamRequestFields,
   seedreamSizePresetFor,
   seedreamSizeTable,
   seedreamSpecOfCard,
   seedreamSupportsAspectRatio,
+  seedreamSupportsOutputFormatParameter,
   seedreamSupportsTransparentBackground,
+  seedreamTransparentBackgroundFromText,
+  type SeedreamFeatureFlags,
   type SeedreamResolutionTier,
-  type SeedreamSizePreset
+  type SeedreamSizePreset,
+  type SeedreamSizeTableFamily
 } from "./cards/image/ark/index.js";
 // 阿里的模型语义同样住在卡片目录里（`cards/image/alibaba`），家族与百炼 Provider 按 id 读卡片。
 export {

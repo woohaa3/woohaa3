@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   discoverRunningHubLanguageModels,
+  ensureRunningHubLanguageRegion,
   languageCatalog,
   parseRunningHubLanguageCatalog,
   resetRunningHubLanguageModels,
@@ -60,6 +61,27 @@ describe("RunningHub 文字目录", () => {
     expect(runningHubLanguageCapabilities("llm/openai/vision")).toEqual({ tools: false, imageInput: true, streaming: true });
     expect(runningHubLanguageCapabilities("llm/missing")).toBeUndefined();
     resetRunningHubLanguageModels();
+  });
+
+  it("切换区域使用对应 fixture：国内站不展示国际站独有的文字模型", () => {
+    resetRunningHubLanguageModels("ai");
+    const aiIds = languageCatalog().map(model => model.id);
+    expect(aiIds).toContain("anthropic/claude-opus-5");
+
+    ensureRunningHubLanguageRegion("cn");
+    const cnIds = languageCatalog().map(model => model.id);
+    expect(cnIds).toContain("qwen/qwen3.8-flash-next");
+    expect(cnIds).not.toContain("anthropic/claude-opus-5");
+    expect(cnIds.length).toBeLessThan(aiIds.length);
+
+    // 同区域重复 ensure 不重置用户刚刷新过的目录。
+    const refreshed = parseRunningHubLanguageCatalog(CATALOG);
+    if (!refreshed.ok) throw new Error(refreshed.message);
+    setRunningHubLanguageModels(refreshed.models);
+    ensureRunningHubLanguageRegion("cn");
+    expect(languageCatalog().map(model => model.id)).toEqual(["glm/glm-5.2", "openai/vision"]);
+
+    resetRunningHubLanguageModels("ai");
   });
 });
 

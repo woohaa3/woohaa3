@@ -99,7 +99,7 @@ pub(crate) fn sync_textures(
         // 共享内容按「像素不变」前提复用，原地覆盖会同时改掉其他绑定节点的画面
         // （例如两个节点共用同一张封面，其中一个开始播放后另一个也跟着变帧）。
         // 节点当前绑在共享内容上时改为新开一份私有纹理，旧共享引用由 `bind` 结算。
-        let private_upload = content.is_none() && texture_store.is_shared(&id);
+        let replace_shared = texture_store.is_shared(&id);
         // 同内容同尺寸已有共享纹理：只把该节点绑过去，不重复建 GPU 资源。
         // 切 scope 后旧 sprite 仍在本帧查询里，但不能当作可复用绑定；新上传必须当帧新建。
         let existing = if scope_changed {
@@ -115,7 +115,7 @@ pub(crate) fn sync_textures(
         let handle = match texture_store.resolve(content, texture_px) {
             TextureAction::Reused(shared) => shared,
             TextureAction::Fresh => {
-                let image = Image::new(
+                let mut image = Image::new(
                     Extent3d {
                         width,
                         height,
@@ -126,7 +126,11 @@ pub(crate) fn sync_textures(
                     TextureFormat::Rgba8UnormSrgb,
                     RenderAssetUsages::default(),
                 );
-                match existing.clone().filter(|_| !private_upload) {
+                if super::video_diagnostics::enabled() {
+                    image.texture_descriptor.usage |=
+                        bevy::render::render_resource::TextureUsages::COPY_SRC;
+                }
+                match existing.clone().filter(|_| !replace_shared) {
                     // 同尺寸的既有纹理：原地覆盖，保留 handle 与 Sprite。
                     Some((entity, _, _)) => {
                         let previous = sprites
@@ -455,6 +459,55 @@ mod tests {
         assert_eq!(poster_pixels, poster);
         let frame_pixels = images.get(&private).unwrap().data.clone().unwrap();
         assert_eq!(frame_pixels, vec![0u8, 255, 0, 255, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn changed_content_gets_new_binding_without_overwriting_shared_pixels() {
+        let mut world = World::new();
+        let scene = two_card_scene();
+        world.insert_resource(CurrentScene(scene.clone()));
+        world.insert_resource(NodeIndex::default());
+        world.resource_mut::<NodeIndex>().rebuild(&scene);
+        world.insert_resource(TextureStore::default());
+        world.insert_resource(TextureBatch::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.spawn(CanvasNodeId("a".into()));
+        world.spawn(CanvasNodeId("b".into()));
+        let poster = vec![255u8, 0, 0, 255, 255, 0, 0, 255];
+        {
+            let mut batch = world.resource_mut::<TextureBatch>();
+            batch
+                .0
+                .insert("a".into(), (2, 1, poster.clone(), Some("poster".into())));
+            batch
+                .0
+                .insert("b".into(), (2, 1, poster.clone(), Some("poster".into())));
+        }
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let shared = sprite_image(&mut world, "a");
+        assert_eq!(sprite_image(&mut world, "b"), shared);
+
+        world.resource_mut::<TextureBatch>().0.insert(
+            "a".into(),
+            (
+                2,
+                1,
+                vec![0u8, 255, 0, 255, 0, 255, 0, 255],
+                Some("focus:2".into()),
+            ),
+        );
+        world.run_system_once(sync_textures).unwrap();
+        world.flush();
+        let private = sprite_image(&mut world, "a");
+        assert_ne!(private, shared);
+        assert_eq!(sprite_image(&mut world, "b"), shared);
+        let images = world.resource::<Assets<Image>>();
+        assert_eq!(images.get(&shared).unwrap().data.clone().unwrap(), poster);
+        assert_eq!(
+            images.get(&private).unwrap().data.clone().unwrap(),
+            vec![0u8, 255, 0, 255, 0, 255, 0, 255]
+        );
     }
 
     #[test]

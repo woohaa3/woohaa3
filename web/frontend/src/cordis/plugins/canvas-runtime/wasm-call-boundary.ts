@@ -20,7 +20,7 @@ export function protectWasmModule<T extends object>(raw: T, issues: RuntimeIssue
           if (error instanceof WebAssembly.RuntimeError || (typeof error === "object" && error !== null && "name" in error && error.name === "RuntimeError")) {
             fatal = error;
             issues.report({ key: "runtime:trap", scope: "runtime", operation: String(property),
-              message: "画布渲染器发生故障，当前预览已暂停，编辑现场仍保留。",
+              message: `画布渲染器在 ${String(property)} 时崩溃（WASM 运行时错误），预览已暂停；编辑内容与待确认操作仍保留。`,
               detail: errorDetail(error), recoverable: false });
           }
           throw error;

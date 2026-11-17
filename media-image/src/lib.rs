@@ -195,6 +195,29 @@ pub fn prepare(bytes: &[u8], max_edge: u32) -> Result<PreparedImage> {
     })
 }
 
+// Quantize only the final linear-to-sRGB conversion, within one RGBA8 code value.
+// A worker reuses this 64 KiB table instead of evaluating powf for every output channel.
+fn srgb_encode_table() -> &'static [u8] {
+    static TABLE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        (0..=65535)
+            .map(|i| {
+                let v = i as f32 / 65535.;
+                let v = if v <= 0.0031308 {
+                    v * 12.92
+                } else {
+                    1.055 * v.powf(1. / 2.4) - 0.055
+                };
+                (v * 255.).round() as u8
+            })
+            .collect()
+    })
+}
+
+fn encode_srgb(v: f32, table: &[u8]) -> u8 {
+    table[(v.clamp(0., 1.) * 65535.).round() as usize]
+}
+
 /// Linear-light premultiplied filtering avoids dark or coloured transparent fringes.
 fn resize_alpha(source: &RgbaImage, w: u32, h: u32) -> RgbaImage {
     let linear = |c: u8| {
@@ -206,15 +229,8 @@ fn resize_alpha(source: &RgbaImage, w: u32, h: u32) -> RgbaImage {
         }
     };
     let linear_values: [f32; 256] = std::array::from_fn(|i| linear(i as u8));
-    let encode = |v: f32| {
-        let v = v.clamp(0., 1.);
-        let v = if v <= 0.0031308 {
-            v * 12.92
-        } else {
-            1.055 * v.powf(1. / 2.4) - 0.055
-        };
-        (v * 255.).round() as u8
-    };
+    let encode_table = srgb_encode_table();
+    let encode = |v: f32| encode_srgb(v, encode_table);
     // Area integration only allocates the bounded destination, even for a 64 MP source.
     // Intermediates are premultiplied linear samples, never straight-alpha RGB averages.
     let sx = source.width() as f64 / w as f64;
@@ -286,6 +302,20 @@ mod tests {
         }
         .encode_png()
         .unwrap()
+    }
+    #[test]
+    fn srgb_lookup_stays_within_one_byte_of_transfer_function() {
+        let table = srgb_encode_table();
+        for i in 0..=1_000_000 {
+            let v = i as f32 / 1_000_000.;
+            let expected = if v <= 0.0031308 {
+                v * 12.92
+            } else {
+                1.055 * v.powf(1. / 2.4) - 0.055
+            };
+            let expected = (expected * 255.).round() as u8;
+            assert!(expected.abs_diff(encode_srgb(v, &table)) <= 1);
+        }
     }
     #[test]
     fn keeps_alpha_and_aspect() {

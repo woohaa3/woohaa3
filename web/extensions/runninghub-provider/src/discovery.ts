@@ -27,13 +27,20 @@ import {
 } from "../scripts/model-pipeline.mjs";
 import upstreamPatch from "../scripts/upstream/runninghub-gpt-image-2-5.json";
 import knownLive from "../scripts/upstream/runninghub-known-live.json";
-import type { RunningHubLogicalModel } from "./shared.js";
+import { runningHubModelDefinition, runningHubRegistry, type RunningHubLogicalModel } from "./shared.js";
+import type { GenerationModelDefinition } from "@woohaa3/contracts";
+import {
+  filterModelRoutesForRegion,
+  isEndpointAvailableInRegion,
+  type RunningHubEndpointAvailability
+} from "./model-availability.js";
+import { DEFAULT_RUNNINGHUB_REGION, type RunningHubRegion } from "./region.js";
 
 /** 官方端点 registry（构建期脚本用的是同一个文件）。 */
 export const RUNNINGHUB_REGISTRY_URL =
   "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/developer-kit/model-registry.public.json";
 
-/** 站点标准模型目录页：只当「这个模型还在」的正向证据。 */
+/** 站点标准模型目录页的国际站默认值：只当「这个模型还在」的正向证据；插件按区域覆盖。 */
 export const RUNNINGHUB_CATALOG_URL = "https://www.runninghub.ai/call-api/standard-api";
 
 const DISCOVERY_TIMEOUT_MS = 20_000;
@@ -52,6 +59,8 @@ export type RunningHubDiscoveryResult =
       removed: string[];
       /** registry 没收录、但站点目录页仍列出的模型 id。 */
       liveOnly: string[];
+      /** 因当前站点无可用端点而隐藏的入库模型 id（不是下架）。 */
+      regionHidden: string[];
       /** 目录页是否取到：取不到时不移除任何模型。 */
       catalogChecked: boolean;
     }
@@ -95,26 +104,45 @@ export async function discoverRunningHubModels(options: {
   registryUrl?: string;
   catalogUrl?: string;
   timeoutMs?: number;
+  /** 当前 Key 的站点区域；缺省国际站。 */
+  region?: RunningHubRegion;
+  /** 区域可用性覆盖（测试）；缺省使用入库的 `data/model-availability.json`。 */
+  availability?: RunningHubEndpointAvailability;
   /** 仓库内上游补丁（默认 `scripts/upstream/runninghub-gpt-image-2-5.json`）；测试可置空。 */
   patchEntries?: readonly RunningHubEndpointEntry[];
 }): Promise<RunningHubDiscoveryResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const region = options.region ?? DEFAULT_RUNNINGHUB_REGION;
+  const availability = options.availability;
   const registry = await readJson(fetchImpl, options.registryUrl ?? RUNNINGHUB_REGISTRY_URL, MAX_REGISTRY_BYTES, options.timeoutMs ?? DISCOVERY_TIMEOUT_MS);
   if (!registry.ok) return { ok: false, message: registry.message };
-  const entries = registryEntries(registry.value);
+  const entries = registryEntries(registry.value).filter((entry) =>
+    isEndpointAvailableInRegion(region, entry.endpoint, availability)
+  );
   if (entries.length === 0) return { ok: false, message: "RunningHub 模型清单为空" };
 
-  const patch = options.patchEntries ?? registryEntries(upstreamPatch);
+  const patch = (options.patchEntries ?? registryEntries(upstreamPatch)).filter((entry) =>
+    isEndpointAvailableInRegion(region, entry.endpoint, availability)
+  );
   const upstream = logicalModelsOf(mergeByEndpoint(entries, patch));
   if (upstream.length === 0) return { ok: false, message: "RunningHub 模型清单没有可纳管的端点" };
   const upstreamIds = new Set(upstream.map((model) => model.id));
+
+  // 入库清单也要按区域裁剪路由；全部路由都不可用时隐藏整个模型，但不当作“下架”。
+  const baseForRegion: RunningHubLogicalModel[] = [];
+  const regionHidden: string[] = [];
+  for (const model of options.base) {
+    const filtered = filterModelRoutesForRegion(model, region, availability);
+    if (filtered) baseForRegion.push(filtered);
+    else regionHidden.push(model.id);
+  }
 
   const catalog = await readText(fetchImpl, options.catalogUrl ?? RUNNINGHUB_CATALOG_URL, MAX_CATALOG_BYTES, CATALOG_TIMEOUT_MS);
   const liveIds = catalog.ok ? catalogLogicalIds(catalog.text) : undefined;
 
   // 仓库里登记过「站点在售、registry 未收录」的模型：既不算 liveOnly（不打标签），也不会被移除。
   const knownLiveIds = knownLiveIdsOf();
-  const absent = options.base.filter((model) => !upstreamIds.has(model.id));
+  const absent = baseForRegion.filter((model) => !upstreamIds.has(model.id));
   const liveOnly = absent.filter(
     (model) => !knownLiveIds.has(model.id) && liveIds?.has(model.id) === true
   );
@@ -136,8 +164,20 @@ export async function discoverRunningHubModels(options: {
     discovered: upstream.length,
     removed: removed.map((model) => model.id),
     liveOnly: liveOnly.map((model) => model.id),
+    regionHidden,
     catalogChecked: liveIds !== undefined
   };
+}
+
+/** 当前区域的入库模型定义；启动期注册与刷新后的 `all` 共用同一套过滤。 */
+export function runningHubModelDefinitionsForRegion(
+  region: RunningHubRegion = DEFAULT_RUNNINGHUB_REGION,
+  availability?: RunningHubEndpointAvailability
+): GenerationModelDefinition[] {
+  return runningHubRegistry().models
+    .map((model) => filterModelRoutesForRegion(model, region, availability))
+    .filter((model): model is RunningHubLogicalModel => model !== undefined)
+    .map((model) => runningHubModelDefinition(model));
 }
 
 /** 仓库登记的在售清单（`scripts/upstream/runninghub-known-live.json`）。 */

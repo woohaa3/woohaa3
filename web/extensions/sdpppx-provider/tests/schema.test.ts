@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  SDPPPX_RAW_PARAMS_FIELD,
-  buildSdpppxInputSchema
-} from "../src/backend/schema.js";
+import { buildSdpppxInputSchema } from "../src/backend/schema.js";
 
 const FORM = {
   type: "object",
@@ -33,18 +30,27 @@ const FORM = {
 };
 
 describe("Formily → 宿主 inputSchema", () => {
-  it("白名单转换 string/integer/number/boolean/enum，并保留 default 与 required", () => {
+  it("白名单转换 string/integer/number/boolean/enum，不渲染 prompt 与 rawParams", () => {
     const built = buildSdpppxInputSchema({ formSchema: FORM, promptField: "prompt" });
     const properties = built.inputSchema.properties as Record<string, Record<string, unknown>>;
-    expect(properties.prompt).toMatchObject({ type: "string", maxLength: 800, "x-component": "Input.TextArea" });
-    expect(properties.steps).toMatchObject({ type: "integer", minimum: 1, maximum: 50, "x-component": "NumberPicker" });
+    expect(properties.prompt).toBeUndefined();
+    expect(properties.rawParams).toBeUndefined();
+    expect(properties.steps).toMatchObject({
+      type: "integer",
+      minimum: 1,
+      maximum: 50,
+      "x-component": "NumberPicker",
+      "x-pptask-presentation": { section: "common" }
+    });
     expect(properties.steps?.default).toBe(20);
     expect(properties.ratio).toMatchObject({ type: "number", multipleOf: 0.5 });
     expect(properties.enhance).toMatchObject({ type: "boolean", "x-component": "Switch" });
     expect(properties.size).toMatchObject({ type: "string", enum: ["512", "1024"], "x-enum-labels": ["小", "大"] });
-    expect(built.inputSchema.required).toEqual(["prompt", "size"]);
-    expect(built.defaultInput).toEqual({ prompt: "", steps: 20, enhance: true, [SDPPPX_RAW_PARAMS_FIELD]: "" });
-    expect(built.promptRequirement).toBe("required");
+    expect(built.inputSchema.required).toEqual(["size"]);
+    expect(built.defaultInput).toEqual({ steps: 20, enhance: true });
+    expect(built.promptRequirement).toBe("none");
+    expect(built.promptField).toBe("prompt");
+    expect(built.hasPromptField).toBe(true);
   });
 
   it("上传字段映射为参考媒体：单个取一、数组收全部并识别视频", () => {
@@ -66,50 +72,68 @@ describe("Formily → 宿主 inputSchema", () => {
     ]);
   });
 
-  it("未识别字段收敛到 rawParams，不丢信息、不阻塞面板", () => {
+  it("未识别字段只记诊断，不进入面板、不生成 rawParams", () => {
     const built = buildSdpppxInputSchema({ formSchema: FORM, promptField: "prompt" });
     expect(built.unknownFields).toEqual(["mystery", "note"]);
     const properties = built.inputSchema.properties as Record<string, unknown>;
-    expect(properties[SDPPPX_RAW_PARAMS_FIELD]).toMatchObject({ type: "string", "x-component": "Input.TextArea" });
-    expect(built.mappedFields).toBe(7);
+    expect(properties.rawParams).toBeUndefined();
+    expect(built.mappedFields).toBe(6);
   });
 
-  it("模板没有 prompt 字段时 promptRequirement=none", () => {
+  it("没有 prompt 字段时同样不渲染 prompt，promptRequirement 固定为 none", () => {
     const built = buildSdpppxInputSchema({
       formSchema: { type: "object", properties: { size: { type: "string", enum: ["1"] } } },
       promptField: "prompt"
     });
     expect(built.promptRequirement).toBe("none");
+    expect(built.hasPromptField).toBe(false);
     const properties = built.inputSchema.properties as Record<string, unknown>;
     expect(properties.prompt).toBeUndefined();
   });
 
-  it("prompt 存在但非必填时为 optional", () => {
-    const built = buildSdpppxInputSchema({
-      formSchema: { type: "object", properties: { prompt: { type: "string" } } },
-      promptField: "prompt"
-    });
-    expect(built.promptRequirement).toBe("optional");
-  });
-
-  it("describe 失败/超时给最小 prompt + rawParams，不猜字段", () => {
+  it("describe 失败/超时只给空 schema，不猜字段也不补 prompt/rawParams", () => {
     const built = buildSdpppxInputSchema({ formSchema: undefined, promptField: "prompt", minimal: true });
-    expect(built.promptRequirement).toBe("required");
+    expect(built.promptRequirement).toBe("none");
     expect(built.unknownFields).toEqual([]);
     expect(built.mappedFields).toBe(0);
-    const properties = built.inputSchema.properties as Record<string, unknown>;
-    expect(properties.prompt).toMatchObject({ type: "string" });
-    expect(properties[SDPPPX_RAW_PARAMS_FIELD]).toBeDefined();
-    expect(built.inputSchema.required).toEqual(["prompt"]);
+    expect(built.inputSchema.properties).toEqual({});
+    expect(built.inputSchema.required).toBeUndefined();
+    expect(built.defaultInput).toEqual({});
+    expect(built.hasPromptField).toBe(false);
   });
 
-  it("自定义 prompt 字段名生效", () => {
+  it("自定义 prompt 字段名只用于提交回填，不出现在参数面板", () => {
     const built = buildSdpppxInputSchema({
       formSchema: { type: "object", required: ["text"], properties: { text: { type: "string" } } },
       promptField: "text"
     });
-    expect(built.promptRequirement).toBe("required");
-    expect((built.inputSchema.properties as Record<string, unknown>).text).toBeDefined();
+    expect(built.promptRequirement).toBe("none");
+    expect(built.hasPromptField).toBe(true);
+    expect(built.promptField).toBe("text");
+    expect((built.inputSchema.properties as Record<string, unknown>).text).toBeUndefined();
     expect((built.inputSchema.properties as Record<string, unknown>).prompt).toBeUndefined();
+  });
+
+  it("识别带前缀的模板提示词字段（2_prompt），不把它当普通参数", () => {
+    const built = buildSdpppxInputSchema({
+      formSchema: {
+        type: "object",
+        required: ["2_prompt", "2_resolution"],
+        properties: {
+          "2_prompt": { type: "string", title: "提示词", "x-component": "Input.TextArea" },
+          "2_resolution": { type: "string", title: "清晰度", enum: ["1K", "2K"] }
+        }
+      },
+      promptField: "prompt"
+    });
+    const properties = built.inputSchema.properties as Record<string, unknown>;
+    expect(built.hasPromptField).toBe(true);
+    expect(built.promptField).toBe("2_prompt");
+    expect(properties["2_prompt"]).toBeUndefined();
+    expect(properties["2_resolution"]).toMatchObject({
+      title: "清晰度",
+      "x-pptask-presentation": { section: "common" }
+    });
+    expect(built.inputSchema.required).toEqual(["2_resolution"]);
   });
 });

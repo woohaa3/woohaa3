@@ -44,8 +44,6 @@ export type ExposerRegistryOptions = {
 };
 
 const DEFAULT_PRIORITY = 100;
-/** 文档上限一天；没有签名时间时按文档上限留安全余量（由提供者自己声明 validitySeconds）。 */
-const FALLBACK_VALIDITY_SECONDS = 24 * 60 * 60;
 
 type Candidate = {
   exposer: StorageExposer;
@@ -59,7 +57,6 @@ type RequestFacts = {
   mediaKind?: string;
   contentType?: string;
   sizeBytes?: number;
-  requiredValiditySeconds?: number;
   signal?: AbortSignal;
 };
 
@@ -138,7 +135,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
     return undefined;
   };
 
-  /** 请求条件是否在该临时图床的声明范围内；`sizeBytes` 未知时只核对类型与有效窗口。 */
+  /** 请求条件是否在该临时图床的声明范围内；`sizeBytes` 未知时只核对类型。 */
   const accepts = (candidate: Candidate, facts: RequestFacts): boolean => {
     if (!configured(candidate)) return false;
     if (facts.configurationOnly) return true;
@@ -149,16 +146,6 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
       if (!kind || !constraints.mediaKinds.includes(kind)) return false;
     }
     if (constraints?.maxBytes !== undefined && facts.sizeBytes !== undefined && facts.sizeBytes > constraints.maxBytes) return false;
-    const required = facts.requiredValiditySeconds;
-    if (required !== undefined) {
-      const declared = candidate.declaration.validitySeconds;
-      if (declared === null) {
-        // 来源明确不承诺窗口：只有「不要求未来有效性」的请求可以继续用它。
-        if (required > 0) return false;
-      } else if (required > (declared ?? FALLBACK_VALIDITY_SECONDS)) {
-        return false;
-      }
-    }
     return true;
   };
 
@@ -175,9 +162,6 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
       ...(input.request?.mediaKind ? { mediaKind: input.request.mediaKind } : {}),
       ...(input.request?.contentType ? { contentType: input.request.contentType } : {}),
       ...(input.request?.sizeBytes === undefined ? {} : { sizeBytes: input.request.sizeBytes }),
-      ...(input.request?.requiredValiditySeconds === undefined
-        ? input.expiresSeconds === undefined ? {} : { requiredValiditySeconds: input.expiresSeconds }
-        : { requiredValiditySeconds: input.request.requiredValiditySeconds }),
       ...(input.request?.signal ? { signal: input.request.signal } : {})
     };
     if (facts.mediaKind === undefined || facts.sizeBytes === undefined) {
@@ -345,8 +329,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         configurationOnly: request === undefined,
         ...(request?.mediaKind ? { mediaKind: request.mediaKind } : {}),
         ...(request?.contentType ? { contentType: request.contentType } : {}),
-        ...(request?.sizeBytes === undefined ? {} : { sizeBytes: request.sizeBytes }),
-        ...(request?.requiredValiditySeconds === undefined ? {} : { requiredValiditySeconds: request.requiredValiditySeconds })
+        ...(request?.sizeBytes === undefined ? {} : { sizeBytes: request.sizeBytes })
       };
       const route = resolveRoute(facts, namespace, scope);
       if (route.mode === "disabled" || route.error || !route.id) return false;
@@ -395,8 +378,7 @@ export function createExposerRegistry(options: ExposerRegistryOptions): HostExpo
         configurationOnly: query?.request === undefined,
         ...(query?.request?.mediaKind ? { mediaKind: query.request.mediaKind } : {}),
         ...(query?.request?.contentType ? { contentType: query.request.contentType } : {}),
-        ...(query?.request?.sizeBytes === undefined ? {} : { sizeBytes: query.request.sizeBytes }),
-        ...(query?.request?.requiredValiditySeconds === undefined ? {} : { requiredValiditySeconds: query.request.requiredValiditySeconds })
+        ...(query?.request?.sizeBytes === undefined ? {} : { sizeBytes: query.request.sizeBytes })
       };
       const route = resolveRoute(facts, query?.namespace ?? "media", query?.scope);
       const mode: TemporaryHostingRouteView["mode"] = route.mode;

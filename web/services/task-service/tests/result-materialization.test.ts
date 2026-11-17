@@ -6,6 +6,11 @@ import { resultFromMedia } from "../src/worker/runtime.js";
 
 const VIDEO_KEY = `generation-outputs/${"c".repeat(64)}.mp4`;
 const POSTER_KEY = `generation-outputs/${"d".repeat(64)}.png`;
+const LAYER_KEYS = [
+  `generation-outputs/${"1".repeat(64)}.png`,
+  `generation-outputs/${"2".repeat(64)}.png`,
+  `generation-outputs/${"3".repeat(64)}.png`
+] as const;
 
 describe("resultFromMedia 四媒体", () => {
   it("视频主媒体 + poster + duration", () => {
@@ -37,5 +42,32 @@ describe("resultFromMedia 四媒体", () => {
     const result = resultFromMedia({ storageKey: VIDEO_KEY, contentType: "image/png", size: 1, checksum: "c".repeat(64) });
     expect(result.mediaKind).toBe("image");
     expect(result.poster).toBeUndefined();
+  });
+
+  it("图层拆分：多产物写进 outputs，主产物仍是顶层字段", () => {
+    // Seedream 5.5 一次给 1 张底图 + N 个图层；只留第一张会让画布只剩一块白底板。
+    const result = resultFromMedia(
+      { storageKey: LAYER_KEYS[0]!, contentType: "image/png", size: 1536, checksum: "a".repeat(64), mediaKind: "image" },
+      {
+        outputs: LAYER_KEYS.map((storageKey, index) => ({
+          index,
+          storageKey,
+          contentType: "image/png",
+          size: 1000 + index,
+          checksum: `${index}`.repeat(64)
+        }))
+      }
+    );
+    expect(result.storageKey).toBe(LAYER_KEYS[0]);
+    expect(result.outputs?.map((entry) => entry.index)).toEqual([0, 1, 2]);
+    expect(result.outputs?.[1]?.storageKey).toBe(LAYER_KEYS[1]);
+  });
+
+  it("单产物不写 outputs（缺省表示「只有一份」，不是「不知道几份」）", () => {
+    const result = resultFromMedia(
+      { storageKey: VIDEO_KEY, contentType: "image/png", size: 1, checksum: "c".repeat(64) },
+      { outputs: [{ index: 0, storageKey: VIDEO_KEY, contentType: "image/png", size: 1, checksum: "c".repeat(64) }] }
+    );
+    expect(result.outputs).toBeUndefined();
   });
 });

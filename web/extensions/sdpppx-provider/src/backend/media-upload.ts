@@ -1,7 +1,7 @@
 /**
  * SDPPPX 独立媒体上传（`POST /media/upload`，change: 2026-11-09-add-sdpppx-media-temporary-hosting）。
  *
- * 与模板任务的 `reference.ts`（`/tasks/upload`、`X-Tenant-ID`、32 MiB、顶层 `url`）严格分开：
+ * 模板参考上传（`reference.ts`）与临时图床共用本适配器：
  * - 路径固定为 `${baseUrl}/media/upload`，不重复追加部署前缀；
  * - 原始二进制 + 真实 MIME，只带 Bearer，不带 provider / filename / 租户头；
  * - 业务上限 20 MiB，MIME 只接受 image/video；
@@ -16,7 +16,7 @@ import { SDPPPX_ERROR_CODES, recordOf, textOf, type SdpppxErrorCode } from "../s
 
 /** 上游 handler 的单文件业务上限（Express 的 25 MB 不是业务上限）。 */
 export const SDPPPX_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
-/** 与既有参考上传一致的超时；不复用旧接口的 32 MiB 上限。 */
+/** 上传超时；模板参考与临时图床共用。 */
 export const SDPPPX_MEDIA_UPLOAD_TIMEOUT_MS = 60_000;
 /** 匿名读取核验：只验可读性与类型，不整段下载视频。 */
 export const SDPPPX_MEDIA_PROBE_TIMEOUT_MS = 15_000;

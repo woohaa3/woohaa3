@@ -39,7 +39,7 @@ export const seedream50Pro = imageCard({
     resolutions: ["1K", "1.5K", "2K"],
     gatewayResolutions: ["1K", "2K"],
     defaultResolution: "2K",
-    sizes: seedreamSizeTable("1K", "1.5K", "2K"),
+    sizes: seedreamSizeTable("pro", "1K", "1.5K", "2K"),
     aspectRatios: SEEDREAM_ASPECT_RATIOS,
     pixelWindow: {
       minTotalPixels: 921_600,
@@ -47,7 +47,15 @@ export const seedream50Pro = imageCard({
       minAspectRatio: 1 / 16,
       maxAspectRatio: 16
     },
-    transparentBackground: true
+    transparentBackground: true,
+    features: {
+      outputFormatParameter: true,
+      // 官方模型参数表：只有 5.0 pro 与 4.0 有「极速模式」。
+      promptOptimizeModes: ["standard", "fast"],
+      // 5.0 pro / flash 只认光杆 `layer_decomposition`，多传 options 会被拒。
+      streaming: false,
+      webSearch: false
+    }
   },
   limits: {
     promptMaxChars: 800,

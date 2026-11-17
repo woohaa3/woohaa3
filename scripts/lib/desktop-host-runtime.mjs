@@ -40,6 +40,10 @@ export async function startDesktopServer({ backend, frontendDir, instance, exten
  catch(error){await backend.close();throw error;}
  origin=`http://127.0.0.1:${server.address().port}`;
  publishDesktopLoopbackPort(server.address().port, [process.env, env]);
+ // 实例登记：把「我是谁、我在哪」写进约定目录，同机其他工具（例如 DSH 的 woohaa-attach 插件）
+ // 读一个目录就知道这件事，不必扫端口——桌面宿主用的是随机端口，扫段根本够不着。
+ // 必须在 listen 成功之后调用：端口为 0 时只有此刻才知道真实值。
+ try{backend.publishOrigin?.(origin);}catch(error){process.stderr.write(`[desktop-host] 实例登记失败：${error?.message??error}\n`);}
  let closing;
  return {ready:{type:'ready',protocol:1,instance,origin,pid:process.pid},close(){
   if(closing)return closing;stopping=true;

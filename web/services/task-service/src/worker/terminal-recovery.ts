@@ -26,9 +26,9 @@ import type { MediaClient } from "../clients/media-client.js";
 import type { SqliteTaskHistoryRepository } from "../repository/history-repository.js";
 import { projectExecutionRecord } from "./execution-projection.js";
 import {
-  materializeBinaryResult,
+  materializeOutputs,
   materializeStableMediaResult,
-  readRawBinaryBytes,
+  readRawBinarySources,
   readRawDurationSeconds,
   readRawPosterUrl,
   readStableMediaResult
@@ -116,9 +116,15 @@ async function recoverOne(
   if (state === "succeeded") {
     // 稳定媒体结果（远端托管生成）：重启后重新 verify-and-adopt，不依赖 provider 地址，
     // 也不把已采用过的对象当「没有可转存来源」误判失败。
+    //
+    // **多产物必须走逐张路径**：`isGenerationStableMediaResult` 只认顶层 `media`（= 主产物），
+    // 在这里采纳会静默丢掉其余图层。归档记录带 `outputs` 时交给 rematerializeBinaryOutput，
+    // 它按 `readRawBinarySources` 逐项 verify-and-adopt（2026-11-17 现场：图层拆分重启后
+    // 只剩一张白底板）。
     const stableMedia = readStableMediaResult(execution);
+    const multiOutput = hasArchivedOutputs(task.result);
     const binaryKind = binaryKindOf(modelType) ?? inferBinaryKind(task.result);
-    if (stableMedia && options.mediaClient) {
+    if (stableMedia && !multiOutput && options.mediaClient) {
       await materializeStableMediaResult(materializationContext(options), execution, association, stableMedia.media);
     } else if (binaryKind && options.mediaClient) {
       const materialized = await rematerializeBinaryOutput(options, execution, association, binaryKind, task.result);
@@ -171,27 +177,35 @@ async function rematerializeBinaryOutput(
 ): Promise<boolean> {
   const context = materializationContext(options);
   if (kind !== "video") {
-    const bytes = await readRawBinaryBytes(options.taskStore, execution.id, kind).catch(() => undefined);
-    if (bytes) {
-      await materializeBinaryResult(context, execution, association, { ...bytes, modelType: kind });
+    const sources = await readRawBinarySources(await options.taskStore.find(execution.id).catch(() => null), kind);
+    if (sources.length > 0) {
+      await materializeOutputs(context, execution, association, { modelType: kind, sources });
       return true;
     }
   }
-  const url = readOutputUrl(rawResult, kind);
-  if (!url) return false;
+  const urls = readOutputUrls(rawResult, kind);
+  if (urls.length === 0) return false;
   const durationSeconds = readRawDurationSeconds(rawResult);
   if (kind === "video") {
     const posterUrl = readRawPosterUrl(rawResult);
-    await materializeBinaryResult(
+    await materializeOutputs(
       context,
       execution,
       association,
-      { kind: "url", url, modelType: "video", ...(posterUrl ? { posterUrl } : {}) },
-      durationSeconds
+      {
+        modelType: "video",
+        sources: [{ kind: "url", url: urls[0]! }],
+        ...(posterUrl ? { posterUrl } : {}),
+        ...(durationSeconds !== undefined ? { durationSeconds } : {})
+      }
     );
     return true;
   }
-  await materializeBinaryResult(context, execution, association, { kind: "url", url, modelType: kind }, durationSeconds);
+  await materializeOutputs(context, execution, association, {
+    modelType: kind,
+    sources: urls.map((url) => ({ kind: "url" as const, url })),
+    ...(durationSeconds !== undefined ? { durationSeconds } : {})
+  });
   return true;
 }
 
@@ -267,29 +281,38 @@ function inferBinaryKind(raw: unknown): BinaryModelType | undefined {
   return undefined;
 }
 
-/** provider 原始结果里的受控输出地址（顶层媒体项或 providerMetadata）。 */
-function readOutputUrl(raw: unknown, kind: BinaryModelType): string | undefined {
-  if (!isRecord(raw)) return undefined;
+/** 归档记录是否带多产物引用（`outputs` 长度 > 1）：此时只能逐张 adopt，不能只认主产物。 */
+function hasArchivedOutputs(raw: unknown): boolean {
+  if (!isRecord(raw)) return false;
+  return Array.isArray(raw.outputs) && raw.outputs.length > 1;
+}
+
+/** provider 原始结果里的受控输出地址（顶层媒体项或 providerMetadata），按输出顺序全量返回。 */
+function readOutputUrls(raw: unknown, kind: BinaryModelType): string[] {
+  if (!isRecord(raw)) return [];
   const key = kind === "image" ? "images" : kind === "audio" ? "audios" : kind === "motion" ? "motions" : "videos";
+  const urls: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value === "string" && /^https?:\/\//i.test(value)) urls.push(value);
+    else if (isRecord(value) && typeof value.url === "string" && value.url !== "") urls.push(value.url);
+  };
   const direct = raw[key];
-  if (Array.isArray(direct)) {
-    for (const item of direct) {
-      if (typeof item === "string" && /^https?:\/\//i.test(item)) return item;
-      if (isRecord(item) && typeof item.url === "string" && item.url !== "") return item.url;
-    }
-  }
+  if (Array.isArray(direct)) for (const item of direct) push(item);
+  if (urls.length > 0) return dedupe(urls);
   const metadata = raw.providerMetadata;
   if (isRecord(metadata)) {
     for (const entry of Object.values(metadata)) {
       if (!isRecord(entry)) continue;
       const list = entry[key];
       if (!Array.isArray(list)) continue;
-      for (const item of list) {
-        if (isRecord(item) && typeof item.url === "string" && item.url !== "") return item.url;
-      }
+      for (const item of list) push(item);
     }
   }
-  return undefined;
+  return dedupe(urls);
+}
+
+function dedupe(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 /** 从 history 快照取业务关联（jobId 只在 store 里，画布/节点/run 足以定位投影）。 */

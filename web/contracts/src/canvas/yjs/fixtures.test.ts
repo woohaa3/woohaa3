@@ -71,9 +71,15 @@ describe("包依赖边界（任务 1.6；change: split-web-runtime-services 后�
     expect(bundle).not.toContain("cos-nodejs-sdk-v5");
     // 产物体积应远小于 yjs 本体（说明未内联 yjs/lib0 实现）。
     // 阈值随包功能增长而上调；yjs + lib0 内联会是数 MB 级。
-    expect(bundle.length).toBeLessThan(200_000);
+    expect(bundle.length).toBeLessThan(300_000);
     // 直接证据：产物里 import 了外部依赖，而不是内联。
     expect(bundle).toMatch(/from "yjs"/);
     expect(bundle).toMatch(/from "lib0\//);
+    // 体积阈值只能发现「整体爆掉」，发现不了「只多带了一份大常量」。SOMA v1/v2 人体网格
+    // 是十几 MB 的 base64 常量，`sideEffects: false` 一旦丢失就会重新被当成有副作用模块整份内联
+    // （2026-11-16 现场：11 个扩展各自内联 17MB contracts，web host payload 92MB → 405MB，
+    // SEA 注入直接失败）。网格的 base64 都以 `mREAACkAAAD` 开头，点名它比只看体积更准：
+    // 清单/manifest 文字仍可按需进入产物，真正不该来的是那几 MB 顶点数据。
+    expect(bundle).not.toContain("mREAACkAAAD");
   });
 });

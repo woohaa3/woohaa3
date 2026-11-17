@@ -98,6 +98,15 @@ export type TurnRunInput = {
   /** 稳定回合计身份；与 requestId 一起构成幂等身份。 */
   turnId: string;
   requestId: string;
+  /**
+   * 回合主体的可信身份（宿主准备结果里的 owner）。
+   *
+   * 必须显式传：`turnId` 的推导在宿主侧不止一种——本机适配器用
+   * `sha256([owner, requestId])`，扩展执行器用
+   * `sha256([extensionId, executor, owner, requestId])`——daemon 不能假定其中任何一种，
+   * 只能拿这里声明的 owner 与 `prepared.workspace.owner` 比对。缺省时退回旧的哈希比对。
+   */
+  owner?: string;
   kind: TurnKind;
   /** 目标 executor id；缺省用 daemon 的 defaultExecutor。 */
   executor?: string;

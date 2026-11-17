@@ -37,6 +37,8 @@ describe("WASM trap 门禁", () => {
     expect(() => module.query()).toThrow("unreachable");
     expect(raw.query).toHaveBeenCalledTimes(calls);
     expect(issues.getSnapshot()[0]).toMatchObject({ scope: "runtime", recoverable: false });
+    expect(issues.getSnapshot()[0]?.message).toContain("texture");
+    expect(issues.getSnapshot()[0]?.message).toContain("WASM 运行时错误");
     issues.clearRecoverable();
     expect(issues.getSnapshot()).toHaveLength(1);
   });

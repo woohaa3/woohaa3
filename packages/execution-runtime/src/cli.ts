@@ -224,6 +224,7 @@ async function main(): Promise<number> {
                               [--role-module FILE] [--extension-id ID] [--artifact-id ID]
   woohaa3-executor turn run --prepared FILE|- [--executor echo|process|ID]
                               [--payload JSON|@FILE] [--turn-id ID] [--request-id ID]
+                              [--owner ID]
                               [--follow] [--json] [--executor-module FILE]
   woohaa3-executor turn run --role ID --input JSON [--role-module FILE] [--executor ...]
   woohaa3-executor turn query ID [--json]
@@ -324,6 +325,7 @@ async function main(): Promise<number> {
       const input: TurnRunInput = {
         turnId: flag(parsed, "turn-id") ?? crypto.randomUUID(),
         requestId,
+        ...(flag(parsed, "owner") ? { owner: flag(parsed, "owner")! } : {}),
         kind: prepared && typeof prepared === "object" && "roleRef" in prepared ? "agent" : "generation",
         ...(prepared && typeof prepared === "object" && "roleRef" in prepared ? { prepared: prepared as TurnRunInput["prepared"] } : {}),
         ...(payloadSource ? { payload: readJsonSource(payloadSource) } : {}),

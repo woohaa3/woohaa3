@@ -69,6 +69,23 @@ function imageAsset(): StoredAsset {
   };
 }
 
+/** 图层拆分里的一张产物：id 与媒体键按序号区分。 */
+function layerAsset(index: number): StoredAsset {
+  const checksum = `${index}`.repeat(64);
+  return {
+    id: `layer-${index}`,
+    nodeId: "n1",
+    title: `图层 ${index + 1}`,
+    mediaKind: "image",
+    source: "generated",
+    status: "ready",
+    url: `/api/media/generation-outputs/${checksum}.png`,
+    createdAt: NOW,
+    provenance: { taskNodeId: "n1", taskKind: "image-generation", runId: "run-1", outputIndex: index },
+    metadata: { storageKey: `generation-outputs/${checksum}.png`, checksum, contentType: "image/png", size: 10 + index }
+  };
+}
+
 function record(overrides: Partial<PptaskExecutionRecord> = {}): PptaskExecutionRecord {
   return {
     taskKey: "run-1",
@@ -97,6 +114,76 @@ describe("终态投影（任务 7.3 / 7.4）", () => {
     expect(exported.canvas.jobs[0].status).toBe("success");
     // seed(1) + projection(1) = 2。
     expect(exported.canvas.revision).toBe(2);
+  });
+
+  it("多产物（图层拆分）：每张落一张卡片，并自动打成一个 2D 组", async () => {
+    const { room, projector } = await setupRoom();
+    const layers = [0, 1, 2].map((index) => layerAsset(index));
+    const outcome = await projector.project(record({
+      output: { mediaKind: "image", asset: layers[0], assets: layers }
+    }));
+    expect(outcome.status).toBe("projected");
+
+    const exported = room.exportCanvas();
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    // 3 份资产全部落库（底图也算一份，不再只剩第一张）。
+    expect(exported.canvas.assets.map((asset) => asset.id)).toEqual(["layer-0", "layer-1", "layer-2"]);
+    // 每张都有独立卡片，原任务节点仍是主产物宿主。
+    const memberIds = ["image-run-1-layer-0", "image-run-1-layer-1", "image-run-1-layer-2"];
+    for (const [index, memberId] of memberIds.entries()) {
+      expect(exported.canvas.document.nodes.some((node) => node.id === memberId)).toBe(true);
+      expect(exported.canvas.nodeData[memberId].outputAssetId).toBe(`layer-${index}`);
+    }
+    expect(exported.canvas.nodeData["n1"].outputAssetId).toBe("layer-0");
+    // 自动创建的 2D 组框住全部成员。
+    const groupId = "group-run-1-layers";
+    expect(exported.canvas.document.nodes.some((node) => node.id === groupId)).toBe(true);
+    const groupData = exported.canvas.nodeData[groupId] as { workflowGroup2d?: { memberNodeIds: string[] } };
+    expect(groupData.workflowGroup2d?.memberNodeIds).toEqual(memberIds);
+    // 组必须连回源任务节点：没有这条连线时画布上只剩一个孤立框，用户看不出它是谁生成的
+    // （2026-11-17 现场：图层拆分结果成组但完全没有连线）。
+    const groupEdge = exported.canvas.document.edges.find((edge) => edge.target === groupId);
+    expect(groupEdge).toBeDefined();
+    expect(groupEdge?.source).toBe("n1");
+    // 只有一个组入口连线：成员卡片各自独立，不与源节点重复连线。
+    expect(exported.canvas.document.edges.filter((edge) => edge.target === groupId)).toHaveLength(1);
+  });
+
+  it("多产物重投：已存在的节点与组不再 node.add，只补缺失的连线（幂等）", async () => {
+    const { room, projector } = await setupRoom();
+    const layers = [0, 1].map((index) => layerAsset(index));
+    const rec = record({ output: { mediaKind: "image", asset: layers[0], assets: layers } });
+    expect((await projector.project(rec)).status).toBe("projected");
+    const before = room.exportCanvas();
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+
+    // 模拟旧版本投影留下的画布：组在、成员在，但链接缺失。
+    const groupId = "group-run-1-layers";
+    const edgeId = `edge-n1-${groupId}`;
+    const stripped = before.canvas.document.edges.filter((edge) => edge.id !== edgeId);
+    expect(stripped).toHaveLength(before.canvas.document.edges.length - 1);
+    await room.submit({
+      protocolVersion: YJS_SYNC_PROTOCOL_VERSION,
+      canvasId: CANVAS,
+      commandId: "strip-edge",
+      baseRevision: before.canvas.revision,
+      actorId: "test",
+      commands: [{ type: "edge.remove", edgeId }]
+    });
+
+    // 用新的 commandId 重投同一终态（补偿扫描的形态）：不得因 duplicate-node 整批失败。
+    const replay = await projector.project({ ...rec, terminalAt: `${rec.terminalAt}+replay` });
+    expect(replay.status).toBe("projected");
+    const after = room.exportCanvas();
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    // 连线补回来了。
+    expect(after.canvas.document.edges.some((edge) => edge.id === edgeId)).toBe(true);
+    // 节点数量没有翻倍。
+    expect(after.canvas.document.nodes.filter((node) => node.id === groupId)).toHaveLength(1);
+    expect(after.canvas.document.nodes.filter((node) => node.id === "image-run-1-layer-0")).toHaveLength(1);
   });
 
   it("终态投影保留已受理任务的取景绑定（T10）", async () => {

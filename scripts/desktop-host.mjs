@@ -19,6 +19,16 @@ if(arg('instance')){emit({type:'heartbeat'});setInterval(()=>emit({type:'heartbe
 console.log=(...args)=>console.error(...args);
 const inheritedIngress=process.env.WOOHAA3_TRUSTED_INGRESS_SECRET;
 const dataDir=path.resolve(arg('data-dir',''));const resourceRoot=path.resolve(arg('resource-root',''));
+// 开发态 --resource-root 是真实的 web/backend，--host-home 才是 staging 目录。
+// Windows junction 不会先 realpath，pnpm 的相对依赖链接会从链接路径算错。
+const hostHome=()=>path.resolve(arg('host-home',resourceRoot));
+// 发布树的 backend-runtime 是实体目录，createRequire 从它的 package.json 解析。
+// 开发态那个名字是 junction，解析根必须是真实的 web/backend。
+const backendRootOf=(home)=>{
+ const linked=path.join(home,'backend-runtime');
+ if(arg('host-home')&&fs.existsSync(path.join(resourceRoot,'package.json')))return resourceRoot;
+ return fs.existsSync(linked)?linked:resourceRoot;
+};
 // Monitor preserves Node's default fatal-exception behavior (including exit status).
 process.on('uncaughtExceptionMonitor', (error, origin) => {
  try { process.stderr.write(`[desktop-host] ${JSON.stringify({event:'fatal-exception',time:new Date().toISOString(),pid:process.pid,origin,stack:error?.stack??String(error)})}\n`); } catch {}
@@ -35,20 +45,23 @@ async function main(){
  if(arg('export')){emit({type:'exported',...exportWorkspace(dataDir,arg('export'))});return;}
  if(arg('restore-backup')){emit({type:'restored',...restoreBackup(dataDir,arg('restore-backup'))});return;}
  if(arg('import-config')){
-  materializeRuntimeLinks(resourceRoot);
-  const require=createRequire(path.join(resourceRoot,'backend-runtime/package.json'));
-  const {createSqliteSiteExtensionConfigStore,createSqliteGenerationModelStore}=await import(pathToFileURL(path.join(resourceRoot,'backend-runtime/dist/index.js')).href);
+  const home=hostHome();
+  materializeRuntimeLinks(home);
+  const backendRoot=backendRootOf(home);
+  const require=createRequire(path.join(backendRoot,'package.json'));
+  const {createSqliteSiteExtensionConfigStore,createSqliteGenerationModelStore}=await import(pathToFileURL(path.join(backendRoot,'dist/index.js')).href);
   emit({type:'config-imported',...importConfigPackage({dataDir,archive:arg('import-config'),yaml:require('yaml'),createStore:createSqliteSiteExtensionConfigStore,createModelStore:createSqliteGenerationModelStore})});return;
  }
  if(arg('import')){emit({type:'imported',...importWorkspace(dataDir,arg('import'))});return;}
  const instance=arg('instance');if(!instance)throw new Error('缺少 instance');
  releaseLock=acquireDataLock(dataDir);
- const versionFile=path.join(resourceRoot,'host-manifest.json');
+ const home=hostHome();
+ const versionFile=path.join(home,'host-manifest.json');
  const manifest=fs.existsSync(versionFile)?JSON.parse(fs.readFileSync(versionFile,'utf8')):{schema:1,build:'development'};
  if(manifest.nodeVersion&&process.versions.node!==manifest.nodeVersion)throw new Error(`宿主要求 Node ${manifest.nodeVersion}`);
  const version={schema:manifest.schema??1,build:manifest.build};prepareData(dataDir,version);
  process.chdir(dataDir);
- const env=desktopEnvironment({dataDir,resourceRoot,baseEnv:process.env,development:Boolean(manifest.developmentRoot)});
+ const env=desktopEnvironment({dataDir,resourceRoot:home,baseEnv:process.env,development:Boolean(manifest.developmentRoot)});
  if(process.env.WOOHAA_DESKTOP_RUN_DIR)env.WOOHAA3_LOG_DIR=process.env.WOOHAA_DESKTOP_RUN_DIR;
  if(manifest.version)env.WOOHAA3_APP_VERSION=manifest.version;
  if(arg('dev-origin'))env.WOOHAA3_ALLOWED_ORIGINS=new URL(arg('dev-origin')).origin;
@@ -58,14 +71,14 @@ async function main(){
  for(const key of Object.keys(process.env))if((key.startsWith('WOOHAA3_')&&!Object.hasOwn(env,key))||['NODE_OPTIONS','NODE_PATH','MONGODB_URI','MONGODB_DB'].includes(key))delete process.env[key];
  // 独立执行器（Agent 来源 / SDK / OAuth / 本机通道）：桌面形态与 dev 启动器同源，
  // 先按 workspace 复用或拉起随包 daemon，再把连接信息交给 backend。
- const executorScript=path.join(resourceRoot,'executor-runtime','dist','cli.js');
+ const executorScript=path.join(home,'executor-runtime','dist','cli.js');
  try{
   if(!fs.existsSync(executorScript))throw new Error(`缺少随包执行器运行时：${executorScript}`);
   agentSupervisor=createAgentSupervisorHost({
-   root:resourceRoot,
+   root:home,
    runtimeDir:agentRuntimeDirectory({root:dataDir}),
    canvasWorkspaceRoot:path.join(dataDir,'agent-workspaces'),
-   canvasWorkspaceProtectedPaths:[resourceRoot,...['config','secrets','stores','media','extension-data','extensions'].map(name=>path.join(dataDir,name))],
+   canvasWorkspaceProtectedPaths:[home,...['config','secrets','stores','media','extension-data','extensions'].map(name=>path.join(dataDir,name))],
    workspaceKey:hashKey(path.resolve(dataDir)),
    scriptPath:executorScript,
    expectedRuntimeBuild:createHash('sha256').update(fs.readFileSync(executorScript)).digest('hex').slice(0,32),
@@ -76,10 +89,12 @@ async function main(){
   env.WOOHAA3_AGENT_RUNTIME_SOCKET=agentRuntime.socketPath;
   env.WOOHAA3_AGENT_RUNTIME_TOKEN=agentRuntime.token;
   env.WOOHAA3_AGENT_WORKSPACE_KEY=agentRuntime.workspaceKey;
+  env.WOOHAA3_AGENT_RUNTIME_DIR=agentRuntime.runtimeDir;
   Object.assign(process.env,{
    WOOHAA3_AGENT_RUNTIME_SOCKET:agentRuntime.socketPath,
    WOOHAA3_AGENT_RUNTIME_TOKEN:agentRuntime.token,
-   WOOHAA3_AGENT_WORKSPACE_KEY:agentRuntime.workspaceKey
+   WOOHAA3_AGENT_WORKSPACE_KEY:agentRuntime.workspaceKey,
+   WOOHAA3_AGENT_RUNTIME_DIR:agentRuntime.runtimeDir
   });
   console.error(`[agent-runtime] 执行器就绪 pid=${agentRuntime.pid} reused=${agentRuntime.reused}`);
  }catch(error){
@@ -87,8 +102,8 @@ async function main(){
   agentSupervisor=null;
   console.error(`[desktop-host] 执行器运行时不可用：${error?.stack??error}`);
  }
- materializeRuntimeLinks(resourceRoot);
- const backendRoot=path.join(resourceRoot,'backend-runtime');
+ materializeRuntimeLinks(home);
+ const backendRoot=backendRootOf(home);
  const require=createRequire(path.join(backendRoot,'package.json'));
  const yaml=require('yaml');
  const configFile=env.WOOHAA3_CONFIG_FILE;
@@ -106,9 +121,9 @@ async function main(){
  const {publishDesktopLoopbackPort,startDesktopServer}=await import('./lib/desktop-host-runtime.mjs');
  const requestedPort=Number(arg('port','0'));
  if(Number.isInteger(requestedPort)&&requestedPort>0)publishDesktopLoopbackPort(requestedPort,[env,process.env]);
- const extensionHost=await loadExtensionHost({repoRoot:manifest.developmentRoot??resourceRoot,env,logger:event=>console.error(`[extensions] ${JSON.stringify(event)}`)});
+ const extensionHost=await loadExtensionHost({repoRoot:manifest.developmentRoot??home,env,logger:event=>console.error(`[extensions] ${JSON.stringify(event)}`)});
  const backend=await createBackendService({desktopCanvasAgentWorkspace:{version:1},env,basePath:'/',extensionHost});
- runtime=await startDesktopServer({backend,frontendDir:path.join(resourceRoot,'frontend'),extensionHost,instance,port:requestedPort,devOrigin:arg('dev-origin',null),env});
+ runtime=await startDesktopServer({backend,frontendDir:path.join(home,'frontend'),extensionHost,instance,port:requestedPort,devOrigin:arg('dev-origin',null),env});
  commitDataVersion(dataDir,version);
  emit(runtime.ready);
  process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

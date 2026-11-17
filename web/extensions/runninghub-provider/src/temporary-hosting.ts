@@ -18,7 +18,11 @@ import { RUNNINGHUB_PLUGIN_ID } from "./shared/identity.js";
 /** 稳定的 exposerId：自动路由的提供商候选。 */
 export const RUNNINGHUB_TEMPORARY_EXPOSER_ID = "runninghub-temporary";
 export const RUNNINGHUB_TEMPORARY_LABEL = "RunningHub 临时图床";
-/** 官方新版上传端点；固定写死在插件内。 */
+/**
+ * 官方新版上传端点的国际站默认值。
+ *
+ * 插件装配时按 API Key 识别出的区域传入对应地址；直接调用本模块的测试仍可用该默认值。
+ */
 export const RUNNINGHUB_UPLOAD_URL = "https://www.runninghub.ai/openapi/v2/media/upload/binary";
 /** 官方文档的链接上限：一天；不是续期承诺。 */
 export const RUNNINGHUB_TEMPORARY_VALIDITY_SECONDS = 24 * 60 * 60;
@@ -200,7 +204,6 @@ export function createRunningHubTemporaryExposer(options: RunningHubTemporaryExp
       category: "provider",
       priority: 10,
       constraints: { mediaKinds: ["image", "video", "audio"] },
-      validitySeconds: RUNNINGHUB_TEMPORARY_SAFE_VALIDITY_SECONDS,
       ready: () => Boolean(options.getApiKey()?.trim()),
       credentialEpoch: epoch
     },
@@ -209,7 +212,7 @@ export function createRunningHubTemporaryExposer(options: RunningHubTemporaryExp
       if (!apiKey) throw new Error("RunningHub 临时图床未配置 API Key");
       const signal = input.request?.signal;
       if (signal?.aborted) throw abortError();
-      const required = input.request?.requiredValiditySeconds ?? input.expiresSeconds ?? 0;
+      const required = input.expiresSeconds ?? 0;
       if (required > RUNNINGHUB_TEMPORARY_SAFE_VALIDITY_SECONDS) {
         throw new Error(`RunningHub 临时图床只承诺一天内的临时地址，无法满足 ${required} 秒的有效窗口`);
       }

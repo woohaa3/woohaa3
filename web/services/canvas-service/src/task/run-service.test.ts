@@ -204,6 +204,8 @@ describe("视频参数 schema 权威复验", () => {
     parameters: Record<string, unknown>;
     inputSchema?: Record<string, unknown>;
     defaultInput?: Record<string, unknown>;
+    promptRequirement?: "required" | "optional" | "none";
+    prompt?: string;
   }) {
     const repository = new InMemoryYjsDocumentRepository();
     const room = new CanvasRoom({ canvasId: CANVAS, repository, now: () => NOW });
@@ -239,6 +241,7 @@ describe("视频参数 schema 权威复验", () => {
             interaction: { id: "generic-model", version: 1 },
             inputSchema: input.inputSchema ?? AGNES_SCHEMA,
             defaultInput: input.defaultInput ?? {},
+            ...(input.promptRequirement ? { promptRequirement: input.promptRequirement } : {}),
             bindings: [],
             taskTimeoutMs: 1000
           }
@@ -253,12 +256,27 @@ describe("视频参数 schema 权威复验", () => {
       runId: "run-1",
       jobId: "job-1",
       modelKey: "test:agnes",
-      prompt: "一段动画",
+      prompt: input.prompt ?? "一段动画",
       parameters: input.parameters
     });
     const exported = room.exportCanvas();
     return { outcome, submitted, canvas: exported.ok ? exported.canvas : null };
   }
+
+  it("promptRequirement: none 的模型允许空提示词提交", async () => {
+    const { outcome, submitted } = await setup({
+      parameters: { aspectRatio: "16:9" },
+      inputSchema: {
+        type: "object",
+        properties: { aspectRatio: { type: "string", enum: ["16:9", "9:16"] } }
+      },
+      promptRequirement: "none",
+      prompt: ""
+    });
+    expect(outcome).toMatchObject({ ok: true });
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]?.prompt).toBe("");
+  });
 
   it("缺 aspectRatio 时拒绝且不创建 provider 任务", async () => {
     const { outcome, submitted, canvas } = await setup({

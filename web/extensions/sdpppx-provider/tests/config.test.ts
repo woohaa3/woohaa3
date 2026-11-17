@@ -14,7 +14,6 @@ import {
   DEFAULT_SDPPPX_BASE_URL,
   DEFAULT_SDPPPX_PROMPT_FIELD,
   DEFAULT_SDPPPX_TASK_TIMEOUT_MS,
-  DEFAULT_SDPPPX_UPLOAD_PROVIDER,
   SDPPPX_ERROR_CODES
 } from "../src/shared.js";
 import { FULL_ENV, TEST_DEPLOYMENT } from "./helpers.js";
@@ -102,6 +101,5 @@ describe("readSdpppxConfig", () => {
     expect(summary.baseUrl).toBe(DEFAULT_SDPPPX_BASE_URL);
     expect(summary.authingScene).toBe(DEFAULT_SDPPPX_AUTHING_SCENE);
     expect(summary.promptField).toBe(DEFAULT_SDPPPX_PROMPT_FIELD);
-    expect(summary.uploadProvider).toBe(DEFAULT_SDPPPX_UPLOAD_PROVIDER);
   });
 });

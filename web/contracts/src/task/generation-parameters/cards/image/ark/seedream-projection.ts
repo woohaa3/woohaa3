@@ -22,6 +22,7 @@ import {
   seedreamGatewayResolutions,
   seedreamPixelSize,
   seedreamSupportsAspectRatio,
+  seedreamSupportsOutputFormatParameter,
   seedreamSupportsTransparentBackground,
   type SeedreamSizePreset,
 } from "./seedream-spec.js";
@@ -115,12 +116,14 @@ export function seedreamRequestFields(
     ?? (requestedResolution && tiers.includes(requestedResolution) ? requestedResolution : undefined)
     ?? (explicit && /^\d{3,5}x\d{3,5}$/.test(explicit) ? explicit : defaultTier);
   const fields: Record<string, string | number> = { size };
-  // 透明背景是 5.0 pro / flash 的能力：官方要求输出 PNG，配 `jpeg` 会被直接拒绝。
+  // 透明背景：官方要求输出 PNG，配 `jpeg` 会被直接拒绝。
   // 面板已经联动切格式，这里对旧草稿 / 批处理 / 直接调 API 做最后一道——
   // 把格式补成 png，而不是悄悄退回不透明（用户要的是透明）。
+  // 注意 `output_format` 只有部分版本认（见 `seedreamSupportsOutputFormatParameter`）：
+  // 4.5 / 4.0 传了就 400，所以这里只在模型真支持时才补。
   if (seedreamSupportsTransparentBackground(spec) && readText(input.background) === "transparent") {
     fields.background = "transparent";
-    fields.output_format = "png";
+    if (seedreamSupportsOutputFormatParameter(spec)) fields.output_format = "png";
   }
   return fields;
 }

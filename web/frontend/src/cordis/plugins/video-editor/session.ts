@@ -1,3 +1,4 @@
+import { createVideoPlaybackTrace, traceVideoPixels, observeVideoPlayback, probeVideoSource } from "../canvas-runtime/video-playback-diagnostics.js";
 /** 视频聚焦会话：解码、取景、历史 override 与迟到回调的生命周期。 */
 import { buildCanvasRenderScene } from "@woohaa3/contracts";
 import { rasterizeDrawable, defaultRasterCanvasFactory, type RasterCanvas } from "../canvas-runtime/media-raster.js";
@@ -15,6 +16,10 @@ export class VideoFocusSession {
   private readonly video: VideoElementLike;
   private readonly canvas: RasterCanvas;
   private generation = 0;
+  private readonly playbackTrace;
+  private frameSequence = 0;
+  private stopPlaybackDiagnostics = () => {};
+  private stopSourceProbe = () => {};
   /** 是否已执行首次进入放大动画（换源/历史恢复不重复放大）。 */
   private entered = false;
   private readonly minUploadInterval: number;
@@ -51,6 +56,7 @@ export class VideoFocusSession {
   constructor(options: VideoFocusSessionOptions) {
     this.options = options;
     this.nodeId = options.nodeId;
+    this.playbackTrace = createVideoPlaybackTrace(options.nodeId);
     this.currentTarget = options.target;
     this.video = (options.createVideo ?? defaultCreateVideo)();
     this.canvas = (options.createCanvas ?? defaultRasterCanvasFactory)();
@@ -72,6 +78,9 @@ export class VideoFocusSession {
   /** 初次进入：绑定自身输出并暂停；不自动播放。 */
   start(): boolean {
     const { url } = this.currentTarget;
+    this.playbackTrace.log("start", {}, true);
+    this.stopPlaybackDiagnostics = observeVideoPlayback(this.playbackTrace, this.video);
+    this.stopSourceProbe = probeVideoSource(this.playbackTrace, url);
     this.video.src = url;
     this.video.muted = true;
     this.video.loop = false;
@@ -333,6 +342,7 @@ export class VideoFocusSession {
    * 不把旧来源的播放位置套到新视频（design D5）。历史预览中只更新 future 直连目标。
    */
   setTarget(target: VideoFocusTarget): void {
+    this.playbackTrace.log("target-change", { generation: this.generation }, true);
     this.currentTarget = target;
     if (this.disposed || this.historyUrl !== null) return;
     this.cancelTransition();
@@ -372,6 +382,7 @@ export class VideoFocusSession {
    */
   setHistoryOverride(override: { url: string } | null): void {
     if (!override && this.historyUrl === null) return;
+    this.playbackTrace.log("history-change", { enabled: override !== null, generation: this.generation }, true);
     this.cancelTransition();
     this.generation += 1;
     this.cancelFrameLoop();
@@ -444,7 +455,8 @@ export class VideoFocusSession {
     try {
       const result = this.video.play();
       if (result && typeof (result as Promise<void>).catch === "function") await (result as Promise<void>);
-    } catch {
+    } catch (error) {
+      this.playbackTrace.log("play-rejected", { error: error instanceof Error ? error.name : "unknown" }, true);
       // 自动播放策略拒绝：保持最后帧，不破坏画布。
     }
     this.scheduleFrames(this.generation);
@@ -496,9 +508,12 @@ export class VideoFocusSession {
   private scheduleFrames(generation: number): void {
     if (!this.isCurrent(generation)) return;
     const video = this.video;
+    this.playbackTrace.log("frame-request", { generation, currentTime: Number(video.currentTime), videoFrameCallback: typeof video.requestVideoFrameCallback === "function" });
     if (typeof video.requestVideoFrameCallback === "function") {
-      this.frameHandle = video.requestVideoFrameCallback(() => {
+      this.frameHandle = video.requestVideoFrameCallback((_now, metadata) => {
         this.frameHandle = null;
+        const frame = metadata as { mediaTime?: number; presentedFrames?: number } | undefined;
+        this.playbackTrace.log("frame-callback", { generation, currentTime: Number(video.currentTime), mediaTime: frame?.mediaTime, presentedFrames: frame?.presentedFrames });
         this.pumpFrame(generation);
         if (this.isCurrent(generation) && !(video as unknown as { paused?: boolean }).paused) this.scheduleFrames(generation);
       });
@@ -517,7 +532,7 @@ export class VideoFocusSession {
     // 未解码出可呈现画面时取帧只会得到全透明像素：上传它会覆盖已呈现画面，表现为「放大后
     // 视频消失」。与卡片会话保持一致，先校验 current data 与 seek 状态，并在渲染前复查一次
     // （绘制期间状态仍可能变化）。被拒绝的取帧不占用节流时间窗，seek/帧回调可补上新画面。
-    if (!this.canPresentFrame()) return;
+    if (!this.canPresentFrame()) { this.playbackTrace.log("frame-not-ready", { generation, currentTime: Number(this.video.currentTime) }); return; }
     const uploadedAt = this.now();
     // 与卡片预览一致，容忍帧回调的微小抖动，按上传开始时间节流。
     if (uploadedAt - this.lastUploadedAt < Math.max(0, this.minUploadInterval - 1)) return;
@@ -525,8 +540,15 @@ export class VideoFocusSession {
     const width = Number(this.video.videoWidth);
     const height = Number(this.video.videoHeight);
     if (!width || !height) return;
-    const raster = rasterizeDrawable(this.video as unknown as CanvasImageSource, { width, height }, () => this.canvas, VIDEO_FOCUS_TEXTURE_MAX_DIMENSION);
-    if (!raster) return;
+    let raster;
+    try {
+      raster = rasterizeDrawable(this.video as unknown as CanvasImageSource, { width, height }, () => this.canvas, VIDEO_FOCUS_TEXTURE_MAX_DIMENSION);
+    } catch (error) {
+      this.playbackTrace.log("raster-error", { error: error instanceof Error ? error.name : "unknown", currentTime: Number(this.video.currentTime) }, true);
+      throw error;
+    }
+    if (!raster) { this.playbackTrace.log("raster-unavailable", {}, true); return; }
+    traceVideoPixels(raster.pixels, this.playbackTrace, ++this.frameSequence, Number(this.video.currentTime));
     this.options.onTexture({ nodeId: this.nodeId, width: raster.width, height: raster.height, pixels: raster.pixels });
     this.lastUploadedAt = uploadedAt;
   }
@@ -550,6 +572,9 @@ export class VideoFocusSession {
   /** 退出会话：暂停、撤销回调、移除媒体源、清投影/纹理并恢复进入前视口。 */
   dispose(): void {
     if (this.disposed) return;
+    this.playbackTrace.log("dispose", { generation: this.generation, frames: this.frameSequence }, true);
+    this.stopPlaybackDiagnostics();
+    this.stopSourceProbe();
     this.disposed = true;
     this.transition.cancel();
     this.animationGeneration += 1;

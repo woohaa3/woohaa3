@@ -131,7 +131,7 @@ describe("临时地址缓存与并发", () => {
       upload: async () => { uploads += 1; return uploadResult(); }
     });
     await expect(exposer.expose({
-      namespace: "media", key: "sha256-a.png", request: { requiredValiditySeconds: 2 * 24 * 60 * 60 }
+      namespace: "media", key: "sha256-a.png", expiresSeconds: 2 * 24 * 60 * 60
     })).rejects.toThrow(/一天/);
     expect(uploads).toBe(0);
   });

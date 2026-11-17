@@ -115,6 +115,9 @@ export function buildAttachInteractionOptions(deps: AttachAssemblyDeps): Interac
     ...(deps.gestures.shot ? { shotGesture: deps.gestures.shot } : {}),
     ...(deps.gestures.focus ? { focusGesture: deps.gestures.focus } : {}),
     ...(deps.gestures.shotWheel ? { shotWheel: deps.gestures.shotWheel } : {}),
+    // 吸附策略必须转发：扩展常在 controller 挂载前就注入策略，只存在宿主 ref 里；
+    // 不转发的话 controller 挂载后读不到，拖动既不吸附也没有参考线，只有挂载后再启停才生效。
+    ...(deps.alignmentSnap ? { alignmentSnap: deps.alignmentSnap } : {}),
     onModelFocusChange: deps.onModelFocusChange,
     onViewportChange: deps.onViewportChange,
     ...(deps.onFrame ? { onFrame: deps.onFrame } : {}),
