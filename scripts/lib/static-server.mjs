@@ -156,10 +156,10 @@ export function createStaticHandler(dist, options = {}) {
 			return;
 		}
 		const type = MIME[path.extname(filePath)] || "application/octet-stream";
-		// Only content-addressed build assets are immutable; HTML and named WASM revalidate.
+		// Only content-addressed build assets are immutable; named WASM revalidates.
 		// 发布扩展资源也按内容寻址：`/extensions/<id>/<artifactId>/...` 与
 		// `/extension-releases/<releaseId>.json` 的目录段均为 sha256，可长期 immutable 缓存；
-		// `index.html` 与具名 WASM 仍 revalidate（发布时 link 会被就地改写）。
+		// 入口 HTML 不进缓存（响应时会改写发布目录 link）；具名 WASM 仍 revalidate。
 		const normalizedPath = filePath.replaceAll(path.sep, "/");
 		const hashedAsset =
 			/\/assets\/[^/]+-[\w-]{8,}\.[\w]+$/.test(normalizedPath) ||
@@ -179,7 +179,9 @@ export function createStaticHandler(dist, options = {}) {
 				...(gzip ? { "content-encoding": "gzip" } : { "content-length": body.length }),
 				vary: "Accept-Encoding",
 				...ISOLATION_HEADERS,
-				"cache-control": "no-cache",
+				// 入口 HTML 在响应时改写发布目录 link，且浏览器会按它钉死宿主脚本。
+				// no-cache 且没有校验器时，普通刷新仍可能沿用内存里的旧文档，只能强刷新才换页。
+				"cache-control": "no-store",
 			});
 			if (req.method === "HEAD") { res.end(); return; }
 			if (gzip) pipeline(Readable.from(body), createGzip(), res, error => { if (error && !res.destroyed) res.destroy(error); });

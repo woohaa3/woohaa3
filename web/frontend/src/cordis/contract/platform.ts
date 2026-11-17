@@ -494,7 +494,9 @@ export type SlotContributionMap = {
    * 扩展声明一个**通用宿主节点**的创建项：宿主据此在 `section`（缺省「创作工具」）插入菜单项，
    * 选中时用 `createNodeData()` 产出的自包含 nodeData 创建 `nodeType` 节点。宿主只按通用
    * 节点契约处理，不 import 任何具体扩展内容，也不出现业务插件专属 node type 或分支；
-   * `nodeType` 的合法性由 canonical 规范化与 reducer 校验。拉线创建时模板不作为连线目标（排除）。
+   * `nodeType` 的合法性由 canonical 规范化与 reducer 校验。拉线创建默认不把模板当作连线目标；
+   * 声明 `acceptsConnection` 的模板会出现在拉线菜单里，选中后同一次创建连上那条边。
+   * `createNodeData` 在拉线上下文里返回 undefined 表示这个来源类型不能连过来（菜单项不出现）。
    */
   "canvas.node-template": {
     icon?: ComponentType<{ className?: string }>;
@@ -502,6 +504,8 @@ export type SlotContributionMap = {
     label: string;
     section?: string;
     order?: number;
+    /** 拉线到空白处时，这项可以作为新建并连线的目标。缺省不出现在拉线菜单。 */
+    acceptsConnection?: boolean;
     /** 创建默认 nodeData；返回 undefined 时该模板不可用（不产生菜单项）。 */
     createNodeData: (context: ContextMenuContext) => import("@woohaa3/contracts").CanvasNodeData | undefined;
   };

@@ -117,7 +117,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
             nodeData: canvas?.nodeData
           }), ...(canvas ? selectionArrangeItems(canvas, selectedNodeIds ?? [], writable) : [])];
         }
-        // 拉线创建只列出合法可连接节点（创作工具类节点不作为连线目标）。
+        // 拉线创建只列出合法可连接节点。创作工具类模板默认不是连线目标；
+        // 自己声明 acceptsConnection 的模板仍会出现，并在创建时带上这条边。
         const baseTemplates = NODE_TEMPLATES.filter((template) => template.nodeType !== COMPOSITE_ASSET_NODE_TYPE);
         return [
           ...baseTemplates.map((template) => ({
@@ -132,7 +133,8 @@ export const canvasMenuExtension: Plugin.Function<void> = definePlugin(
             { id: "insert-scope:camera", label: "镜头", section: CANVAS_MENU_SECTION.basicMaterial, disabled: !writable }
           ]),
           // 扩展贡献的通用节点模板；宿主只按通用节点契约合并菜单项，不 import 任何具体扩展内容。
-          ...(connectFrom ? [] : extensionNodeTemplateItems(ctx, context)),
+          // 拉线时只保留声明了 acceptsConnection 的模板（过滤在 extensionNodeTemplateMenuItems 里）。
+          ...extensionNodeTemplateItems(ctx, context),
           { id: "upload", label: "上传…", section: CANVAS_MENU_SECTION.other, disabled: !writable }
         ];
       },
@@ -330,6 +332,8 @@ export type ExtensionNodeTemplateContribution = {
   nodeType: string;
   section?: string;
   order?: number;
+  /** 拉线到空白处时可以作为新建并连线的目标。 */
+  acceptsConnection?: boolean;
   createNodeData: (context: ContextMenuContext) => unknown;
 };
 
@@ -346,6 +350,7 @@ export function extensionNodeTemplateMenuItems(
 ): CanvasContextMenuItem[] {
   const items: CanvasContextMenuItem[] = [];
   for (const contribution of contributions) {
+    if (context.connectFrom && contribution.acceptsConnection !== true) continue;
     let nodeData: unknown;
     try {
       nodeData = contribution.createNodeData(context);
@@ -389,7 +394,14 @@ function insertExtensionTemplateNode(ctx: Context, contributionId: string, conte
   }
   if (nodeData === undefined) return;
   if (!workingCanvasOf(woohaa3CanvasStore.getState())?.id) return;
-  const commands = planInsertNode({ nodeType: contribution.nodeType, position: context.world, nodeData });
+  const label = context.connectFrom ? connectLabelFor(context.connectFrom.nodeType, contribution.nodeType) : "";
+  const commands = planInsertNode({
+    nodeType: contribution.nodeType,
+    position: context.world,
+    nodeData,
+    ...(context.connectFrom ? { connectFromNodeId: context.connectFrom.nodeId } : {}),
+    ...(label ? { connectLabel: label } : {})
+  });
   const createdNodeId = createdNodeIdOf(commands);
   void ctx.canvasEdit.record(commands, "创建作品");
   // 提交的同时选中：working projection 已同步包含新节点，失败/拒绝时由帧内失效清理移除选择。

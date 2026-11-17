@@ -7,7 +7,8 @@
  * 2. 新增的 `server-active` 条目登记进本页 entry registry，再按最新服务端状态 reconcile——
  *    与启动期登记的入口走同一套资格（actual active 才装配）；
  * 3. 新增的 `browser-local` 条目不在当前页面装配（保持「本次启动」语义），下次打开画布时按偏好装配；
- * 4. 发出 `extension.release.changed` 事实事件：升级/卸载的条目不热换，由设置面提示重开画布。
+ * 4. 升级条目有重装入口时先换上新产物再卸下旧实例装上新的；装不上才记入 `pendingReopen`。
+ *    宿主入口脚本变了则由调用方换整页，热换扩展换不到那段脚本。
  *
  * 同一 releaseId 只处理一次；读取失败记日志并在下一次指针通知时重试，不影响已装配的扩展。
  */
@@ -43,8 +44,8 @@ export type ExtensionReleaseAdoptionOptions = {
 };
 
 export type ExtensionReleaseAdoption = {
-  /** 收到最新指针（可重复调用；同一 releaseId 只处理一次，串行）。 */
-  observe(pointer: ApplicationExtensionReleasePointer | null | undefined): Promise<void>;
+  /** 收到最新指针（可重复调用；同一 releaseId 只处理一次，串行）。返回这次是否新采纳。 */
+  observe(pointer: ApplicationExtensionReleasePointer | null | undefined): Promise<boolean>;
   dispose(): void;
 };
 
@@ -55,18 +56,18 @@ export function createExtensionReleaseAdoption(options: ExtensionReleaseAdoption
   let disposed = false;
   const unregister: Array<() => void> = [];
 
-  const adopt = async (pointer: ApplicationExtensionReleasePointer) => {
-    if (disposed || pointer.releaseId === handled) return;
+  const adopt = async (pointer: ApplicationExtensionReleasePointer): Promise<boolean> => {
+    if (disposed || pointer.releaseId === handled) return false;
     let delta;
     try {
       delta = await options.runtime.adoptRelease(pointer);
     } catch (error) {
       log({ event: "extension-release-adopt-failed", releaseId: pointer.releaseId, message: error instanceof Error ? error.message : String(error) });
-      return;
+      return false;
     }
-    if (disposed) return;
+    if (disposed) return false;
     handled = pointer.releaseId;
-    if (!delta) return;
+    if (!delta) return true;
     for (const extensionId of delta.added) {
       const entry = options.runtime.entry(extensionId);
       if (!entry || entry.metadata.activation !== "server-active" || options.registry.has(extensionId)) continue;
@@ -101,13 +102,17 @@ export function createExtensionReleaseAdoption(options: ExtensionReleaseAdoption
       removed: delta.removed,
       pendingReopen: [...options.runtime.staleExtensionIds()]
     });
+    return true;
   };
 
   return {
     observe(pointer) {
-      if (!pointer || disposed) return chain;
-      chain = chain.then(() => adopt(pointer));
-      return chain;
+      if (!pointer || disposed) return Promise.resolve(false);
+      let adopted = false;
+      chain = chain.then(async () => {
+        adopted = await adopt(pointer);
+      });
+      return chain.then(() => adopted);
     },
     dispose() {
       disposed = true;

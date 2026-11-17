@@ -45,7 +45,7 @@ test('HEAD returns representation headers and no bytes',async()=>{
   assert.equal(res.headers['cache-control'],'no-cache');
 });
 test('SPA routes revalidate and missing assets never return HTML',async()=>{
-  assert.equal((await request('/task-history')).headers['cache-control'],'no-cache');
+  assert.equal((await request('/task-history')).headers['cache-control'],'no-store');
   assert.equal((await request('/missing.wasm')).status,404);
   assert.equal((await request('/%ZZ')).status,400);
   assert.equal((await request('/..%2foutside.wasm')).status,403);
@@ -79,7 +79,7 @@ test('HTML 响应按启动标题注入，保留 gzip、HEAD 与原文件字节',
     const body = gunzipSync(res.body).toString();
     assert.match(body, /<title>WooHaa3 · 预览<\/title>/);
     assert.match(body, /<base href="\/tools\/preview\/"/);
-    assert.equal(res.headers['cache-control'], 'no-cache');
+    assert.equal(res.headers['cache-control'], 'no-store');
     const head = await get('HEAD');
     assert.equal(head.headers['content-encoding'], 'gzip');
     assert.equal(head.body.length, 0);

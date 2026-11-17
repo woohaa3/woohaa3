@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { EXTENSION_SDK_ABI_VERSION, HOST_REACT_MAJOR, type ExtensionBrowserReleaseEntry } from "@woohaa3/contracts";
-import { createExtensionRuntimeService } from "./service.js";
+import { createExtensionRuntimeService, resolveUpgradedPlugin } from "./service.js";
 import { ExtensionLoadError, type ExtensionArtifactLoader } from "./loader.js";
 import type { ExtensionReleaseCatalog } from "@woohaa3/contracts";
 
@@ -227,6 +227,32 @@ describe("adoptRelease 热登记（change: 2026-10-21-add-extension-marketplace-
     await svc.ensureCatalog();
     await expect(svc.adoptRelease(pointer)).rejects.toMatchObject({ code: "invalid-catalog" });
     expect(svc.entry("added")).toBeUndefined();
+  });
+
+  it("升级产物加载失败时回到旧 artifact", async () => {
+    let rejectNext = false;
+    const loader = artifactLoader(() => "ok");
+    const next = { ...catalog(), releaseId: NEXT_ID, entries: [upgraded()] };
+    const svc = createExtensionRuntimeService({
+      catalogLoader: { load: async () => catalog(), peek: async () => next, currentReleaseId: () => RELEASE_ID, dispose() {} } as never,
+      artifactLoader: {
+        ...loader,
+        load: async (entry) => {
+          if (rejectNext && entry.artifactId === "c".repeat(64)) {
+            throw new ExtensionLoadError("evaluation", "新版本求值失败", false);
+          }
+          return loader.load(entry);
+        }
+      }
+    });
+    await svc.ensureCatalog();
+    await svc.adoptRelease(pointer);
+    rejectNext = true;
+    await expect(resolveUpgradedPlugin(svc, "demo")).rejects.toThrow("新版本求值失败");
+    expect(svc.entry("demo")?.artifactId).toBe("b".repeat(64));
+    expect(svc.staleExtensionIds()).not.toContain("demo");
+    rejectNext = false;
+    await expect(svc.loadDescriptor("demo")).resolves.toMatchObject({ extensionId: "demo" });
   });
 
   it("目录尚未固定：不发请求，首次加载即用新目录", async () => {

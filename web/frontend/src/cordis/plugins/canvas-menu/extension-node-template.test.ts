@@ -58,6 +58,38 @@ describe("extensionNodeTemplateMenuItems（任务 2.4/2.6）", () => {
     expect(items.map((item) => item.id)).toEqual([`${EXTENSION_NODE_TEMPLATE_ITEM_PREFIX}ready`]);
   });
 
+  it("拉线菜单只保留声明 acceptsConnection 且能接受这个来源的模板", () => {
+    const connectFrom = { nodeId: "img-1", nodeType: "image" } as const;
+    const wired = { ...context, connectFrom };
+    const items = extensionNodeTemplateMenuItems(
+      [
+        contribution({ id: "tool-only" }),
+        contribution({
+          id: "image-compare",
+          label: "对比",
+          acceptsConnection: true,
+          createNodeData: (menu) => (menu.connectFrom && menu.connectFrom.nodeType !== "image" ? undefined : { title: "图片对比" })
+        })
+      ],
+      true,
+      wired
+    );
+    expect(items.map((item) => item.id)).toEqual([`${EXTENSION_NODE_TEMPLATE_ITEM_PREFIX}image-compare`]);
+    expect(items[0]).toMatchObject({ label: "对比", disabled: false });
+  });
+
+  it("空白处新建仍列出未声明连线目标的模板", () => {
+    const items = extensionNodeTemplateMenuItems(
+      [contribution({ id: "tool-only" }), contribution({ id: "wired", acceptsConnection: true })],
+      true,
+      context
+    );
+    expect(items.map((item) => item.id)).toEqual([
+      `${EXTENSION_NODE_TEMPLATE_ITEM_PREFIX}tool-only`,
+      `${EXTENSION_NODE_TEMPLATE_ITEM_PREFIX}wired`
+    ]);
+  });
+
   it("只读时禁用扩展节点模板项", () => {
     const items = extensionNodeTemplateMenuItems([contribution()], false, context);
     expect(items[0]?.disabled).toBe(true);

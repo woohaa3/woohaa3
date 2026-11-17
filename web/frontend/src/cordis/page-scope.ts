@@ -52,7 +52,7 @@ import type { AppPageLocation, AppPageScopeStatus } from "./navigation/app-route
 import type { CanvasCatalogRemote, CanvasCatalogService, CanvasSelectionService } from "./contract/canvas-catalog.js";
 import type { CanvasPreparationRemote, CanvasPreparationService } from "./contract/canvas-preparation.js";
 import type { CanvasExtensionMetadata } from "./plugins/extension-manager/contract.js";
-import { createExtensionRuntimeService, type ExtensionRuntimeService } from "./extension-runtime/service.js";
+import { createExtensionRuntimeService, resolveUpgradedPlugin, type ExtensionRuntimeService } from "./extension-runtime/service.js";
 import { extensionDefaultPreferences, resolveExtensionStartupSelection } from "./extension-runtime/selection.js";
 import { installAppHostConnectivity, type AppConnectivityOptions, type AppConnectivityRuntime } from "./app-host-connectivity.js";
 import { browserHistory, subscribePreparationReady } from "./page-scope-helpers.js";
@@ -302,11 +302,8 @@ export async function startApp(options: StartAppOptions = {}): Promise<AppRuntim
           description: result.entry.description,
           plugin: result.descriptor.plugin() as Plugin,
           extension: true,
-          // 重装时先刷新本条目再求值，取到的是宿主当前产物（change: 2026-10-27-add-extension-dev-reload）。
-          resolvePlugin: async () => {
-            await runtimeService.refreshEntry(result.entry.extensionId);
-            return (await runtimeService.loadDescriptor(result.entry.extensionId)).plugin() as Plugin;
-          }
+          // 重装时先换上新产物再求值。求值失败则把目录装回旧产物，旧实例继续留着。
+          resolvePlugin: async () => (await resolveUpgradedPlugin(runtimeService, result.entry.extensionId)).plugin() as Plugin
         });
       } else if (result.entry.required) {
         // required 资源加载失败：进入稳定 page error，不挂载半可用画布。

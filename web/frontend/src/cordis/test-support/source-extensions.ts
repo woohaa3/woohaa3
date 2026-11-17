@@ -146,6 +146,9 @@ export function createSourceExtensionRuntimeService(
     async refreshEntry() {
       return { changed: false, artifactId: null };
     },
+    restoreEntry() {
+      /* 源码型 runtime 没有可回滚的发布产物 */
+    },
     metadata: () => [...byId.values()].map((entry) => entry.metadata),
     entry: (extensionId) => byId.get(extensionId),
     async loadDescriptor(extensionId) {

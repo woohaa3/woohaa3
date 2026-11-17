@@ -19,7 +19,10 @@ const metadata = (extensionId: string, activation: ExtensionFrontendMetadata["ac
   sdkAbi: EXTENSION_SDK_ABI_VERSION
 });
 
-function harness(delta: { added: string[]; upgraded: string[]; removed: string[] } | null | Error) {
+function harness(
+  delta: { added: string[]; upgraded: string[]; removed: string[] } | null | Error,
+  extra: { reloadExtension?: (extensionId: string) => Promise<unknown>; stale?: () => readonly string[] } = {}
+) {
   const entries = new Map([
     ["site-ext", { metadata: metadata("site-ext", "server-active"), artifactId: "a" }],
     ["local-ext", { metadata: metadata("local-ext", "browser-local"), artifactId: "b" }]
@@ -37,13 +40,14 @@ function harness(delta: { added: string[]; upgraded: string[]; removed: string[]
       },
       entry: (id) => entries.get(id) as never,
       loadDescriptor: async () => ({}) as never,
-      staleExtensionIds: () => (delta && !(delta instanceof Error) ? delta.upgraded : [])
+      staleExtensionIds: () => extra.stale?.() ?? (delta && !(delta instanceof Error) ? delta.upgraded : [])
     },
     registry,
     reconcile: () => {
       reconciles += 1;
     },
-    emit: (payload) => events.push(payload)
+    emit: (payload) => events.push(payload),
+    ...(extra.reloadExtension ? { reloadExtension: extra.reloadExtension } : {})
   });
   return { adoption, registry, events, reconciles: () => reconciles, adopts: () => adopts };
 }
@@ -83,5 +87,47 @@ describe("createExtensionReleaseAdoption", () => {
     await h.adoption.observe(pointer);
     h.adoption.dispose();
     expect(h.registry.has("site-ext")).toBe(false);
+  });
+
+  it("只有新采纳的发布返回 true；重复指针、空指针和读取失败都是 false", async () => {
+    const ok = harness({ added: [], upgraded: ["image-compare"], removed: [] });
+    await expect(ok.adoption.observe(pointer)).resolves.toBe(true);
+    await expect(ok.adoption.observe(pointer)).resolves.toBe(false);
+    await expect(ok.adoption.observe(null)).resolves.toBe(false);
+
+    const failed = harness(new Error("network"));
+    await expect(failed.adoption.observe(pointer)).resolves.toBe(false);
+    await expect(failed.adoption.observe(pointer)).resolves.toBe(false);
+    // 失败不记成已处理，同一指针还会再读一次。
+    expect(failed.adopts()).toBe(2);
+  });
+
+  it("升级先重装该扩展；重装成功不再待重开，失败仍待重开", async () => {
+    const reloaded: string[] = [];
+    let stale = ["image-compare"];
+    const ok = harness(
+      { added: [], upgraded: ["image-compare"], removed: [] },
+      {
+        stale: () => stale,
+        reloadExtension: async (extensionId) => {
+          reloaded.push(extensionId);
+          stale = [];
+        }
+      }
+    );
+    await ok.adoption.observe(pointer);
+    expect(reloaded).toEqual(["image-compare"]);
+    expect(ok.events[0]?.pendingReopen).toEqual([]);
+
+    const again = harness(
+      { added: [], upgraded: ["image-compare"], removed: [] },
+      {
+        reloadExtension: async () => {
+          throw new Error("not-mounted");
+        }
+      }
+    );
+    await again.adoption.observe(pointer);
+    expect(again.events[0]?.pendingReopen).toEqual(["image-compare"]);
   });
 });
