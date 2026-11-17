@@ -1,0 +1,51 @@
+/*
+ * 一键整理浮层。
+ *
+ * 用 absolute 定位在画布容器内：坐标来自 `worldToClient` 减 canvas 元素矩形，已含画布外框偏移，
+ * 因此不依赖其它祖先建立定位上下文。容器只做锚点，按钮自己承担视觉。
+ */
+.canvas-tidy {
+  position: absolute;
+  z-index: 7;
+  transform: translateY(-100%);
+  pointer-events: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.canvas-tidy__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 8px;
+  background: var(--app-web-panel);
+  box-shadow: var(--app-web-shadow);
+  color: var(--app-web-text-primary);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 次要动作（组内整理）：同一形态、更轻的强调，避免抢主动作。 */
+.canvas-tidy__button--secondary {
+  color: var(--app-web-text-muted);
+}
+
+.canvas-tidy__button:hover {
+  background: var(--app-web-elevated);
+  border-color: var(--app-web-border-strong);
+}
+
+.canvas-tidy__button:active {
+  color: var(--app-interaction-accent);
+}
+
+.canvas-tidy__button:disabled {
+  color: var(--app-web-text-muted);
+  cursor: default;
+}

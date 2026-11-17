@@ -1,0 +1,44 @@
+/*
+ * 整理失败的非阻塞提示条。
+ *
+ * 放在画布下方居中、不进弹窗层级：整理是随手可重试的动作，用模态框打断（还要手动关掉）
+ * 不划算。自动消失 + 可手动关闭，不拦画布输入。
+ */
+.canvas-tidy-notice {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  transform: translateX(-50%);
+  z-index: 32;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100% - 48px));
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--app-web-border);
+  border-radius: 10px;
+  background: var(--app-web-panel);
+  box-shadow: var(--app-web-shadow);
+  color: var(--app-web-text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.canvas-tidy-notice__close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--app-web-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-tidy-notice__close:hover {
+  background: var(--app-web-elevated);
+  color: var(--app-web-text-primary);
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "extensionId": "canvas-tidy",
+  "version": "0.1.0",
+  "hostPlugin": {
+    "module": "./backend",
+    "factory": "createCanvasTidyPlugin",
+    "order": 60
+  },
+  "icon": { "glyph": "canvas" },
+  "engines": {
+    "hostAbi": "^1.0.0",
+    "sdkAbi": "^1.0.0",
+    "protocolVersion": 1,
+    "host": { "log": 1 }
+  }
+}

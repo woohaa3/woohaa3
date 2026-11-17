@@ -237,6 +237,7 @@ export * from "./canvas/world-authoring.js";
 export * from "./canvas/assistant-world-authority.js";
 export * from "./mcp/authoring-tools.js";
 export * from "./canvas/group-authoring-scope.js";
+export * from "./canvas/group-layout.js";
 export * from "./canvas/world-authoring-response-codec.js";
 
 // 以下为主干在分叉后新增、而特性线未导出的模块（日志信封、图片资源、人形骨架等）。

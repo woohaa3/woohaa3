@@ -1,0 +1,58 @@
+{
+  "name": "@woohaa3/extension-canvas-tidy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "一键整理扩展：多选后浮出按钮，按连线方向分层排布并按需缩回过大卡片；配置由宿主持久化。",
+  "files": [
+    "extension.json",
+    "assets",
+    "browser-dist",
+    "dist",
+    "src"
+  ],
+  "exports": {
+    "./frontend": {
+      "types": "./src/frontend/index.ts",
+      "import": "./src/frontend/index.ts"
+    },
+    "./backend": {
+      "types": "./src/backend.ts",
+      "import": "./dist/backend.js"
+    },
+    "./shared": {
+      "types": "./src/shared.ts",
+      "import": "./dist/shared.js"
+    }
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs --entry src/backend.ts --outdir dist --platform node --entry-name backend && node ../../scripts/build-package.mjs --entry src/shared.ts --outdir dist --platform neutral --entry-name shared",
+    "build:browser": "node ../../scripts/build-extension-browser.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@woohaa3/contracts": "workspace:*",
+    "@woohaa3/frontend": "workspace:*",
+    "@woohaa3/ui": "workspace:*",
+    "react": "^18.3.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@types/node": "^22.15.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "jsdom": "^30.1.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^7.0.2",
+    "vitest": "^2.0.0"
+  }
+}
