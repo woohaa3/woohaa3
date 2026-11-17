@@ -184,15 +184,19 @@ const MULTI_OUTPUT_GROUP_PADDING = 32;
  * 时画布上只剩一块白底板（真实缺陷），所以这里把**每一张**都落成独立图片节点，并用
  * `workflow-group-2d` 框住整批——用户要的正是一套可整体拖动的图层集合。
  *
- * 三条硬约束：
+ * 四条硬约束：
  * - 组与成员节点 id 由 `runId + 序号` 确定性生成，投影重投只会撞同一批 id（幂等）；
  * - 成员表只写本次新建的节点（不吞掉节点已属的其它组，那是用户的选择）；
- * - 原任务节点仍是主产物的宿主：它保留 `outputAssetId` = 第一张，作为「生成入口」留在组外。
+ * - 原任务节点仍是主产物的宿主：它保留 `outputAssetId` = 第一张，作为「生成入口」留在组外；
+ * - **组必须连回源任务节点**（`connect.fromNodeId`）：组代表「这次生成的产物集合」，没有这条
+ *   连线时画布上只有一个孤立的框，用户看不出它是谁生成的（2026-11-17 现场：图层拆分结果
+ *   成组但完全没有连线）。边 ID 与组 ID 同源派生，重投撞同一个 id，走 commandId 幂等。
  */
 function buildMultiOutputCommands(
   record: PptaskExecutionRecord,
   primaryAsset: StoredAsset,
   extraAssets: readonly StoredAsset[],
+  currentCanvas: ServerCanvas,
   origin: { x: number; y: number },
   baseZIndex: number
 ): CanvasCommand[] {
@@ -202,30 +206,35 @@ function buildMultiOutputCommands(
   const columns = Math.min(MULTI_OUTPUT_COLUMNS, assets.length);
   const rows = Math.ceil(assets.length / columns);
   const memberIds: string[] = [];
+  const existing = new Set(currentCanvas.document.nodes.map((node) => node.id));
   for (const [index, asset] of assets.entries()) {
     const memberId = multiOutputNodeId(record, index);
     memberIds.push(memberId);
     const column = index % columns;
     const row = Math.floor(index / columns);
-    commands.push({
-      type: "node.add",
-      node: {
-        id: memberId,
-        type: "image",
-        position: {
-          x: origin.x + column * (size.width + MULTI_OUTPUT_GAP),
-          y: origin.y + row * (size.height + MULTI_OUTPUT_GAP)
+    // 已在画布上的成员不再 `node.add`：reducer 对重复 id 直接 reject，会让整批投影失败
+    // （旧画布重投时正是这个原因导致补偿永远补不上连线）。资产仍然 upsert，保证媒体可读。
+    if (!existing.has(memberId)) {
+      commands.push({
+        type: "node.add",
+        node: {
+          id: memberId,
+          type: "image",
+          position: {
+            x: origin.x + column * (size.width + MULTI_OUTPUT_GAP),
+            y: origin.y + row * (size.height + MULTI_OUTPUT_GAP)
+          },
+          width: size.width,
+          height: size.height
         },
-        width: size.width,
-        height: size.height
-      },
-      nodeData: {
-        title: asset.title ?? `图层 ${index + 1}`,
-        outputAssetId: asset.id,
-        resourceKind: "image",
-        taskStatus: "successed"
-      }
-    });
+        nodeData: {
+          title: asset.title ?? `图层 ${index + 1}`,
+          outputAssetId: asset.id,
+          resourceKind: "image",
+          taskStatus: "successed"
+        }
+      });
+    }
     commands.push({ type: "asset.upsert", asset });
   }
   const groupId = multiOutputGroupId(record);
@@ -238,18 +247,29 @@ function buildMultiOutputCommands(
     scopeVersion: stableAuthorityVersion("workflow-group-scope", { groupId, memberNodeIds: memberIds }),
     memberNodeIds: memberIds
   };
-  commands.push({
-    type: "node.add",
-    node: {
-      id: groupId,
-      type: "workflow-group-2d",
-      position: { x: origin.x - MULTI_OUTPUT_GROUP_PADDING, y: origin.y - MULTI_OUTPUT_GROUP_PADDING },
-      width: groupWidth,
-      height: groupHeight,
-      zIndex: baseZIndex - 1
-    },
-    nodeData: { title: "图层拆分", workflowGroup2d: workflowGroup } as unknown as CanvasNodeData
-  });
+  if (!existing.has(groupId)) {
+    commands.push({
+      type: "node.add",
+      node: {
+        id: groupId,
+        type: "workflow-group-2d",
+        position: { x: origin.x - MULTI_OUTPUT_GROUP_PADDING, y: origin.y - MULTI_OUTPUT_GROUP_PADDING },
+        width: groupWidth,
+        height: groupHeight,
+        zIndex: baseZIndex - 1
+      },
+      nodeData: { title: "图层拆分", workflowGroup2d: workflowGroup } as unknown as CanvasNodeData,
+      // 组 ← 源任务节点：表达「这一组是这次生成的产物」。source 是上游（生成节点），
+      // target 是新建的组，与 canvas 的 edge 语义一致（source → target）。
+      connect: { fromNodeId: record.nodeId, edgeId: multiOutputEdgeId(record) }
+    });
+  } else if (!currentCanvas.document.edges.some((edge) => edge.id === multiOutputEdgeId(record))) {
+    // 组已存在但缺链接（旧版本投影留下的画布）：单独补边即可，不重建节点。
+    commands.push({
+      type: "edge.add",
+      edge: { id: multiOutputEdgeId(record), source: record.nodeId, target: groupId }
+    });
+  }
   return commands;
 }
 
@@ -261,6 +281,11 @@ function multiOutputNodeId(record: PptaskExecutionRecord, index: number): string
 /** 多产物自动组的确定性 id。 */
 function multiOutputGroupId(record: PptaskExecutionRecord): string {
   return `group-${record.runId}-layers`;
+}
+
+/** 「源任务节点 → 多产物组」这条边的确定性 id（客户端稳定 ID 约定）。 */
+function multiOutputEdgeId(record: PptaskExecutionRecord): string {
+  return `edge-${record.nodeId}-${multiOutputGroupId(record)}`;
 }
 
 /**
@@ -312,6 +337,7 @@ export function buildProjectionCommands(input: {
           record,
           mediaAsset,
           extraAssets,
+          currentCanvas,
           { x: canvasNode?.position?.x ?? 0, y: canvasNode?.position?.y ?? 0 },
           canvasNode?.zIndex ?? 0
         ));
