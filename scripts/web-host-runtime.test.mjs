@@ -49,6 +49,61 @@ test('serves frontend, health probes and backend routes on the allocated port', 
   }
 });
 
+/**
+ * 实例登记：web host 监听成功后也要把真实 origin 交给 backend.publishOrigin。
+ *
+ * 打包版虽然端口固定（4173），但部署可以换端口、也可以挂子路径；外部工具靠登记表拿到
+ * 「能打开画布的那个地址」，而不是自己拼一个。子路径必须一并带上，否则登记出来的地址
+ * 点开是 404。
+ */
+test('listening origin is registered for instance discovery', async () => {
+  const dir = fixture();
+  const published = [];
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      basePath: '/',
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {}, publishOrigin: (origin) => published.push(origin) }
+    });
+    assert.deepEqual(published, [server.origin]);
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('子路径部署时登记的地址带上挂载前缀', async () => {
+  const dir = fixture();
+  const published = [];
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      basePath: '/tools/woohaa/',
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {}, publishOrigin: (origin) => published.push(origin) }
+    });
+    // 尾斜杠去掉：登记的是可拼深链的 origin，不是入口页面。
+    assert.deepEqual(published, [`${server.origin}/tools/woohaa`]);
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('registration failure does not abort startup', async () => {
+  const dir = fixture();
+  try {
+    const server = await startWebHostServer({
+      frontendDir: dir,
+      basePath: '/',
+      backend: { readiness: async () => ({ ready: true }), handle: async () => false, close: async () => {}, publishOrigin: () => { throw new Error('registry down'); } }
+    });
+    assert.match(server.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
+    await server.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('unready backend refuses to publish a listening port', async () => {
   const dir = fixture();
   let closed = false;
