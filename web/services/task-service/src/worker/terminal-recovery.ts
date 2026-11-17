@@ -116,9 +116,15 @@ async function recoverOne(
   if (state === "succeeded") {
     // 稳定媒体结果（远端托管生成）：重启后重新 verify-and-adopt，不依赖 provider 地址，
     // 也不把已采用过的对象当「没有可转存来源」误判失败。
+    //
+    // **多产物必须走逐张路径**：`isGenerationStableMediaResult` 只认顶层 `media`（= 主产物），
+    // 在这里采纳会静默丢掉其余图层。归档记录带 `outputs` 时交给 rematerializeBinaryOutput，
+    // 它按 `readRawBinarySources` 逐项 verify-and-adopt（2026-11-17 现场：图层拆分重启后
+    // 只剩一张白底板）。
     const stableMedia = readStableMediaResult(execution);
+    const multiOutput = hasArchivedOutputs(task.result);
     const binaryKind = binaryKindOf(modelType) ?? inferBinaryKind(task.result);
-    if (stableMedia && options.mediaClient) {
+    if (stableMedia && !multiOutput && options.mediaClient) {
       await materializeStableMediaResult(materializationContext(options), execution, association, stableMedia.media);
     } else if (binaryKind && options.mediaClient) {
       const materialized = await rematerializeBinaryOutput(options, execution, association, binaryKind, task.result);
@@ -273,6 +279,12 @@ function inferBinaryKind(raw: unknown): BinaryModelType | undefined {
   if (Array.isArray(raw.audios) && raw.audios.length > 0) return "audio";
   if (Array.isArray(raw.videos) && raw.videos.length > 0) return "video";
   return undefined;
+}
+
+/** 归档记录是否带多产物引用（`outputs` 长度 > 1）：此时只能逐张 adopt，不能只认主产物。 */
+function hasArchivedOutputs(raw: unknown): boolean {
+  if (!isRecord(raw)) return false;
+  return Array.isArray(raw.outputs) && raw.outputs.length > 1;
 }
 
 /** provider 原始结果里的受控输出地址（顶层媒体项或 providerMetadata），按输出顺序全量返回。 */

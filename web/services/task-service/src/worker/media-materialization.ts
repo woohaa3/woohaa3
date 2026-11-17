@@ -294,10 +294,25 @@ function stableModelType(record: ExecutionRecord): BinaryModelType {
   return record.modelType === "video" || record.modelType === "audio" || record.modelType === "motion" ? record.modelType : "image";
 }
 
-/** 一份待转存的二进制来源：受控地址，或 durable 记录里的字节。 */
+/**
+ * 一份待转存的二进制来源：受控地址、durable 记录里的字节，或已归档的稳定引用。
+ *
+ * `media` 分支是图层拆分等多产物结果的常态：落库前已经归档（见 worker/result-archive.ts），
+ * 这里只需要按引用 verify-and-adopt，不搬字节。
+ */
 export type OutputSource =
   | { kind: "url"; url: string }
-  | { kind: "bytes"; bytesBase64: string; contentType: string };
+  | { kind: "bytes"; bytesBase64: string; contentType: string }
+  | { kind: "media"; media: StableMediaRef };
+
+/** 已归档条目的稳定身份（`GenerationStableMediaResult.media` 的位置与 metadata 子集）。 */
+export type StableMediaRef = {
+  storageKey: string;
+  locator?: string;
+  contentType: string;
+  size: number;
+  checksum?: string;
+};
 
 /**
  * 受控转存 provider 的**全部**二进制输出；成功写稳定 metadata，失败写 failed。
@@ -337,19 +352,30 @@ export async function materializeOutputs(
     });
     return;
   }
+  /**
+   * 单份来源落到稳定媒体：地址走受控下载，字节走内容寻址，已归档条目只做 verify-and-adopt。
+   *
+   * 三条分支共用一个循环，`outputs` 的序号因此始终等于 provider 输出顺序。
+   */
+  const importOneSource = async (source: OutputSource): Promise<MediaMetadata> => {
+    if (source.kind === "url") return options.mediaClient!.importFromUrl({ url: source.url, maxBytes, ...scope });
+    if (source.kind === "bytes") {
+      return options.mediaClient!.importBytes({
+        bytesBase64: source.bytesBase64,
+        contentType: source.contentType,
+        maxBytes,
+        ...scope
+      });
+    }
+    // 已归档（多产物落库前转存过）：按引用核验，不搬字节。
+    return adoptStableObject(options, source.media.storageKey, source.media, scope);
+  };
   try {
     const imported: Array<MediaMetadata | undefined> = [];
     let primaryError: unknown;
     for (const [index, source] of sources.entries()) {
       try {
-        imported[index] = source.kind === "url"
-          ? await options.mediaClient!.importFromUrl({ url: source.url, maxBytes, ...scope })
-          : await options.mediaClient!.importBytes({
-              bytesBase64: source.bytesBase64,
-              contentType: source.contentType,
-              maxBytes,
-              ...scope
-            });
+        imported[index] = await importOneSource(source);
       } catch (error) {
         if (index === 0) primaryError = error;
         else options.logger?.({ event: "media-output-item-failed", taskKey: record.id, code: safeMediaFailure(error, modelType).code });
@@ -393,7 +419,7 @@ export async function materializeOutputs(
     // materializeBinaryBytesFromStore）。
     const allUrls = sources.every((source) => source.kind === "url");
     if (allUrls && modelType !== "video" && input.allowStoreFallback !== false) {
-      const adopted = await importStoredBytesAfterUrlFailure(options, record, association, modelType, maxBytes, scope, error);
+      const adopted = await importStoredBytesAfterUrlFailure(options, record, association, modelType, error);
       if (adopted) return;
     }
     const failure = safeMediaFailure(error, modelType);
@@ -432,12 +458,10 @@ async function importStoredBytesAfterUrlFailure(
   record: ExecutionRecord,
   association: Partial<TaskAssociation> | undefined,
   modelType: "image" | "audio" | "motion",
-  maxBytes: number,
-  scope: { canvasId?: string },
   urlError: unknown
 ): Promise<boolean> {
-  const stored = await readStoredBinarySource(options.taskStore, record.id, modelType).catch(() => undefined);
-  if (!stored) {
+  const stored = await readStoredBinarySources(options.taskStore, record.id, modelType).catch(() => [] as StoredBinarySources);
+  if (stored.length === 0) {
     options.logger?.({
       event: "media-output-import-bytes-unavailable",
       taskKey: record.id,
@@ -446,26 +470,13 @@ async function importStoredBytesAfterUrlFailure(
     return false;
   }
   try {
-    if (stored.kind === "media") {
-      // 落库前已归档（SqliteTaskStore 的负载变换）：按稳定引用 verify-and-adopt，不搬字节。
-      await materializeStableMediaResult(options, record, association, stored.media);
-      options.logger?.({ event: "media-output-adopted-from-store", taskKey: record.id });
-      return true;
-    }
-    const metadata = await options.mediaClient!.importBytes({
-      bytesBase64: stored.bytesBase64,
-      contentType: stored.contentType,
-      maxBytes,
-      ...scope
+    // 落库前已归档（SqliteTaskStore 的负载变换）：按稳定引用 verify-and-adopt，不搬字节；
+    // 未归档记录走字节转存。两条都交给 materializeOutputs，多产物一次转全。
+    await materializeOutputs(options, record, association, { modelType, sources: stored });
+    options.logger?.({
+      event: stored.every((entry) => entry.kind === "media") ? "media-output-adopted-from-store" : "media-output-imported-from-store",
+      taskKey: record.id
     });
-    options.logger?.({ event: "media-output-imported-from-store", taskKey: record.id });
-    projectExecutionRecord(
-      options.history,
-      record,
-      association,
-      resultFromMedia(metadata, { durationSeconds: readDurationFromRecord(record) }),
-      "succeeded"
-    );
     return true;
   } catch (error) {
     options.logger?.({ event: "media-output-import-bytes-failed", taskKey: record.id, code: safeMediaFailure(error, modelType).code });
@@ -530,8 +541,8 @@ export async function materializeBinaryBytesFromStore(
     );
     return;
   }
-  const stored = await readStoredBinarySourceWithRetry(options.taskStore, record.id, modelType);
-  if (!stored) {
+  const stored = await readStoredBinarySourcesWithRetry(options.taskStore, record.id, modelType);
+  if (stored.length === 0) {
     // 二进制任务既没有可转存来源、也没有稳定结果：不得落「无产物 succeeded」。
     projectExecutionRecord(
       options.history,
@@ -547,50 +558,41 @@ export async function materializeBinaryBytesFromStore(
     );
     return;
   }
-  if (stored.kind === "media") {
-    // 记录里已是稳定媒体引用（落库前已归档，见 worker/result-archive.ts）：verify-and-adopt。
-    // 这条路径就是 2.2GB 那个缺陷的修复落点：字节不再从 SQLite 读回来再 base64 传一遍。
-    await materializeStableMediaResult(options, record, association, stored.media);
-    return;
-  }
-  await materializeOutputs(options, record, association, {
-    modelType,
-    sources: [{ kind: "bytes", bytesBase64: stored.bytesBase64, contentType: stored.contentType }]
-  });
+  // 已归档的多产物在这里一次性走引用核验；未归档记录按字节逐张转存。
+  // 这条路径就是 2.2GB / 640MB 那两个缺陷的修复落点：字节不再从 SQLite 读回来再 base64 传一遍。
+  await materializeOutputs(options, record, association, { modelType, sources: stored });
 }
 
-/** durable 记录里的二进制来源：真实字节，或已归档的稳定媒体引用。 */
-export type StoredBinarySource =
-  | { kind: "bytes"; bytesBase64: string; contentType: string; modelType: BinaryModelType }
-  | { kind: "media"; media: GenerationStableMediaResult["media"] };
+/** durable 记录里的二进制来源：已归档的稳定引用，或未归档的原始字节（可以是多份）。 */
+export type StoredBinarySources = OutputSource[];
 
 /** 有界重试读取来源：worker 的 `saveTask` 紧随 succeeded 广播之后。 */
-async function readStoredBinarySourceWithRetry(
+async function readStoredBinarySourcesWithRetry(
   taskStore: PptaskTaskStore,
   taskKey: string,
   modelType: BinaryModelType
-): Promise<StoredBinarySource | undefined> {
+): Promise<StoredBinarySources> {
   const deadline = Date.now() + 5_000;
   for (;;) {
-    const stored = await readStoredBinarySource(taskStore, taskKey, modelType);
-    if (stored) return stored;
-    if (Date.now() > deadline) return undefined;
+    const stored = await readStoredBinarySources(taskStore, taskKey, modelType);
+    if (stored.length > 0) return stored;
+    if (Date.now() > deadline) return [];
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 
 /**
- * 读 durable 记录里的二进制来源。
+ * 读 durable 记录里的二进制来源（全部产物）。
  *
- * 落地方式有两种：新记录在落库前已把字节归档成 `{ media }`（见 worker/result-archive.ts），
+ * 落地方式有两种：新记录在落库前已把字节归档成稳定引用（见 worker/result-archive.ts），
  * 老记录仍可能带原始字节（JSON 往返后是 `{"0":n,...}`）。两条都要认，否则升级后旧任务
  * 无法对账、新任务会走到「没有可转存来源」。
  */
-export async function readStoredBinarySource(
+export async function readStoredBinarySources(
   taskStore: PptaskTaskStore,
   taskKey: string,
   modelType: BinaryModelType
-): Promise<StoredBinarySource | undefined> {
+): Promise<StoredBinarySources> {
   const raw = await taskStore.find(taskKey).catch(() => null);
   // pptask persists the execution snapshot and the display result in separate
   // columns.  A terminal notification can race the second save, leaving only
@@ -599,8 +601,7 @@ export async function readStoredBinarySource(
   // without an asset and the retry window cannot recover it once the result
   // column is never written (old worker versions did this on shutdown).
   const result = raw?.result ?? readStateResult(raw?.state);
-  if (isGenerationStableMediaResult(result)) return { kind: "media", media: result.media };
-  return bytesFromResult(result, modelType);
+  return readRawBinarySources({ result }, modelType);
 }
 
 function readStateResult(state: unknown): unknown {
@@ -609,9 +610,57 @@ function readStateResult(state: unknown): unknown {
 }
 
 /**
- * 从 durable task store 的原始 result 恢复**全部**二进制字节（重启终态对账也用它）。
+ * 已归档记录的稳定引用（不搬字节）：优先 `outputs[]`（多产物），否则顶层 `media`。
  *
- * 图层拆分一次落多份字节，只取第一份会让重启后的对账把整套结果降级成一张图。
+ * `outputs` 的项与 `GenerationStableMediaResult.media` 同形，可以直接进
+ * `materializeOutputs` 的 `media` 分支做 verify-and-adopt。
+ */
+function archivedStableSources(result: unknown): OutputSource[] {
+  if (!isRecord(result)) return [];
+  const outputs = result.outputs;
+  if (Array.isArray(outputs) && outputs.length > 0) {
+    const sources: OutputSource[] = [];
+    for (const entry of outputs) {
+      if (!isRecord(entry) || typeof entry.storageKey !== "string" || entry.storageKey === "") continue;
+      const contentType = typeof entry.contentType === "string" ? entry.contentType : "";
+      const size = typeof entry.size === "number" && Number.isFinite(entry.size) ? entry.size : 0;
+      sources.push({
+        kind: "media",
+        media: {
+          storageKey: entry.storageKey,
+          contentType,
+          size,
+          ...(typeof entry.locator === "string" && entry.locator !== "" ? { locator: entry.locator } : {}),
+          ...(typeof entry.checksum === "string" && entry.checksum !== "" ? { checksum: entry.checksum } : {})
+        }
+      });
+    }
+    if (sources.length > 0) return sources;
+  }
+  const stable = isGenerationStableMediaResult(result) ? result.media : undefined;
+  if (!stable) return [];
+  return [{
+    kind: "media",
+    media: {
+      storageKey: stable.storageKey,
+      contentType: stable.contentType,
+      size: stable.size,
+      ...(stable.locator !== undefined ? { locator: stable.locator } : {}),
+      ...(stable.checksum !== undefined ? { checksum: stable.checksum } : {})
+    }
+  }];
+}
+
+/**
+ * 从 durable task store 的原始 result 恢复**全部**二进制来源（重启终态对账也用它）。
+ *
+ * 两种落地形态都要认：
+ * - 已归档（新记录，见 worker/result-archive.ts）：`outputs[]` 是稳定引用，逐项
+ *   verify-and-adopt，不搬字节；只有一份产物时退回顶层 `media`。
+ * - 未归档（旧记录或归档失败）：`images` / `audios` 里的原始字节，JSON 往返后是
+ *   `{"0":n,...}`。
+ *
+ * 图层拆分一次落多份，只取第一份会让重启后的对账把整套结果降级成一张图（2026-11-17 现场）。
  */
 export function readRawBinarySources(
   task: { result?: unknown; state?: unknown } | null | undefined,
@@ -619,6 +668,8 @@ export function readRawBinarySources(
 ): OutputSource[] {
   if (!task) return [];
   const result = task.result ?? readStateResult(task.state);
+  const archived = archivedStableSources(result);
+  if (archived.length > 0) return archived;
   const container = isRecord(result) ? (result as Record<string, unknown>) : undefined;
   if (!container) return [];
   const list = Array.isArray(container.motions) ? container.motions : Array.isArray(container.videos)
@@ -645,29 +696,6 @@ export function readRawBinarySources(
     });
   }
   return sources;
-}
-
-function bytesFromResult(result: unknown, modelType: BinaryModelType): StoredBinarySource | undefined {
-  const container = isRecord(result) ? (result as Record<string, unknown>) : undefined;
-  if (!container) return undefined;
-  const list = Array.isArray(container.motions) ? container.motions : Array.isArray(container.videos)
-    ? container.videos
-    : Array.isArray(container.audios)
-      ? container.audios
-      : container.images;
-  if (!Array.isArray(list) || list.length === 0) return undefined;
-
-  const maxBytes = maxBytesFor(modelType);
-  const bytes = toUint8Array(list[0], maxBytes);
-  if (!bytes || bytes.byteLength === 0) return undefined;
-  if (bytes.byteLength > maxBytes) return undefined;
-
-  return {
-    kind: "bytes",
-    bytesBase64: Buffer.from(bytes).toString("base64"),
-    contentType: readProviderContentType(result, modelType),
-    modelType
-  };
 }
 
 /**

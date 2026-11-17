@@ -235,6 +235,12 @@ export class SqliteTaskStore implements PptaskTaskStore {
       state: record.state,
       result: record.result
     });
+    // 序列化只做一次：早先这里先 json() 写库、写完整行再 read() 回来重新 JSON.parse 两份
+    // （640MB 记录要多付 2.6s 解析 + 一次全量克隆），而这些 JSON 字符串就在手边。
+    const paramsJson = json(record.params);
+    const contextJson = json(record.context);
+    const stateJson = json(payload.state);
+    const resultJson = json(payload.result);
     const result = this.db
       .prepare(
         `UPDATE task_records
@@ -245,10 +251,10 @@ export class SqliteTaskStore implements PptaskTaskStore {
       )
       .run(
         record.providerId,
-        json(record.params),
-        json(record.context),
-        json(payload.state),
-        json(payload.result),
+        paramsJson,
+        contextJson,
+        stateJson,
+        resultJson,
         record.status,
         record.claimToken ?? null,
         record.leaseUntil?.getTime() ?? null,
@@ -260,8 +266,12 @@ export class SqliteTaskStore implements PptaskTaskStore {
         record.claimToken ?? null
       );
     if (result.changes === 0) return; // 围栏失配：另一个 writer 已经接管，别覆盖它的状态。
-    const saved = this.read(record.key);
-    if (saved) this.publish(saved);
+    // 用刚写入的负载拼 record，不再从库里读回整行：省掉一次全量 read + JSON.parse。
+    this.publish({
+      ...record,
+      ...(payload.state !== undefined ? { state: payload.state } : {}),
+      ...(payload.result !== undefined ? { result: payload.result } : {})
+    });
   }
 
   async cancel(key: string, now: Date): Promise<PptaskTaskRecord | null> {
@@ -316,6 +326,9 @@ export class SqliteTaskStore implements PptaskTaskStore {
   }
 
   private publish(record: PptaskTaskRecord): void {
+    // 没有订阅者就不要拷贝：`structuredClone` 会整条深拷贝，带字节的记录一次要秒级，
+    // 而 worker 每次状态迁移都会走到这里（2026-11-17：24MB 载荷 = 8.4s 同步阻塞）。
+    if (this.listeners.size === 0) return;
     for (const listener of this.listeners) {
       try {
         listener(structuredClone(record));
