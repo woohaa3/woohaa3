@@ -1,3 +1,4 @@
+import { traceVideoTexture } from "./video-playback-diagnostics.js";
 import { IMAGE_FETCH_RESERVATION_BYTES } from "@woohaa3/contracts";
 import { releaseImagePixels } from "./image-worker/native-port.js";
 import { prepareImageResource } from "./image-worker/client.js";
@@ -640,6 +641,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
         focusSource = `focus:${override.nodeId}:${++nextFocusSource}`;
         const accepted = uploads.run(`focus:${override.nodeId}`, override, override.nodeId,
           () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels, { sourceKey: focusSource }) !== false);
+        traceVideoTexture(override.pixels, "texture-submit", { accepted: !!accepted, sourceKey: focusSource, width: override.width, height: override.height });
         overrideUploaded = !!accepted;
         if (accepted) {
           const original = entries.get(override.nodeId);
@@ -647,6 +649,11 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
           setUploaded(override.nodeId, true); changed = true;
         }
       }
+      if (override && overrideUploaded) traceVideoTexture(override.pixels, "texture-receipt", {
+        sourceKey: focusSource,
+        applied: options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? null,
+        renderedRevision: options.runtime.renderedRevision?.()
+      });
       if (override && overrideUploaded && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) {
         const original = entries.get(override.nodeId);
         if (original) loading.setLoading(original.load, false);
