@@ -41,6 +41,7 @@ import {
   collectBundleArtifacts,
   formatCommand,
   hashPath,
+  macBundleVersionFor,
   missingBundleKinds,
   missingIcons,
   parseDesktopArgs,
@@ -53,8 +54,7 @@ import {
   tauriFrontendDist,
   validateIconSource
 } from "./lib/desktop-release.mjs";
-import { buildDefines, describeBuildProfile, loadBuildProfile, updateEndpointFor, updaterPlatformKey } from "./lib/build-profile.mjs";
-
+import { buildDefines, describeBuildProfile, loadBuildProfile, resolveUpdateEndpoints, STABLE_UPDATE_CHANNEL, updaterPlatformKey } from "./lib/build-profile.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 // Explicit external composition projects use the same packaging pipeline.
@@ -82,6 +82,7 @@ const usage = `Tauri 桌面发行打包
   --build-frontend     先构建前端与扩展发布产物（包含前端所需的两套 WASM 绑定）
   --identifier <id>    覆盖 bundle identifier
   --version <semver>   覆盖应用版本
+  --channel <name>     更新通道（缺省 stable）；alpha 产物只写 alpha feed，且带 stable 回退地址
   --out <dir>          manifest（及 --copy 时的产物副本）输出目录
   --copy               把 bundle 复制到 <out>/bundles/
   --release-id <id>    覆盖 release 标识
@@ -342,12 +343,24 @@ async function runBuild(options) {
     identifier: options.identifier,
     version: options.version,
     frontendDist: options.frontend ? (process.env.WOOHAA_DESKTOP_PROJECT_DIR ? frontendDist : tauriFrontendDist(frontendDist, desktopDir)) : null,
-    defaultsPath
+    defaultsPath,
+    // macOS 的 CFBundleVersion 必须是纯数字串；预发布版本把 alpha 序号翻成递增的数字。
+    // 正式版不写该字段，保持改动前产物一致。
+    macBundleVersion: macBundleVersionFor(options.version)
   });
   const platformKey = updaterPlatformKey({ platform, arch });
-  const updateEndpoint = updateEndpointFor(buildProfile.resolved, platformKey) || null;
+  // 通道决定写进产物的 feed 集合：stable 包只带 stable 地址，alpha 包才带 alpha 地址。
+  // 缺省 stable，未升级的调用方与旧 profile 行为不变。
+  const updateChannel = options.channel ?? STABLE_UPDATE_CHANNEL;
+  let updateEndpoints = null;
+  if (platformKey && buildProfile.resolved.updateEndpointTemplate) {
+    updateEndpoints = resolveUpdateEndpoints(buildProfile.resolved, platformKey, updateChannel);
+  } else if (updateChannel !== STABLE_UPDATE_CHANNEL) {
+    throw new Error(`指定了 ${updateChannel} 通道，但 build profile 没有配置更新地址模板`);
+  }
+  const updateEndpoint = updateEndpoints?.endpoints[STABLE_UPDATE_CHANNEL] ?? null;
   const updatePublicKey = buildProfile.resolved.updatePublicKeys[0] ?? null;
-  if (!options.dryRun && !options.debug && !options.uiUrl && !buildProfile.resolved.allowUnconfiguredUpdate && (!updateEndpoint || !updatePublicKey)) {
+  if (!options.dryRun && !options.debug && !options.uiUrl && !buildProfile.resolved.allowUnconfiguredUpdate && (!updateEndpoints || !updatePublicKey)) {
     throw new Error("缺少桌面更新源或公钥：在 build-profile.json 配 cdn.updatePath 与 desktop.update.publicKeys，或设 desktop.allowUnconfiguredUpdate=true 明确承认不带自动更新。");
   }
   let hostPackage = null;
@@ -366,7 +379,7 @@ async function runBuild(options) {
     const hostArchive = createHostArchive(prepared.resourceRoot, path.join(path.dirname(defaultsPath), "desktop-host.tar.gz"));
     const runtimeFile = path.join(path.dirname(defaultsPath), "desktop-runtime.json");
     fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
-    fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(endpoint ? { updater: { endpoint, publicKey } } : {}) }));
+    fs.writeFileSync(runtimeFile, JSON.stringify({ hostArchiveSha256: hostArchive.sha256, nodeVersion: prepared.nodeVersion, ...(updateEndpoints ? { updater: { channel: updateEndpoints.channel, endpoints: updateEndpoints.endpoints, publicKey: updatePublicKey } } : {}) }));
     override.bundle = { ...override.bundle, ...standalone.bundle, resources: { ...override.bundle?.resources, ...standalone.bundle.resources, [runtimeFile]: "desktop-runtime.json", [hostArchive.path]: "desktop-host.tar.gz", [path.join(root, "bevy/assets/")]: "native-assets/" } };
     hostPackage = { status: "packaged", nodeVersion: prepared.nodeVersion, nodeSha256: prepared.nodeSha256, extensions: prepared.extensions, packages: prepared.packages, updater: endpoint ? "configured" : "unconfigured", ...(prepareCommand ? { hostPrepareCommand: prepareCommand } : {}) };
   }
@@ -387,6 +400,7 @@ async function runBuild(options) {
     if (!options.uiUrl) console.log("  cargo build 原生 model-renderer (--release)，然后装配宿主运行时");
     console.log(`  前端 dist：${relative(frontendDist)}`);
     console.log(`  bundle 种类：${kindList.length > 0 ? kindList.join(", ") : "（--no-bundle）"}`);
+    console.log(`  更新通道：${updateChannel}${updateEndpoints ? ` → ${Object.keys(updateEndpoints.endpoints).join("、")}` : "（未配置更新源）"}`);
     console.log(`  默认值资源：${relative(defaultsPath)}`);
     console.log(`  APPLE_SIGNING_IDENTITY：${process.env.APPLE_SIGNING_IDENTITY ? "已设置（透传 tauri）" : "未设置（ad-hoc）"}`);
     console.log(`  归档前钩子：${process.env.WOOHAA_DESKTOP_HOST_PREPARE_COMMAND?.trim() || "（未配置）"}`);

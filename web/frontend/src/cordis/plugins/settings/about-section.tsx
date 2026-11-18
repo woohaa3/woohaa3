@@ -3,11 +3,21 @@
  *
  * 这里刻意解答「为什么生成任务说没有对外地址」：把主存储、对外地址提供者、已注册的
  * 扩展点与临时图床的注册状态摊开，用户不用去翻日志。
+ *
+ * 桌面版另有「接收开发者版本」开关（change: 2026-11-18-add-desktop-update-channels）：
+ * 只有安装包自带 alpha feed 时才出现，普通用户不打开就永远收不到开发者版本。
  */
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Switch } from "@woohaa3/ui/primitives";
 import type { SettingsSnapshot } from "@woohaa3/contracts";
-import { desktopAppVersion } from "../../../extension-api/host-platform.js";
+import { desktopAppVersion, isDesktopHost } from "../../../extension-api/host-platform.js";
 import { appBuildVersion } from "../../services/build-info.js";
+import {
+  offersDeveloperChannel,
+  readUpdateChannel,
+  writeUpdateChannel,
+  type UpdateChannelOptions
+} from "../../../desktop/update-channel.js";
 
 function settingValue(snapshot: SettingsSnapshot | null, key: string): string {
   const entry = snapshot?.settings.find((item) => item.key === key);
@@ -27,6 +37,70 @@ function Row({ label, children, testId }: { label: string; children: ReactNode; 
         <span className="settings-page__item-label">{label}</span>
       </div>
       <p className="settings-page__item-description">{children}</p>
+    </li>
+  );
+}
+
+/**
+ * 「接收开发者版本」开关。
+ *
+ * 三条硬约束，任何一条破了就等于把开发者版本漏给普通用户：
+ * 1. 只在当前安装包自带 alpha feed 时渲染——stable 包没有这个入口；
+ * 2. 缺省关闭，且只影响**下次启动**的更新检查，不暗示立即升级；
+ * 3. 关回 stable 时说清楚下一次启动会装回正式版（这是唯一允许降级的路径）。
+ */
+function DeveloperChannelRow() {
+  const [options, setOptions] = useState<UpdateChannelOptions | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (!isDesktopHost(globalThis)) return;
+    let cancelled = false;
+    readUpdateChannel()
+      .then((value) => { if (!cancelled) setOptions(value); })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // 未读到或本安装包不提供 alpha 时不渲染：stable 用户看不到任何开发者入口。
+  if (options === null || !offersDeveloperChannel(options)) return null;
+
+  const enabled = options.channel === "alpha";
+  const toggle = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      setOptions(await writeUpdateChannel(enabled ? "stable" : "alpha"));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <li className="settings-page__item" data-testid="settings-about-update-channel">
+      <div className="settings-page__item-head">
+        <span className="settings-page__item-label">接收开发者版本</span>
+      </div>
+      <p className="settings-page__item-description">
+        {enabled
+          ? "下次启动会检查开发者版本并强制更新；关闭后下次启动会装回正式版。"
+          : "开启后下次启动才会检查开发者版本；期间仍使用正式版。"}
+      </p>
+      <div className="settings-page__item-control">
+        <Switch
+          checked={enabled}
+          disabled={pending}
+          onCheckedChange={() => { void toggle(); }}
+          aria-label="接收开发者版本"
+          testId="settings-about-update-channel-toggle"
+        />
+      </div>
+      {error !== null ? <p className="settings-page__error">{error}</p> : null}
     </li>
   );
 }
@@ -83,6 +157,7 @@ export function AboutSection({ snapshot }: { snapshot: SettingsSnapshot | null }
         {snapshot?.installedExtensions?.length ?? 0} 个
         {snapshot?.safeMode ? <span className="settings-page__badge is-warning">安全模式</span> : null}
       </Row>
+      <DeveloperChannelRow />
     </ul>
   );
 }

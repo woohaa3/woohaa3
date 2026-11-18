@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseSettings, buildReleaseIndex } from './lib/desktop-release-index.mjs';
+import { releaseSettings, buildReleaseIndex, prereleaseTag } from './lib/desktop-release-index.mjs';
+import { macBundleVersionFor } from './lib/desktop-release.mjs';
 test('platform release roots isolate Windows from macOS',()=>{
  const win=releaseSettings({platform:'win32',arch:'x64',endpoint:'https://updates.example.com/windows/latest.json'}); const mac=releaseSettings({platform:'darwin',arch:'arm64',endpoint:'https://updates.example.com/latest.json'});
  assert.equal(win.endpoint,'https://updates.example.com/windows/latest.json');
@@ -62,4 +63,51 @@ test('收敛不出唯一候选时把候选清单带进错误信息',()=>{
 test('signed releases require an explicit HTTPS endpoint',()=>{
  assert.throws(()=>releaseSettings({platform:'darwin',arch:'arm64'}),/endpoint/i);
  assert.throws(()=>releaseSettings({platform:'darwin',arch:'arm64',endpoint:'http://example.com/latest.json'}),/HTTPS/);
+});
+
+test('stable 通道拒绝预发布版本，alpha 通道接受',()=>{
+ const manifest={product:{version:'0.2.0-alpha.3'},artifacts:[
+  {name:'Actual.app.tar.gz',path:'mac/archive'},
+  {name:'Actual.app.tar.gz.sig',path:'mac/signature'}
+ ]};
+ // 预发布版落进 stable feed 等于对所有用户强制推送开发者版本。
+ assert.throws(
+  ()=>buildReleaseIndex({manifest,platform:'darwin',arch:'arm64',endpoint:'https://updates.example.com/stable/darwin-aarch64/latest.json',signature:'s'}),
+  /stable 通道不能发布预发布版本/
+ );
+ const alpha=buildReleaseIndex({manifest,platform:'darwin',arch:'arm64',channel:'alpha',endpoint:'https://updates.example.com/alpha/darwin-aarch64/latest.json',signature:'s'});
+ assert.equal(alpha.channel,'alpha');
+ assert.equal(alpha.prerelease,true);
+ assert.equal(alpha.latest.version,'0.2.0-alpha.3');
+ assert.match(alpha.latest.platforms['darwin-aarch64'].url,/^https:\/\/updates\.example\.com\/alpha\/darwin-aarch64\/0\.2\.0-alpha\.3\//);
+});
+
+test('alpha 通道仍可发布正式版（转正后复用同一 feed）',()=>{
+ const manifest={product:{version:'0.2.0'},artifacts:[{name:'Actual.app.tar.gz',path:'a'},{name:'Actual.app.tar.gz.sig',path:'s'}]};
+ const result=buildReleaseIndex({manifest,platform:'darwin',arch:'arm64',channel:'alpha',endpoint:'https://updates.example.com/alpha/darwin-aarch64/latest.json',signature:'s'});
+ assert.equal(result.prerelease,false);
+ assert.equal(result.latest.version,'0.2.0');
+});
+
+test('通道名非法时拒绝',()=>{
+ const manifest={product:{version:'0.2.0'},artifacts:[{name:'Actual.app.tar.gz',path:'a'},{name:'Actual.app.tar.gz.sig',path:'s'}]};
+ for(const channel of ['Alpha','../alpha','alpha/beta','']){
+  assert.throws(()=>releaseSettings({platform:'darwin',arch:'arm64',channel,endpoint:'https://updates.example.com/latest.json'}),/channel/i);
+ }
+});
+
+test('prereleaseTag 只取预发布后缀',()=>{
+ assert.equal(prereleaseTag('0.2.0-alpha.3'),'alpha.3');
+ assert.equal(prereleaseTag('0.2.0-rc.1'),'rc.1');
+ assert.equal(prereleaseTag('0.2.0'),'');
+ assert.equal(prereleaseTag('0.2.0+build.7'),'');
+});
+
+test('macBundleVersionFor 只对预发布版给出纯数字构建号',()=>{
+ assert.equal(macBundleVersionFor('0.2.0-alpha.3'),'0.2.0.3');
+ assert.equal(macBundleVersionFor('0.2.0-rc.12'),'0.2.0.12');
+ assert.equal(macBundleVersionFor('0.2.0-beta'),'0.2.0.0');
+ // 正式版不写该字段，产物与改造前一致。
+ assert.equal(macBundleVersionFor('0.2.0'),null);
+ assert.equal(macBundleVersionFor(null),null);
 });

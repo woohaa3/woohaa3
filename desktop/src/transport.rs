@@ -536,6 +536,30 @@ pub fn install(
                 });
                 return;
             }
+            // 更新通道设置：GET 读、POST 写。可用集合取自随包 updater 配置，
+            // 前端拿到的选项与实际能查到的 feed 永远是同一份事实。
+            if request.uri().path() == "/update-channel" {
+                let app = ctx.app_handle().clone();
+                let method = request.method().clone();
+                let body = request.body().to_vec();
+                std::thread::spawn(move || {
+                    let _reservation = reservation;
+                    let available = crate::desktop_updates::available_channels(&app);
+                    let result = match method {
+                        tauri::http::Method::GET => crate::update_channel_controls::read()
+                            .map(|state| json!({ "state": state, "available": available })),
+                        tauri::http::Method::POST => crate::update_channel_controls::write(&available, &body)
+                            .map(|state| json!({ "state": state, "available": available })),
+                        _ => Err("更新通道操作只接受 GET 或 POST".into()),
+                    };
+                    let value = match result {
+                        Ok(value) => json!({ "ok": true, "value": value }),
+                        Err(error) => json!({ "ok": false, "error": error }),
+                    };
+                    respond(serde_json::to_vec(&value).unwrap(), "application/json");
+                });
+                return;
+            }
             let queued = std::time::Instant::now();
             let app = ctx.app_handle().clone();
             let _ = ctx.app_handle().run_on_main_thread(move || {

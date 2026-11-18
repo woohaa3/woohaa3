@@ -24,13 +24,15 @@ The job pins Node 24.22.0, pnpm 11.17.0, Rust 1.97.1, wasm-bindgen 0.2.128 and B
 
 ## Signed update channel
 
-Keep the updater private key on the release machine, with its matching `.pub` file alongside it. Increase `desktop/tauri.conf.json`'s version before building an update. Set the update endpoint explicitly; the client has no default publisher CDN.
+Keep the updater private key on the release machine, with its matching `.pub` file alongside it. Increase `desktop/tauri.conf.json`'s version before building an update. The client has no default publisher CDN: the update endpoint comes from the build profile's `cdn.updatePath` template, expanded per platform key and update channel.
 
 ```powershell
 $env:WOOHAA_DESKTOP_SIGNING_KEY = 'C:\private\woohaa\updater.key'
-$env:WOOHAA_DESKTOP_UPDATE_ENDPOINT = 'https://updates.example.com/windows-x64/latest.json'
+$env:WOOHAA_RELEASE_CHANNEL = 'stable'   # or 'alpha'
 pnpm desktop:release --build-frontend
 ```
+
+Do **not** set `WOOHAA_DESKTOP_UPDATE_ENDPOINT`: it overrides the `{channel}` template at load time, so an alpha build would either fail or write to the stable feed. Select the channel with `--channel` (or `WOOHAA_RELEASE_CHANNEL`) instead.
 
 Upload the version directory from `artifacts/desktop/standalone-windows-x64/upload/` to the corresponding HTTPS directory, then upload `latest.json` last. The index uses platform key `windows-x86_64`; keep it separate from macOS. Permit anonymous reads of the index and version artifacts. Never upload the private signing key. The index includes the updater signature; installed clients validate with the matching embedded public key.
 

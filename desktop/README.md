@@ -35,6 +35,19 @@ Bundling does not decide the enable state. `remote-server` ships with `site.defa
 
 The standalone packaging paths support Apple Silicon macOS and Windows x64. They include a pinned Node runtime, local host, frontend, extensions and native tools, so installed users do not need Node or pnpm. Output manifests under `artifacts/desktop/` record hashes and sizes. An explicit `--ui-url` creates an external-host development configuration. See [Windows build and lifecycle checks](WINDOWS.md).
 
+### Update channels (alpha)
+
+`--channel <name>` picks the update channel; it defaults to `stable`. The channel is baked into the artifact: `desktop-runtime.json` carries `updater.channel` plus an `updater.endpoints` map.
+
+- A `stable` build only contains the `stable` feed. It cannot reach alpha at all — the developer version is out of reach at the artifact level, not by runtime policy.
+- An `alpha` build contains **both** feeds, so testers can fall back to a release build.
+- `pnpm desktop:release -- --channel alpha` writes only the alpha prefix (`woohaa/updates/alpha/<platform>/`). It never touches `stable/latest.json`. The legacy `macos-arm64` mirror runs for stable only.
+- Stable releases reject prerelease versions; publish `0.2.0-alpha.3` to the alpha channel instead.
+
+Version numbers use prerelease semver (`0.2.0-alpha.3`) on the same line as stable (`0.2.0`). macOS gets a numeric `CFBundleVersion` derived from the tag; release builds keep the field unset.
+
+In the app, the switch lives in **Settings → 关于 → 接收开发者版本**. It is only rendered when the installed build ships an alpha feed, defaults to off, and takes effect on the **next launch**. Turning it off writes a one-shot rollback intent, which is the only path allowed to install a lower version; that intent is cleared after a successful downgrade or when the running build is already a release.
+
 ## macOS signing and notarization
 
 Signing and notarization are **not** part of this repository. This client builds artifacts; whether

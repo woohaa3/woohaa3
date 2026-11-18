@@ -33,6 +33,19 @@
             "publicKeys"
           ],
           "properties": {
+            "channels": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "description": "允许产出的更新通道；必须包含 stable。只有通道本身是 alpha 的安装包才会带 alpha 地址，普通用户因此在产物层面就够不到开发者版本。",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,31}$"
+              },
+              "contains": {
+                "const": "stable"
+              }
+            },
             "publicKeys": {
               "type": "array",
               "minItems": 1,

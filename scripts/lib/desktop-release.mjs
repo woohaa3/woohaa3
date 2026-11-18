@@ -69,6 +69,7 @@ const VALUE_ARGS = new Set([
   "--frontend",
   "--identifier",
   "--version",
+  "--channel",
   "--icon-source"
 ]);
 
@@ -123,6 +124,7 @@ export function parseDesktopArgs(argv) {
     frontend: raw["--frontend"] ?? null,
     identifier: raw["--identifier"] ?? null,
     version: raw["--version"] ?? null,
+    channel: raw["--channel"] ?? null,
     iconSource: raw["--icon-source"] ?? null,
     buildFrontend: flags.has("--build-frontend"),
     debug: flags.has("--debug"),
@@ -211,12 +213,15 @@ export function buildDefaultsDocument({ uiUrl }) {
  * 只放非路径键与**绝对**资源路径：合并配置里的相对路径归属不明确，图标等相对路径继续留在
  * `desktop/tauri.conf.json`。资源用 map 形式显式指定目标名，避免依赖绝对路径的目录推断。
  */
-export function tauriConfigOverride({ identifier = null, version = null, frontendDist = null, defaultsPath = null }) {
+export function tauriConfigOverride({ identifier = null, version = null, frontendDist = null, defaultsPath = null, macBundleVersion = null }) {
   const config = {};
   if (identifier) config.identifier = identifier;
   if (version) config.version = version;
   if (frontendDist) config.build = { frontendDist };
   if (defaultsPath) config.bundle = { resources: { [defaultsPath]: DESKTOP_DEFAULTS_RESOURCE } };
+  // macOS 的 CFBundleShortVersionString 只接受三段数字；预发布后缀必须走 CFBundleVersion，
+  // 否则 Finder 与系统组件会显示异常值。
+  if (macBundleVersion) config.bundle = { ...(config.bundle ?? {}), macOS: { bundleVersion: macBundleVersion } };
   return config;
 }
 
@@ -231,8 +236,23 @@ export function tauriBuildArgs({ options, kinds, config }) {
   return args;
 }
 
-/** 发行标识：`desktop-<UTC 时间戳>-<平台>-<架构>`。 */
-export function releaseIdFor({ platform, arch, now = new Date() }) {
+/**
+ * macOS 的 `CFBundleVersion`（纯数字串）：正式版返回 null（不写该字段，产物与改造前一致），
+ * 预发布版把后缀里的数字翻成递增构建号，保证 `0.2.0-alpha.3` 与 `0.2.0-alpha.4` 在系统层
+ * 也能分出先后。后缀里没有数字时按 0 处理。
+ */
+export function macBundleVersionFor(version) {
+  if (typeof version !== "string") return null;
+  const match = /^(\d+)\.(\d+)\.(\d+)-([0-9A-Za-z.-]+)$/.exec(version);
+  if (!match) return null;
+  const [, major, minor, patch, tag] = match;
+  const numbers = tag.match(/\d+/g) ?? [];
+  const sequence = numbers.length > 0 ? Number(numbers[numbers.length - 1]) : 0;
+  if (!Number.isSafeInteger(sequence)) return null;
+  return `${major}.${minor}.${patch}.${sequence}`;
+}
+
+/** 发行标识：`desktop-<UTC 时间戳>-<平台>-<架构>`。 */export function releaseIdFor({ platform, arch, now = new Date() }) {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
   return `desktop-${stamp}-${platform}-${arch}`;
 }

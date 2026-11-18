@@ -10,6 +10,8 @@ import {
   describeBuildProfile,
   joinUrl,
   loadBuildProfile,
+  resolveUpdateEndpoints,
+  STABLE_UPDATE_CHANNEL,
   updateEndpointFor,
   updaterPlatformKey
 } from "./build-profile.mjs";
@@ -134,6 +136,75 @@ test("updateEndpointFor 展开平台键，缺平台键时抛错", () => {
     "https://cos.example.com/woohaa/updates/stable/darwin-aarch64/latest.json"
   );
   assert.throws(() => updateEndpointFor(loaded.resolved, null), /平台键/);
+});
+
+/** 双通道 profile：模板含 {channel}，允许 stable 与 alpha。 */
+function channelProfile(extra = {}) {
+  return validProfile({
+    cdn: {
+      baseUrl: "https://cos.example.com/",
+      runtimePath: "woohaa/runtimes/",
+      updatePath: "woohaa/updates/{channel}/{platformKey}/latest.json"
+    },
+    desktop: { update: { publicKeys: ["dW50cnVzdGVkIGNvbW1lbnQ6IHRlc3Q="], channels: ["stable", "alpha"] } },
+    ...extra
+  });
+}
+
+test("stable-only 模板：展开结果与改造前逐字节一致", () => {
+  const loaded = loadBuildProfile({ repoRoot: sandbox(validProfile()) });
+  assert.deepEqual(loaded.resolved.updateChannels, [STABLE_UPDATE_CHANNEL]);
+  const endpoints = resolveUpdateEndpoints(loaded.resolved, "darwin-aarch64");
+  assert.equal(endpoints.channel, "stable");
+  assert.deepEqual(Object.keys(endpoints.endpoints), ["stable"]);
+  assert.equal(endpoints.endpoints.stable, updateEndpointFor(loaded.resolved, "darwin-aarch64"));
+});
+
+test("stable 安装包只带 stable 地址，产物层面就够不到 alpha", () => {
+  const loaded = loadBuildProfile({ repoRoot: sandbox(channelProfile()) });
+  const endpoints = resolveUpdateEndpoints(loaded.resolved, "darwin-aarch64", "stable");
+  assert.deepEqual(endpoints.endpoints, {
+    stable: "https://cos.example.com/woohaa/updates/stable/darwin-aarch64/latest.json"
+  });
+});
+
+test("alpha 安装包同时带 stable 与 alpha 地址", () => {
+  const loaded = loadBuildProfile({ repoRoot: sandbox(channelProfile()) });
+  const endpoints = resolveUpdateEndpoints(loaded.resolved, "darwin-aarch64", "alpha");
+  assert.equal(endpoints.channel, "alpha");
+  assert.deepEqual(endpoints.endpoints, {
+    stable: "https://cos.example.com/woohaa/updates/stable/darwin-aarch64/latest.json",
+    alpha: "https://cos.example.com/woohaa/updates/alpha/darwin-aarch64/latest.json"
+  });
+});
+
+test("通道不在允许集合内时拒绝构建", () => {
+  const loaded = loadBuildProfile({ repoRoot: sandbox(validProfile()) });
+  assert.throws(() => resolveUpdateEndpoints(loaded.resolved, "darwin-aarch64", "alpha"), /不在 build profile 允许集合/);
+});
+
+test("多通道但模板缺 {channel} 时解码失败", () => {
+  // 没有占位符时两个通道会展开成同一个地址，等于把 alpha 写进 stable 的位置。
+  const profile = validProfile({ desktop: { update: { publicKeys: ["dW50cnVzdGVkIGNvbW1lbnQ6IHRlc3Q="], channels: ["stable", "alpha"] } } });
+  const decoded = decodeBuildProfile(profile);
+  assert.equal(decoded.ok, false);
+  assert.ok(decoded.errors.some(error => error.path === "$.cdn.updatePath" && /\{channel\}/.test(error.message)));
+});
+
+test("通道集合必须包含 stable、不得重复、名字合法", () => {
+  const key = "dW50cnVzdGVkIGNvbW1lbnQ6IHRlc3Q=";
+  assert.equal(decodeBuildProfile(channelProfile({ desktop: { update: { publicKeys: [key], channels: ["alpha"] } } })).ok, false);
+  assert.equal(decodeBuildProfile(channelProfile({ desktop: { update: { publicKeys: [key], channels: ["stable", "stable"] } } })).ok, false);
+  assert.equal(decodeBuildProfile(channelProfile({ desktop: { update: { publicKeys: [key], channels: ["stable", "Alpha"] } } })).ok, false);
+  assert.equal(decodeBuildProfile(channelProfile({ desktop: { update: { publicKeys: [key], channels: ["stable", "alpha"] } } })).ok, true);
+});
+
+test("环境覆盖出来的模板缺 {channel} 时仍然挡住 alpha 构建", () => {
+  // decode 只校验文件里的值；env 覆盖绕过 decode，因此解析阶段必须再拦一次。
+  const loaded = loadBuildProfile({
+    repoRoot: sandbox(validProfile({ desktop: { update: { publicKeys: ["dW50cnVzdGVkIGNvbW1lbnQ6IHRlc3Q="], channels: ["stable", "alpha"] } } }))
+  });
+  assert.equal(loaded.ok, false);
 });
 
 test("extensions.defaultEnabled 解码通过，非法 id 与非布尔值被拒", () => {

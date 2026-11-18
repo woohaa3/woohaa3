@@ -23,6 +23,12 @@ const PEM_PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const HTTPS_URL = /^https:\/\/[^/@\s]+(\/[^\s]*)?$/;
 const DEV_URL = /^https?:\/\/[^/@\s]+(\/[^\s]*)?$/;
 
+/** 更新通道名；小写字母开头，与 release-cli 的 `--channel` 取值同形。 */
+export const UPDATE_CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+
+/** 稳定通道。任何安装包都必须能查它，否则用户回不到正式版。 */
+export const STABLE_UPDATE_CHANNEL = "stable";
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function isObject(value) {
@@ -117,7 +123,7 @@ export function decodeBuildProfile(raw) {
         if (!isObject(update)) push("$.desktop.update", "必须是对象");
         else {
           for (const key of Object.keys(update)) {
-            if (key !== "publicKeys") push("$.desktop.update." + key, "未知字段");
+            if (!["publicKeys", "channels"].includes(key)) push("$.desktop.update." + key, "未知字段");
           }
           const keys = update.publicKeys;
           if (!Array.isArray(keys) || keys.length === 0) push("$.desktop.update.publicKeys", "至少需要一个公钥");
@@ -126,9 +132,36 @@ export function decodeBuildProfile(raw) {
               push("$.desktop.update.publicKeys[" + index + "]", "必须是 base64 字符串");
             }
           });
+          // 通道集合决定「这份源码能产哪些通道的安装包」；stable 必须在内，
+          // 否则一旦误配出只带 alpha 的包，用户就再也回不到正式版。
+          const channels = update.channels;
+          if (channels !== undefined) {
+            if (!Array.isArray(channels) || channels.length === 0) push("$.desktop.update.channels", "必须是非空数组");
+            else {
+              channels.forEach((channel, index) => {
+                if (typeof channel !== "string" || !UPDATE_CHANNEL_PATTERN.test(channel)) {
+                  push("$.desktop.update.channels[" + index + "]", "必须匹配 " + UPDATE_CHANNEL_PATTERN.source);
+                }
+              });
+              if (!channels.includes(STABLE_UPDATE_CHANNEL)) {
+                push("$.desktop.update.channels", "必须包含 " + STABLE_UPDATE_CHANNEL);
+              }
+              if (new Set(channels).size !== channels.length) push("$.desktop.update.channels", "通道不得重复");
+            }
+          }
         }
       }
     }
+  }
+
+  // 通道与模板的交叉约束放在两者都解析完之后：多通道却共用一个 feed 模板，
+  // 等于把 alpha 写进 stable 的位置，必须在构建前拒绝。
+  const declaredChannels = isObject(desktop) && isObject(desktop.update) && Array.isArray(desktop.update.channels)
+    ? desktop.update.channels
+    : null;
+  if (declaredChannels !== null && declaredChannels.length > 1
+    && isObject(cdn) && typeof cdn.updatePath === "string" && !cdn.updatePath.includes("{channel}")) {
+    push("$.cdn.updatePath", "声明了多个通道时模板必须包含 {channel}，否则所有通道会写到同一个 feed");
   }
 
   const dev = raw.dev;
@@ -282,6 +315,7 @@ export function loadBuildProfile({ repoRoot, clientRoot, env = {} } = {}) {
     runtimeCdnUrl: profile.cdn ? joinUrl(profile.cdn.baseUrl, profile.cdn.runtimePath) : "",
     updateEndpointTemplate: profile.cdn ? joinUrl(profile.cdn.baseUrl, profile.cdn.updatePath) : "",
     updatePublicKeys: profile.desktop?.update?.publicKeys ? [...profile.desktop.update.publicKeys] : [],
+    updateChannels: profile.desktop?.update?.channels ? [...profile.desktop.update.channels] : [STABLE_UPDATE_CHANNEL],
     allowUnconfiguredUpdate: profile.desktop?.allowUnconfiguredUpdate === true,
     allowUnmanagedExtensionTrust: profile.desktop?.allowUnmanagedExtensionTrust === true,
     officialKeys: profile.extensionTrust?.officialKeys ? profile.extensionTrust.officialKeys.map(entry => ({ ...entry })) : [],
@@ -307,12 +341,50 @@ export function loadBuildProfile({ repoRoot, clientRoot, env = {} } = {}) {
   return { ok: true, profile, source: located.source, path: located.path, roots: located.roots, resolved, overrides };
 }
 
-/** 把 {platformKey} 模板展开成具体 feed 地址；没有模板时返回空串。 */
-export function updateEndpointFor(resolved, platformKey) {
+/**
+ * 把 `{platformKey}` / `{channel}` 模板展开成具体 feed 地址；没有模板时返回空串。
+ *
+ * 模板不含 `{channel}` 时忽略 channel 参数——那是旧的 stable-only 模板，
+ * 展开结果必须与改造前逐字节一致。
+ */
+export function updateEndpointFor(resolved, platformKey, channel = STABLE_UPDATE_CHANNEL) {
   const template = resolved.updateEndpointTemplate ?? "";
   if (!template) return "";
   if (!platformKey) throw new Error("无法确定 updater 平台键（模板：" + template + "）");
-  return template.replaceAll("{platformKey}", platformKey);
+  if (!UPDATE_CHANNEL_PATTERN.test(String(channel))) throw new Error("更新通道名非法：" + String(channel));
+  return template.replaceAll("{platformKey}", platformKey).replaceAll("{channel}", channel);
+}
+
+/**
+ * 按「本安装包自己的通道」解析出要写进 `desktop-runtime.json` 的更新配置。
+ *
+ * 返回 `{channel, endpoints, publicKey}`：
+ * - `endpoints` 一定含 `stable`；只有通道本身是 alpha 时才追加该通道的地址，
+ *   因此 stable 安装包在产物里就查不到 alpha feed——这是「普通用户不会升到开发者版本」的
+ *   硬保证，不依赖运行期判断。
+ * - 通道不在 profile 允许集合内、或缺少该通道地址时抛错：写错配置要在构建期暴露。
+ */
+export function resolveUpdateEndpoints(resolved, platformKey, channel = STABLE_UPDATE_CHANNEL) {
+  if (!UPDATE_CHANNEL_PATTERN.test(String(channel))) throw new Error("更新通道名非法：" + String(channel));
+  const available = resolved.updateChannels ?? [STABLE_UPDATE_CHANNEL];
+  if (!available.includes(channel)) {
+    throw new Error(`通道 ${channel} 不在 build profile 允许集合（${available.join("、")}）内`);
+  }
+  if (!platformKey) throw new Error("无法确定 updater 平台键");
+  const template = resolved.updateEndpointTemplate ?? "";
+  if (channel !== STABLE_UPDATE_CHANNEL && !template.includes("{channel}")) {
+    // 模板没有通道占位符时，两个通道会展开成同一个地址，等于把 alpha 写进 stable 的位置。
+    throw new Error(`通道 ${channel} 需要包含 {channel} 的更新地址模板，当前模板只会产出 stable 地址`);
+  }
+  const publicKey = resolved.updatePublicKeys?.[0] ?? null;
+  const endpoints = {};
+  for (const name of channel === STABLE_UPDATE_CHANNEL ? [STABLE_UPDATE_CHANNEL] : [STABLE_UPDATE_CHANNEL, channel]) {
+    if (!available.includes(name)) throw new Error(`通道 ${name} 不在 build profile 允许集合（${available.join("、")}）内`);
+    const endpoint = updateEndpointFor(resolved, platformKey, name);
+    if (!endpoint) throw new Error(`缺少 ${name} 通道的更新地址模板（cdn.updatePath）`);
+    endpoints[name] = endpoint;
+  }
+  return { channel, endpoints, publicKey };
 }
 
 /**
