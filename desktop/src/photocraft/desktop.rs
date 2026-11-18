@@ -509,6 +509,9 @@ impl EditorSession for DesktopSession {
                         document_id: d.doc.id.0.to_string(),
                         source_id,
                         node_binding,
+                        // 原生编辑器按 source 打开文件，没有画布节点访问记录；
+                        // 字段语义即「旧宿主 / 外部文件为 None」。
+                        node_visit: None,
                         revision: d.revision,
                         saved_revision: d.saved_revision,
                         source_size: [d.doc.size.width, d.doc.size.height],
