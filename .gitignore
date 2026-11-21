@@ -77,6 +77,8 @@ extensions/*/.browser-test/
 # assembled release output（host dist 内组合的扩展资源与发布目录）
 web/frontend/dist/extensions/
 web/frontend/dist/extension-releases/
+# 大画布 benchmark 专用前端构建（scripts/canvas-benchmark 生成，约百 MB）
+web/frontend/dist-benchmark/
 
 # goal tracking
 .pi/
