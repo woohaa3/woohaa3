@@ -158,7 +158,8 @@ pub(super) fn plan(
                 .geometry
                 .as_ref()
                 .map_or(0, estimated_vertices);
-            if !chunk.is_empty() && (chunk.len() >= MAX_PARTS || vertices + estimate > VERTEX_BUDGET)
+            if !chunk.is_empty()
+                && (chunk.len() >= MAX_PARTS || vertices + estimate > VERTEX_BUDGET)
             {
                 if chunk.len() >= MIN_PARTS {
                     plans.push(BatchPlan {

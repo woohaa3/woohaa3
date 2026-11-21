@@ -28,9 +28,11 @@ impl Plugin for RuntimeHealthPlugin {
         // An exclusive system keeps these writes on that same thread.
         app.add_systems(Last, |world: &mut World| {
             SUSPENDED.with(|v| {
-                v.set(world
-                    .get_resource::<crate::canvas_activity::CanvasWorkSuspended>()
-                    .is_some_and(|state| state.0));
+                v.set(
+                    world
+                        .get_resource::<crate::canvas_activity::CanvasWorkSuspended>()
+                        .is_some_and(|state| state.0),
+                );
             });
             UPDATES.with(|v| v.set(v.get().wrapping_add(1)));
         });
@@ -137,13 +139,17 @@ mod suspension_tests {
         app.update();
         let before: serde_json::Value = serde_json::from_str(&runtime_health()).unwrap();
         assert_eq!(before["suspended"], false);
-        app.world_mut().resource_mut::<crate::canvas_activity::CanvasWorkSuspended>().0 = true;
+        app.world_mut()
+            .resource_mut::<crate::canvas_activity::CanvasWorkSuspended>()
+            .0 = true;
         app.update();
         let paused: serde_json::Value = serde_json::from_str(&runtime_health()).unwrap();
         assert_eq!(paused["suspended"], true);
         assert_eq!(paused["appliedGeneration"], before["appliedGeneration"]);
         assert_eq!(paused["renderedGeneration"], before["renderedGeneration"]);
-        app.world_mut().resource_mut::<crate::canvas_activity::CanvasWorkSuspended>().0 = false;
+        app.world_mut()
+            .resource_mut::<crate::canvas_activity::CanvasWorkSuspended>()
+            .0 = false;
         app.update();
         let resumed: serde_json::Value = serde_json::from_str(&runtime_health()).unwrap();
         assert_eq!(resumed["suspended"], false);

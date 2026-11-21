@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::{model3d, protocol::Scene};
 use crate::canvas_runtime::{ChangeSet, EdgeIndex};
+use crate::{model3d, protocol::Scene};
 
 /// 当前场景（`protocol::Scene` 本身不依赖 Bevy，因此由 app 包装成 resource）。
 #[derive(Resource, Default)]
@@ -49,10 +49,16 @@ impl NodeIndex {
         self.by_id.clear();
         self.by_id.reserve(scene.nodes.len());
         for (index, node) in scene.nodes.iter().enumerate() {
-            let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.mode == "locked");
+            let locked = node
+                .edit_scope
+                .as_ref()
+                .is_some_and(|scope| scope.mode == "locked");
             self.by_id
                 .entry(node.id.clone())
-                .and_modify(|slots| { slots.last = index; slots.locked |= locked; })
+                .and_modify(|slots| {
+                    slots.last = index;
+                    slots.locked |= locked;
+                })
                 .or_insert(NodeSlots {
                     first: index,
                     last: index,
@@ -275,6 +281,7 @@ pub(crate) struct FrameFlags {
     /// （change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3/D4）。
     pub(crate) viewport_only: bool,
     pub(crate) observer_changed: bool,
+    pub(crate) hover_changed: bool,
     /// 本帧是否重建了静态 2D mesh（由 `canvas2d::render` 置位，app 层据此上报实际工作计数）。
     pub(crate) mesh_rebuilt: bool,
     /// Actual ordinary-card blocks rebuilt; unchanged blocks retain GPU handles.

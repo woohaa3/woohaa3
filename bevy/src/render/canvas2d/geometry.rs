@@ -2,7 +2,7 @@
 //!
 //! 纯逻辑：接收数值与颜色，返回单个 [`Mesh`]。不持有 ECS 状态、不读写 bridge。
 
-use std::f32::consts::PI;
+use std::{f32::consts::PI, sync::OnceLock};
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -10,7 +10,36 @@ use bevy::{
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
 
-use super::layout::hex;
+/// 8-bit sRGB → 线性 RGB 查表：几何构面高频调色，避免逐多边形重复调用 `powf`。
+fn linear_lut() -> &'static [f32; 256] {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| {
+        std::array::from_fn(|value| Color::srgb_u8(value as u8, 0, 0).to_linear().red)
+    })
+}
+
+#[inline]
+fn linear_rgba(color: u32, alpha: f32) -> [f32; 4] {
+    let lut = linear_lut();
+    [
+        lut[((color >> 16) & 0xff) as usize],
+        lut[((color >> 8) & 0xff) as usize],
+        lut[(color & 0xff) as usize],
+        alpha.clamp(0.0, 1.0),
+    ]
+}
+
+/// Presentation subdivision tiers for edge curves.  The fixed query sampler remains in
+/// `canvas_query::curve::EDGE_CURVE_SEGMENTS`; these values only control rendered mesh density.
+pub(crate) fn edge_curve_segments(zoom: f32) -> usize {
+    if zoom <= 0.18 {
+        12
+    } else if zoom <= 0.45 {
+        24
+    } else {
+        64
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct Geometry {
@@ -48,8 +77,7 @@ impl Geometry {
             (&mut self.positions, &mut self.colors, &mut self.indices)
         };
         let offset = positions.len() as u32;
-        let mut rgba = hex(color).to_linear().to_f32_array();
-        rgba[3] = alpha.clamp(0.0, 1.0);
+        let rgba = linear_rgba(color, alpha);
         for point in points {
             positions.push([point.x, -point.y, z]);
             colors.push(rgba);
@@ -304,7 +332,19 @@ impl Geometry {
         self.ring_arc(center, radius, phase, PI * 0.65, 3.0, z + 0.0001, color);
     }
 
-    /// 以扇形细分绘制圆环弧段。
+    /// 静态底层轨道环：旋转弧线改用共享网格的实体旋转。
+    pub(crate) fn loading_track(&mut self, center: Vec2, radius: f32, track: u32, z: f32) {
+        self.ring_arc(center, radius, 0.0, PI * 2.0, 3.0, z, track);
+    }
+
+    /// 独立的加载旋转弧共享网格（原点为圆心，绕 Z 轴旋转驱动动画）。
+    pub(crate) fn spinner_arc_mesh(radius: f32, color: u32) -> Mesh {
+        let mut geometry = Self::default();
+        geometry.ring_arc(Vec2::ZERO, radius, 0.0, PI * 0.65, 3.0, 0.0, color);
+        geometry.build()
+    }
+
+    /// 以连续三角形条带绘制圆环弧段（每步只写外内一对顶点）。
     fn ring_arc(
         &mut self,
         center: Vec2,
@@ -318,21 +358,27 @@ impl Geometry {
         let inner = (radius - thickness / 2.0).max(0.5);
         let outer = radius + thickness / 2.0;
         let steps = ((sweep.abs() / (PI / 18.0)).ceil() as usize).max(2);
-        for i in 0..steps {
-            let a0 = start + sweep * (i as f32 / steps as f32);
-            let a1 = start + sweep * ((i + 1) as f32 / steps as f32);
-            let p0 = Vec2::new(a0.cos(), a0.sin());
-            let p1 = Vec2::new(a1.cos(), a1.sin());
-            self.polygon(
-                &[
-                    center + p0 * outer,
-                    center + p1 * outer,
-                    center + p1 * inner,
-                    center + p0 * inner,
-                ],
-                z,
-                color,
-            );
+        let base = self.positions.len() as u32;
+        let rgba = linear_rgba(color, 1.0);
+        self.positions.reserve((steps + 1) * 2);
+        self.colors.reserve((steps + 1) * 2);
+        self.indices.reserve(steps * 6);
+        for i in 0..=steps {
+            let angle = start + sweep * (i as f32 / steps as f32);
+            let dir = Vec2::new(angle.cos(), angle.sin());
+            let po = center + dir * outer;
+            let pi = center + dir * inner;
+            self.positions.push([po.x, -po.y, z]);
+            self.positions.push([pi.x, -pi.y, z]);
+            self.colors.push(rgba);
+            self.colors.push(rgba);
+        }
+        for i in 0..steps as u32 {
+            let o0 = base + i * 2;
+            let i0 = o0 + 1;
+            let o1 = o0 + 2;
+            let i1 = o0 + 3;
+            self.indices.extend_from_slice(&[o0, i1, o1, o0, i0, i1]);
         }
     }
 
@@ -341,6 +387,35 @@ impl Geometry {
         // 共用（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，design D4）。
         let (c1, c2) = super::curve::edge_control_points(a, b);
         self.curve_with_controls(a, c1, c2, b, width, z, color, dashed);
+    }
+
+    /// Draw an edge curve using the subdivision tier appropriate for the current zoom.
+    ///
+    /// Hit testing continues to use the fixed 64 sample curve.  This is only a presentation
+    /// LOD, so changing the tier cannot change interaction results.
+    pub(crate) fn curve_lod(
+        &mut self,
+        a: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        dashed: bool,
+        zoom: f32,
+    ) {
+        let (c1, c2) = super::curve::edge_control_points(a, b);
+        self.curve_with_controls_alpha_lod(
+            a,
+            c1,
+            c2,
+            b,
+            width,
+            z,
+            color,
+            dashed,
+            1.0,
+            edge_curve_segments(zoom),
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -355,7 +430,18 @@ impl Geometry {
         color: u32,
         dashed: bool,
     ) {
-        self.curve_with_controls_alpha(a, c1, c2, b, width, z, color, dashed, 1.);
+        self.curve_with_controls_alpha_lod(
+            a,
+            c1,
+            c2,
+            b,
+            width,
+            z,
+            color,
+            dashed,
+            1.,
+            super::curve::EDGE_CURVE_SEGMENTS,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -371,7 +457,37 @@ impl Geometry {
         dashed: bool,
         alpha: f32,
     ) {
+        self.curve_with_controls_alpha_lod(
+            a,
+            c1,
+            c2,
+            b,
+            width,
+            z,
+            color,
+            dashed,
+            alpha,
+            super::curve::EDGE_CURVE_SEGMENTS,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn curve_with_controls_alpha_lod(
+        &mut self,
+        a: Vec2,
+        c1: Vec2,
+        c2: Vec2,
+        b: Vec2,
+        width: f32,
+        z: f32,
+        color: u32,
+        dashed: bool,
+        alpha: f32,
+        segments: usize,
+    ) {
+        let segments = segments.max(1);
         if dashed {
+            // Dash spacing and its hit-test golden data remain tied to the fixed curve sampler.
             let points: Vec<_> = (0..=super::curve::EDGE_CURVE_SEGMENTS)
                 .map(|i| {
                     super::curve::cubic_point(
@@ -386,12 +502,78 @@ impl Geometry {
             super::dash::dashed_polyline_alpha(self, &points, width, z, color, alpha);
             return;
         }
-        let mut previous = a;
-        for i in 1..=super::curve::EDGE_CURVE_SEGMENTS {
-            let t = i as f32 / super::curve::EDGE_CURVE_SEGMENTS as f32;
-            let point = super::curve::cubic_point(a, c1, c2, b, t);
-            self.line_alpha(previous, point, width, z, color, alpha);
-            previous = point;
+        let points: Vec<_> = (0..=segments)
+            .map(|i| super::curve::cubic_point(a, c1, c2, b, i as f32 / segments as f32))
+            .collect();
+        self.polyline_strip_alpha(&points, width, z, color, alpha);
+    }
+
+    /// Append a continuous triangle strip for a stroked polyline.  Each sample contributes
+    /// exactly two vertices; adjacent segments reuse the pair at their shared join.
+    fn polyline_strip_alpha(
+        &mut self,
+        points: &[Vec2],
+        width: f32,
+        z: f32,
+        color: u32,
+        alpha: f32,
+    ) {
+        if points.len() < 2 || width <= 0.0 {
+            return;
+        }
+        let blend = alpha < 1.0;
+        let (positions, colors, indices) = if blend {
+            (
+                &mut self.blend_positions,
+                &mut self.blend_colors,
+                &mut self.blend_indices,
+            )
+        } else {
+            (&mut self.positions, &mut self.colors, &mut self.indices)
+        };
+        let offset = positions.len() as u32;
+        let half_width = width * 0.5;
+        let rgba = linear_rgba(color, alpha);
+        for i in 0..points.len() {
+            let tangent = if i == 0 {
+                points[1] - points[0]
+            } else if i + 1 == points.len() {
+                points[i] - points[i - 1]
+            } else {
+                (points[i] - points[i - 1]) + (points[i + 1] - points[i])
+            };
+            let tangent = tangent.normalize_or_zero();
+            let normal = if tangent.length_squared() > f32::EPSILON {
+                tangent.perp()
+            } else {
+                Vec2::Y
+            };
+            // A miter join keeps the stroke continuous.  Limit extreme bends so a very short
+            // or repeated Bézier sample cannot produce an unbounded spike.
+            let mut join = normal;
+            if i > 0 && i + 1 < points.len() {
+                let incoming = (points[i] - points[i - 1]).normalize_or_zero();
+                let outgoing = (points[i + 1] - points[i]).normalize_or_zero();
+                let incoming_normal = incoming.perp();
+                let outgoing_normal = outgoing.perp();
+                let miter = (incoming_normal + outgoing_normal).normalize_or_zero();
+                let denominator = miter.dot(outgoing_normal).abs();
+                if denominator > 0.25 {
+                    join = miter * (1.0 / denominator).min(4.0);
+                }
+            }
+            let offset_vec = join * half_width;
+            positions.push([points[i].x + offset_vec.x, -(points[i].y + offset_vec.y), z]);
+            positions.push([points[i].x - offset_vec.x, -(points[i].y - offset_vec.y), z]);
+            colors.push(rgba);
+            colors.push(rgba);
+        }
+        for i in 0..points.len() - 1 {
+            let left = offset + (i * 2) as u32;
+            let right = left + 1;
+            let next_left = left + 2;
+            let next_right = left + 3;
+            indices.extend_from_slice(&[left, next_right, right, left, next_left, next_right]);
         }
     }
 
@@ -643,7 +825,10 @@ impl Geometry {
         let mut pending = vec![u32::MAX; retained_positions.len()];
         let mut triangles = Vec::with_capacity(retained_indices.len());
         for triangle in retained_indices.chunks_exact(3) {
-            if !triangle.iter().any(|index| kept.get(*index as usize).is_some_and(|k| *k != u32::MAX)) {
+            if !triangle
+                .iter()
+                .any(|index| kept.get(*index as usize).is_some_and(|k| *k != u32::MAX))
+            {
                 continue;
             }
             let mut mapped = [0u32; 3];
@@ -893,5 +1078,16 @@ mod tests {
         let mut geometry = Geometry::default();
         geometry.progress_ring(Vec2::ZERO, 10.0, 50.0, 0x00ff00, 0x333333, 0.0);
         assert!(geometry.positions.len() > 4 * 4);
+    }
+
+    #[test]
+    fn linear_rgba_lut_matches_bevy_srgb_conversion() {
+        for color in [0x000000, 0x112233, 0x3b82f6, 0x84a1c3, 0xef6721, 0xffffff] {
+            let expected = super::super::layout::hex(color).to_linear().to_f32_array();
+            let actual = linear_rgba(color, 1.0);
+            assert_eq!(actual, expected, "color={color:#08x}");
+        }
+        let half = linear_rgba(0x112233, 0.55);
+        assert!((half[3] - 0.55).abs() < 1e-6);
     }
 }

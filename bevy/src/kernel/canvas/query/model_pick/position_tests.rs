@@ -15,14 +15,16 @@ fn setup() -> (u32, Vec<ModelCandidate>) {
     let candidates = vec![
         ModelCandidate {
             node_id: "m".into(),
-            shared_world: false, empty_marker: false,
+            shared_world: false,
+            empty_marker: false,
             triangles: None,
             min: [-10.; 3],
             max: [10.; 3],
         },
         ModelCandidate {
             node_id: "other".into(),
-            shared_world: false, empty_marker: false,
+            shared_world: false,
+            empty_marker: false,
             triangles: None,
             min: [100.; 3],
             max: [120.; 3],
@@ -92,8 +94,10 @@ fn combined_viewport_updates_generation_and_position_only_preserves_camera() {
             *slot.borrow(),
             ModelPickCamera {
                 viewport: [90., 80., 0.5],
-                surface: [1000., 800.]
-                , ordinary: true, focus: None            }
+                surface: [1000., 800.],
+                ordinary: true,
+                focus: None
+            }
         )
     });
     let stale = pick_query_json(&format!(
@@ -117,15 +121,25 @@ fn shared_world_candidate_ignores_card_position_updates() {
 #[test]
 fn ground_query_uses_accepted_camera_and_rejects_stale_generation() {
     let (generation, _) = setup();
-    let query = |generation, x: f32, y: f32| pick_query_json(&format!(
-        r#"{{"kind":"ground","generation":{generation},"x":{x},"y":{y},"width":1000,"height":800}}"#
-    ));
+    let query = |generation, x: f32, y: f32| {
+        pick_query_json(&format!(
+            r#"{{"kind":"ground","generation":{generation},"x":{x},"y":{y},"width":1000,"height":800}}"#
+        ))
+    };
     let value: serde_json::Value = serde_json::from_str(&query(generation, 12., 34.)).unwrap();
     assert_eq!(value["ground"]["u"], 0.0);
     assert_eq!(value["ground"]["v"], 0.0);
-    let view = crate::isometric_grid::IsometricGridView { x: 12., y: 34., zoom: 2. };
-    let screen = crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::new(128., 0., -192.), &view);
-    let value: serde_json::Value = serde_json::from_str(&query(generation, screen.x, screen.y)).unwrap();
+    let view = crate::isometric_grid::IsometricGridView {
+        x: 12.,
+        y: 34.,
+        zoom: 2.,
+    };
+    let screen = crate::isometric_grid::screen_point_from_world(
+        bevy::prelude::Vec3::new(128., 0., -192.),
+        &view,
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&query(generation, screen.x, screen.y)).unwrap();
     assert!((value["ground"]["u"].as_f64().unwrap() - 2.).abs() < 1e-5);
     assert!((value["ground"]["v"].as_f64().unwrap() - 3.).abs() < 1e-5);
     assert!(query(generation.wrapping_add(1), 12., 34.).contains("stale"));
@@ -138,7 +152,8 @@ fn model_overflow_rejects_all_query_changes_before_generation_advances() {
     let (base, _) = setup();
     let extreme = vec![ModelCandidate {
         node_id: "m".into(),
-        shared_world: false, empty_marker: false,
+        shared_world: false,
+        empty_marker: false,
         triangles: None,
         min: [f32::MAX; 3],
         max: [f32::MAX; 3],

@@ -28,3 +28,14 @@ export type ImageReply = { version: 2; id: number; generation: number } & (
   | { ok: true; result: ImageResult }
   | { ok: false; message: string; transient: boolean }
 );
+
+export type ImageFetchJob = {
+  version: 2;
+  fetchId: number;
+  url: string;
+};
+
+export type ImageFetchReply = { version: 2; fetchId: number } & (
+  | { ok: true; bytes: ArrayBuffer }
+  | { ok: false; message: string; transient: boolean }
+);

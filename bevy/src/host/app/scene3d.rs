@@ -6,9 +6,9 @@ use super::{
     AnimationCameraState, CurrentScene, FocusRig, FrameFlags, ModelAssetTable, SurfaceState,
 };
 
-pub(super) use super::scene_area_visual::sync_scene_areas;
 #[cfg(test)]
 use super::scene_area_visual::SceneAreaLine;
+pub(super) use super::scene_area_visual::sync_scene_areas;
 
 /// 共享世界对象的轻量呈现：空模型锚点、世界模型选择框与聚焦可见性。
 ///
@@ -87,6 +87,12 @@ pub(super) fn sync_grid(
     model3d::grid::sync_target(&scene.0, surface.size, &mut target);
 }
 
+#[derive(Default)]
+pub(super) struct ModelSyncCache {
+    assets: std::collections::HashMap<String, std::sync::Weak<crate::protocol::ModelSnapshot>>,
+    leases_synced: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sync_models(
     mut commands: Commands,
@@ -95,9 +101,7 @@ pub(super) fn sync_models(
     mut visuals: ResMut<model3d::ModelVisuals>,
     mut focus: ResMut<model3d::FocusVisuals>,
     mut resources: ResMut<ModelAssetTable>,
-    mut previous_assets: Local<
-        std::collections::HashMap<String, std::sync::Weak<crate::protocol::ModelSnapshot>>,
-    >,
+    mut sync_cache: Local<ModelSyncCache>,
     scene: Res<CurrentScene>,
     flags: Res<FrameFlags>,
     rig: Res<FocusRig>,
@@ -137,15 +141,26 @@ pub(super) fn sync_models(
     );
     // 模型 payload lease：只有当前需求引用重型 IR（design D5）。先按最新需求收敛预算，
     // 再同步根：本次淘汰掉的 cold payload 会在同步里以缺资源跳过，等待重新取得需求。
-    let leases = model3d::demand::payload_lease_keys(&scene.0, models);
-    let (_retained, evicted) = crate::bridge::set_model_payload_leases(leases);
-    if !evicted.is_empty() {
-        // 淘汰后刷新只读快照资源，使本帧所有消费者看到同一份 payload 表。
-        resources.0 = crate::bridge::model_assets_snapshot();
-    }
-    let assets_changed = previous_assets.len() != resources.0.len()
+    let assets_changed_initial = sync_cache.assets.len() != resources.0.len()
         || resources.0.iter().any(|(key, value)| {
-            previous_assets
+            sync_cache
+                .assets
+                .get(key)
+                .is_none_or(|old| !std::sync::Weak::ptr_eq(old, &std::sync::Arc::downgrade(value)))
+        });
+    if !sync_cache.leases_synced || flags.changed || demand_changed || assets_changed_initial {
+        let leases = model3d::demand::payload_lease_keys(&scene.0, models);
+        let (_retained, evicted) = crate::bridge::set_model_payload_leases(leases);
+        if !evicted.is_empty() {
+            // 淘汰后刷新只读快照资源，使本帧所有消费者看到同一份 payload 表。
+            resources.0 = crate::bridge::model_assets_snapshot();
+        }
+        sync_cache.leases_synced = true;
+    }
+    let assets_changed = sync_cache.assets.len() != resources.0.len()
+        || resources.0.iter().any(|(key, value)| {
+            sync_cache
+                .assets
                 .get(key)
                 .is_none_or(|old| !std::sync::Weak::ptr_eq(old, &std::sync::Arc::downgrade(value)))
         });
@@ -159,7 +174,7 @@ pub(super) fn sync_models(
             &resources.0,
             &scene.0,
         );
-        *previous_assets = resources
+        sync_cache.assets = resources
             .0
             .iter()
             .map(|(key, value)| (key.clone(), std::sync::Arc::downgrade(value)))
@@ -169,15 +184,24 @@ pub(super) fn sync_models(
     // 活动动画节点的运动求值（change: 2026-10-05-bind-model-animation-to-shots）：独立模型
     // 姿态与唯一时钟；相机姿态写入共享资源供 shot adapter / 聚焦相机复用。
     // 透明度实例状态从实体组件派生（Resource 只保留回收策略）。
-    let opacity: std::collections::HashMap<
-        Entity,
-        crate::canvas_ecs::components::OpacityMaterialInstance,
-    > = opacity
-        .iter()
-        .map(|(entity, instance)| (entity, instance.clone()))
-        .collect();
-    animation_camera.0 =
-        model3d::apply_motion_playback(&mut commands, models, &mut materials, &opacity, &scene.0);
+    let empty_opacity = std::collections::HashMap::new();
+    let collected_opacity;
+    let opacity_map = if !opacity.is_empty() {
+        collected_opacity = opacity
+            .iter()
+            .map(|(entity, instance)| (entity, instance.clone()))
+            .collect();
+        &collected_opacity
+    } else {
+        &empty_opacity
+    };
+    animation_camera.0 = model3d::apply_motion_playback(
+        &mut commands,
+        models,
+        &mut materials,
+        opacity_map,
+        &scene.0,
+    );
     // 质量档位只替换共享 handle，不重建 hierarchy、不执行脚本、不改 canonical AABB。
     let quality_changed = model3d::sync_quality_with_demand(
         &mut commands,
@@ -190,6 +214,7 @@ pub(super) fn sync_models(
     );
     if quality_changed {
         models.trim_resources(&mut meshes, &mut materials);
+        sync_cache.leases_synced = false;
     }
     // 准备管线的发布/取消/退役同样推进诊断快照；只在有变更时发布一次，不逐帧输出。
     let preparation_changed = false;
@@ -480,11 +505,15 @@ mod grid_tests {
             .filter(|(_, visibility)| **visibility != Visibility::Hidden)
             .map(|(transform, _)| *transform)
             .collect();
-        assert_eq!(lines.len(), 10, "each nameplate splits one edge into two visible pieces");
+        assert_eq!(
+            lines.len(),
+            10,
+            "each nameplate splits one edge into two visible pieces"
+        );
         assert!(lines.iter().all(|line| line.translation.y == 0.025));
-        assert!(lines
-            .iter()
-            .any(|line| line.translation == Vec3::new(96.0, 0.025, -192.0) && line.scale.x >= 192.0));
+        assert!(lines.iter().any(
+            |line| line.translation == Vec3::new(96.0, 0.025, -192.0) && line.scale.x >= 192.0
+        ));
         assert!(lines.iter().any(
             |line| line.translation == Vec3::new(192.0, 0.025, -256.0) && line.scale.x >= 128.0
         ));
@@ -558,7 +587,10 @@ mod grid_tests {
         let mut node: crate::protocol::GraphNode = serde_json::from_value(serde_json::json!({"id":"n", "type":"model", "x":9000,"y":0,"width":100,"height":50,
             "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":"i",
             "transform":{"version":"shared-world-v1","position":{"u":1,"v":2,"h":3},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
-        node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
+        node.model = Some(ModelReference {
+            ground_anchor_local: None,
+            part_rotations: None,
+            part_positions: None,
             resource_key: key.clone(),
             scene_version: descriptor.scene_version.clone(),
             signature: descriptor.signature.clone(),
@@ -568,11 +600,12 @@ mod grid_tests {
             ..default()
         });
         app.update();
-        assert!(app
-            .world()
-            .resource::<model3d::ModelVisuals>()
-            .test_root("n")
-            .is_none());
+        assert!(
+            app.world()
+                .resource::<model3d::ModelVisuals>()
+                .test_root("n")
+                .is_none()
+        );
         bridge::queue_model_asset(descriptor.clone());
         app.update();
         let root = |app: &App| {
@@ -608,11 +641,12 @@ mod grid_tests {
         assert_eq!(root(&app), changed);
         bridge::clear_model_assets();
         app.update();
-        assert!(app
-            .world()
-            .resource::<model3d::ModelVisuals>()
-            .test_root("n")
-            .is_none());
+        assert!(
+            app.world()
+                .resource::<model3d::ModelVisuals>()
+                .test_root("n")
+                .is_none()
+        );
         bridge::queue_model_asset(descriptor);
         app.update();
         assert_eq!(root(&app).1.translation, Vec3::new(256., 192., -128.));
@@ -686,11 +720,12 @@ mod grid_tests {
         let cleared = crate::set_scene(&scene.to_string()).unwrap();
         app.update();
         assert!(query(cleared, Vec3::new(0., 64., 0.)).is_null());
-        assert!(app
-            .world()
-            .resource::<model3d::ModelVisuals>()
-            .test_root("model")
-            .is_none());
+        assert!(
+            app.world()
+                .resource::<model3d::ModelVisuals>()
+                .test_root("model")
+                .is_none()
+        );
         crate::bridge::clear_model_assets();
     }
 

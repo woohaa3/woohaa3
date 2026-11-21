@@ -178,11 +178,7 @@ mod tests {
             .collect()
     }
 
-    fn sync(
-        world: &mut World,
-        opacity: &mut OpacityMaterials,
-        desired: &DesiredOpacity,
-    ) {
+    fn sync(world: &mut World, opacity: &mut OpacityMaterials, desired: &DesiredOpacity) {
         let existing = snapshot(world);
         world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
             {

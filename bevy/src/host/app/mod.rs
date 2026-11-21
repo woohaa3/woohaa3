@@ -152,8 +152,10 @@ fn configure_canvas(app: &mut App) {
         .init_resource::<ThemeResource>()
         .init_resource::<canvas2d::GenerationClock>()
         .init_resource::<canvas2d::text_presentation::PresentationCache>()
+        .init_resource::<canvas2d::text_batch::TextBatchCache>()
         .add_plugins(model3d::shadows::ModelShadowsPlugin)
         .add_plugins(crate::runtime_health::RuntimeHealthPlugin)
+        .add_plugins(canvas2d::AtlasSubUploadPlugin)
         .add_plugins(canvas2d::video_diagnostics::VideoDiagnosticsPlugin)
         .add_plugins(crate::shot_camera::ShotCameraPlugin)
         .add_plugins(crate::preview_readiness::PreviewReadinessPlugin)
@@ -263,10 +265,13 @@ fn configure_canvas(app: &mut App) {
             )
                 .chain(),
         )
-        .add_systems(Update, canvas2d::sync_workset
-            .after(sync_surface)
-            .after(canvas2d::sync_canvas_labels)
-            .after(canvas2d::refresh_overlay_stamp))
+        .add_systems(
+            Update,
+            canvas2d::sync_workset
+                .after(sync_surface)
+                .after(canvas2d::sync_canvas_labels)
+                .after(canvas2d::refresh_overlay_stamp),
+        )
         // 顶部操作横条覆盖层（change: 2026-10-13-add-node-to-film-set-shortcut）：独立小 mesh +
         // 独立标签池，逐帧读场景重建；排在画布几何之后，不参与主场景 chain 的元组上限。
         .add_systems(
@@ -303,6 +308,15 @@ fn configure_canvas(app: &mut App) {
         .add_systems(
             PostUpdate,
             (
+                (
+                    canvas2d::text_batch::sync,
+                    bevy::ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .after(bevy::text::load_font_assets_into_font_collection)
+                    .before(bevy::sprite::update_text2d_layout)
+                    .before(bevy::transform::TransformSystems::Propagate)
+                    .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
                 scene_area_label::sync
                     .after(bevy::text::load_font_assets_into_font_collection)
                     .before(bevy::transform::TransformSystems::Propagate),

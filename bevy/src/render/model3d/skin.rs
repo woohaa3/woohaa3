@@ -82,7 +82,8 @@ mod tests {
             "inverseBindMatrices": vec![Mat4::IDENTITY.to_cols_array(); 10],
             "indices": [(0..10).collect::<Vec<_>>()],
             "weights": [vec![0.1; 10]]
-        })).unwrap();
+        }))
+        .unwrap();
         let mut matrices = vec![Mat4::IDENTITY; 10];
         matrices[9] = Mat4::from_translation(Vec3::Y * 10.);
         let result = deform(&[[0., 0., 0.]], &skin, &matrices);
@@ -116,8 +117,14 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>()
             .add_systems(Update, update);
-        let mut source = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default());
-        source.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0., 0., 0.], [0.001, 0., 0.], [0., 0.001, 0.]]);
+        let mut source = Mesh::new(
+            bevy::render::render_resource::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        source.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0., 0., 0.], [0.001, 0., 0.], [0., 0.001, 0.]],
+        );
         source.insert_indices(bevy::render::mesh::Indices::U32(vec![0, 1, 2]));
         let Some(VertexAttributeValues::Float32x3(vertices)) =
             source.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -168,7 +175,13 @@ mod tests {
             else {
                 panic!("positions")
             };
-            let Some(VertexAttributeValues::Float32x3(normals)) = meshes.get(&handle).unwrap().attribute(Mesh::ATTRIBUTE_NORMAL) else { panic!("normals") };
+            let Some(VertexAttributeValues::Float32x3(normals)) = meshes
+                .get(&handle)
+                .unwrap()
+                .attribute(Mesh::ATTRIBUTE_NORMAL)
+            else {
+                panic!("normals")
+            };
             assert_eq!(normals, &vec![[0., 0., 1.]; 3]);
             assert_eq!(
                 actual[0],

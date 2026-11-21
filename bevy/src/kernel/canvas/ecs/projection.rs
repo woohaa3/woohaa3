@@ -68,7 +68,8 @@ pub(crate) fn project_canvas_nodes(
     // point. Keep the stable entity index and update only those layouts; the
     // full projection below remains the conservative path for structure/content
     // snapshots and for a missing index.
-    if !cfg!(feature = "canvas-reference") && !flags.scene_received
+    if !cfg!(feature = "canvas-reference")
+        && !flags.scene_received
         && flags.positions_received
         && state.entity_index.is_some()
         && index.is_some()
@@ -76,10 +77,12 @@ pub(crate) fn project_canvas_nodes(
         let mut valid = true;
         for id in &flags.changed_node_ids {
             let Some(slot) = index.as_ref().and_then(|index| index.position_last(id)) else {
-                valid = false; break;
+                valid = false;
+                break;
             };
             let Some(node) = source.nodes.get(slot).filter(|node| node.id == *id) else {
-                valid = false; break;
+                valid = false;
+                break;
             };
             let Some(entity) = state
                 .entity_index
@@ -87,10 +90,15 @@ pub(crate) fn project_canvas_nodes(
                 .and_then(|entities| entities.get(id))
                 .copied()
             else {
-                valid = false; break;
+                valid = false;
+                break;
             };
-            if !existing.get(entity).is_ok_and(|(_, current)| current.0 == *id) {
-                valid = false; break;
+            if !existing
+                .get(entity)
+                .is_ok_and(|(_, current)| current.0 == *id)
+            {
+                valid = false;
+                break;
             }
             if let Ok(mut layout) = layouts.get_mut(entity) {
                 let next = CanvasLayout::from_node(node);
@@ -98,7 +106,8 @@ pub(crate) fn project_canvas_nodes(
                     *layout = next;
                 }
             } else {
-                valid = false; break;
+                valid = false;
+                break;
             }
         }
         if valid {
@@ -266,6 +275,7 @@ fn spawn_canvas_node(
             Transform::IDENTITY,
             GlobalTransform::IDENTITY,
             Visibility::Inherited,
+            bevy::camera::visibility::NoCpuCulling,
             Name::new(format!("canvas-node:{}", node.id)),
         ))
         .id();
@@ -488,7 +498,13 @@ mod tests {
         world.run_system_once(project_canvas_nodes).unwrap();
         world.flush();
         assert_eq!(entity_for(&mut world, "a"), a);
-        assert_eq!(world.query_filtered::<Entity, Changed<CanvasDepth>>().iter(&world).count(), 0);
+        assert_eq!(
+            world
+                .query_filtered::<Entity, Changed<CanvasDepth>>()
+                .iter(&world)
+                .count(),
+            0
+        );
     }
 
     #[test]

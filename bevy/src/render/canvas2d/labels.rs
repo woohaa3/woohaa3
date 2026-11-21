@@ -9,9 +9,9 @@ use bevy::{
     text::{LineBreak, TextBounds},
 };
 
+use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
 use crate::canvas2d::CanvasOverlayCache;
 use crate::canvas2d::text_presentation::{LogicalText, TextScaleMode};
-use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
 
 mod store;
 

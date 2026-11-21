@@ -112,10 +112,15 @@ pub(crate) fn sync(
         }
     }
     let scope_changed = match batch.1 {
-        Some(scope) if *last_scope != Some(scope) => { *last_scope = Some(scope); true }
+        Some(scope) if *last_scope != Some(scope) => {
+            *last_scope = Some(scope);
+            true
+        }
         _ => false,
     };
-    if scope_changed { clear(&mut commands, &mut state, &mut images, &regions); }
+    if scope_changed {
+        clear(&mut commands, &mut state, &mut images, &regions);
+    }
     let mut pending_details: Vec<(Entity, [u32; 4], Handle<Image>)> = Vec::new();
     if let Some(next) = batch.0.take() {
         if let Some(upload) = next {
@@ -134,7 +139,9 @@ pub(crate) fn sync(
                 .is_some_and(|old| old.bounds() != upload.frame.bounds())
             {
                 for (entity, region, _) in regions.iter() {
-                    if scope_changed { continue; }
+                    if scope_changed {
+                        continue;
+                    }
                     if region.kind == FocusDetailKind::Base {
                         commands.entity(entity).despawn();
                     }
@@ -253,7 +260,9 @@ pub(crate) fn sync(
     wanted.sort_unstable();
     if existing_base != wanted {
         for (entity, region, _) in regions.iter() {
-            if scope_changed { continue; }
+            if scope_changed {
+                continue;
+            }
             if region.kind == FocusDetailKind::Base {
                 commands.entity(entity).despawn();
             }
@@ -283,7 +292,9 @@ pub(crate) fn sync(
         }
     }
     for (entity, region, _) in regions.iter() {
-        if scope_changed { continue; }
+        if scope_changed {
+            continue;
+        }
         if region.kind != FocusDetailKind::Base {
             continue;
         }
@@ -301,7 +312,9 @@ pub(crate) fn sync(
         }
     }
     for (entity, region, source_pixels) in regions.iter() {
-        if scope_changed { continue; }
+        if scope_changed {
+            continue;
+        }
         if region.kind != FocusDetailKind::Detail {
             continue;
         }
@@ -347,7 +360,8 @@ mod scope_tests {
         let mut scene = crate::protocol::Scene::default();
         scene.nodes = serde_json::from_value(serde_json::json!([
             {"id":"img","type":"image","x":0,"y":0,"width":100,"height":100,"texture":true}
-        ])).unwrap();
+        ]))
+        .unwrap();
         scene.image_focus = Some(serde_json::from_value(serde_json::json!({
             "version":"woohaa-image-focus-v1", "nodeId":"img", "sourceWidth":1, "sourceHeight":1,
             "viewport":{"x":0,"y":0,"zoom":1}
@@ -359,17 +373,35 @@ mod scope_tests {
         app.insert_resource(FocusDetailBatch::default());
         app.insert_resource(FocusDetailVisuals::default());
         app.insert_resource(Assets::<Image>::default());
-        let base = app.world_mut().resource_mut::<Assets<Image>>().add(Image::new(
-            Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            TextureDimension::D2, vec![4, 4, 4, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default()));
+        let base = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::new(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                vec![4, 4, 4, 255],
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::default(),
+            ));
         let owner = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((Sprite::from_image(base), Transform::default(), CanvasTextureSprite {
-            owner, node_id: "img".into(), content_id: None,
-        }));
+        app.world_mut().spawn((
+            Sprite::from_image(base),
+            Transform::default(),
+            CanvasTextureSprite {
+                owner,
+                node_id: "img".into(),
+                content_id: None,
+            },
+        ));
         let frame: FocusDetails = serde_json::from_value(serde_json::json!({
             "nodeId":"img", "width":1, "height":1,
             "tiles":[{"x":0,"y":0,"width":1,"height":1}]
-        })).unwrap();
+        }))
+        .unwrap();
         let upload = FocusDetailUpload::resolve(frame, &[1, 2, 3, 255], None).unwrap();
         {
             let mut batch = app.world_mut().resource_mut::<FocusDetailBatch>();
@@ -378,10 +410,21 @@ mod scope_tests {
         }
         app.add_systems(Update, sync);
         app.update();
-        let old = app.world_mut().query::<&FocusDetailSource>().iter(app.world()).next().expect("old detail").image.clone();
+        let old = app
+            .world_mut()
+            .query::<&FocusDetailSource>()
+            .iter(app.world())
+            .next()
+            .expect("old detail")
+            .image
+            .clone();
         app.world_mut().resource_mut::<FocusDetailBatch>().1 = Some(2);
         app.update();
-        let count = app.world_mut().query::<&FocusDetailRegion>().iter(app.world()).count();
+        let count = app
+            .world_mut()
+            .query::<&FocusDetailRegion>()
+            .iter(app.world())
+            .count();
         assert_eq!(count, 0, "new scope must not keep old focus details");
         assert!(app.world().resource::<Assets<Image>>().get(&old).is_none());
     }
@@ -392,44 +435,84 @@ mod scope_tests {
         let mut scene = crate::protocol::Scene::default();
         scene.nodes = serde_json::from_value(serde_json::json!([
             {"id":"img","type":"image","x":0,"y":0,"width":100,"height":100,"texture":true}
-        ])).unwrap();
+        ]))
+        .unwrap();
         scene.image_focus = Some(serde_json::from_value(serde_json::json!({
             "version":"woohaa-image-focus-v1", "nodeId":"img", "sourceWidth":1, "sourceHeight":1,
             "viewport":{"x":0,"y":0,"zoom":1}
         })).unwrap());
-        let mut index = NodeIndex::default(); index.rebuild(&scene);
-        app.insert_resource(CurrentScene(scene)); app.insert_resource(index);
-        app.insert_resource(FocusDetailBatch::default()); app.insert_resource(FocusDetailVisuals::default());
+        let mut index = NodeIndex::default();
+        index.rebuild(&scene);
+        app.insert_resource(CurrentScene(scene));
+        app.insert_resource(index);
+        app.insert_resource(FocusDetailBatch::default());
+        app.insert_resource(FocusDetailVisuals::default());
         app.insert_resource(Assets::<Image>::default());
-        let base = app.world_mut().resource_mut::<Assets<Image>>().add(Image::new(
-            Extent3d { width: 1, height: 1, depth_or_array_layers: 1 }, TextureDimension::D2,
-            vec![4, 4, 4, 255], TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default()));
+        let base = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::new(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                vec![4, 4, 4, 255],
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::default(),
+            ));
         let owner = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((Sprite::from_image(base), Transform::default(), CanvasTextureSprite {
-            owner, node_id: "img".into(), content_id: None,
-        }));
+        app.world_mut().spawn((
+            Sprite::from_image(base),
+            Transform::default(),
+            CanvasTextureSprite {
+                owner,
+                node_id: "img".into(),
+                content_id: None,
+            },
+        ));
         let frame: FocusDetails = serde_json::from_value(serde_json::json!({
             "nodeId":"img", "width":1, "height":1,
             "tiles":[{"x":0,"y":0,"width":1,"height":1}]
-        })).unwrap();
+        }))
+        .unwrap();
         {
             let upload = FocusDetailUpload::resolve(frame.clone(), &[1, 2, 3, 255], None).unwrap();
             let mut batch = app.world_mut().resource_mut::<FocusDetailBatch>();
-            batch.0 = Some(Some(upload)); batch.1 = Some(1);
+            batch.0 = Some(Some(upload));
+            batch.1 = Some(1);
         }
-        app.add_systems(Update, sync); app.update();
-        let old = app.world_mut().query::<&FocusDetailSource>().iter(app.world()).next().unwrap().image.clone();
+        app.add_systems(Update, sync);
+        app.update();
+        let old = app
+            .world_mut()
+            .query::<&FocusDetailSource>()
+            .iter(app.world())
+            .next()
+            .unwrap()
+            .image
+            .clone();
         {
             let upload = FocusDetailUpload::resolve(frame, &[7, 8, 9, 255], None).unwrap();
             let mut batch = app.world_mut().resource_mut::<FocusDetailBatch>();
-            batch.0 = Some(Some(upload)); batch.1 = Some(2);
+            batch.0 = Some(Some(upload));
+            batch.1 = Some(2);
         }
         app.update();
-        let handles: Vec<_> = app.world_mut().query::<&FocusDetailSource>().iter(app.world()).map(|source| source.image.clone()).collect();
+        let handles: Vec<_> = app
+            .world_mut()
+            .query::<&FocusDetailSource>()
+            .iter(app.world())
+            .map(|source| source.image.clone())
+            .collect();
         assert_eq!(handles.len(), 1);
         assert_ne!(handles[0].id(), old.id());
         let images = app.world().resource::<Assets<Image>>();
         assert!(images.get(&old).is_none());
-        assert_eq!(images.get(&handles[0]).unwrap().data.as_deref(), Some(&[7, 8, 9, 255][..]));
+        assert_eq!(
+            images.get(&handles[0]).unwrap().data.as_deref(),
+            Some(&[7, 8, 9, 255][..])
+        );
     }
 }

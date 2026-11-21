@@ -70,6 +70,7 @@ fn model_tool_is_rejected_and_transport_facades_share_query() {
     assert_eq!(query(&accept(model))["available"], false);
     // The opaque native dispatcher returns the same result as the JSON facade.
     let request = accept(editor());
-    let facade: Value = serde_json::from_str(&crate::query_gizmo_hit(&request.to_string())).unwrap();
+    let facade: Value =
+        serde_json::from_str(&crate::query_gizmo_hit(&request.to_string())).unwrap();
     assert_eq!(facade, query(&request));
 }

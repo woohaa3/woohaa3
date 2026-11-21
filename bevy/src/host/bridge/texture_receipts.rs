@@ -1,5 +1,8 @@
 //! Bevy 资产应用回执，不代表 GPU presentation。scope 在发送时冻结。
-use std::{collections::HashMap, sync::{LazyLock, Mutex}};
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+};
 
 type Receipt = (String, String, u32, u32, String);
 type Key = (Option<u64>, String, String);
@@ -16,7 +19,9 @@ impl ReceiptStore {
         self.entries.retain(|(scope, _, _), _| scope.is_none());
     }
     fn end(&mut self, token: u64) -> bool {
-        if self.active != Some(token) { return false; }
+        if self.active != Some(token) {
+            return false;
+        }
         self.active = None;
         self.entries.retain(|(scope, _, _), _| scope.is_none());
         true
@@ -32,36 +37,92 @@ impl ReceiptStore {
         }
     }
     fn invalidate(&mut self, scope: Option<u64>, channel: &str, id: &str) {
-        if self.permitted(scope) { self.entries.remove(&(scope, channel.to_owned(), id.to_owned())); }
-    }
-    fn applied(&mut self, scope: Option<u64>, channel: &str, id: &str, width: u32, height: u32, content: &str) {
         if self.permitted(scope) {
-            self.entries.insert((scope, channel.to_owned(), id.to_owned()), (width, height, content.to_owned()));
+            self.entries
+                .remove(&(scope, channel.to_owned(), id.to_owned()));
+        }
+    }
+    fn applied(
+        &mut self,
+        scope: Option<u64>,
+        channel: &str,
+        id: &str,
+        width: u32,
+        height: u32,
+        content: &str,
+    ) {
+        if self.permitted(scope) {
+            self.entries.insert(
+                (scope, channel.to_owned(), id.to_owned()),
+                (width, height, content.to_owned()),
+            );
         }
     }
     fn take(&mut self, scope: Option<u64>) -> Vec<Receipt> {
-        if !self.permitted(scope) { return Vec::new(); }
-        let keys: Vec<_> = self.entries.keys().filter(|(entry_scope, _, _)| *entry_scope == scope).cloned().collect();
-        keys.into_iter().filter_map(|key| self.entries.remove(&key).map(|(width, height, content)|
-            (key.1, key.2, width, height, content))).collect()
+        if !self.permitted(scope) {
+            return Vec::new();
+        }
+        let keys: Vec<_> = self
+            .entries
+            .keys()
+            .filter(|(entry_scope, _, _)| *entry_scope == scope)
+            .cloned()
+            .collect();
+        keys.into_iter()
+            .filter_map(|key| {
+                self.entries
+                    .remove(&key)
+                    .map(|(width, height, content)| (key.1, key.2, width, height, content))
+            })
+            .collect()
     }
 }
 
-static APPLIED: LazyLock<Mutex<ReceiptStore>> = LazyLock::new(|| Mutex::new(ReceiptStore::default()));
-fn serialize(rows: Vec<Receipt>) -> String { serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into()) }
-pub(crate) fn begin_scope(token: u64) { APPLIED.lock().unwrap().begin(token); }
-pub(crate) fn end_scope(token: u64) -> bool { APPLIED.lock().unwrap().end(token) }
-pub(crate) fn reset_renderer() { APPLIED.lock().unwrap().reset_renderer(); }
-pub(crate) fn invalidate(channel: &str, id: &str) { APPLIED.lock().unwrap().invalidate(None, channel, id); }
-pub(crate) fn invalidate_scoped(token: u64, channel: &str, id: &str) { APPLIED.lock().unwrap().invalidate(Some(token), channel, id); }
+static APPLIED: LazyLock<Mutex<ReceiptStore>> =
+    LazyLock::new(|| Mutex::new(ReceiptStore::default()));
+fn serialize(rows: Vec<Receipt>) -> String {
+    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+}
+pub(crate) fn begin_scope(token: u64) {
+    APPLIED.lock().unwrap().begin(token);
+}
+pub(crate) fn end_scope(token: u64) -> bool {
+    APPLIED.lock().unwrap().end(token)
+}
+pub(crate) fn reset_renderer() {
+    APPLIED.lock().unwrap().reset_renderer();
+}
+pub(crate) fn invalidate(channel: &str, id: &str) {
+    APPLIED.lock().unwrap().invalidate(None, channel, id);
+}
+pub(crate) fn invalidate_scoped(token: u64, channel: &str, id: &str) {
+    APPLIED.lock().unwrap().invalidate(Some(token), channel, id);
+}
 pub(crate) fn applied(channel: &str, id: &str, width: u32, height: u32, content: &str) {
-    APPLIED.lock().unwrap().applied(None, channel, id, width, height, content);
+    APPLIED
+        .lock()
+        .unwrap()
+        .applied(None, channel, id, width, height, content);
 }
-pub(crate) fn applied_scoped(token: u64, channel: &str, id: &str, width: u32, height: u32, content: &str) {
-    APPLIED.lock().unwrap().applied(Some(token), channel, id, width, height, content);
+pub(crate) fn applied_scoped(
+    token: u64,
+    channel: &str,
+    id: &str,
+    width: u32,
+    height: u32,
+    content: &str,
+) {
+    APPLIED
+        .lock()
+        .unwrap()
+        .applied(Some(token), channel, id, width, height, content);
 }
-pub(crate) fn take() -> String { serialize(APPLIED.lock().unwrap().take(None)) }
-pub(crate) fn take_scoped(token: u64) -> String { serialize(APPLIED.lock().unwrap().take(Some(token))) }
+pub(crate) fn take() -> String {
+    serialize(APPLIED.lock().unwrap().take(None))
+}
+pub(crate) fn take_scoped(token: u64) -> String {
+    serialize(APPLIED.lock().unwrap().take(Some(token)))
+}
 
 #[cfg(test)]
 mod tests {
@@ -72,7 +133,9 @@ mod tests {
         applied("node", "a", 128, 128, "old");
         invalidate("node", "a");
         assert_eq!(take(), "[]");
-        std::thread::spawn(|| applied("node", "a", 256, 128, "new")).join().unwrap();
+        std::thread::spawn(|| applied("node", "a", 256, 128, "new"))
+            .join()
+            .unwrap();
         assert!(take().contains("new"));
         assert_eq!(take(), "[]");
     }

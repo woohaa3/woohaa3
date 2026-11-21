@@ -9,7 +9,7 @@
 
 use bevy::prelude::{Vec2, Vec3};
 
-use super::{center_radius, ModelCandidate};
+use super::{ModelCandidate, center_radius};
 
 /// 指针到最近露出表面的最大屏幕容差（CSS 像素）。
 pub(crate) const MAX_TOLERANCE_PX: f32 = 4.0;
@@ -30,7 +30,8 @@ pub(crate) fn screen_bounds(
     for x in [min[0], max[0]] {
         for y in [min[1], max[1]] {
             for z in [min[2], max[2]] {
-                let point = crate::isometric_grid::screen_point_from_world(Vec3::new(x, y, z), view);
+                let point =
+                    crate::isometric_grid::screen_point_from_world(Vec3::new(x, y, z), view);
                 if !point.x.is_finite() || !point.y.is_finite() {
                     continue;
                 }
@@ -55,12 +56,16 @@ pub(crate) fn pick_candidates_near(
     let mut seen = std::collections::HashSet::new();
     for candidate in candidates {
         // 空模型标记没有三角面，其锚点已由精确射线命中负责。
-        let Some(triangles) = candidate.triangles.as_ref() else { continue };
+        let Some(triangles) = candidate.triangles.as_ref() else {
+            continue;
+        };
         // 相机的机位与视锥共用同一节点 id：命中结果只按节点去重。
         if !seen.insert(candidate.node_id.as_str()) {
             continue;
         }
-        let Some((low, high)) = screen_bounds(candidate.min, candidate.max, view) else { continue };
+        let Some((low, high)) = screen_bounds(candidate.min, candidate.max, view) else {
+            continue;
+        };
         if point.x < low.x - tolerance
             || point.x > high.x + tolerance
             || point.y < low.y - tolerance
@@ -73,7 +78,10 @@ pub(crate) fn pick_candidates_near(
             let [a, b, c] = triangle.vertices.map(|vertex| {
                 crate::isometric_grid::screen_point_from_world(Vec3::from_array(vertex), view)
             });
-            if ![a, b, c].iter().all(|vertex| vertex.x.is_finite() && vertex.y.is_finite()) {
+            if ![a, b, c]
+                .iter()
+                .all(|vertex| vertex.x.is_finite() && vertex.y.is_finite())
+            {
                 continue;
             }
             nearest = nearest.min(point_triangle_distance(point, a, b, c));

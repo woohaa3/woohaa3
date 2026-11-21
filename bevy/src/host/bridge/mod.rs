@@ -11,22 +11,22 @@
 //! 不可变模型资源表见 [`assets`]。
 
 mod assets;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod shot_capture_wire;
-pub(crate) mod scoped_texture;
-pub(crate) mod texture_receipts;
-#[cfg(feature = "canvas-core")]
-pub(crate) mod texture_upload;
 #[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
 pub mod document_editor_textures;
 #[cfg(all(feature = "native-canvas", not(feature = "wasm")))]
 pub mod document_editor_visibility;
+pub(crate) mod scoped_texture;
+#[cfg(feature = "canvas-core")]
+pub(crate) mod shot_capture_wire;
+pub(crate) mod texture_receipts;
+#[cfg(feature = "canvas-core")]
+pub(crate) mod texture_upload;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use crate::clock::Instant;
-use crate::protocol::{NodePosition, ObserverUpdateRequest, Scene, Viewport};
+use crate::protocol::{NodeHover, NodePosition, ObserverUpdateRequest, Scene, Viewport};
 
 pub(crate) use assets::{
     AssetRegistration, AssetRegistryStats, asset_registry_stats, declare_model_descriptor,
@@ -52,6 +52,7 @@ thread_local! {
     /// 最近 full scene 的 viewport，不重建场景几何。latest-wins。
     static VIEWPORT: RefCell<Option<Viewport>> = const { RefCell::new(None) };
     static OBSERVER: RefCell<Option<ObserverUpdateRequest>> = const { RefCell::new(None) };
+    static HOVER: RefCell<Option<Option<NodeHover>>> = const { RefCell::new(None) };
     static TEXTURES: RefCell<HashMap<String, (u32, u32, Vec<u8>, Option<String>)>> = RefCell::new(HashMap::new());
     static SCOPED_TEXTURES: RefCell<scoped_texture::ScopedTextureInbox> = RefCell::new(scoped_texture::ScopedTextureInbox::default());
     /// 片场媒体平面纹理（键为全局唯一 `planeId`；change: 2026-10-08-make-film-set-model-only）。
@@ -633,7 +634,7 @@ pub(crate) fn take_world_capture_result(
         {
             *guard = None;
             return None;
-            }
+        }
         let matches = guard.as_ref().is_some_and(|result| {
             result.request_id == request_id && result.generation == generation
         });
@@ -688,7 +689,9 @@ fn discard_world_capture_not_current() {
 #[cfg(test)]
 pub(crate) fn test_global_state_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    GUARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -720,6 +723,7 @@ pub(crate) struct FrameInput {
     /// full scene 的 viewport；与 scene 同在 latest-wins inbox，取最新值。
     pub(crate) viewport: Option<Viewport>,
     pub(crate) observer: Option<ObserverUpdateRequest>,
+    pub(crate) hover: Option<Option<NodeHover>>,
     /// nodeId → (宽, 高, RGBA, 内容身份)。内容身份用于 Rust 侧按内容共享 GPU 纹理
     /// （change: 2026-10-23-scale-canvas-media-residency，design D4 / 任务 4.4）。
     pub(crate) textures: HashMap<String, (u32, u32, Vec<u8>, Option<String>)>,
@@ -745,6 +749,7 @@ pub(crate) fn queue_scene(scene: Scene) {
     // （统一 latest-wins 顺序；change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
     VIEWPORT.with(|slot| *slot.borrow_mut() = None);
     OBSERVER.with(|slot| *slot.borrow_mut() = None);
+    HOVER.with(|slot| *slot.borrow_mut() = None);
     POSITIONS.with(|slot| slot.borrow_mut().clear());
     RESOURCE_STATES.with(|slot| slot.borrow_mut().clear());
     SCENE.with(|slot| *slot.borrow_mut() = Some(scene));
@@ -771,6 +776,10 @@ pub(crate) fn queue_viewport(viewport: Viewport) {
 
 pub(crate) fn queue_observer(update: ObserverUpdateRequest) {
     OBSERVER.with(|slot| *slot.borrow_mut() = Some(update));
+}
+
+pub(crate) fn queue_hover(hover: Option<NodeHover>) {
+    HOVER.with(|slot| *slot.borrow_mut() = Some(hover));
 }
 
 /// Only accepted updates enter this inbox. Multiple batches retain all node IDs
@@ -833,7 +842,8 @@ pub(crate) fn begin_texture_scope(canvas_id: &str) -> Result<u64, &'static str> 
     SCENE.with(|slot| *slot.borrow_mut() = None);
     TEXTURES.with(|slot| slot.borrow_mut().clear());
     MODEL_TEXTURES.with(|slot| slot.borrow_mut().clear());
-    FOCUS_DETAILS.with(|slot| *slot.borrow_mut() = crate::protocol::focus_details::FocusDetailInbox::new());
+    FOCUS_DETAILS
+        .with(|slot| *slot.borrow_mut() = crate::protocol::focus_details::FocusDetailInbox::new());
     Ok(token)
 }
 
@@ -858,7 +868,8 @@ pub(crate) fn end_texture_scope(token: u64) -> bool {
     SCENE.with(|slot| *slot.borrow_mut() = None);
     TEXTURES.with(|slot| slot.borrow_mut().clear());
     MODEL_TEXTURES.with(|slot| slot.borrow_mut().clear());
-    FOCUS_DETAILS.with(|slot| *slot.borrow_mut() = crate::protocol::focus_details::FocusDetailInbox::new());
+    FOCUS_DETAILS
+        .with(|slot| *slot.borrow_mut() = crate::protocol::focus_details::FocusDetailInbox::new());
     true
 }
 
@@ -866,11 +877,19 @@ pub(crate) fn queue_scoped_texture(token: u64, id: &str, texture: scoped_texture
     SCOPED_TEXTURES.with(|slot| slot.borrow_mut().queue(token, id.to_owned(), texture))
 }
 
-pub(crate) fn queue_scoped_model_texture(token: u64, id: &str, texture: (u32, u32, Vec<u8>)) -> bool {
+pub(crate) fn queue_scoped_model_texture(
+    token: u64,
+    id: &str,
+    texture: (u32, u32, Vec<u8>),
+) -> bool {
     SCOPED_TEXTURES.with(|slot| slot.borrow_mut().queue_model(token, id.to_owned(), texture))
 }
 
-pub(crate) fn queue_scoped_focus_details(token: u64, frame: Option<crate::protocol::focus_details::FocusDetails>, bytes: &[u8]) -> Result<(), &'static str> {
+pub(crate) fn queue_scoped_focus_details(
+    token: u64,
+    frame: Option<crate::protocol::focus_details::FocusDetails>,
+    bytes: &[u8],
+) -> Result<(), &'static str> {
     SCOPED_TEXTURES.with(|slot| slot.borrow_mut().queue_focus(token, frame, bytes))
 }
 
@@ -890,15 +909,23 @@ pub(crate) fn take_input() -> FrameInput {
     let positions = POSITIONS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
     let viewport = VIEWPORT.with(|slot| slot.borrow_mut().take());
     let observer = OBSERVER.with(|slot| slot.borrow_mut().take());
-    let (legacy_allowed, drain_scope, scoped, scoped_model, scoped_focus) = SCOPED_TEXTURES.with(|slot| {
-        let mut inbox = slot.borrow_mut();
-        let legacy_allowed = inbox.legacy_allowed();
-        let drain_scope = inbox.drain_scope();
-        let scoped = inbox.drain();
-        let scoped_model = inbox.drain_model();
-        let scoped_focus = inbox.drain_focus();
-        (legacy_allowed, drain_scope, scoped, scoped_model, scoped_focus)
-    });
+    let hover = HOVER.with(|slot| slot.borrow_mut().take());
+    let (legacy_allowed, drain_scope, scoped, scoped_model, scoped_focus) =
+        SCOPED_TEXTURES.with(|slot| {
+            let mut inbox = slot.borrow_mut();
+            let legacy_allowed = inbox.legacy_allowed();
+            let drain_scope = inbox.drain_scope();
+            let scoped = inbox.drain();
+            let scoped_model = inbox.drain_model();
+            let scoped_focus = inbox.drain_focus();
+            (
+                legacy_allowed,
+                drain_scope,
+                scoped,
+                scoped_model,
+                scoped_focus,
+            )
+        });
     let mut textures = TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
     if !legacy_allowed {
         textures.clear();
@@ -907,8 +934,16 @@ pub(crate) fn take_input() -> FrameInput {
     let model_textures =
         MODEL_TEXTURES.with(|textures| std::mem::take(&mut *textures.borrow_mut()));
     let legacy_focus = FOCUS_DETAILS.with(|slot| slot.borrow_mut().take());
-    let model_textures = if legacy_allowed { model_textures } else { scoped_model };
-    let focus_details = if legacy_allowed { legacy_focus } else { scoped_focus };
+    let model_textures = if legacy_allowed {
+        model_textures
+    } else {
+        scoped_model
+    };
+    let focus_details = if legacy_allowed {
+        legacy_focus
+    } else {
+        scoped_focus
+    };
     FrameInput {
         focus_details,
         scene,
@@ -916,6 +951,7 @@ pub(crate) fn take_input() -> FrameInput {
         positions,
         viewport,
         observer,
+        hover,
         textures,
         texture_scope: drain_scope,
         model_textures,

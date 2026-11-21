@@ -52,10 +52,12 @@ pub(crate) fn update(
             }
         }
     }
-    let alive: HashSet<_> = scene.nodes.iter().map(|n| n.id.as_str()).collect();
-    models
-        .offscreen_since
-        .retain(|id, _| alive.contains(id.as_str()));
+    if !models.offscreen_since.is_empty() {
+        let alive: HashSet<_> = scene.nodes.iter().map(|n| n.id.as_str()).collect();
+        models
+            .offscreen_since
+            .retain(|id, _| alive.contains(id.as_str()));
+    }
     if models.demand.as_ref() == Some(&desired) {
         return pins_changed;
     }
@@ -138,11 +140,25 @@ mod tests {
         );
         assert!(near_viewport(&scene.nodes[0], &scene, None));
         let mut models = ModelVisuals::default();
-        update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), 0.);
+        update(
+            &mut models,
+            &scene,
+            None,
+            &HashSet::new(),
+            &HashSet::new(),
+            0.,
+        );
         assert!(models.demand.as_ref().unwrap().contains("m"));
         models.offscreen_since.insert("m".into(), 0.);
         scene.nodes[0].y = -1000.;
-        update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), 3.);
+        update(
+            &mut models,
+            &scene,
+            None,
+            &HashSet::new(),
+            &HashSet::new(),
+            3.,
+        );
         assert!(!models.demand.as_ref().unwrap().contains("m"));
     }
 
@@ -150,9 +166,12 @@ mod tests {
     fn shared_world_demand_ignores_card_position_and_leases_resource() {
         let mut scene = Scene::default();
         scene.viewport.zoom = 1.;
-        scene.surface = Some(serde_json::from_value(serde_json::json!({
-            "width": 1024., "height": 600., "pixelRatio": 1.
-        })).unwrap());
+        scene.surface = Some(
+            serde_json::from_value(serde_json::json!({
+                "width": 1024., "height": 600., "pixelRatio": 1.
+            }))
+            .unwrap(),
+        );
         scene.nodes.push(serde_json::from_value(serde_json::json!({
             "id":"m", "type":"model", "x":10000., "y":10000., "width":100., "height":50.,
             "model":{"resourceKey":"test:box","signature":"box"},
@@ -162,13 +181,27 @@ mod tests {
         })).unwrap());
         let mut models = ModelVisuals::default();
         for now in [0., 3.] {
-            update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), now);
+            update(
+                &mut models,
+                &scene,
+                None,
+                &HashSet::new(),
+                &HashSet::new(),
+                now,
+            );
             assert!(models.demand.as_ref().unwrap().contains("m"));
             assert!(payload_lease_keys(&scene, &models).contains("test:box"));
             scene.nodes[0].x += 10000.;
         }
         scene.nodes.clear();
-        update(&mut models, &scene, None, &HashSet::new(), &HashSet::new(), 4.);
+        update(
+            &mut models,
+            &scene,
+            None,
+            &HashSet::new(),
+            &HashSet::new(),
+            4.,
+        );
         assert!(models.demand.as_ref().unwrap().is_empty());
     }
 }

@@ -5,8 +5,15 @@ import {
 } from "@woohaa3/contracts";
 import type { CanvasResourceCoordinator, ResidencyPurpose } from "../residency/index.js";
 import { ImageLoadError } from '../image-load.js';
-import { DEFAULT_RESIDENCY_POLICY } from '../residency/policy.js';
-import { IMAGE_INPUT_LIMIT, IMAGE_WORKER_VERSION, type ImageJob, type ImageReply, type ImageResult } from './protocol.js';
+import { adaptiveImageDecodeMaxInstances } from '../residency/policy.js';
+import {
+  IMAGE_INPUT_LIMIT,
+  IMAGE_WORKER_VERSION,
+  type ImageFetchReply,
+  type ImageJob,
+  type ImageReply,
+  type ImageResult
+} from './protocol.js';
 const experimentalThreads = import.meta.env?.VITE_WOOHAA_IMAGE_THREADS === "1";
 type Job = { request: ImageJob; resolve: (value: ImageResult) => void; reject: (error: unknown) => void; signal?: AbortSignal; cleanup: () => void };
 type Slot = { worker: Worker; generation: number; job?: Job; timeout?: ReturnType<typeof setTimeout>; idle?: ReturnType<typeof setTimeout>; memoryBytes: number };
@@ -18,7 +25,7 @@ export class ImageWorkerPool {
   private sequence = 0;
   private generation = 0;
   private disposed = false;
-  constructor(private readonly capacity = experimentalThreads ? 1 : DEFAULT_RESIDENCY_POLICY.imageDecodeMaxInstances,
+  constructor(private readonly capacity = experimentalThreads ? 1 : adaptiveImageDecodeMaxInstances(),
     private readonly createWorker = () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'woohaa-rust-image' })) {}
   /** Decode already-authorised compressed bytes. `bytes` is optional for the legacy URL-only ABI. */
   decode(url: string, maxEdge: number, signal?: AbortSignal, encoded = false, region?: ImageJob["region"], bytes?: ArrayBuffer): Promise<ImageResult> {
@@ -110,18 +117,102 @@ export class ImageWorkerPool {
 let pool: ImageWorkerPool | undefined;
 let coordinator: CanvasResourceCoordinator | undefined;
 let jobSequence = 0;
+let fetchSequence = 0;
+let fetchWorker: Worker | undefined;
+let fetchWorkerIdle: ReturnType<typeof setTimeout> | undefined;
+const pendingFetches = new Map<number, {
+  resolve: (bytes: ArrayBuffer) => void;
+  reject: (error: unknown) => void;
+  cleanup: () => void;
+}>();
+
+function resetFetchWorker(errorMessage?: string) {
+  clearTimeout(fetchWorkerIdle);
+  fetchWorkerIdle = undefined;
+  if (fetchWorker) {
+    fetchWorker.terminate();
+    fetchWorker = undefined;
+  }
+  if (errorMessage) {
+    for (const [, pending] of pendingFetches) {
+      pending.cleanup();
+      pending.reject(new ImageLoadError(errorMessage, true));
+    }
+    pendingFetches.clear();
+  }
+}
+
+function scheduleFetchWorkerIdle() {
+  clearTimeout(fetchWorkerIdle);
+  if (pendingFetches.size === 0 && fetchWorker) {
+    fetchWorkerIdle = setTimeout(() => {
+      if (pendingFetches.size === 0) resetFetchWorker();
+    }, 15000);
+  }
+}
+
+function ensureFetchWorker(): Worker {
+  if (fetchWorker) return fetchWorker;
+  const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'woohaa-image-fetch' });
+  worker.onmessage = (event: MessageEvent<ImageFetchReply>) => {
+    const reply = event.data;
+    if (!reply || reply.version !== IMAGE_WORKER_VERSION || !('fetchId' in reply)) return;
+    const pending = pendingFetches.get(reply.fetchId);
+    if (!pending) return;
+    pendingFetches.delete(reply.fetchId);
+    pending.cleanup();
+    if (reply.ok) pending.resolve(reply.bytes);
+    else pending.reject(new ImageLoadError(reply.message, reply.transient));
+    scheduleFetchWorkerIdle();
+  };
+  worker.onerror = () => resetFetchWorker('图片网络 Worker 异常终止，请重试');
+  worker.onmessageerror = () => resetFetchWorker('图片网络 Worker 回执无效');
+  fetchWorker = worker;
+  return worker;
+}
+
+function canUseFetchWorker(source: URL): boolean {
+  if (typeof Worker === 'undefined') return false;
+  if (source.protocol === 'data:') return false;
+  const fn = globalThis.fetch as unknown as { mock?: unknown } | undefined;
+  if (fn && 'mock' in fn) return false;
+  return true;
+}
+
+function readBytesInWorker(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  if (signal?.aborted) return Promise.reject(new Error('image-cancelled'));
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = ensureFetchWorker();
+    } catch {
+      readBytesDirect(new URL(url), signal).then(resolve, reject);
+      return;
+    }
+    clearTimeout(fetchWorkerIdle);
+    const fetchId = ++fetchSequence;
+    const onAbort = () => {
+      const pending = pendingFetches.get(fetchId);
+      if (!pending) return;
+      pendingFetches.delete(fetchId);
+      pending.cleanup();
+      worker.postMessage({ cancelFetch: fetchId });
+      scheduleFetchWorkerIdle();
+      reject(new Error('image-cancelled'));
+    };
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    pendingFetches.set(fetchId, { resolve, reject, cleanup });
+    worker.postMessage({ version: IMAGE_WORKER_VERSION, fetchId, url });
+  });
+}
+
 export function registerImageCoordinator(value: CanvasResourceCoordinator) {
   coordinator=value;
   return () => { if(coordinator===value)coordinator=undefined; };
 }
 
-/** Page-side read of authorised compressed bytes; the decode slot is never held during this. */
-async function readBytes(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  const pageLocation = globalThis.location;
-  const origin = pageLocation?.origin ?? 'http://localhost';
-  const source = new URL(url, pageLocation?.href ?? origin);
-  if (!['http:', 'https:', 'blob:', 'data:'].includes(source.protocol) || (source.protocol !== 'data:' && source.origin !== origin))
-    throw new Error('unauthorised-image-origin');
+async function readBytesDirect(source: URL, signal?: AbortSignal): Promise<ArrayBuffer> {
   let response: Response;
   try { response = await fetch(source, { credentials: 'same-origin', ...(signal ? { signal } : {}) }); }
   catch (error) { throw new ImageLoadError(error instanceof Error ? error.message : '图片网络读取失败', true); }
@@ -145,6 +236,19 @@ async function readBytes(url: string, signal?: AbortSignal): Promise<ArrayBuffer
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes.buffer;
+}
+
+/** Authorised compressed bytes read via subthread IO Worker (or direct fallback in tests). */
+async function readBytes(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const pageLocation = globalThis.location;
+  const origin = pageLocation?.origin ?? 'http://localhost';
+  const source = new URL(url, pageLocation?.href ?? origin);
+  if (!['http:', 'https:', 'blob:', 'data:'].includes(source.protocol) || (source.protocol !== 'data:' && source.origin !== origin))
+    throw new Error('unauthorised-image-origin');
+  if (canUseFetchWorker(source)) {
+    return readBytesInWorker(source.href, signal);
+  }
+  return readBytesDirect(source, signal);
 }
 
 function workerDecode(url: string, edge: number, signal?: AbortSignal, encoded = false, bytes?: ArrayBuffer, region?: ImageJob["region"]) {

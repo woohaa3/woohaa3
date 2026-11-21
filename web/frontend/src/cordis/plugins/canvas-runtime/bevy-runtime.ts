@@ -27,7 +27,7 @@ import type {
   CanvasRenderScene,
   PreparedModelResource
 } from "@woohaa3/contracts";
-import { canvasPositionUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
+import { canvasPositionUpdateRequest, canvasHoverUpdateRequest, modelDescriptorOf, modelDescriptorPayload, modelPayloadLeaseRequest, modelPrepareRequest, CANVAS_RENDER_SCENE_VERSION, CANVAS_VIEWPORT_UPDATE_VERSION, CANVAS_POSITION_UPDATE_VERSION, CANVAS_OBSERVER_UPDATE_VERSION } from "@woohaa3/contracts";
 
 import { sceneDiagnostics, measureSceneWork } from "./scene-diagnostics.js";
 import { createRuntimeViewport } from "./runtime-viewport.js";
@@ -562,6 +562,16 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
       if (lastScene) lastScene = positionMirror.apply(lastScene, input);
       return accepted;
     },
+    ...(module.set_hover ? { setHover: (input: { baseSceneGeneration: number; hover: NonNullable<CanvasRenderScene["hover"]> | null }) => {
+      if (disposed) throw new Error("Bevy runtime disposed");
+      if (!module.set_hover) throw new Error("Bevy 运行时缺少 set_hover 边界");
+      const json = canvasHoverUpdateRequest(input);
+      const accepted = measureSceneWork("wasmAcceptMs", now, () => module.set_hover!(json));
+      interactionGeneration = accepted;
+      sceneDiagnostics.boundaryBytes += new TextEncoder().encode(json).byteLength;
+      if (lastScene) lastScene = { ...lastScene, hover: input.hover ?? undefined };
+      return accepted;
+    } } : {}),
     ...createRuntimeViewport({ module: () => module, now, accepted: (input, accepted) => {
       if (disposed) return;
       interactionGeneration = accepted;
@@ -585,12 +595,15 @@ async function createBevyRuntime(options: BevyLoaderOptions): Promise<BevyRuntim
     setTexture: (id, width, height, rgba, source) => {
       const scope = source?.scope;
       if (coordinator && (!scope || !coordinator.isCurrent(scope))) return false;
-      return textures.upload('node', id, width, height, rgba, () => {
+      return textures.upload('node', id, width, height, rgba, (alreadyShared) => {
+        const payload = alreadyShared && source?.sourceKey && !isNativeImage(rgba)
+          ? new Uint8Array(0)
+          : rgba;
         if (coordinator && scope) {
-          if (isNativeImage(rgba)) applyNativeImage(rgba,id,false,source?.sourceKey ?? '',scope.token);
-          else scopedCanvasModule(module)!.set_texture_scoped(scope.token,id,width,height,rgba,source?.sourceKey ?? '');
-        } else if (isNativeImage(rgba)) applyNativeImage(rgba,id,false,source?.sourceKey ?? '');
-        else module.set_texture(id,width,height,rgba,source?.sourceKey ?? '');
+          if (isNativeImage(payload)) applyNativeImage(payload,id,false,source?.sourceKey ?? '',scope.token);
+          else scopedCanvasModule(module)!.set_texture_scoped(scope.token,id,width,height,payload,source?.sourceKey ?? '');
+        } else if (isNativeImage(payload)) applyNativeImage(payload,id,false,source?.sourceKey ?? '');
+        else module.set_texture(id,width,height,payload,source?.sourceKey ?? '');
       }, source);
     },
     setImageFocusDetails: (frame, scope) => {

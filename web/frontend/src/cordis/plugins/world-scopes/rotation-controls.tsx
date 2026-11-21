@@ -19,6 +19,11 @@ export function installWorldRotationControls(ctx: Context, canvasId: string | un
   let disposed = false, generation = 0, key = "";
   let availability = { nodeId: "", enabled: false };
   const invalidate = () => ctx.canvasRuntime.controller()?.invalidate("world-rotation-availability");
+  const setAvailability = (next: { nodeId: string; enabled: boolean }) => {
+    if (next.nodeId === availability.nodeId && next.enabled === availability.enabled) return;
+    availability = next;
+    invalidate();
+  };
   const refresh = () => {
     const canvas = workingCanvasOf(woohaa3CanvasStore.getState());
     const ids = nodeSelectionStore.getSnapshot().nodeIds;
@@ -28,19 +33,24 @@ export function installWorldRotationControls(ctx: Context, canvasId: string | un
     if (nextKey === key) return;
     key = nextKey;
     const current = ++generation;
-    availability = { nodeId, enabled: availability.nodeId === nodeId && availability.enabled && ctx.canvasSession.isWritable() };
-    invalidate();
-    if (!canvas || canvas.id !== canvasId || !nodeId || !ctx.canvasSession.isWritable()) return;
+    if (!canvas || canvas.id !== canvasId || !nodeId || !ctx.canvasSession.isWritable()) {
+      setAvailability({ nodeId: "", enabled: false });
+      return;
+    }
     const area = decodeSceneAreaData(canvas.nodeData[nodeId]?.sceneArea);
     const instance = decodeWorldInstanceData(canvas.nodeData[nodeId]?.sharedWorldInstance);
-    if (!area.ok && !instance.ok) return;
+    if (!area.ok && !instance.ok) {
+      setAvailability({ nodeId: "", enabled: false });
+      return;
+    }
+    setAvailability({ nodeId, enabled: availability.nodeId === nodeId && availability.enabled });
     let scopes: string[] = [];
     if (area.ok) scopes = [area.value.areaId];
     else if (instance.ok) {
-      if (!resource) { availability = { nodeId, enabled: false }; invalidate(); return; }
+      if (!resource) { setAvailability({ nodeId, enabled: false }); return; }
       const rig = storedHumanoidRig(canvas.nodeData[nodeId]?.modelRig);
       const local = modelGroundAnchorLocal(resource.ops, rig.ok ? rig.value : null);
-      if (!local) { availability = { nodeId, enabled: false }; invalidate(); return; }
+      if (!local) { setAvailability({ nodeId, enabled: false }); return; }
       const anchor = worldModelGroundAnchor(local, instance.value.transform);
       scopes = canvas.document.nodes.flatMap(node => {
         const candidate = decodeSceneAreaData(canvas.nodeData[node.id]?.sceneArea);
@@ -50,7 +60,7 @@ export function installWorldRotationControls(ctx: Context, canvasId: string | un
           ? [candidate.value.areaId] : [];
       });
     }
-    if (!scopes.length) { availability = { nodeId, enabled: true }; invalidate(); return; }
+    if (!scopes.length) { setAvailability({ nodeId, enabled: true }); return; }
     void Promise.all(scopes.map(areaId => ctx.canvasRemote.prepareSceneArea({ canvasId: canvas.id, areaId })))
       .then(results => {
         if (disposed || generation !== current) return;
@@ -59,8 +69,8 @@ export function installWorldRotationControls(ctx: Context, canvasId: string | un
           if (area.ok) return result.snapshot.occupancy.state === "idle";
           return !result.snapshot.occupancy.locks.some(lock => lock.target.kind === "instance" && instance.ok && lock.target.instanceId === instance.value.instanceId);
         });
-        availability = { nodeId, enabled }; invalidate();
-      }).catch(() => { if (!disposed && generation === current) { availability = { nodeId, enabled: false }; invalidate(); } });
+        setAvailability({ nodeId, enabled });
+      }).catch(() => { if (!disposed && generation === current) setAvailability({ nodeId, enabled: false }); });
   };
   const offAction = ctx.slots.register("canvas.node-action", {
     id: "world-rotate-clockwise", owner: "world-scopes", order: 15,

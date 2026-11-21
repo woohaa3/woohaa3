@@ -4,7 +4,7 @@
 //! `sync_scene` 的大同步过程拆分为独立 system：所有节点输入来自 ECS Query（稳定身份、
 //! 布局、深度与展示组件），完整绘制 DTO 仍按 id 从 `CurrentScene`/`NodeIndex` 读取。
 //! 16 节点块、共享 mesh 句柄、Geometry、纹理共享与预算仍是 Resource。
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
 
@@ -24,17 +24,22 @@ use super::{CanvasOverlayCache, CardBlockCache, CardDecorationCache, EdgeBlockCa
 /// 静态 2D 场景只在 accepted scene/视口/主题变化时重建。
 pub(crate) fn canvas_render_requested(
     flags: Res<FrameFlags>,
+    scene: Res<CurrentScene>,
+    edges: Res<EdgeBlockCache>,
     card_visuals: Query<(), Changed<CardVisual>>,
     edge_visuals: Query<(), Changed<EdgeVisual>>,
     theme: Res<ThemeResource>,
     surface: Res<SurfaceState>,
 ) -> bool {
+    let lod_changed = edges.lod_changed(scene.0.viewport.zoom);
     flags.scene_received
         || flags.positions_received
+        || flags.hover_changed
         || flags.surface_changed
         || flags.theme_changed
         || !card_visuals.is_empty()
         || !edge_visuals.is_empty()
+        || lod_changed
         || theme.is_changed()
         || surface.is_changed()
 }
@@ -147,23 +152,37 @@ pub(crate) fn produce_card_geometry(
     changes: Option<Res<crate::app::RuntimeChanges>>,
     projection: Option<Res<crate::canvas_ecs::CanvasProjectionState>>,
 ) {
-    let dirty = if !cfg!(feature = "canvas-reference")
-        && flags.positions_received
-        && !flags.scene_received
+    let local_scene_change = changes
+        .as_ref()
+        .is_some_and(|changes| changes.has_scene && !changes.current.structure_changed);
+    let incremental = !cfg!(feature = "canvas-reference")
+        && (flags.positions_received
+            || flags.hover_changed
+            || (flags.scene_received && local_scene_change))
         && !flags.theme_changed
         && !flags.surface_changed
         && !flags.observer_changed
         && flags.resource_nodes.is_empty()
         && !theme.is_changed()
-        && visuals.can_update_blocks(scene.0.nodes.len())
-    {
-        changes
-            .as_ref()
-            .filter(|changes| changes.has_scene)
-            .map(|changes| &changes.current.card_blocks)
+        && visuals.can_update_blocks(scene.0.nodes.len());
+    let viewport_only = flags.viewport_only
+        && !flags.scene_received
+        && !flags.positions_received
+        && !flags.hover_changed;
+    let hover_only = flags.hover_changed && !flags.scene_received && !flags.positions_received;
+    let dirty_set = if viewport_only || hover_only {
+        Some(BTreeSet::new())
     } else {
-        None
+        incremental
+            .then(|| {
+                changes
+                    .as_ref()
+                    .filter(|changes| changes.has_scene)
+                    .map(|changes| changes.current.card_blocks.clone())
+            })
+            .flatten()
     };
+    let dirty = dirty_set.as_ref();
     let indexed_cards = dirty.and_then(|dirty| {
         let entities = projection.as_ref()?.entity_index.as_ref()?;
         let mut cards = Vec::new();
@@ -244,23 +263,36 @@ pub(crate) fn produce_card_hover(
     changes: Option<Res<crate::app::RuntimeChanges>>,
     projection: Option<Res<crate::canvas_ecs::CanvasProjectionState>>,
 ) {
+    let local_scene_change = changes
+        .as_ref()
+        .is_some_and(|changes| changes.has_scene && !changes.current.structure_changed);
     let incremental = !cfg!(feature = "canvas-reference")
-        && flags.positions_received
-        && !flags.scene_received
+        && (flags.positions_received
+            || flags.hover_changed
+            || (flags.scene_received && local_scene_change))
         && !flags.theme_changed
         && !flags.surface_changed
         && !flags.observer_changed
-        && flags.resource_nodes.is_empty()
         && !theme.is_changed()
         && visuals.blocks.len() == scene.0.nodes.len().div_ceil(super::card_cache::BLOCK_SIZE);
-    let dirty = incremental
-        .then(|| {
-            changes
-                .as_ref()
-                .filter(|changes| changes.has_scene)
-                .map(|changes| &changes.current.card_blocks)
-        })
-        .flatten();
+    let viewport_only = flags.viewport_only
+        && !flags.scene_received
+        && !flags.positions_received
+        && !flags.hover_changed;
+    let dirty_set = if viewport_only {
+        Some(BTreeSet::new())
+    } else {
+        incremental
+            .then(|| {
+                let base = changes
+                    .as_ref()
+                    .filter(|changes| changes.has_scene)
+                    .map(|changes| changes.current.card_blocks.clone())?;
+                Some(visuals.hover_dirty_blocks(&scene.0, &index, &base))
+            })
+            .flatten()
+    };
+    let dirty = dirty_set.as_ref();
     let indexed = dirty.and_then(|dirty| {
         let entities = projection.as_ref()?.entity_index.as_ref()?;
         let mut projected = Vec::new();
@@ -333,21 +365,38 @@ pub(crate) fn produce_edges(
     projection: Option<Res<crate::canvas_ecs::CanvasProjectionState>>,
     index: Res<NodeIndex>,
 ) {
-    let dirty = if !cfg!(feature = "canvas-reference")
-        && flags.positions_received
-        && !flags.scene_received
+    let local_scene_change = changes
+        .as_ref()
+        .is_some_and(|changes| changes.has_scene && !changes.current.structure_changed);
+    let incremental = !cfg!(feature = "canvas-reference")
+        && (flags.positions_received
+            || flags.hover_changed
+            || (flags.scene_received && local_scene_change))
         && !flags.theme_changed
         && !flags.surface_changed
-        && flags.resource_nodes.is_empty()
         && !theme.is_changed()
-        && visuals.can_update_blocks(scene.0.edges.len())
-    {
-        changes
-            .as_ref()
-            .filter(|changes| changes.has_scene)
-            .map(|changes| &changes.current.edge_blocks)
+        && visuals.can_update_blocks(scene.0.edges.len());
+    let viewport_only = flags.viewport_only && !flags.scene_received && !flags.positions_received;
+    let dirty_set = if viewport_only {
+        Some(BTreeSet::new())
     } else {
+        incremental
+            .then(|| {
+                let base = changes
+                    .as_ref()
+                    .filter(|changes| changes.has_scene)
+                    .map(|changes| changes.current.edge_blocks.clone())?;
+                Some(visuals.interaction_dirty_blocks(&scene.0, &base))
+            })
+            .flatten()
+    };
+    let dirty = dirty_set.as_ref();
+    // A zoom LOD transition requires all edge blocks.  The cache turns `None` into a full
+    // retained rebuild; other local scene changes keep their sparse block set.
+    let dirty = if visuals.lod_changed(scene.0.viewport.zoom) {
         None
+    } else {
+        dirty
     };
     let indexed_layouts = dirty.and_then(|dirty| {
         let entities = projection.as_ref()?.entity_index.as_ref()?;

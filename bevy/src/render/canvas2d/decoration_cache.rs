@@ -6,6 +6,7 @@
 use super::{CanvasMaterials, geometry::Geometry};
 use crate::{protocol::Scene, theme::ThemeResource};
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
+use std::collections::BTreeSet;
 pub(super) const BLOCK_SIZE: usize = 16;
 #[derive(PartialEq)]
 /// 单一悬停装饰输入；由当前 presentation DTO 派生，块比较只看这一份值。
@@ -25,9 +26,54 @@ pub(super) struct Block {
     mesh: Option<Handle<Mesh>>,
 }
 
+#[derive(Clone, PartialEq)]
+struct HoverState {
+    node_id: Option<String>,
+    port: Option<String>,
+    cursor: Option<[f32; 2]>,
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct CardDecorationCache {
     pub(super) blocks: Vec<Block>,
+    last_hover: HoverState,
+}
+
+impl Default for HoverState {
+    fn default() -> Self {
+        Self {
+            node_id: None,
+            port: None,
+            cursor: None,
+        }
+    }
+}
+
+impl CardDecorationCache {
+    pub(crate) fn hover_dirty_blocks(
+        &self,
+        scene: &Scene,
+        index: &crate::app::NodeIndex,
+        base: &BTreeSet<u32>,
+    ) -> BTreeSet<u32> {
+        let current = hover_state(scene);
+        if self.last_hover == current {
+            return base.clone();
+        }
+        let mut dirty = base.clone();
+        for id in [
+            self.last_hover.node_id.as_deref(),
+            current.node_id.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(slot) = index.position(id) {
+                dirty.insert((slot / BLOCK_SIZE) as u32);
+            }
+        }
+        dirty
+    }
 }
 impl Block {
     #[cfg(test)]
@@ -151,7 +197,20 @@ pub(super) fn sync(
         block.theme = theme.fingerprint().to_owned();
     }
     visuals.blocks = blocks;
+    visuals.last_hover = hover_state(scene);
     rebuilt
+}
+
+fn hover_state(scene: &Scene) -> HoverState {
+    HoverState {
+        node_id: scene.hover.as_ref().and_then(|hover| hover.node_id.clone()),
+        port: scene.hover.as_ref().and_then(|hover| hover.port.clone()),
+        cursor: scene
+            .hover
+            .as_ref()
+            .and_then(|hover| hover.cursor)
+            .map(|point| [point.x, point.y]),
+    }
 }
 
 #[cfg(test)]

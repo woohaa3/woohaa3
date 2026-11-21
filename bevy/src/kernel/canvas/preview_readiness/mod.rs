@@ -94,13 +94,20 @@ pub(super) fn evidence(
         return Evidence::AwaitingRoot;
     };
     let drawn = prepared && phase_present && (targets == 0 || (expected > 0 && queued >= expected));
-    if drawn { Evidence::Drawn } else { Evidence::Materializing }
+    if drawn {
+        Evidence::Drawn
+    } else {
+        Evidence::Materializing
+    }
 }
 
 /// Consecutive drawn frames required before the texture is published.
 const STABLE_FRAMES: u8 = 2;
 
-fn images_ready(ids: &[bevy::asset::AssetId<Image>], mut contains: impl FnMut(bevy::asset::AssetId<Image>) -> bool) -> bool {
+fn images_ready(
+    ids: &[bevy::asset::AssetId<Image>],
+    mut contains: impl FnMut(bevy::asset::AssetId<Image>) -> bool,
+) -> bool {
     ids.iter().copied().all(&mut contains)
 }
 
@@ -131,7 +138,10 @@ pub(super) fn observe(
     for (preview, view, visible, _target) in &views {
         alive.insert(preview.camera);
         let mut prepared = preview.meshes.iter().all(|id| meshes.get(*id).is_some())
-            && preview.materials.iter().all(|id| materials.get(*id).is_some())
+            && preview
+                .materials
+                .iter()
+                .all(|id| materials.get(*id).is_some())
             && images_ready(&preview.images, |id| images.get(id).is_some());
         let expected = visible
             .get::<Mesh3d>()
@@ -143,36 +153,77 @@ pub(super) fn observe(
         let mut phase_present = false;
         if let Some(phase) = opaque.get(key) {
             phase_present = true;
-            queued += phase.batchable_meshes.values().map(|bin| bin.entities().len()).sum::<usize>();
-            queued += phase.unbatchable_meshes.values().map(|bin| bin.entities.len()).sum::<usize>();
+            queued += phase
+                .batchable_meshes
+                .values()
+                .map(|bin| bin.entities().len())
+                .sum::<usize>();
+            queued += phase
+                .unbatchable_meshes
+                .values()
+                .map(|bin| bin.entities.len())
+                .sum::<usize>();
             multidraw |= !phase.multidrawable_meshes.is_empty();
             for batch in phase.multidrawable_meshes.keys() {
-                prepared &= matches!(cache.get_render_pipeline_state(batch.pipeline), CachedPipelineState::Ok(_));
+                prepared &= matches!(
+                    cache.get_render_pipeline_state(batch.pipeline),
+                    CachedPipelineState::Ok(_)
+                );
             }
-            for batch in phase.batchable_meshes.keys().chain(phase.unbatchable_meshes.keys()) {
-                prepared &= matches!(cache.get_render_pipeline_state(batch.0.pipeline), CachedPipelineState::Ok(_));
+            for batch in phase
+                .batchable_meshes
+                .keys()
+                .chain(phase.unbatchable_meshes.keys())
+            {
+                prepared &= matches!(
+                    cache.get_render_pipeline_state(batch.0.pipeline),
+                    CachedPipelineState::Ok(_)
+                );
             }
         }
         if let Some(phase) = mask.get(key) {
             phase_present = true;
-            queued += phase.batchable_meshes.values().map(|bin| bin.entities().len()).sum::<usize>();
-            queued += phase.unbatchable_meshes.values().map(|bin| bin.entities.len()).sum::<usize>();
+            queued += phase
+                .batchable_meshes
+                .values()
+                .map(|bin| bin.entities().len())
+                .sum::<usize>();
+            queued += phase
+                .unbatchable_meshes
+                .values()
+                .map(|bin| bin.entities.len())
+                .sum::<usize>();
             multidraw |= !phase.multidrawable_meshes.is_empty();
             for batch in phase.multidrawable_meshes.keys() {
-                prepared &= matches!(cache.get_render_pipeline_state(batch.pipeline), CachedPipelineState::Ok(_));
+                prepared &= matches!(
+                    cache.get_render_pipeline_state(batch.pipeline),
+                    CachedPipelineState::Ok(_)
+                );
             }
-            for batch in phase.batchable_meshes.keys().chain(phase.unbatchable_meshes.keys()) {
-                prepared &= matches!(cache.get_render_pipeline_state(batch.0.pipeline), CachedPipelineState::Ok(_));
+            for batch in phase
+                .batchable_meshes
+                .keys()
+                .chain(phase.unbatchable_meshes.keys())
+            {
+                prepared &= matches!(
+                    cache.get_render_pipeline_state(batch.0.pipeline),
+                    CachedPipelineState::Ok(_)
+                );
             }
         }
         if let Some(phase) = transparent.get(key) {
             phase_present = true;
             queued += phase.items.len();
             for (_, item) in &phase.items {
-                prepared &= matches!(cache.get_render_pipeline_state(item.pipeline), CachedPipelineState::Ok(_));
+                prepared &= matches!(
+                    cache.get_render_pipeline_state(item.pipeline),
+                    CachedPipelineState::Ok(_)
+                );
             }
         }
-        let entry = stable.entry(preview.camera).or_insert((preview.generation, 0));
+        let entry = stable
+            .entry(preview.camera)
+            .or_insert((preview.generation, 0));
         if entry.0 != preview.generation {
             *entry = (preview.generation, 0);
         }
@@ -181,7 +232,12 @@ pub(super) fn observe(
                 && crate::shot_camera::preview_readiness::visible_pipelines_ready(
                     visible,
                     specialized.get(key),
-                    |id| matches!(cache.get_render_pipeline_state(id), CachedPipelineState::Ok(_)),
+                    |id| {
+                        matches!(
+                            cache.get_render_pipeline_state(id),
+                            CachedPipelineState::Ok(_)
+                        )
+                    },
                 );
         let verdict = evidence(
             prepared && complete,
@@ -190,9 +246,17 @@ pub(super) fn observe(
             expected,
             preview.rooted.then_some(preview.meshes.len()),
         );
-        entry.1 = if verdict == Evidence::Drawn { entry.1.saturating_add(1) } else { 0 };
+        entry.1 = if verdict == Evidence::Drawn {
+            entry.1.saturating_add(1)
+        } else {
+            0
+        };
         if entry.1 >= STABLE_FRAMES {
-            ready.0.lock().unwrap().insert(preview.camera, preview.generation);
+            ready
+                .0
+                .lock()
+                .unwrap()
+                .insert(preview.camera, preview.generation);
         } else {
             ready.0.lock().unwrap().remove(&preview.camera);
         }
@@ -211,7 +275,9 @@ impl Plugin for PreviewReadinessPlugin {
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.insert_resource(ready).add_systems(
                 bevy::render::Render,
-                observe.after(RenderSystems::Prepare).before(RenderSystems::Render),
+                observe
+                    .after(RenderSystems::Prepare)
+                    .before(RenderSystems::Render),
             );
         }
     }

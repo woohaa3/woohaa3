@@ -47,10 +47,21 @@ fn setup_lights(commands: &mut Commands, shared_world: bool, shadows_enabled: bo
         brightness: 600.0,
         ..default()
     });
-    crate::model3d::shadows::install_light(commands,
-        if shared_world { crate::model3d::shadows::world_light_rotation() } else { Quat::IDENTITY },
-        default(), shadows_enabled,
-        if shared_world { crate::model3d::CANVAS_UNITS_PER_METER } else { 1.0 });
+    crate::model3d::shadows::install_light(
+        commands,
+        if shared_world {
+            crate::model3d::shadows::world_light_rotation()
+        } else {
+            Quat::IDENTITY
+        },
+        default(),
+        shadows_enabled,
+        if shared_world {
+            crate::model3d::CANVAS_UNITS_PER_METER
+        } else {
+            1.0
+        },
+    );
 }
 
 /// 背景色：透明（alpha 0）或 `#rrggbb`。
@@ -123,10 +134,14 @@ fn spawn_model(
                     }
                 }
                 let mut source = scene::standard_material_for(&spec.material_key, &material_specs);
-                if let Some(id) = spec.material_key.strip_prefix("material:")
+                if let Some(id) = spec
+                    .material_key
+                    .strip_prefix("material:")
                     .and_then(|key| material_specs.get(key))
-                    .and_then(|material| material.base_color_texture.as_ref()) {
-                    source.base_color_texture = textures.get(id).cloned().or(source.base_color_texture);
+                    .and_then(|material| material.base_color_texture.as_ref())
+                {
+                    source.base_color_texture =
+                        textures.get(id).cloned().or(source.base_color_texture);
                 }
                 let material = resources.material(materials, source);
                 part_materials.insert(spec.id.clone(), material.clone());
@@ -172,12 +187,14 @@ fn spawn_model(
             else {
                 continue;
             };
-            commands.entity(entity).insert(crate::model3d::skin::SkinBinding {
-                joints,
-                skin: skin.clone(),
-                vertices: vertices.clone(),
-                last_matrices: Vec::new(),
-            });
+            commands
+                .entity(entity)
+                .insert(crate::model3d::skin::SkinBinding {
+                    joints,
+                    skin: skin.clone(),
+                    vertices: vertices.clone(),
+                    last_matrices: Vec::new(),
+                });
         }
     }
     (entities, bases, binds, poses, part_materials)
@@ -360,7 +377,11 @@ fn run_render(request: &RenderRequest, capture: &CaptureOptions) -> Result<Vec<u
     run_render_with_shadows(request, capture, true)
 }
 
-pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &CaptureOptions, shadows_enabled: bool) -> Result<Vec<u8>, String> {
+pub(super) fn run_render_with_shadows(
+    request: &RenderRequest,
+    capture: &CaptureOptions,
+    shadows_enabled: bool,
+) -> Result<Vec<u8>, String> {
     let width = capture.width;
     let height = capture.height;
     let pixels: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
@@ -370,16 +391,29 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
         use base64::Engine;
         for entry in &world.instances {
             let model = crate::model3d::prepare_snapshot(ModelSnapshot {
-                scene_version: Some(request.scene_version.clone()), ops: entry.ops.clone(),
-                signature: entry.instance.instance_id.clone(), extent: 1.0,
-                aabb: None, geometry_keys: None, prepared_bounds: None, placement: default(),
+                scene_version: Some(request.scene_version.clone()),
+                ops: entry.ops.clone(),
+                signature: entry.instance.instance_id.clone(),
+                extent: 1.0,
+                aabb: None,
+                geometry_keys: None,
+                prepared_bounds: None,
+                placement: default(),
             });
             let mut textures = Vec::new();
             for texture in &entry.textures {
-                let bytes = base64::engine::general_purpose::STANDARD.decode(&texture.bytes_base64).map_err(|error| error.to_string())?;
-                let image = Image::from_buffer(&bytes, bevy::image::ImageType::MimeType(&texture.mime_type),
-                    bevy::image::CompressedImageFormats::NONE, true, bevy::image::ImageSampler::linear(), RenderAssetUsages::default())
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(&texture.bytes_base64)
                     .map_err(|error| error.to_string())?;
+                let image = Image::from_buffer(
+                    &bytes,
+                    bevy::image::ImageType::MimeType(&texture.mime_type),
+                    bevy::image::CompressedImageFormats::NONE,
+                    true,
+                    bevy::image::ImageSampler::linear(),
+                    RenderAssetUsages::default(),
+                )
+                .map_err(|error| error.to_string())?;
                 textures.push((texture.id.clone(), image));
             }
             world_models.push((entry.instance.clone(), model, textures));
@@ -390,11 +424,15 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
     // software driver must never produce native evidence or native output.
     let settings = bevy::render::settings::WgpuSettings::default();
     let render_resources = bevy::tasks::block_on(bevy::render::renderer::initialize_renderer(
-        settings.backends.unwrap_or_default(), None, &settings,
+        settings.backends.unwrap_or_default(),
+        None,
+        &settings,
     ));
     if format!("{:?}", render_resources.2.device_type) == "Cpu" {
-        return Err(format!("native renderer requires a hardware GPU; detected {} ({:?})",
-            render_resources.2.name, render_resources.2.backend));
+        return Err(format!(
+            "native renderer requires a hardware GPU; detected {} ({:?})",
+            render_resources.2.name, render_resources.2.backend
+        ));
     }
     let mut app = App::new();
     #[cfg(feature = "recording-gpu")]
@@ -420,7 +458,9 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
                 ..default()
             })
             .set(RenderPlugin {
-                render_creation: bevy::render::settings::RenderCreation::Manual(Box::new(render_resources)),
+                render_creation: bevy::render::settings::RenderCreation::Manual(Box::new(
+                    render_resources,
+                )),
                 ..default()
             }),
     );
@@ -502,20 +542,39 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
             setup_lights(&mut commands, world.is_some(), shadows_enabled);
             if let Some(world) = &world {
                 for (instance, model, decoded) in &world_models {
-                    let textures = decoded.iter().map(|(id, image)| (id.clone(), images.add(image.clone()))).collect();
-                    spawn_model(&mut commands, &mut meshes, &mut materials, model,
-                        crate::world_camera_view::instance_pose(instance), &textures);
+                    let textures = decoded
+                        .iter()
+                        .map(|(id, image)| (id.clone(), images.add(image.clone())))
+                        .collect();
+                    spawn_model(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        model,
+                        crate::world_camera_view::instance_pose(instance),
+                        &textures,
+                    );
                 }
                 commands.spawn((
                     Camera3d::default(),
                     crate::model3d::shadows::camera_lighting(),
-                    Camera { clear_color: ClearColorConfig::Custom(background), ..default() },
+                    Camera {
+                        clear_color: ClearColorConfig::Custom(background),
+                        ..default()
+                    },
                     RenderTarget::Image(image.clone().into()),
                     crate::world_camera_view::pose(&world.camera),
                     crate::world_camera_view::projection(&world.camera, size),
-                    Msaa::Sample4, Tonemapping::None, DebandDither::Disabled,
+                    Msaa::Sample4,
+                    Tonemapping::None,
+                    DebandDither::Disabled,
                 ));
-                super::readiness::enqueue_readback(&mut commands, image, pixels_setup.clone(), capture_ready.clone());
+                super::readiness::enqueue_readback(
+                    &mut commands,
+                    image,
+                    pixels_setup.clone(),
+                    capture_ready.clone(),
+                );
                 return;
             }
             let (entities, bases, binds, poses, part_materials) = spawn_model(
@@ -536,14 +595,14 @@ pub(super) fn run_render_with_shadows(request: &RenderRequest, capture: &Capture
                     else {
                         continue;
                     };
-                let transform = crate::model3d::compose_channels(
-                    *base,
-                    binds.get(part_id).copied(),
-                    poses.get(part_id).copied(),
-                    delta.owns_rotation.then_some(delta.rotation),
-                    delta.owns_position.then_some(delta.translation),
-                    Some(delta.scale),
-                );
+                    let transform = crate::model3d::compose_channels(
+                        *base,
+                        binds.get(part_id).copied(),
+                        poses.get(part_id).copied(),
+                        delta.owns_rotation.then_some(delta.rotation),
+                        delta.owns_position.then_some(delta.translation),
+                        Some(delta.scale),
+                    );
                     commands.entity(*entity).insert(transform);
                     if !delta.opacity.is_finite() || delta.opacity >= 1.0 {
                         continue;
@@ -745,7 +804,10 @@ mod static_pose_skin_tests {
         );
         let spawn = |app: &mut App, offset: f32| {
             let mut model = skinned_snapshot();
-            if let ModelOp::Group { pose: Some(pose), .. } = &mut model.ops[1] {
+            if let ModelOp::Group {
+                pose: Some(pose), ..
+            } = &mut model.ops[1]
+            {
                 pose.position = Some([0., offset, 0.]);
             }
             let mut meshes = app.world_mut().remove_resource::<Assets<Mesh>>().unwrap();
@@ -773,13 +835,28 @@ mod static_pose_skin_tests {
         let first = spawn(&mut app, 2.0);
         let second = spawn(&mut app, 4.0);
         let first_handle = app.world().entity(first).get::<Mesh3d>().unwrap().0.clone();
-        let second_handle = app.world().entity(second).get::<Mesh3d>().unwrap().0.clone();
-        assert_ne!(first_handle, second_handle, "skinned meshes must not share a mutable handle");
+        let second_handle = app
+            .world()
+            .entity(second)
+            .get::<Mesh3d>()
+            .unwrap()
+            .0
+            .clone();
+        assert_ne!(
+            first_handle, second_handle,
+            "skinned meshes must not share a mutable handle"
+        );
         app.update();
         let first_positions = mesh_positions(&mut app, first);
         let second_positions = mesh_positions(&mut app, second);
-        assert!((first_positions[0][1] - 2.0).abs() < 1e-4, "{first_positions:?}");
-        assert!((second_positions[0][1] - 4.0).abs() < 1e-4, "{second_positions:?}");
+        assert!(
+            (first_positions[0][1] - 2.0).abs() < 1e-4,
+            "{first_positions:?}"
+        );
+        assert!(
+            (second_positions[0][1] - 4.0).abs() < 1e-4,
+            "{second_positions:?}"
+        );
         // 第二个实例的更新不会污染第一个实例的网格。
         app.world_mut()
             .entity_mut(second)

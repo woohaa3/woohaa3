@@ -68,7 +68,10 @@ impl CanvasIndices {
         }
     }
 
-    pub(crate) fn incident_edges<'a>(&'a self, ids: impl IntoIterator<Item = &'a str>) -> Vec<usize> {
+    pub(crate) fn incident_edges<'a>(
+        &'a self,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<usize> {
         let mut edges = HashSet::new();
         for id in ids {
             edges.extend(self.edges.incident(id).iter().copied());
@@ -89,11 +92,13 @@ mod tests {
         scene.nodes = serde_json::from_value(json!([
             {"id":"a","type":"text","x":0,"y":0},
             {"id":"b","type":"text","x":10,"y":10}
-        ])).unwrap();
+        ]))
+        .unwrap();
         scene.edges = serde_json::from_value(json!([
             {"id":"e0","source":"a","target":"b"},
             {"id":"e1","source":"a","target":"a"}
-        ])).unwrap();
+        ]))
+        .unwrap();
         scene
     }
 
@@ -103,6 +108,9 @@ mod tests {
         let indices = CanvasIndices::build(&scene);
         assert_eq!(indices.nodes.get("a"), Some(0));
         assert_eq!(indices.edges.incident("a"), &[0, 1]);
-        assert_eq!(indices.incident_edges(["a", "b"].into_iter()).as_slice(), &[0, 1]);
+        assert_eq!(
+            indices.incident_edges(["a", "b"].into_iter()).as_slice(),
+            &[0, 1]
+        );
     }
 }

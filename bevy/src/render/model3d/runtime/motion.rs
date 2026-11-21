@@ -47,13 +47,17 @@ fn apply_clip_playback(
     let Some(motion) = &plan.top else {
         super::super::pick::publish_motion(None, HashMap::new());
         if let Some(root) = models.roots.get_mut(&playback.node_id) {
-            root.opacity.sync_frame(materials, commands, opacity, &desired);
+            root.opacity
+                .sync_frame(materials, commands, opacity, &desired);
         }
         return None;
     };
     let initial = playback.initial_camera_state();
     let (camera, model_deltas) = crate::motion::evaluate(&motion, playback.time, initial);
-    super::super::pick::publish_motion(Some(&playback.node_id), model_deltas.iter().cloned().collect());
+    super::super::pick::publish_motion(
+        Some(&playback.node_id),
+        model_deltas.iter().cloned().collect(),
+    );
 
     if let Some(root) = models.roots.get_mut(&playback.node_id) {
         for (part_id, delta) in &model_deltas {
@@ -76,7 +80,8 @@ fn apply_clip_playback(
             }
             queue_opacity(root, part_id, delta.opacity, &mut desired);
         }
-        root.opacity.sync_frame(materials, commands, opacity, &desired);
+        root.opacity
+            .sync_frame(materials, commands, opacity, &desired);
     }
     Some(camera)
 }
@@ -123,8 +128,12 @@ fn reset_motion_parts(
     };
     // 透明度实例必须随姿态一起恢复，否则离开动画节点后画面会保持半透明。
     root.opacity.restore_all(commands, opacity);
-    let Some((id, targets)) = &models.motion_targets else { return; };
-    if id != node_id { return; }
+    let Some((id, targets)) = &models.motion_targets else {
+        return;
+    };
+    if id != node_id {
+        return;
+    }
     for part_id in targets.iter() {
         let Some(entity) = root.part_entities.get(part_id) else {
             continue;
@@ -186,44 +195,85 @@ pub(crate) fn apply_motion_playback(
     scene: &Scene,
 ) -> Option<crate::motion::CameraState> {
     let camera = apply_clip_playback(commands, models, materials, opacity, scene);
-    let current: HashMap<_, _> = scene.nodes.iter().filter_map(|node| {
-        let model = node.model.as_ref()?;
-        if model.part_rotations.is_none() && model.part_positions.is_none() { return None; }
-        Some((node.id.as_str(), (model.part_rotations.as_ref(), model.part_positions.as_ref())))
-    }).collect();
-    if models.joint_targets.is_empty() && current.values().all(|(r,p)| r.is_none_or(|v| v.is_empty()) && p.is_none_or(|v| v.is_empty())) {
+    if models.roots.is_empty() && models.joint_targets.is_empty() {
+        return camera;
+    }
+    let current: HashMap<_, _> = scene
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let model = node.model.as_ref()?;
+            if model.part_rotations.is_none() && model.part_positions.is_none() {
+                return None;
+            }
+            Some((
+                node.id.as_str(),
+                (model.part_rotations.as_ref(), model.part_positions.as_ref()),
+            ))
+        })
+        .collect();
+    if models.joint_targets.is_empty()
+        && current
+            .values()
+            .all(|(r, p)| r.is_none_or(|v| v.is_empty()) && p.is_none_or(|v| v.is_empty()))
+    {
         return camera;
     }
     let previous = std::mem::take(&mut models.joint_targets);
-    let active: std::collections::HashSet<&str> = previous.keys().map(String::as_str)
-        .chain(current.keys().copied()).collect();
+    let active: std::collections::HashSet<&str> = previous
+        .keys()
+        .map(String::as_str)
+        .chain(current.keys().copied())
+        .collect();
     let mut clip = HashMap::new();
     if let Some(playback) = &scene.animation_playback {
         let plan = super::super::motion_plan::resolve(models, playback);
         if let Some(top) = &plan.top {
             clip = crate::motion::evaluate(top, playback.time, playback.initial_camera_state())
-                .1.into_iter().collect();
+                .1
+                .into_iter()
+                .collect();
         }
     }
     for node_id in active {
-        let Some(root) = models.roots.get(node_id) else { continue };
+        let Some(root) = models.roots.get(node_id) else {
+            continue;
+        };
         let (rotations, positions) = current.get(node_id).copied().unwrap_or((None, None));
         let targets: std::collections::HashSet<String> = rotations
-            .map(|r| r.keys().cloned().collect()).unwrap_or_default();
+            .map(|r| r.keys().cloned().collect())
+            .unwrap_or_default();
         let mut targets = targets;
-        if let Some(positions) = positions { targets.extend(positions.keys().cloned()); }
+        if let Some(positions) = positions {
+            targets.extend(positions.keys().cloned());
+        }
         let mut affected = previous.get(node_id).cloned().unwrap_or_default();
         affected.extend(targets.iter().cloned());
         for id in affected {
-            let (Some(entity), Some(base)) = (
-                root.part_entities.get(&id), root.part_bases.get(&id),
-            ) else { continue };
-            let clip = if scene.animation_playback.as_ref().is_some_and(|p| p.node_id == node_id) {
+            let (Some(entity), Some(base)) =
+                (root.part_entities.get(&id), root.part_bases.get(&id))
+            else {
+                continue;
+            };
+            let clip = if scene
+                .animation_playback
+                .as_ref()
+                .is_some_and(|p| p.node_id == node_id)
+            {
                 clip.get(&id)
-            } else { None };
-            let part_rotation = rotations.and_then(|r| r.get(&id)).copied().map(Quat::from_array);
-            let part_position = positions.and_then(|p| p.get(&id)).copied().map(Vec3::from_array);
-            let (rotation, position, scale) = animation_channels(clip, part_rotation, part_position);
+            } else {
+                None
+            };
+            let part_rotation = rotations
+                .and_then(|r| r.get(&id))
+                .copied()
+                .map(Quat::from_array);
+            let part_position = positions
+                .and_then(|p| p.get(&id))
+                .copied()
+                .map(Vec3::from_array);
+            let (rotation, position, scale) =
+                animation_channels(clip, part_rotation, part_position);
             let pose = compose_channels(
                 *base,
                 root.part_binds.get(&id).copied(),
@@ -252,14 +302,17 @@ fn animation_channels(
     part_rotation: Option<Quat>,
     part_position: Option<Vec3>,
 ) -> (Option<Quat>, Option<Vec3>, Option<Vec3>) {
-    let clip_rotation = clip.filter(|delta| delta.owns_rotation).map(|delta| delta.rotation);
+    let clip_rotation = clip
+        .filter(|delta| delta.owns_rotation)
+        .map(|delta| delta.rotation);
     let rotation = match (clip_rotation, part_rotation) {
         (Some(clip), Some(part)) => Some(clip * part),
         (Some(clip), None) => Some(clip),
         (None, part) => part,
     };
     let position = match (
-        clip.filter(|delta| delta.owns_position).map(|delta| delta.translation),
+        clip.filter(|delta| delta.owns_position)
+            .map(|delta| delta.translation),
         part_position,
     ) {
         (Some(clip), Some(part)) => Some(clip + part),

@@ -2,7 +2,10 @@ use super::*;
 
 #[test]
 fn back_faces_only_pick_when_material_is_double_sided() {
-    let mut face = SurfaceTriangle { vertices: [[-1., -1., 0.], [1., -1., 0.], [0., 1., 0.]], cull_back: true };
+    let mut face = SurfaceTriangle {
+        vertices: [[-1., -1., 0.], [1., -1., 0.], [0., 1., 0.]],
+        cull_back: true,
+    };
     let origin = bevy::prelude::Vec3::new(0., 0., -1.);
     let direction = bevy::prelude::Vec3::Z;
     assert!(ray_triangle(origin, direction, &face).is_none());
@@ -14,11 +17,23 @@ fn back_faces_only_pick_when_material_is_double_sided() {
 fn shared_pick_uses_surface_depth_and_preserves_gaps() {
     use bevy::prelude::Vec3;
     let candidate = |id: &str, z: f32| ModelCandidate {
-        node_id: id.into(), shared_world: true, empty_marker: false, min: [-2., -2., 0.], max: [2., 2., 10.],
-        triangles: Some(std::sync::Arc::new(vec![SurfaceTriangle { vertices: [[-1., -1., z], [1., -1., z], [0., 1., z]], cull_back: false }])),
+        node_id: id.into(),
+        shared_world: true,
+        empty_marker: false,
+        min: [-2., -2., 0.],
+        max: [2., 2., 10.],
+        triangles: Some(std::sync::Arc::new(vec![SurfaceTriangle {
+            vertices: [[-1., -1., z], [1., -1., z], [0., 1., z]],
+            cull_back: false,
+        }])),
     };
     let candidates = vec![candidate("back", 7.), candidate("front", 3.)];
-    assert_eq!(pick_candidates(&candidates, Vec3::ZERO, Vec3::Z, 20.).unwrap().0, "front");
+    assert_eq!(
+        pick_candidates(&candidates, Vec3::ZERO, Vec3::Z, 20.)
+            .unwrap()
+            .0,
+        "front"
+    );
     assert!(pick_candidates(&candidates, Vec3::new(1.5, 1.5, 0.), Vec3::Z, 20.).is_none());
 }
 
@@ -128,7 +143,8 @@ fn pick_query_respects_generation_and_emptiness() {
     );
     accept_models(
         vec![ModelCandidate {
-            shared_world: false, empty_marker: false,
+            shared_world: false,
+            empty_marker: false,
             triangles: None,
             node_id: "m".into(),
             min: [center.x - 5.0, center.y - 5.0, center.z - 5.0],
@@ -202,8 +218,14 @@ fn pixel_tolerance_hits_near_surface_but_not_empty_aabb_space() {
     assert!(query(empty, None).is_null());
     assert!(query(empty, Some(4.0)).is_null());
     // 三角面外沿 3 像素：精确射线穿过空隙，4 像素裙边命中真实表面，1 像素裙边不命中。
-    let screen = |x: f32, z: f32| crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::new(x, 0., z), &view);
-    let (a, b, c) = (screen(-300., -300.), screen(-280., -300.), screen(-300., -280.));
+    let screen = |x: f32, z: f32| {
+        crate::isometric_grid::screen_point_from_world(bevy::prelude::Vec3::new(x, 0., z), &view)
+    };
+    let (a, b, c) = (
+        screen(-300., -300.),
+        screen(-280., -300.),
+        screen(-300., -280.),
+    );
     let centroid = (a + b + c) / 3.0;
     let edge_midpoint = (a + b) / 2.0;
     let outside = edge_midpoint + (edge_midpoint - centroid).normalize() * 3.0;
@@ -225,9 +247,23 @@ fn marquee_selects_world_models_by_projected_aabb() {
         triangles: None,
     };
     let candidates = vec![candidate("near", 0.0), candidate("far", 1000.0)];
-    let ids = marquee_node_ids(&candidates, &view, center.x - 200.0, center.y - 200.0, 400.0, 400.0);
+    let ids = marquee_node_ids(
+        &candidates,
+        &view,
+        center.x - 200.0,
+        center.y - 200.0,
+        400.0,
+        400.0,
+    );
     assert_eq!(ids, vec!["near".to_owned()]);
     // 空矩形不命中任何模型。
-    let empty = marquee_node_ids(&candidates, &view, center.x + 5000.0, center.y + 5000.0, 10.0, 10.0);
+    let empty = marquee_node_ids(
+        &candidates,
+        &view,
+        center.x + 5000.0,
+        center.y + 5000.0,
+        10.0,
+        10.0,
+    );
     assert!(empty.is_empty());
 }

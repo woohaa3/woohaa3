@@ -74,8 +74,7 @@ pub(super) fn prepare(
             let base = super::mesh::mesh_key(geometry);
             // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，与 spawn/quality 一致
             // （change: 2026-10-15-add-film-set-overview-lod，design D3）。
-            let effective =
-                super::mesh::effective_quality(geometry, root.quality);
+            let effective = super::mesh::effective_quality(geometry, root.quality);
             let Some((mesh, geometry)) = models.shared.mesh(meshes, &base, geometry, effective)
             else {
                 return;
@@ -100,9 +99,7 @@ pub(super) fn prepare(
                 .specs
                 .iter()
                 .filter_map(|spec| spec.geometry.as_ref())
-                .map(|geometry| {
-                    super::mesh::effective_quality(geometry, root.quality)
-                })
+                .map(|geometry| super::mesh::effective_quality(geometry, root.quality))
                 .min()
                 .unwrap_or(root.quality);
             let Some(asset) = models.shared.batches.get(meshes, &source, batch_quality) else {
@@ -183,8 +180,7 @@ pub(super) fn prepare(
         .iter()
         .filter_map(|(_, base, geometry)| {
             // 有效档位（总览根自定义 Mesh/Box 恒 High），避免低档 lookup 漏掉 High handle。
-            let effective =
-                super::mesh::effective_quality(geometry, root.quality);
+            let effective = super::mesh::effective_quality(geometry, root.quality);
             models.shared.lookup(base, geometry, effective).cloned()
         })
         .chain(root.batches.iter().map(|batch| batch.asset.handle.clone()))

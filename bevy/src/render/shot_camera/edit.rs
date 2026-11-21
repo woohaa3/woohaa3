@@ -228,7 +228,8 @@ impl Plugin for ShotCameraInteractionPlugin {
             PostUpdate,
             (pointer_begin_edit, pointer_apply_motion, pointer_end_edit)
                 .chain()
-                .before(super::ShotCameraSet::Edit).run_if(crate::canvas_activity::running),
+                .before(super::ShotCameraSet::Edit)
+                .run_if(crate::canvas_activity::running),
         );
     }
 }

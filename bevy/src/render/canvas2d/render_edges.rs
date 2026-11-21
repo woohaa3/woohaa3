@@ -31,6 +31,7 @@ pub(super) fn draw_block(
     geometry: &mut Geometry,
     overlay_z: f32,
     depth_offset: f32,
+    curve_zoom: f32,
     index: &crate::app::NodeIndex,
 ) -> Vec<Label> {
     let mut labels = Vec::new();
@@ -42,9 +43,13 @@ pub(super) fn draw_block(
             let selected = scene.selection.edge.as_ref() == Some(&edge.id);
             let locked = index.is_locked(&edge.source) || index.is_locked(&edge.target);
             let paint = |color: u32| {
-                if locked { crate::scope_visual::muted_color(color) } else { color }
+                if locked {
+                    crate::scope_visual::muted_color(color)
+                } else {
+                    color
+                }
             };
-            geometry.curve(
+            geometry.curve_lod(
                 source.port(true),
                 target.port(false),
                 if selected { 3.0 } else { 2.0 },
@@ -55,6 +60,7 @@ pub(super) fn draw_block(
                     paint(theme.token_u32("canvasEdgeDefault"))
                 },
                 false,
+                curve_zoom,
             );
             let mid = (source.port(true) + target.port(false)) / 2.;
             let label_width = edge_label_width(&edge.label);

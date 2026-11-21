@@ -164,7 +164,13 @@ pub fn sync_lines<M: Component + Clone>(
         } else {
             entities.push(
                 commands
-                    .spawn((marker.clone(), bevy::light::NotShadowCaster, Mesh3d(mesh.clone()), values, layers.clone()))
+                    .spawn((
+                        marker.clone(),
+                        bevy::light::NotShadowCaster,
+                        Mesh3d(mesh.clone()),
+                        values,
+                        layers.clone(),
+                    ))
                     .id(),
             );
         }
@@ -249,5 +255,4 @@ mod tests {
             assert_eq!(current == &cone, shape == GizmoShape::Cone);
         }
     }
-
 }

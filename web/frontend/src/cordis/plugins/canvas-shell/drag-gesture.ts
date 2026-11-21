@@ -13,6 +13,7 @@ import {
   decodeWorkflowGroupData,
   effectiveCanvasNodeSize,
   isMergeEligibleNode,
+  mergeTargetContainsCenter,
   planGroupMembershipCommand,
   resolveMergeTarget,
   type CanvasCommand,
@@ -93,6 +94,20 @@ export function createDragGestureFamily(
       excludeNodeIds: new Set(gesture.origins.keys())
     });
     if (!resolved) return null;
+    // A target already covering the source center at pointerdown is a
+    // pre-existing overlap (for example a hidden grid card under a focal
+    // card), not an intentional drop onto that target. Require the source to
+    // enter the target during this gesture so returning to the origin cannot
+    // open the irreversible merge dialog.
+    const origin = gesture.origins.get(sourceNodeId);
+    const target = candidates.find((candidate) => candidate.nodeId === resolved.nodeId);
+    if (origin && target) {
+      const originCenter = {
+        x: origin.x + size.width / 2,
+        y: origin.y + size.height / 2,
+      };
+      if (mergeTargetContainsCenter(originCenter, target)) return null;
+    }
     return { sourceNodeIds: [sourceNodeId], targetNodeId: resolved.nodeId, point: center };
   };
 

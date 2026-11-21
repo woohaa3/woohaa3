@@ -75,7 +75,7 @@ export async function createNativeRuntimeRealm(
   });
   const rpc = (method: string, ...args: unknown[]) => {
     if (method === "set_scene" || method === "set_scene_scoped" || method === "seed_runtime_generation") viewport.cancel();
-    else if (method.startsWith("query_") || method === "set_positions" || method === "set_resource_states" || method === "request_shot_capture") {
+    else if (method.startsWith("query_") || method === "set_positions" || method === "set_hover" || method === "set_resource_states" || method === "request_shot_capture") {
       const generation = viewport.flush();
       if (generation !== null && method.startsWith("query_") && typeof args[0] === "string") {
         const input = JSON.parse(args[0]);
@@ -134,7 +134,7 @@ export async function createNativeRuntimeRealm(
   for (const name of [
     "is_ready", "rendered_revision", "base_scene_generation", "viewport_capability", "observer_capability", "position_capability", "scene_capability",
     "runtime_health", "canvas_work_diagnostics", "model_asset_diagnostics", "shot_diagnostics",
-    "set_scene", "set_viewport", "set_observer", "set_positions", "prepare_and_register_model_resource",
+    "set_scene", "set_viewport", "set_observer", "set_positions", "set_hover", "hover_capability", "prepare_and_register_model_resource",
     "declare_model_resource", "set_model_payload_leases",
     "query_point_hit", "query_marquee", "query_probe", "query_drop_target",
     "query_model_pick", "query_model_marquee", "query_gizmo_hit",

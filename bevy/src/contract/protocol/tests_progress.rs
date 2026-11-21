@@ -29,7 +29,10 @@ fn node_progress_start_parses_from_camel_case_field() {
     let scene = parse(
         r#"{"version":"woohaa-canvas-render-scene-v44","nodes":[{"id":"n1","type":"image","x":0,"y":0,"busy":true,"progress":20.0,"progressStartedAt":1767225600000}],"edges":[]}"#,
     );
-    assert_eq!(scene.nodes[0].progress_started_at, Some(1_767_225_600_000.0));
+    assert_eq!(
+        scene.nodes[0].progress_started_at,
+        Some(1_767_225_600_000.0)
+    );
     assert!(scene.validate().is_ok());
 }
 

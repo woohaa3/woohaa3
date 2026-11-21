@@ -4,7 +4,6 @@
 
 use super::*;
 
-
 /// 带顶部操作横条的场景：`nodeActions` 按节点 id 下发，命中由 Rust 快照判定。
 fn scene_with_actions(nodes: Vec<GraphNode>) -> Scene {
     scene_with_actions_for("n1", nodes)
@@ -40,9 +39,6 @@ fn scene_with_actions_for(node_id: &str, nodes: Vec<GraphNode>) -> Scene {
         ..scene(nodes, vec![])
     }
 }
-
-
-
 
 #[test]
 fn node_action_bar_hits_action_and_menu_rects_only() {
@@ -203,7 +199,3 @@ fn node_action_hits_match_layout_after_viewport_and_edge_drag() {
         assert_hit(generation, &node("n1", x, y, 200.0, 120.0), &viewport);
     }
 }
-
-
-
-

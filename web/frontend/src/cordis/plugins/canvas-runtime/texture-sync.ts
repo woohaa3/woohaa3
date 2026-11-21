@@ -112,6 +112,8 @@ type ContentEntry = {
    * 不影响其他卡片。
    */
   released?: boolean;
+  /** 本份共享内容像素是否已在当前运行代际上传过至少一次（后续同源节点只需轻量绑定）。 */
+  runtimeUploaded?: boolean;
   pixels?: import("@woohaa3/contracts").ImagePixelSource;
   width?: number;
   height?: number;
@@ -173,7 +175,10 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
     if (ready) uploaded.add(id); else uploaded.delete(id);
     resourceDirty.add(id);
   };
-  const clearUploaded = () => { for (const id of uploaded) setUploaded(id, false); };
+  const clearUploaded = () => {
+    for (const id of uploaded) setUploaded(id, false);
+    for (const content of contents.values()) content.runtimeUploaded = false;
+  };
   let activeScope = options.runtime.currentCanvasScope?.() ?? null;
   let runtimeGeneration = options.runtime.generation?.() ?? 0;
   let retryVersion = options.runtime.retryVersion?.() ?? 0;
@@ -304,6 +309,7 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
    */
   const startDecode = (target: ContentEntry, url: string, tier: ThumbnailTier, purpose: ResidencyPurpose, key: string): void => {
     target.released = false;
+    target.runtimeUploaded = false;
     if (target.retryTimer !== undefined) {
       globalThis.clearTimeout(target.retryTimer);
       target.retryTimer = undefined;
@@ -548,235 +554,246 @@ export function createTextureSync(options: TextureSyncOptions): TextureUploader 
       resourceDirty.clear();
     },
     sync() {
-      const nextScope = options.runtime.currentCanvasScope?.() ?? null;
-      if (nextScope !== activeScope) {
-        activeScope = nextScope;
-        for (const content of contents.values()) {
-          residency?.cancel(content.decodeKey);
-          if (content.retryTimer !== undefined) globalThis.clearTimeout(content.retryTimer);
-          releaseImagePixels(content.pixels);
-        }
-        contents.clear(); entries.clear(); pendingEntries.clear();
-        clearUploaded(); loading.clear(); uploads.retainNodes(new Set());
-        boundCanvas = null; boundDesired = null; boundStructure = '';
-        previousOverride = null; previousDetails = undefined; overrideUploaded = false;
-      }
-      options.runtime.flushTextureReceipts?.();
       if (disposed) return;
-      const canvas = options.getCanvas();
-      if (!canvas) {
-        entries.clear();
-        pendingEntries.clear();
-        for (const content of contents.values()) releaseImagePixels(content.pixels);
-      contents.clear();
-        clearUploaded();
-        previousOverride = null;
-        loading.clear();
-        boundCanvas = null;
-        boundDesired = null;
-        boundStructure = "";
-        return;
-      }
-      // 需求集合 memo（design D7 / 任务 7.1）：画布身份 + 准入版本 + 幽灵预览表都没变时复用
-      // 上一帧绑定，不重新遍历全量节点解析媒体 URL。
-      const previews = options.getPreviewUrls?.() ?? null;
-      const revision = residency?.projectionRevision() ?? -1;
-      // 结构信号（节点/资产容器身份 + revision）一起参与 memo：即使调用方原地改了 working
-      // 文档，也不会把旧绑定当成最新需求继续复用。
-      const structure = canvasStructureKey(canvas);
-      let desired = boundDesired;
-      const bindingsChanged = !desired || canvas !== boundCanvas || revision !== boundRevision || previews !== boundPreviews
-        || structure !== boundStructure;
-      if (bindingsChanged || !desired) {
-        desired = desiredUrls(canvas);
-        boundCanvas = canvas;
-        boundRevision = revision;
-        boundPreviews = previews;
-        boundStructure = structure;
-        boundDesired = desired;
-      }
-      if (bindingsChanged) {
-        loading.retain(new Map([...desired].map(([nodeId, value]) => [nodeId, value.url])));
-        uploads.retainNodes(new Set(desired.keys()));
-      }
-      const nextGeneration = options.runtime.generation?.() ?? 0;
-      if (nextGeneration !== runtimeGeneration) {
-        runtimeGeneration = nextGeneration;
-        clearUploaded(); previousOverride = null;
-        previousDetails=undefined;
-        // GPU 代际已重建：旧纹理和后台目标都不能再假定存在。把目标直接提升为当前绑定，
-        // 由下方重新上传；保留 pending 会让旧条目先上传一份马上被替换的纹理。
-        for (const nodeId of [...pendingEntries.keys()]) {
-          const pending = pendingEntries.get(nodeId);
-          pendingEntries.delete(nodeId);
-          const previous = entries.get(nodeId);
-          if (previous) {
-            entries.delete(nodeId);
-            detachContent(nodeId, previous.contentKey);
+      loading.batch(() => {
+        const nextScope = options.runtime.currentCanvasScope?.() ?? null;
+        if (nextScope !== activeScope) {
+          activeScope = nextScope;
+          for (const content of contents.values()) {
+            residency?.cancel(content.decodeKey);
+            if (content.retryTimer !== undefined) globalThis.clearTimeout(content.retryTimer);
+            releaseImagePixels(content.pixels);
           }
-          if (pending) {
-            entries.set(nodeId, {
-              url: pending.url, contentKey: pending.contentKey, tier: pending.tier,
-              load: pending.load, sent: false
-            });
-            resourceDirty.add(nodeId);
+          contents.clear(); entries.clear(); pendingEntries.clear();
+          clearUploaded(); loading.clear(); uploads.retainNodes(new Set());
+          boundCanvas = null; boundDesired = null; boundStructure = '';
+          previousOverride = null; previousDetails = undefined; overrideUploaded = false;
+        }
+        options.runtime.flushTextureReceipts?.();
+        if (disposed) return;
+        const canvas = options.getCanvas();
+        if (!canvas) {
+          entries.clear();
+          pendingEntries.clear();
+          for (const content of contents.values()) releaseImagePixels(content.pixels);
+          contents.clear();
+          clearUploaded();
+          previousOverride = null;
+          loading.clear();
+          boundCanvas = null;
+          boundDesired = null;
+          boundStructure = "";
+          return;
+        }
+        // 需求集合 memo（design D7 / 任务 7.1）：画布身份 + 准入版本 + 幽灵预览表都没变时复用
+        // 上一帧绑定，不重新遍历全量节点解析媒体 URL。
+        const previews = options.getPreviewUrls?.() ?? null;
+        const revision = residency?.projectionRevision() ?? -1;
+        // 结构信号（节点/资产容器身份 + revision）一起参与 memo：即使调用方原地改了 working
+        // 文档，也不会把旧绑定当成最新需求继续复用。
+        const structure = canvasStructureKey(canvas);
+        let desired = boundDesired;
+        const bindingsChanged = !desired || canvas !== boundCanvas || revision !== boundRevision || previews !== boundPreviews
+          || structure !== boundStructure;
+        if (bindingsChanged || !desired) {
+          desired = desiredUrls(canvas);
+          boundCanvas = canvas;
+          boundRevision = revision;
+          boundPreviews = previews;
+          boundStructure = structure;
+          boundDesired = desired;
+        }
+        if (bindingsChanged) {
+          loading.retain(new Map([...desired].map(([nodeId, value]) => [nodeId, value.url])));
+          uploads.retainNodes(new Set(desired.keys()));
+        }
+        const nextGeneration = options.runtime.generation?.() ?? 0;
+        if (nextGeneration !== runtimeGeneration) {
+          runtimeGeneration = nextGeneration;
+          clearUploaded(); previousOverride = null;
+          previousDetails=undefined;
+          // GPU 代际已重建：旧纹理和后台目标都不能再假定存在。把目标直接提升为当前绑定，
+          // 由下方重新上传；保留 pending 会让旧条目先上传一份马上被替换的纹理。
+          for (const nodeId of [...pendingEntries.keys()]) {
+            const pending = pendingEntries.get(nodeId);
+            pendingEntries.delete(nodeId);
+            const previous = entries.get(nodeId);
+            if (previous) {
+              entries.delete(nodeId);
+              detachContent(nodeId, previous.contentKey);
+            }
+            if (pending) {
+              entries.set(nodeId, {
+                url: pending.url, contentKey: pending.contentKey, tier: pending.tier,
+                load: pending.load, sent: false
+              });
+              resourceDirty.add(nodeId);
+            }
+          }
+          for (const entry of entries.values()) { entry.sent = false; entry.submitted = false; loading.setLoading(entry.load, true); }
+        }
+        const retry = options.runtime.retryVersion?.() ?? 0;
+        const retryChanged = retry !== retryVersion;
+        if (retryChanged) {
+          retryVersion = retry;
+          for (const [key, content] of contents) {
+            if (content.retryTimer !== undefined) {
+              globalThis.clearTimeout(content.retryTimer);
+              content.retryTimer = undefined;
+            }
+            if (content.failed) contents.delete(key);
+          }
+          for (const [id, entry] of [...entries]) if (!desired.has(id) || !contents.has(entry.contentKey)) removeBinding(id);
+          for (const [id, pending] of [...pendingEntries]) if (!desired.has(id) || !contents.has(pending.contentKey)) dropPending(id);
+          previousOverride = null;
+          previousDetails=undefined;
+        }
+        const override = options.getFocusTexture?.() ?? null;
+        if (previousOverride && previousOverride !== override) {
+          uploads.clear(`focus:${previousOverride.nodeId}`);
+          const original = entries.get(previousOverride.nodeId);
+          if (original) { original.sent = false; original.submitted = false; }
+        }
+        // 移除不再需要的节点纹理缓存；先算好删除，再补齐新增（共享内容保留）。
+        let changed = false;
+        if (bindingsChanged || retryChanged) {
+          for (const id of uploaded) if (!desired.has(id)) setUploaded(id, false);
+          if (retainNodes(desired)) changed = true;
+        }
+        if (override && override !== previousOverride) {
+          focusSource = `focus:${override.nodeId}:${++nextFocusSource}`;
+          const accepted = uploads.run(`focus:${override.nodeId}`, override, override.nodeId,
+            () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels, {
+              sourceKey: focusSource,
+              ...(override.scope ? { scope: override.scope } : {})
+            }) !== false);
+          traceVideoTexture(override.pixels, "texture-submit", { accepted: !!accepted, sourceKey: focusSource, width: override.width, height: override.height });
+          overrideUploaded = !!accepted;
+          if (accepted) {
+            const original = entries.get(override.nodeId);
+            if (original && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) loading.setLoading(original.load, false);
+            setUploaded(override.nodeId, true); changed = true;
           }
         }
-        for (const entry of entries.values()) { entry.sent = false; entry.submitted = false; loading.setLoading(entry.load, true); }
-      }
-      const retry = options.runtime.retryVersion?.() ?? 0;
-      const retryChanged = retry !== retryVersion;
-      if (retryChanged) {
-        retryVersion = retry;
-        for (const [key, content] of contents) {
-          if (content.retryTimer !== undefined) {
-            globalThis.clearTimeout(content.retryTimer);
-            content.retryTimer = undefined;
-          }
-          if (content.failed) contents.delete(key);
-        }
-        for (const [id, entry] of [...entries]) if (!desired.has(id) || !contents.has(entry.contentKey)) removeBinding(id);
-        for (const [id, pending] of [...pendingEntries]) if (!desired.has(id) || !contents.has(pending.contentKey)) dropPending(id);
-        previousOverride = null;
-        previousDetails=undefined;
-      }
-      const override = options.getFocusTexture?.() ?? null;
-      if (previousOverride && previousOverride !== override) {
-        uploads.clear(`focus:${previousOverride.nodeId}`);
-        const original = entries.get(previousOverride.nodeId);
-        if (original) { original.sent = false; original.submitted = false; }
-      }
-      // 移除不再需要的节点纹理缓存；先算好删除，再补齐新增（共享内容保留）。
-      let changed = false;
-      if (bindingsChanged || retryChanged) {
-        for (const id of uploaded) if (!desired.has(id)) setUploaded(id, false);
-        if (retainNodes(desired)) changed = true;
-      }
-      if (override && override !== previousOverride) {
-        focusSource = `focus:${override.nodeId}:${++nextFocusSource}`;
-        const accepted = uploads.run(`focus:${override.nodeId}`, override, override.nodeId,
-          () => options.runtime.setTexture(override.nodeId, override.width, override.height, override.pixels, {
-            sourceKey: focusSource,
-            ...(override.scope ? { scope: override.scope } : {})
-          }) !== false);
-        traceVideoTexture(override.pixels, "texture-submit", { accepted: !!accepted, sourceKey: focusSource, width: override.width, height: override.height });
-        overrideUploaded = !!accepted;
-        if (accepted) {
-          const original = entries.get(override.nodeId);
-          if (original && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) loading.setLoading(original.load, false);
-          setUploaded(override.nodeId, true); changed = true;
-        }
-      }
-      if (override && overrideUploaded) traceVideoTexture(override.pixels, "texture-receipt", {
-        sourceKey: focusSource,
-        applied: options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? null,
-        renderedRevision: options.runtime.renderedRevision?.()
-      });
-      if (override && overrideUploaded && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) {
-        const original = entries.get(override.nodeId);
-        if (original) loading.setLoading(original.load, false);
-      }
-      if (!override) overrideUploaded = false;
-      const details=options.getFocusDetails?.()??null;
-      if(details!==previousDetails) {
-        const nodeId=details?.nodeId??previousDetails?.nodeId??"";
-        const accepted=uploads.run(`focus-details:${nodeId}`,details,nodeId,()=>{
-          if(details) {
-            if(!options.runtime.setImageFocusDetails)throw new Error("画布内核缺少图片细节纹理接口");
-            try {setFocusDetails(details, details.scope);}
-            catch(error){setFocusDetails(null, details.scope);throw error;}
-          } else setFocusDetails(null, activeScope ?? undefined);
-          return true;
+        if (override && overrideUploaded) traceVideoTexture(override.pixels, "texture-receipt", {
+          sourceKey: focusSource,
+          applied: options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? null,
+          renderedRevision: options.runtime.renderedRevision?.()
         });
-        previousDetails=details;
-        if(accepted!==true)details?.onUploadFailure?.();
-      }
-      // A failed focus upgrade still allows the card to upload once decoding finishes.
-      const restarted = new Set<string>();
-      // 后台目标先于普通条目上传：旧纹理继续显示，只有目标真正受理后才替换。
-      for (const [id, pending] of [...pendingEntries]) {
-        if (id === override?.nodeId && overrideUploaded) continue;
-        const content = contents.get(pending.contentKey);
-        if (!content) continue;
-        if (content.released) {
-          if (content.ready && !content.failed && !restarted.has(content.key)) {
-            restarted.add(content.key);
-            startDecode(content, content.url, content.tier, admissionOf(id).purpose, content.key);
+        if (override && overrideUploaded && (options.runtime.textureApplied?.(override.nodeId, override.width, override.height, focusSource) ?? true)) {
+          const original = entries.get(override.nodeId);
+          if (original) loading.setLoading(original.load, false);
+        }
+        if (!override) overrideUploaded = false;
+        const details=options.getFocusDetails?.()??null;
+        if(details!==previousDetails) {
+          const nodeId=details?.nodeId??previousDetails?.nodeId??"";
+          const accepted=uploads.run(`focus-details:${nodeId}`,details,nodeId,()=>{
+            if(details) {
+              if(!options.runtime.setImageFocusDetails)throw new Error("画布内核缺少图片细节纹理接口");
+              try {setFocusDetails(details, details.scope);}
+              catch(error){setFocusDetails(null, details.scope);throw error;}
+            } else setFocusDetails(null, activeScope ?? undefined);
+            return true;
+          });
+          previousDetails=details;
+          if(accepted!==true)details?.onUploadFailure?.();
+        }
+        // A failed focus upgrade still allows the card to upload once decoding finishes.
+        const restarted = new Set<string>();
+        // 后台目标先于普通条目上传：旧纹理继续显示，只有目标真正受理后才替换。
+        for (const [id, pending] of [...pendingEntries]) {
+          if (id === override?.nodeId && overrideUploaded) continue;
+          const content = contents.get(pending.contentKey);
+          if (!content) continue;
+          if (content.released) {
+            if (content.ready && !content.failed && !restarted.has(content.key)) {
+              restarted.add(content.key);
+              startDecode(content, content.url, content.tier, admissionOf(id).purpose, content.key);
+            }
+            continue;
           }
-          continue;
-        }
-        if (!content.ready || !content.pixels || !content.width || !content.height) continue;
-        if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
-        const accepted = uploads.run(`image:${id}`, content, id,
-          () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
-            { sourceKey: content.url, preserveFailure: id === override?.nodeId, ...(content.scope ? { scope: content.scope } : {}) }) !== false);
-        if (!accepted) {
-          loading.setLoading(pending.load, false);
-          continue;
-        }
-        const committed = adoptPending(id, true);
-        setUploaded(id, true);
-        changed = true;
-        if (committed && (options.runtime.textureApplied?.(id, content.width, content.height, content.url) ?? true)) {
-          committed.sent = true;
-          loading.setLoading(committed.load, false);
-        }
-      }
-      for (const [id, entry] of entries) {
-        if (pendingEntries.has(id)) continue;
-        if ((id === override?.nodeId && overrideUploaded) || entry.sent) continue;
-        const content = contents.get(entry.contentKey);
-        if (!content) continue;
-        if (content.released) {
-          // 像素已按任务 4.5 释放，但仍有未上传引用者（运行代际恢复 / 新绑定）：按需重读一次。
-          // 同内容每帧最多重读一次；失败内容不自动重试（保持占位，等显式重试）。
-          if (content.ready && !content.failed && !restarted.has(content.key)) {
-            restarted.add(content.key);
-            startDecode(content, content.url, content.tier, admissionOf(id).purpose, content.key);
+          if (!content.ready || !content.pixels || !content.width || !content.height) continue;
+          const pendingCost = content.runtimeUploaded
+            ? Math.min(content.width * content.height * 4, 4096)
+            : content.width * content.height * 4;
+          if (!(residency?.spendUploadBytes(pendingCost) ?? true)) continue;
+          const accepted = uploads.run(`image:${id}`, content, id,
+            () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
+              { sourceKey: content.url, preserveFailure: id === override?.nodeId, ...(content.scope ? { scope: content.scope } : {}) }) !== false);
+          if (!accepted) {
+            loading.setLoading(pending.load, false);
+            continue;
           }
-          continue;
-        }
-        if (!content.ready || !content.pixels || !content.width || !content.height) continue;
-        if (entry.submitted) {
-          if (options.runtime.textureApplied?.(id,content.width,content.height,content.url) ?? true) {
-            entry.sent=true; setUploaded(id, true); loading.setLoading(entry.load,false); changed=true;
+          content.runtimeUploaded = true;
+          const committed = adoptPending(id, true);
+          setUploaded(id, true);
+          changed = true;
+          if (committed && (options.runtime.textureApplied?.(id, content.width, content.height, content.url) ?? true)) {
+            committed.sent = true;
+            loading.setLoading(committed.load, false);
           }
-          continue;
         }
-        // 每帧上传 staging 预算（design D3）：额度用尽就留到下一帧，不能记成失败
-        // （「本帧没上传」不是资源错误，只是被延后）。
-        if (!(residency?.spendUploadBytes(content.width * content.height * 4) ?? true)) continue;
-        const accepted = uploads.run(`image:${id}`, content, id,
-          () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
-            { sourceKey: content.url, preserveFailure: id === override?.nodeId, ...(content.scope ? { scope: content.scope } : {}) }) !== false);
-        if (accepted) {
-          // Publish eligibility so the scene accepts the queued texture; loading waits for the owner-thread receipt.
-          entry.submitted=true; setUploaded(id, true); changed=true;
-          if(options.runtime.textureApplied?.(id,content.width,content.height,content.url) ?? true) {
-            entry.sent=true;loading.setLoading(entry.load,false);
+        for (const [id, entry] of entries) {
+          if (pendingEntries.has(id)) continue;
+          if ((id === override?.nodeId && overrideUploaded) || entry.sent) continue;
+          const content = contents.get(entry.contentKey);
+          if (!content) continue;
+          if (content.released) {
+            // 像素已按任务 4.5 释放，但仍有未上传引用者（运行代际恢复 / 新绑定）：按需重读一次。
+            // 同内容每帧最多重读一次；失败内容不自动重试（保持占位，等显式重试）。
+            if (content.ready && !content.failed && !restarted.has(content.key)) {
+              restarted.add(content.key);
+              startDecode(content, content.url, content.tier, admissionOf(id).purpose, content.key);
+            }
+            continue;
           }
-        } else {
-          loading.setLoading(entry.load, false);
+          if (!content.ready || !content.pixels || !content.width || !content.height) continue;
+          if (entry.submitted) {
+            if (options.runtime.textureApplied?.(id,content.width,content.height,content.url) ?? true) {
+              entry.sent=true; setUploaded(id, true); loading.setLoading(entry.load,false); changed=true;
+            }
+            continue;
+          }
+          // 每帧上传 staging 预算（design D3）：额度用尽就留到下一帧，不能记成失败
+          // （「本帧没上传」不是资源错误，只是被延后）。已上传过像素的同源内容只计轻量绑定成本。
+          const uploadCost = content.runtimeUploaded
+            ? Math.min(content.width * content.height * 4, 4096)
+            : content.width * content.height * 4;
+          if (!(residency?.spendUploadBytes(uploadCost) ?? true)) continue;
+          const accepted = uploads.run(`image:${id}`, content, id,
+            () => options.runtime.setTexture(id, content.width!, content.height!, content.pixels!,
+              { sourceKey: content.url, preserveFailure: id === override?.nodeId, ...(content.scope ? { scope: content.scope } : {}) }) !== false);
+          if (accepted) {
+            content.runtimeUploaded = true;
+            // Publish eligibility so the scene accepts the queued texture; loading waits for the owner-thread receipt.
+            entry.submitted=true; setUploaded(id, true); changed=true;
+            if(options.runtime.textureApplied?.(id,content.width,content.height,content.url) ?? true) {
+              entry.sent=true;loading.setLoading(entry.load,false);
+            }
+          } else {
+            loading.setLoading(entry.load, false);
+          }
         }
-      }
-      // 逐层释放（design D4 / 任务 4.5）：所有引用者都已确认上传后，JS 侧不再保留像素副本。
-      // 只做 JS 去重或只清屏幕图元都不算完成回收；Bevy 侧按内容身份共享纹理，像素可再读。
-      //
-      // 例外：聚焦升级与编辑细节**必须**保留原图（design D4「保持聚焦原图/编辑细节」）——
-      // 退出聚焦要立刻重传原图，不能先黑一下再等重读。
-      const retainedNodes = new Set<string>();
-      const focusNode = override?.nodeId ?? details?.nodeId;
-      if (focusNode) retainedNodes.add(focusNode);
-      for (const content of contents.values()) {
-        if (!content.ready || content.released || !content.pixels) continue;
-        if (hasPendingUpload(content)) continue;
-        if ([...content.nodes].some(nodeId => retainedNodes.has(nodeId))) continue;
-        releaseImagePixels(content.pixels);
-        content.pixels = undefined;
-        content.released = true;
-      }
-      previousOverride = override;
-      if (changed) options.onChange?.();
+        // 逐层释放（design D4 / 任务 4.5）：所有引用者都已确认上传后，JS 侧不再保留像素副本。
+        // 只做 JS 去重或只清屏幕图元都不算完成回收；Bevy 侧按内容身份共享纹理，像素可再读。
+        //
+        // 例外：聚焦升级与编辑细节**必须**保留原图（design D4「保持聚焦原图/编辑细节」）——
+        // 退出聚焦要立刻重传原图，不能先黑一下再等重读。
+        const retainedNodes = new Set<string>();
+        const focusNode = override?.nodeId ?? details?.nodeId;
+        if (focusNode) retainedNodes.add(focusNode);
+        for (const content of contents.values()) {
+          if (!content.ready || content.released || !content.pixels) continue;
+          if (hasPendingUpload(content)) continue;
+          if ([...content.nodes].some(nodeId => retainedNodes.has(nodeId))) continue;
+          releaseImagePixels(content.pixels);
+          content.pixels = undefined;
+          content.released = true;
+        }
+        previousOverride = override;
+        if (changed) options.onChange?.();
+      });
     },
     textureNodeIds() {
       return new Set(uploaded);

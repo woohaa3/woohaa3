@@ -328,7 +328,13 @@ impl RenderResponse {
 
 /// 校验请求：版本、结构、脚本源码拒绝与尺寸上限。
 pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErrorCode, String)> {
-    if request.protocol_version != if request.world.is_some() { WORLD_RENDERER_PROTOCOL_VERSION } else { RENDERER_PROTOCOL_VERSION } {
+    if request.protocol_version
+        != if request.world.is_some() {
+            WORLD_RENDERER_PROTOCOL_VERSION
+        } else {
+            RENDERER_PROTOCOL_VERSION
+        }
+    {
         // 旧 worker 收到 v2 会在此稳定拒绝，不静默忽略运动字段后返回静态帧（任务 4.1）。
         return Err((
             RenderErrorCode::UnsupportedProtocolVersion,
@@ -364,19 +370,40 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
     }
     let capture = &request.capture;
     if let Some(world) = &request.world {
-        world.camera.validate().map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
+        world
+            .camera
+            .validate()
+            .map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
         if request.motion.is_some() || request.placement.is_some() || !request.ops.is_empty() {
-            return Err((RenderErrorCode::InvalidScene, "World capture cannot mix model framing".into()));
+            return Err((
+                RenderErrorCode::InvalidScene,
+                "World capture cannot mix model framing".into(),
+            ));
         }
         let mut ids = std::collections::HashSet::new();
         for entry in &world.instances {
-            entry.instance.validate().map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
-            if !ids.insert(&entry.instance.instance_id) || world.camera.bound_instance_id.as_ref().is_some_and(|id| id != &entry.instance.instance_id) {
-                return Err((RenderErrorCode::InvalidScene, "Invalid world capture binding".into()));
+            entry
+                .instance
+                .validate()
+                .map_err(|error| (RenderErrorCode::InvalidScene, error.to_owned()))?;
+            if !ids.insert(&entry.instance.instance_id)
+                || world
+                    .camera
+                    .bound_instance_id
+                    .as_ref()
+                    .is_some_and(|id| id != &entry.instance.instance_id)
+            {
+                return Err((
+                    RenderErrorCode::InvalidScene,
+                    "Invalid world capture binding".into(),
+                ));
             }
         }
         if world.camera.bound_instance_id.is_some() && world.instances.len() != 1 {
-            return Err((RenderErrorCode::InvalidScene, "Bound world capture requires one instance".into()));
+            return Err((
+                RenderErrorCode::InvalidScene,
+                "Bound world capture requires one instance".into(),
+            ));
         }
     }
     if capture.width == 0
@@ -387,7 +414,10 @@ pub(crate) fn validate_request(request: &RenderRequest) -> Result<(), (RenderErr
         return Err((RenderErrorCode::MalformedRequest, "预览尺寸越界".to_owned()));
     }
     if !CAPTURE_FORMATS.contains(&capture.format.as_str()) {
-        return Err((RenderErrorCode::MalformedRequest, "未知 capture format".to_owned()));
+        return Err((
+            RenderErrorCode::MalformedRequest,
+            "未知 capture format".to_owned(),
+        ));
     }
     if !CAMERA_PRESETS.contains(&capture.camera_preset.as_str()) {
         return Err((

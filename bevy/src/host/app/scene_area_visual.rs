@@ -58,8 +58,17 @@ pub(super) fn sync_scene_areas(
                         material.base_color = rgb(execution_color);
                     }
                 }
-                sync_execution(&mut commands, &mut materials, &cube, visual, area,
-                    &theme, time.elapsed_secs(), scene.0.viewport.zoom, active);
+                sync_execution(
+                    &mut commands,
+                    &mut materials,
+                    &cube,
+                    visual,
+                    area,
+                    &theme,
+                    time.elapsed_secs(),
+                    scene.0.viewport.zoom,
+                    active,
+                );
             }
         }
     }
@@ -108,7 +117,11 @@ pub(super) fn sync_scene_areas(
                 let entities = std::array::from_fn(|i| {
                     let mut entity = commands.spawn((
                         Mesh3d(cube.clone()),
-                        MeshMaterial3d(if i == 12 { fill.clone() } else { border.clone() }),
+                        MeshMaterial3d(if i == 12 {
+                            fill.clone()
+                        } else {
+                            border.clone()
+                        }),
                         RenderLayers::layer(crate::world_camera_preview::DIRECTOR_AREA_LAYER),
                         NotShadowCaster,
                     ));
@@ -127,7 +140,11 @@ pub(super) fn sync_scene_areas(
                 }
             });
             if let Some(mut material) = materials.get_mut(&visual.border) {
-                material.base_color = rgb(if scene.0.executing_scopes.contains(&area.node_id) { execution_color } else { style.border });
+                material.base_color = rgb(if scene.0.executing_scopes.contains(&area.node_id) {
+                    execution_color
+                } else {
+                    style.border
+                });
             }
             if let Some(mut material) = materials.get_mut(&visual.fill) {
                 material.base_color = theme
@@ -186,8 +203,17 @@ pub(super) fn sync_scene_areas(
                     Visibility::Hidden
                 },
             ));
-            sync_execution(&mut commands, &mut materials, &cube, visual, area,
-                &theme, time.elapsed_secs(), zoom, scene.0.executing_scopes.contains(&area.node_id));
+            sync_execution(
+                &mut commands,
+                &mut materials,
+                &cube,
+                visual,
+                area,
+                &theme,
+                time.elapsed_secs(),
+                zoom,
+                scene.0.executing_scopes.contains(&area.node_id),
+            );
         }
     }
     layer.areas.retain(|id, visual| {
@@ -286,9 +312,7 @@ fn sync_execution(
     let contours = scope_label_contours(area, zoom);
     let mut count = 0;
     for segment in crate::scope_visual::execution_trail(&path, seconds) {
-        for (start, end) in
-            edge_outside_labels(segment.start, segment.end, &contours, width)
-        {
+        for (start, end) in edge_outside_labels(segment.start, segment.end, &contours, width) {
             let Some(entity) = execution.entities.get(count) else {
                 break;
             };
@@ -314,18 +338,34 @@ fn sync_execution(
 
 /// The outline and execution trail both leave room for the name and playback capsule.
 fn scope_label_contours(area: &crate::protocol::SceneArea, zoom: f32) -> Vec<(Vec<Vec2>, f32)> {
-    [layout::scene_area_label_geometry_for_zoom(area, zoom),
-     crate::canvas_query::scene_area_player::geometry(area, zoom)]
-        .into_iter().flatten()
-        .map(|g| (layout::scene_area_label_outline(&g), ((g.scale() - 1.0) * 0.5).max(0.0)))
-        .collect()
+    [
+        layout::scene_area_label_geometry_for_zoom(area, zoom),
+        crate::canvas_query::scene_area_player::geometry(area, zoom),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|g| {
+        (
+            layout::scene_area_label_outline(&g),
+            ((g.scale() - 1.0) * 0.5).max(0.0),
+        )
+    })
+    .collect()
 }
 
-fn edge_outside_labels(a: Vec2, b: Vec2, contours: &[(Vec<Vec2>, f32)], width: f32) -> Vec<(Vec2, Vec2)> {
+fn edge_outside_labels(
+    a: Vec2,
+    b: Vec2,
+    contours: &[(Vec<Vec2>, f32)],
+    width: f32,
+) -> Vec<(Vec2, Vec2)> {
     let mut pieces = vec![(a, b)];
     for (contour, border_padding) in contours {
         let padding = projected_stroke_padding(width) + border_padding;
-        pieces = pieces.into_iter().flat_map(|(a,b)| edge_outside_nameplate(a,b,Some(contour),padding)).collect();
+        pieces = pieces
+            .into_iter()
+            .flat_map(|(a, b)| edge_outside_nameplate(a, b, Some(contour), padding))
+            .collect();
     }
     pieces
 }
@@ -415,17 +455,23 @@ mod tests {
     #[test]
     fn execution_animates_retained_border_and_trails_and_restores_after_stop() {
         let scene = crate::protocol::Scene {
-            scene_areas: vec![serde_json::from_value(serde_json::json!({
-                "nodeId":"area", "title":"Area", "bounds":{
-                "min":{"u":-2,"v":-2},"max":{"u":2,"v":2}}
-            })).unwrap()],
+            scene_areas: vec![
+                serde_json::from_value(serde_json::json!({
+                    "nodeId":"area", "title":"Area", "bounds":{
+                    "min":{"u":-2,"v":-2},"max":{"u":2,"v":2}}
+                }))
+                .unwrap(),
+            ],
             executing_scopes: vec!["area".into()],
             ..default()
         };
         let mut app = App::new();
         app.insert_resource(CurrentScene(scene))
             .insert_resource(Time::<()>::default())
-            .insert_resource(FrameFlags { scene_received: true, ..default() })
+            .insert_resource(FrameFlags {
+                scene_received: true,
+                ..default()
+            })
             .init_resource::<ThemeResource>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
@@ -434,26 +480,65 @@ mod tests {
         let (entity, handle, transform) = app.world_mut()
             .query_filtered::<(Entity, &MeshMaterial3d<StandardMaterial>, &Transform), With<SceneAreaLine>>()
             .iter(app.world()).next().map(|(e, h, t)| (e, h.0.clone(), *t)).unwrap();
-        let before = app.world().resource::<Assets<StandardMaterial>>().get(&handle).unwrap().base_color;
-        let trail_before: Vec<_> = app.world_mut().query_filtered::<(Entity, &Transform), With<SceneAreaExecution>>()
-            .iter(app.world()).map(|(entity, transform)| (entity, *transform)).collect();
+        let before = app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap()
+            .base_color;
+        let trail_before: Vec<_> = app
+            .world_mut()
+            .query_filtered::<(Entity, &Transform), With<SceneAreaExecution>>()
+            .iter(app.world())
+            .map(|(entity, transform)| (entity, *transform))
+            .collect();
         assert!(!trail_before.is_empty());
         app.world_mut().resource_mut::<FrameFlags>().scene_received = false;
-        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(900));
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(900));
         app.update();
-        let after = app.world().resource::<Assets<StandardMaterial>>().get(&handle).unwrap().base_color;
+        let after = app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap()
+            .base_color;
         assert_ne!(before, after);
         assert_eq!(*app.world().get::<Transform>(entity).unwrap(), transform);
         assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
-        assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 2 + crate::scope_visual::EXECUTION_TRAIL_STEPS);
+        assert_eq!(
+            app.world().resource::<Assets<StandardMaterial>>().len(),
+            2 + crate::scope_visual::EXECUTION_TRAIL_STEPS
+        );
         assert!(trail_before.iter().any(|(entity, transform)| app.world().get::<Transform>(*entity) != Some(transform)),
             "retained trail segments must move without a scene update");
-        app.world_mut().resource_mut::<CurrentScene>().0.executing_scopes.clear();
+        app.world_mut()
+            .resource_mut::<CurrentScene>()
+            .0
+            .executing_scopes
+            .clear();
         app.world_mut().resource_mut::<FrameFlags>().scene_received = true;
         app.update();
-        let expected = app.world().resource::<ThemeResource>().token_u32("canvasEdgeDefault");
-        assert_eq!(app.world().resource::<Assets<StandardMaterial>>().get(&handle).unwrap().base_color, rgb(expected));
-        assert_eq!(app.world_mut().query_filtered::<Entity, With<SceneAreaExecution>>().iter(app.world()).count(), 0);
+        let expected = app
+            .world()
+            .resource::<ThemeResource>()
+            .token_u32("canvasEdgeDefault");
+        assert_eq!(
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&handle)
+                .unwrap()
+                .base_color,
+            rgb(expected)
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<SceneAreaExecution>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
         assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 2);
     }
 
@@ -517,41 +602,58 @@ mod tests {
         let area: crate::protocol::SceneArea = serde_json::from_value(serde_json::json!({
             "nodeId":"area", "bounds":{"min":{"u":0,"v":0},"max":{"u":3,"v":3}},
             "playback":{"time":1,"duration":4,"playing":true,"loop":false}
-        })).unwrap();
-        let path = [Vec2::new(0.0,0.0), Vec2::new(192.0,0.0),
-                    Vec2::new(192.0,-192.0), Vec2::new(0.0,-192.0)];
+        }))
+        .unwrap();
+        let path = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(192.0, 0.0),
+            Vec2::new(192.0, -192.0),
+            Vec2::new(0.0, -192.0),
+        ];
         let rotation = crate::isometric_grid::view_rotation();
-        for zoom in [0.1,0.25,1.0,8.0,12.0] {
+        for zoom in [0.1, 0.25, 1.0, 8.0, 12.0] {
             let contours = scope_label_contours(&area, zoom);
-            assert_eq!(contours.len(),2);
-            for pixels in [1.25,1.5,2.0,3.0] {
-                let width = ground_stroke_width(pixels,zoom);
+            assert_eq!(contours.len(), 2);
+            for pixels in [1.25, 1.5, 2.0, 3.0] {
+                let width = ground_stroke_width(pixels, zoom);
                 let mut segments = Vec::new();
                 for i in 0..4 {
-                    let pieces = edge_outside_labels(path[i],path[(i+1)%4],&contours,width);
+                    let pieces = edge_outside_labels(path[i], path[(i + 1) % 4], &contours, width);
                     assert!(pieces.len() <= 3, "retained edge pool must fit all pieces");
                     segments.extend(pieces);
                 }
-                for seconds in [0.1,0.9,1.8,3.1] {
-                    let trail: Vec<_> = crate::scope_visual::execution_trail(&path,seconds).into_iter()
-                        .flat_map(|segment| edge_outside_labels(segment.start,segment.end,&contours,width)).collect();
-                    assert!(trail.len() <= 4*(crate::scope_visual::EXECUTION_TRAIL_STEPS+8));
+                for seconds in [0.1, 0.9, 1.8, 3.1] {
+                    let trail: Vec<_> = crate::scope_visual::execution_trail(&path, seconds)
+                        .into_iter()
+                        .flat_map(|segment| {
+                            edge_outside_labels(segment.start, segment.end, &contours, width)
+                        })
+                        .collect();
+                    assert!(trail.len() <= 4 * (crate::scope_visual::EXECUTION_TRAIL_STEPS + 8));
                     segments.extend(trail);
                 }
-                for (start,end) in segments {
-                    for t in [0.0,0.5,1.0] {
-                        for x in [-0.5,0.5] { for z in [-0.5,0.5] {
-                            let p = start.lerp(end,t) + Vec2::new(x,z)*width;
-                            let projected = rotation*Vec3::new(p.x,0.0,p.y);
-                            let point = Vec2::new(projected.x,-projected.y);
-                            for (contour,_) in &contours {
-                                let inside = (0..contour.len()).all(|i| {
-                                    let normal = (contour[(i+1)%contour.len()]-contour[i]).normalize().perp();
-                                    normal.dot(point-contour[i]) >= -0.499
-                                });
-                                assert!(!inside,"scope line enters a ground capsule: zoom={zoom}, pixels={pixels}");
+                for (start, end) in segments {
+                    for t in [0.0, 0.5, 1.0] {
+                        for x in [-0.5, 0.5] {
+                            for z in [-0.5, 0.5] {
+                                let p = start.lerp(end, t) + Vec2::new(x, z) * width;
+                                let projected = rotation * Vec3::new(p.x, 0.0, p.y);
+                                let point = Vec2::new(projected.x, -projected.y);
+                                for (contour, _) in &contours {
+                                    let inside = (0..contour.len()).all(|i| {
+                                        let normal = (contour[(i + 1) % contour.len()]
+                                            - contour[i])
+                                            .normalize()
+                                            .perp();
+                                        normal.dot(point - contour[i]) >= -0.499
+                                    });
+                                    assert!(
+                                        !inside,
+                                        "scope line enters a ground capsule: zoom={zoom}, pixels={pixels}"
+                                    );
+                                }
                             }
-                        } }
+                        }
                     }
                 }
             }

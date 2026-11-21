@@ -158,9 +158,11 @@ fn render_baseline_counts_and_geometry_fingerprint_are_stable() {
         0,
         "清空场景后标签实体必须全部回收"
     );
-    assert!(world
-        .resource::<crate::canvas2d::CardBlockCache>()
-        .blocks
-        .is_empty());
+    assert!(
+        world
+            .resource::<crate::canvas2d::CardBlockCache>()
+            .blocks
+            .is_empty()
+    );
     eprintln!("baseline counts: {baseline_counts:?}, fingerprint: {baseline_fingerprint:#x}");
 }

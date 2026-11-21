@@ -77,7 +77,13 @@ pub(crate) fn draw_unseen_badge(
         theme.token_u32("canvasNodeSurface"),
         12,
     );
-    geometry.circle(badge, 1.35, z + 0.0005, theme.token_u32("statusWarning"), 12);
+    geometry.circle(
+        badge,
+        1.35,
+        z + 0.0005,
+        theme.token_u32("statusWarning"),
+        12,
+    );
 }
 
 /// 聚合节点运行遮罩：覆盖整个节点/范围几何的半透明遮罩 + “运行中”。

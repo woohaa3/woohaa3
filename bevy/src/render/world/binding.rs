@@ -156,7 +156,10 @@ pub(crate) fn capture_layers(
             if !models.has_root(node_id) {
                 return Err("capture-instance-not-ready");
             }
-            Ok((RenderLayers::layer(*layer), bound_instance_id.map(str::to_owned)))
+            Ok((
+                RenderLayers::layer(*layer),
+                bound_instance_id.map(str::to_owned),
+            ))
         }
         BindingResolution::Missing => Err("capture-instance-not-found"),
         BindingResolution::Unavailable => Err("capture-binding-unavailable"),
@@ -241,7 +244,10 @@ mod tests {
         ] {
             let layers = camera_layers(&resolution, false);
             assert!(!layers.intersects(&key), "预览相机不得携带正式捕获主光层");
-            assert!(!layers.intersects(&RenderLayers::layer(0)), "拍摄视图不得包含主画布层");
+            assert!(
+                !layers.intersects(&RenderLayers::layer(0)),
+                "拍摄视图不得包含主画布层"
+            );
         }
     }
 
@@ -299,8 +305,10 @@ mod tests {
         let mut bindings = WorldCameraBinding::default();
         let a = bindings.resolve(&scene, &mut pool, Some("instance-a"));
         let b = bindings.resolve(&scene, &mut pool, Some("instance-b"));
-        let (BindingResolution::Instance { layer: la, .. }, BindingResolution::Instance { layer: lb, .. }) =
-            (&a, &b)
+        let (
+            BindingResolution::Instance { layer: la, .. },
+            BindingResolution::Instance { layer: lb, .. },
+        ) = (&a, &b)
         else {
             panic!("both instances must bind");
         };
@@ -347,9 +355,12 @@ mod tests {
 
     #[test]
     fn capture_whole_world_uses_the_world_layer() {
-        let (layers, hold) =
-            capture_layers(&BindingResolution::WholeWorld, &ModelVisuals::default(), None)
-                .expect("unbound capture");
+        let (layers, hold) = capture_layers(
+            &BindingResolution::WholeWorld,
+            &ModelVisuals::default(),
+            None,
+        )
+        .expect("unbound capture");
         assert!(layers.intersects(&RenderLayers::layer(WORLD_LAYER)));
         assert_eq!(hold, None);
     }

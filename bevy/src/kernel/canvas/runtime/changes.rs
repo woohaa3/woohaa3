@@ -62,7 +62,9 @@ impl ChangeSet {
         edges: &super::indices::EdgeIndex,
     ) {
         for id in ids {
-            let Some(slot) = slots.slot_last(id) else { continue };
+            let Some(slot) = slots.slot_last(id) else {
+                continue;
+            };
             self.nodes.push((id.clone(), NodeChange::Layout));
             self.card_blocks.insert((slot / BLOCK_SIZE) as u32);
             for &edge in edges.incident(id) {
@@ -74,16 +76,28 @@ impl ChangeSet {
 
     pub(crate) fn between(previous: Option<&Scene>, next: &Scene) -> Self {
         let Some(previous) = previous else {
-            let mut result = Self { structure_changed: true, viewport: ViewportChange::Zoom, ..Self::default() };
-            result.card_blocks.extend(0..next.nodes.len().div_ceil(BLOCK_SIZE) as u32);
-            result.edge_blocks.extend(0..next.edges.len().div_ceil(BLOCK_SIZE) as u32);
+            let mut result = Self {
+                structure_changed: true,
+                viewport: ViewportChange::Zoom,
+                ..Self::default()
+            };
+            result
+                .card_blocks
+                .extend(0..next.nodes.len().div_ceil(BLOCK_SIZE) as u32);
+            result
+                .edge_blocks
+                .extend(0..next.edges.len().div_ceil(BLOCK_SIZE) as u32);
             return result;
         };
         let mut result = Self::default();
         let previous_ids: Vec<&str> = previous.nodes.iter().map(|node| node.id.as_str()).collect();
         let next_ids: Vec<&str> = next.nodes.iter().map(|node| node.id.as_str()).collect();
         result.structure_changed = previous_ids != next_ids;
-        let old_by_id: HashMap<&str, &GraphNode> = previous.nodes.iter().map(|node| (node.id.as_str(), node)).collect();
+        let old_by_id: HashMap<&str, &GraphNode> = previous
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
         let indices = CanvasIndices::build(next);
         for (index, node) in next.nodes.iter().enumerate() {
             let change = match old_by_id.get(node.id.as_str()) {
@@ -96,10 +110,20 @@ impl ChangeSet {
             if let Some(change) = change {
                 result.nodes.push((node.id.clone(), change));
                 result.card_blocks.insert((index / BLOCK_SIZE) as u32);
-                result.incident_edges.extend(indices.edges.incident(&node.id).iter().map(|edge| *edge as u32));
+                result.incident_edges.extend(
+                    indices
+                        .edges
+                        .incident(&node.id)
+                        .iter()
+                        .map(|edge| *edge as u32),
+                );
             }
         }
-        let next_by_id: HashMap<&str, &GraphNode> = next.nodes.iter().map(|node| (node.id.as_str(), node)).collect();
+        let next_by_id: HashMap<&str, &GraphNode> = next
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
         for (index, old) in previous.nodes.iter().enumerate() {
             if !next_by_id.contains_key(old.id.as_str()) {
                 result.nodes.push((old.id.clone(), NodeChange::Removed));
@@ -108,12 +132,23 @@ impl ChangeSet {
             }
         }
         if result.structure_changed {
-            result.card_blocks.extend(0..next.nodes.len().div_ceil(BLOCK_SIZE) as u32);
-            result.edge_blocks.extend(0..next.edges.len().div_ceil(BLOCK_SIZE) as u32);
+            result
+                .card_blocks
+                .extend(0..next.nodes.len().div_ceil(BLOCK_SIZE) as u32);
+            result
+                .edge_blocks
+                .extend(0..next.edges.len().div_ceil(BLOCK_SIZE) as u32);
         } else {
-            result.edge_blocks.extend(result.incident_edges.iter().map(|edge| edge / BLOCK_SIZE as u32));
+            result.edge_blocks.extend(
+                result
+                    .incident_edges
+                    .iter()
+                    .map(|edge| edge / BLOCK_SIZE as u32),
+            );
             if edges_changed(previous, next) {
-                result.edge_blocks.extend(0..next.edges.len().div_ceil(BLOCK_SIZE) as u32);
+                result
+                    .edge_blocks
+                    .extend(0..next.edges.len().div_ceil(BLOCK_SIZE) as u32);
             }
         }
         result.viewport = viewport_change(&previous.viewport, &next.viewport);
@@ -133,15 +168,32 @@ fn layout_changed(a: &GraphNode, b: &GraphNode) -> bool {
 }
 
 fn resource_changed(a: &GraphNode, b: &GraphNode) -> bool {
-    a.texture != b.texture || a.media_loading != b.media_loading || a.model.as_ref().map(|m| (&m.resource_key, &m.signature)) != b.model.as_ref().map(|m| (&m.resource_key, &m.signature))
+    a.texture != b.texture
+        || a.media_loading != b.media_loading
+        || a.model.as_ref().map(|m| (&m.resource_key, &m.signature))
+            != b.model.as_ref().map(|m| (&m.resource_key, &m.signature))
 }
 
 fn content_changed(a: &GraphNode, b: &GraphNode) -> bool {
-    a.title != b.title || a.body != b.body || a.type_label != b.type_label || a.card_label != b.card_label || a.kind != b.kind || a.chrome != b.chrome || a.ghost != b.ghost || a.busy != b.busy || a.history_strip != b.history_strip
+    a.title != b.title
+        || a.body != b.body
+        || a.type_label != b.type_label
+        || a.card_label != b.card_label
+        || a.kind != b.kind
+        || a.chrome != b.chrome
+        || a.ghost != b.ghost
+        || a.busy != b.busy
+        || a.history_strip != b.history_strip
 }
 
 fn viewport_change(a: &crate::protocol::Viewport, b: &crate::protocol::Viewport) -> ViewportChange {
-    if a.zoom != b.zoom { ViewportChange::Zoom } else if a.x != b.x || a.y != b.y { ViewportChange::Pan } else { ViewportChange::None }
+    if a.zoom != b.zoom {
+        ViewportChange::Zoom
+    } else if a.x != b.x || a.y != b.y {
+        ViewportChange::Pan
+    } else {
+        ViewportChange::None
+    }
 }
 
 #[cfg(test)]
@@ -154,10 +206,12 @@ mod tests {
         scene.nodes = serde_json::from_value(json!([
             {"id":"a","type":"text","x":0,"y":0,"title":"A"},
             {"id":"b","type":"text","x":100,"y":0,"title":"B"}
-        ])).unwrap();
+        ]))
+        .unwrap();
         scene.edges = serde_json::from_value(json!([
             {"id":"e","source":"a","target":"b"}
-        ])).unwrap();
+        ]))
+        .unwrap();
         scene
     }
 

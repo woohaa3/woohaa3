@@ -68,16 +68,26 @@ pub(crate) fn base_generation() -> u32 {
 }
 
 /// Resource flags have no query geometry. Validate the entire batch before queueing any row.
-pub(crate) fn accept_resource_states(request: &crate::protocol::ResourceStateRequest) -> Result<u32, &'static str> {
+pub(crate) fn accept_resource_states(
+    request: &crate::protocol::ResourceStateRequest,
+) -> Result<u32, &'static str> {
     request.validate()?;
-    if base_generation() == 0 { return Err("unavailable"); }
-    if request.base_scene_generation != base_generation() { return Err("stale-base"); }
+    if base_generation() == 0 {
+        return Err("unavailable");
+    }
+    if request.base_scene_generation != base_generation() {
+        return Err("stale-base");
+    }
     SNAPSHOT.with(|slot| {
         let slot = slot.borrow();
         let snapshot = slot.as_ref().ok_or("unavailable")?;
-        if !snapshot.overview { return Err("not-overview"); }
+        if !snapshot.overview {
+            return Err("not-overview");
+        }
         for node in &request.nodes {
-            if !snapshot.node_index.contains_key(&node.id) { return Err("unknown-resource-node"); }
+            if !snapshot.node_index.contains_key(&node.id) {
+                return Err("unknown-resource-node");
+            }
         }
         Ok(snapshot.generation)
     })
@@ -165,6 +175,24 @@ pub(crate) fn accept_viewport(
         }
     });
     Ok(generation)
+}
+
+pub(crate) fn accept_hover(
+    base: u32,
+    _hover: Option<crate::protocol::NodeHover>,
+) -> Result<u32, &'static str> {
+    if BASE_GENERATION.with(Cell::get) == 0 {
+        return Err("unavailable");
+    }
+    if base != BASE_GENERATION.with(Cell::get) {
+        return Err("stale-base");
+    }
+    SNAPSHOT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|snapshot| snapshot.generation)
+            .ok_or("unavailable")
+    })
 }
 
 pub(crate) fn current_generation() -> u32 {

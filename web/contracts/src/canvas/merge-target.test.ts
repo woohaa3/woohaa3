@@ -3,6 +3,7 @@ import {
   MERGE_TARGET_CENTER_RATIO,
   isMergeEligibleNode,
   isMergeableNodeType,
+  mergeTargetContainsCenter,
   resolveMergeTarget,
   type MergeTargetCandidate
 } from "./merge-target.js";
@@ -19,6 +20,10 @@ function candidate(
 }
 
 describe("resolveMergeTarget", () => {
+  it("可单独判断起拖时是否已在目标矩形内", () => {
+    expect(mergeTargetContainsCenter({ x: 100, y: 100 }, candidate("t", 0, 0))).toBe(true);
+    expect(mergeTargetContainsCenter({ x: 301, y: 100 }, candidate("t", 0, 0))).toBe(false);
+  });
   it("中心落在目标完整矩形内即命中", () => {
     expect(MERGE_TARGET_CENTER_RATIO).toBe(1);
     // 目标 (0,0,200,200)，完整命中半宽 100、半高 100。

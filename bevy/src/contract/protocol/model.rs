@@ -586,7 +586,10 @@ impl ModelPose {
             return Err("Empty model pose");
         }
         for vector in [self.rotation, self.position].into_iter().flatten() {
-            if vector.iter().any(|value| !value.is_finite() || value.abs() > 1_000_000.0) {
+            if vector
+                .iter()
+                .any(|value| !value.is_finite() || value.abs() > 1_000_000.0)
+            {
                 return Err("Invalid model pose");
             }
         }
@@ -597,7 +600,10 @@ impl ModelPose {
 /// 边界级姿势校验：只接受规范化的可选 group pose。
 pub(crate) fn validate_model_poses(ops: &[ModelOp]) -> Result<(), &'static str> {
     for op in ops {
-        if let ModelOp::Group { pose: Some(pose), .. } = op {
+        if let ModelOp::Group {
+            pose: Some(pose), ..
+        } = op
+        {
             pose.validate()?;
         }
     }
@@ -651,10 +657,19 @@ mod signature_tests {
     }
 }
 
-fn deserialize_part_rotations<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<std::collections::HashMap<String, [f32; 4]>>, D::Error> {
+fn deserialize_part_rotations<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<std::collections::HashMap<String, [f32; 4]>>, D::Error> {
     let value = Option::<std::collections::HashMap<String, [f32; 4]>>::deserialize(deserializer)?;
     if let Some(poses) = &value {
-        if poses.len() > 4096 || poses.iter().any(|(id, q)| id.is_empty() || id.len() > 256 || q.iter().any(|v| !v.is_finite()) || (q.iter().map(|v| v * v).sum::<f32>() - 1.0).abs() > 0.001) {
+        if poses.len() > 4096
+            || poses.iter().any(|(id, q)| {
+                id.is_empty()
+                    || id.len() > 256
+                    || q.iter().any(|v| !v.is_finite())
+                    || (q.iter().map(|v| v * v).sum::<f32>() - 1.0).abs() > 0.001
+            })
+        {
             return Err(serde::de::Error::custom("Invalid model part rotations"));
         }
     }
@@ -666,19 +681,54 @@ mod part_rotation_tests {
     use super::*;
     #[test]
     fn part_rotations_reject_non_unit_and_unbounded_wire() {
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partRotations":{"joint":[0,0,0,0]}}"#).is_err());
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partRotations":{"joint":[1e50,0,0,1]}}"#).is_err());
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partRotations":{"joint":[0,0,0,1]}}"#).is_ok());
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m"}"#).unwrap().part_rotations.is_none());
-        let map: std::collections::HashMap<_, _> = (0..4097).map(|i| (i.to_string(), [0.,0.,0.,1.])).collect();
-        assert!(serde_json::from_value::<ModelReference>(serde_json::json!({"resourceKey":"m","partRotations":map})).is_err());
+        assert!(
+            serde_json::from_str::<ModelReference>(
+                r#"{"resourceKey":"m","partRotations":{"joint":[0,0,0,0]}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<ModelReference>(
+                r#"{"resourceKey":"m","partRotations":{"joint":[1e50,0,0,1]}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<ModelReference>(
+                r#"{"resourceKey":"m","partRotations":{"joint":[0,0,0,1]}}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m"}"#)
+                .unwrap()
+                .part_rotations
+                .is_none()
+        );
+        let map: std::collections::HashMap<_, _> = (0..4097)
+            .map(|i| (i.to_string(), [0., 0., 0., 1.]))
+            .collect();
+        assert!(
+            serde_json::from_value::<ModelReference>(
+                serde_json::json!({"resourceKey":"m","partRotations":map})
+            )
+            .is_err()
+        );
     }
 }
 
-fn deserialize_part_positions<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<std::collections::HashMap<String, [f32; 3]>>, D::Error> {
+fn deserialize_part_positions<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<std::collections::HashMap<String, [f32; 3]>>, D::Error> {
     let value = Option::<std::collections::HashMap<String, [f32; 3]>>::deserialize(deserializer)?;
     if let Some(poses) = &value {
-        if poses.len() > 4096 || poses.iter().any(|(id, p)| id.is_empty() || id.len() > 256 || p.iter().any(|v| !v.is_finite() || v.abs() > 10000.0)) {
+        if poses.len() > 4096
+            || poses.iter().any(|(id, p)| {
+                id.is_empty()
+                    || id.len() > 256
+                    || p.iter().any(|v| !v.is_finite() || v.abs() > 10000.0)
+            })
+        {
             return Err(serde::de::Error::custom("Invalid model part positions"));
         }
     }
@@ -690,9 +740,24 @@ mod part_position_tests {
     use super::*;
     #[test]
     fn reject_unbounded_part_positions() {
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partPositions":{"hips":[0,0.2,0]}}"#).is_ok());
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partPositions":{"hips":[0,10001,0]}}"#).is_err());
-        assert!(serde_json::from_str::<ModelReference>(r#"{"resourceKey":"m","partPositions":{"hips":[0,1e50,0]}}"#).is_err());
+        assert!(
+            serde_json::from_str::<ModelReference>(
+                r#"{"resourceKey":"m","partPositions":{"hips":[0,0.2,0]}}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<ModelReference>(
+                r#"{"resourceKey":"m","partPositions":{"hips":[0,10001,0]}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<ModelReference>(
+                r#"{"resourceKey":"m","partPositions":{"hips":[0,1e50,0]}}"#
+            )
+            .is_err()
+        );
     }
 }
 
@@ -700,10 +765,10 @@ mod part_position_tests {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ModelSkin {
- pub joint_ids: Vec<String>,
- pub inverse_bind_matrices: Vec<[f32;16]>,
- pub indices: Vec<Vec<usize>>,
- pub weights: Vec<Vec<f32>>,
+    pub joint_ids: Vec<String>,
+    pub inverse_bind_matrices: Vec<[f32; 16]>,
+    pub indices: Vec<Vec<usize>>,
+    pub weights: Vec<Vec<f32>>,
 }
 
 #[cfg(test)]
@@ -716,9 +781,13 @@ mod pose_tests {
 
     #[test]
     fn group_pose_parses_rotation_and_position_independently() {
-        let parsed = ops(r#"[{"t":"group","id":"root","parent":null,"pose":{"rotation":[0,30,0],"position":[0,0.5,0]}}]"#);
+        let parsed = ops(
+            r#"[{"t":"group","id":"root","parent":null,"pose":{"rotation":[0,30,0],"position":[0,0.5,0]}}]"#,
+        );
         validate_model_poses(&parsed).unwrap();
-        let ModelOp::Group { pose, .. } = &parsed[0] else { panic!() };
+        let ModelOp::Group { pose, .. } = &parsed[0] else {
+            panic!()
+        };
         let pose = pose.expect("pose");
         assert_eq!(pose.rotation, Some([0.0, 30.0, 0.0]));
         assert_eq!(pose.position, Some([0.0, 0.5, 0.0]));
@@ -726,7 +795,12 @@ mod pose_tests {
 
     #[test]
     fn boundary_rejects_unknown_empty_and_non_finite_pose_fields() {
-        assert!(serde_json::from_str::<ModelOp>(r#"{"t":"group","id":"root","pose":{"scale":[1,1,1]}}"#).is_err());
+        assert!(
+            serde_json::from_str::<ModelOp>(
+                r#"{"t":"group","id":"root","pose":{"scale":[1,1,1]}}"#
+            )
+            .is_err()
+        );
         let empty = ops(r#"[{"t":"group","id":"root","pose":{}}]"#);
         assert_eq!(validate_model_poses(&empty), Err("Empty model pose"));
         let infinite = ops(r#"[{"t":"group","id":"root","pose":{"rotation":[1e50,0,0]}}]"#);

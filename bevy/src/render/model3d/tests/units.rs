@@ -103,12 +103,27 @@ fn content_and_world_root_identity_are_independent() {
     };
     // 内容签名变化（Scene IR）不改变世界根。
     assert_eq!(v2_before.signature == v2_after.signature, false);
-    assert_eq!(model_root_transform(&node("i1")), model_root_transform(&node("i1")));
+    assert_eq!(
+        model_root_transform(&node("i1")),
+        model_root_transform(&node("i1"))
+    );
     // 实例身份不同但变换相同 ⇒ 世界根相同；变换改变才改变世界根。
-    assert_eq!(model_root_transform(&node("i1")), model_root_transform(&node("i2")));
+    assert_eq!(
+        model_root_transform(&node("i1")),
+        model_root_transform(&node("i2"))
+    );
     let mut moved = node("i1");
-    moved.shared_world_instance.as_mut().unwrap().transform.position.u = 5.0;
-    assert_ne!(model_root_transform(&node("i1")), model_root_transform(&moved));
+    moved
+        .shared_world_instance
+        .as_mut()
+        .unwrap()
+        .transform
+        .position
+        .u = 5.0;
+    assert_ne!(
+        model_root_transform(&node("i1")),
+        model_root_transform(&moved)
+    );
 }
 
 /// 重复 shape 复用同一 mesh key（任务 4.2）：同尺寸关节不线性创建重复资源。
@@ -162,7 +177,8 @@ fn model_world_is_stable_and_scale_sensitive() {
     // 实例 scale 改变确实改变世界 bounds。
     let scaled = model_bounds_for_node(&model, &node(2.0)).unwrap();
     let radius = |aabb: crate::model3d::scene::ModelAabb| {
-        (bevy::prelude::Vec3::from_array(aabb.max) - bevy::prelude::Vec3::from_array(aabb.min)).length()
+        (bevy::prelude::Vec3::from_array(aabb.max) - bevy::prelude::Vec3::from_array(aabb.min))
+            .length()
             * 0.5
     };
     assert!(
@@ -186,10 +202,11 @@ fn model_placement_never_moves_the_world_root() {
     // 根变换只看实例；`ModelReference` 已不含 placement 字段，因此无法再叠加卡片偏移。
     assert_eq!(root.translation, Vec3::ZERO);
     // 旧客户端携带 `placement`：按未知字段忽略，世界根仍是实例姿态。
-    let _legacy_reference: crate::protocol::ModelReference = serde_json::from_value(serde_json::json!({
-        "resourceKey": "woohaa-model-scene-ir-v2:sig",
-        "placement": {"offset": {"x": 9.0, "y": 9.0, "z": 9.0}, "scale": 3.0, "yaw": 45.0}
-    }))
-    .unwrap();
+    let _legacy_reference: crate::protocol::ModelReference =
+        serde_json::from_value(serde_json::json!({
+            "resourceKey": "woohaa-model-scene-ir-v2:sig",
+            "placement": {"offset": {"x": 9.0, "y": 9.0, "z": 9.0}, "scale": 3.0, "yaw": 45.0}
+        }))
+        .unwrap();
     assert_eq!(model_root_transform(&node).unwrap(), root);
 }

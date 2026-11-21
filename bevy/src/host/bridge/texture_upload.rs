@@ -24,7 +24,14 @@ pub fn set_texture(
         ));
     }
     crate::wake_canvas();
-    protocol::validate_texture(width, height, rgba.len()).map_err(BoundaryError::from_str)?;
+    let expected_len = if !content.is_empty() && rgba.is_empty() {
+        (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4)
+    } else {
+        rgba.len()
+    };
+    protocol::validate_texture(width, height, expected_len).map_err(BoundaryError::from_str)?;
     if content.len() > 4096 {
         return Err(BoundaryError::from_str(
             "Texture content identity too large",
@@ -220,7 +227,14 @@ fn validate_scoped_texture(
     if !bridge::texture_scope_matches_token(token) {
         return Err(BoundaryError::from_str("Stale canvas scope"));
     }
-    protocol::validate_texture(width, height, len).map_err(BoundaryError::from_str)?;
+    let expected_len = if !content.is_empty() && len == 0 {
+        (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4)
+    } else {
+        len
+    };
+    protocol::validate_texture(width, height, expected_len).map_err(BoundaryError::from_str)?;
     if content.len() > 4096 {
         return Err(BoundaryError::from_str(
             "Texture content identity too large",

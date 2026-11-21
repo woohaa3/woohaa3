@@ -119,10 +119,7 @@ pub(crate) fn sampled_camera_pose(
         camera.elevation,
     );
     // 非有限输入不伪造位置（采样镜头/包围球任一非法即放弃）。
-    if ![focus, position]
-        .into_iter()
-        .all(|value| value.is_finite())
-    {
+    if ![focus, position].into_iter().all(|value| value.is_finite()) {
         return None;
     }
     Some((focus, position))

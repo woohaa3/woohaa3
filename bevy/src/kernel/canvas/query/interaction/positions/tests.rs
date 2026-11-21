@@ -12,11 +12,13 @@ fn scene() -> Scene {
             {"id":"b","type":"text","x":400,"y":0,"width":240,"height":180},
             {"id":"c","type":"text","x":0,"y":500},
             {"id":"d","type":"text","x":400,"y":500}
-        ])).unwrap(),
+        ]))
+        .unwrap(),
         edges: serde_json::from_value(serde_json::json!([
             {"id":"ab","source":"a","target":"b","label":"link"},
             {"id":"cd","source":"c","target":"d"}
-        ])).unwrap(),
+        ]))
+        .unwrap(),
         selection: serde_json::from_value(serde_json::json!({"nodes":["a","b"]})).unwrap(),
         aggregate_connect: Some(serde_json::from_value(serde_json::json!({})).unwrap()),
         ..Default::default()

@@ -10,13 +10,13 @@ use super::{
     labels::{Label, LabelOwner, LabelRequests, LabelStyle, LabelWriter},
 };
 use crate::canvas_ecs::components::{CanvasLabelRole, CardVisual};
+use crate::canvas_runtime::{Aabb, Workset, WorksetIndex};
 use crate::{
     protocol::{GraphNode, Scene},
     theme::ThemeResource,
 };
-use crate::canvas_runtime::{Aabb, Workset, WorksetIndex};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub(super) const BLOCK_SIZE: usize = 16;
 // Owned exact draw inputs, rather than hashes or complete model/media payloads.
@@ -122,21 +122,32 @@ impl CardBlockCache {
         let visible = Aabb::from_viewport(&viewport, surface.to_array());
         let next = if cfg!(feature = "canvas-reference") {
             (0..self.blocks.len() as u32).collect()
-        } else { self.workset_index.query_with_hysteresis(
-            visible,
-            64.0 / zoom,
-            80.0 / zoom,
-            self.workset.active(),
-        ) };
+        } else {
+            self.workset_index.query_with_hysteresis(
+                visible,
+                64.0 / zoom,
+                80.0 / zoom,
+                self.workset.active(),
+            )
+        };
         let delta = self.workset.update(next);
         let mut changed = std::mem::take(&mut self.new_block_visibility);
         changed.extend(delta.entered);
         changed.extend(delta.left);
-        self.pending_label_visibility.extend(changed.iter().copied());
+        self.pending_label_visibility
+            .extend(changed.iter().copied());
         #[cfg(test)]
-        { self.visibility_writes = 0; }
+        {
+            self.visibility_writes = 0;
+        }
         for index in changed {
-            let Some(entity) = self.blocks.get(index as usize).and_then(|block| block.entity) else { continue };
+            let Some(entity) = self
+                .blocks
+                .get(index as usize)
+                .and_then(|block| block.entity)
+            else {
+                continue;
+            };
             let visibility = if self.workset.active().contains(&index) {
                 Visibility::Visible
             } else {
@@ -144,18 +155,33 @@ impl CardBlockCache {
             };
             commands.entity(entity).insert(visibility);
             #[cfg(test)]
-            { self.visibility_writes += 1; }
+            {
+                self.visibility_writes += 1;
+            }
         }
     }
 
     pub(crate) fn owner_visible(&self, owner: Entity) -> bool {
-        self.owner_blocks.get(&owner).is_some_and(|block| {
-            self.workset.active().contains(block)
-        })
+        self.owner_blocks
+            .get(&owner)
+            .is_some_and(|block| self.workset.active().contains(block))
+    }
+
+    pub(crate) fn owner_block(&self, owner: Entity) -> Option<u32> {
+        self.owner_blocks.get(&owner).copied()
+    }
+
+    pub(crate) fn block_visible(&self, block: u32) -> bool {
+        self.workset.active().contains(&block)
+    }
+
+    pub(crate) fn block_count(&self) -> u32 {
+        self.blocks.len() as u32
     }
 
     pub(crate) fn take_visibility_owners(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending_label_visibility).into_iter()
+        std::mem::take(&mut self.pending_label_visibility)
+            .into_iter()
             .filter_map(|index| self.blocks.get(index as usize))
             .flat_map(|block| block.label_ids.iter().cloned())
             .collect()
@@ -240,10 +266,18 @@ pub(super) fn sync(
         if !(ordinary(card.node) && focused_id != Some(card.node.id.as_str())) {
             continue;
         }
-        buckets.entry(card.index / BLOCK_SIZE).or_default().push(card);
+        buckets
+            .entry(card.index / BLOCK_SIZE)
+            .or_default()
+            .push(card);
     }
     let indices: Box<dyn Iterator<Item = usize> + '_> = match dirty_blocks {
-        Some(dirty) => Box::new(dirty.iter().map(|&index| index as usize).filter(|&index| index < count)),
+        Some(dirty) => Box::new(
+            dirty
+                .iter()
+                .map(|&index| index as usize)
+                .filter(|&index| index < count),
+        ),
         None => Box::new(0..count),
     };
     for block_index in indices {
@@ -273,7 +307,10 @@ pub(super) fn sync(
                 )
             })
             .collect();
-        if !cfg!(feature = "canvas-reference") && block.theme == theme.fingerprint() && block.keys == keys {
+        if !cfg!(feature = "canvas-reference")
+            && block.theme == theme.fingerprint()
+            && block.keys == keys
+        {
             if block.label_keys != label_keys {
                 let submissions = block_cards
                     .iter()
@@ -347,15 +384,21 @@ pub(super) fn sync(
         visuals.workset_index.clear();
         for (index, block) in visuals.blocks.iter().enumerate() {
             if let Some((min, max)) = block_bounds(block) {
-                visuals.workset_index.insert(index as u32, Aabb { min, max });
+                visuals
+                    .workset_index
+                    .insert(index as u32, Aabb { min, max });
             }
         }
     }
     // Recompute visibility from the current view after rebuilding block bounds.
-    visuals.sync_workset(commands, super::render::workset_viewport(scene), Vec2::new(
-        scene.surface.as_ref().map_or(1.0, |surface| surface.width),
-        scene.surface.as_ref().map_or(1.0, |surface| surface.height),
-    ));
+    visuals.sync_workset(
+        commands,
+        super::render::workset_viewport(scene),
+        Vec2::new(
+            scene.surface.as_ref().map_or(1.0, |surface| surface.width),
+            scene.surface.as_ref().map_or(1.0, |surface| surface.height),
+        ),
+    );
     rebuilt
 }
 
@@ -369,7 +412,10 @@ fn block_bounds(block: &Block) -> Option<([f32; 2], [f32; 2])> {
         max[0] = max[0].max(x.max(x + width));
         max[1] = max[1].max(y.max(y + height));
     }
-    min.iter().chain(max.iter()).all(|value| value.is_finite()).then_some((min, max))
+    min.iter()
+        .chain(max.iter())
+        .all(|value| value.is_finite())
+        .then_some((min, max))
 }
 
 /// 供 producer system 从查询结果构造输入；`node` 来自 `NodeIndex` + focus 投影。
@@ -395,7 +441,7 @@ fn card_submission(
         card.node.id.clone(),
         card.entity,
         super::cards::labels(theme, card.node, card.render),
-        10.0 + card.render as f32 * 0.1 + 0.02,
+        10.02 + card.render as f32 * 0.1,
     )
 }
 

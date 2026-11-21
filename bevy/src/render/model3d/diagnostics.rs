@@ -3,8 +3,14 @@ use super::ModelVisuals;
 use bevy::prelude::*;
 use std::collections::HashSet;
 impl ModelVisuals {
-    pub(crate) fn pose_snapshot(&self, transforms: &Query<(&Transform, &GlobalTransform)>) -> serde_json::Value {
-        fn pose(entity: Entity, transforms: &Query<(&Transform, &GlobalTransform)>) -> Option<serde_json::Value> {
+    pub(crate) fn pose_snapshot(
+        &self,
+        transforms: &Query<(&Transform, &GlobalTransform)>,
+    ) -> serde_json::Value {
+        fn pose(
+            entity: Entity,
+            transforms: &Query<(&Transform, &GlobalTransform)>,
+        ) -> Option<serde_json::Value> {
             let (local, global) = transforms.get(entity).ok()?;
             Some(serde_json::json!({
                 "translation": local.translation.to_array(), "rotation": local.rotation.to_array(),
@@ -94,8 +100,7 @@ impl ModelVisuals {
                     .map_or(count, |ids| ids.len());
                 // 每几何有效档位：总览根的自定义 Mesh / Box 恒 High，按实际 handle 计数，
                 // 不按根 desired 枚举漏计（change: 2026-10-15-add-film-set-overview-lod，design D3/D6）。
-                let effective =
-                    super::mesh::effective_quality(geometry, root.quality);
+                let effective = super::mesh::effective_quality(geometry, root.quality);
                 if let Some(handle) = self.shared.lookup(base, geometry, effective) {
                     unique.insert(handle.id());
                     if let Some(mesh) = meshes.get(handle) {

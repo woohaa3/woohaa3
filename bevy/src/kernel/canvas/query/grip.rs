@@ -22,20 +22,32 @@ impl ResizeGrip {
         let rects = layout::resize_corner_rects(x, y, width, height);
         [
             Self {
-                handle: "nw", x: rects[0].0, y: rects[0].1,
-                width: rects[0].2, height: rects[0].3,
+                handle: "nw",
+                x: rects[0].0,
+                y: rects[0].1,
+                width: rects[0].2,
+                height: rects[0].3,
             },
             Self {
-                handle: "ne", x: rects[1].0, y: rects[1].1,
-                width: rects[1].2, height: rects[1].3,
+                handle: "ne",
+                x: rects[1].0,
+                y: rects[1].1,
+                width: rects[1].2,
+                height: rects[1].3,
             },
             Self {
-                handle: "sw", x: rects[2].0, y: rects[2].1,
-                width: rects[2].2, height: rects[2].3,
+                handle: "sw",
+                x: rects[2].0,
+                y: rects[2].1,
+                width: rects[2].2,
+                height: rects[2].3,
             },
             Self {
-                handle: "se", x: rects[3].0, y: rects[3].1,
-                width: rects[3].2, height: rects[3].3,
+                handle: "se",
+                x: rects[3].0,
+                y: rects[3].1,
+                width: rects[3].2,
+                height: rects[3].3,
             },
         ]
     }

@@ -13,7 +13,16 @@
 use bevy::{
     asset::RenderAssetUsages,
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    render::{
+        Render, RenderApp, RenderSystems,
+        render_asset::RenderAssets,
+        render_resource::{
+            Extent3d, Origin3d, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
+            TextureDimension, TextureFormat,
+        },
+        renderer::RenderQueue,
+        texture::GpuImage,
+    },
 };
 
 use crate::app::TextureBatch;
@@ -21,6 +30,194 @@ use crate::canvas_ecs::components::{CanvasNodeId, CanvasTextureSprite};
 
 use super::TextureStore;
 use super::texture_store::TextureAction;
+
+#[derive(Clone, Debug)]
+pub(crate) struct AtlasPatch {
+    pub(crate) page_id: AssetId<Image>,
+    pub(crate) origin_x: u32,
+    pub(crate) origin_y: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) data: Vec<u8>,
+}
+
+/// Shared queue of sub-region atlas slot uploads from Main World (`sync_textures`)
+/// to Render World (`flush_atlas_patches`), avoiding 64 MB whole-page `AssetEvent::Modified`
+/// re-uploads on every thumbnail arrival.
+#[derive(Resource, Clone, Default)]
+pub(crate) struct AtlasPatchQueue(pub(crate) std::sync::Arc<std::sync::Mutex<Vec<AtlasPatch>>>);
+
+pub(crate) struct AtlasSubUploadPlugin;
+
+impl Plugin for AtlasSubUploadPlugin {
+    fn build(&self, app: &mut App) {
+        if app.get_sub_app_mut(RenderApp).is_none() {
+            return;
+        }
+        let queue = AtlasPatchQueue::default();
+        app.insert_resource(queue.clone());
+        if let Some(render) = app.get_sub_app_mut(RenderApp) {
+            render.insert_resource(queue).add_systems(
+                Render,
+                flush_atlas_patches
+                    .after(RenderSystems::PrepareAssets)
+                    .before(RenderSystems::Prepare),
+            );
+        }
+    }
+}
+
+fn flush_atlas_patches(
+    queue: Res<AtlasPatchQueue>,
+    gpu_images: Res<RenderAssets<GpuImage>>,
+    render_queue: Res<RenderQueue>,
+) {
+    const MAX_PATCH_BYTES_PER_FRAME: usize = 8 * 1024 * 1024;
+    const MAX_PATCHES_PER_FRAME: usize = 16;
+    let Ok(mut patches) = queue.0.lock() else {
+        return;
+    };
+    if patches.is_empty() {
+        return;
+    }
+    let mut uploaded_bytes = 0usize;
+    let mut uploaded_count = 0usize;
+    let mut index = 0;
+    while index < patches.len() {
+        let patch = &patches[index];
+        if uploaded_count >= MAX_PATCHES_PER_FRAME
+            || (uploaded_count > 0 && uploaded_bytes + patch.data.len() > MAX_PATCH_BYTES_PER_FRAME)
+        {
+            break;
+        }
+        let Some(gpu_image) = gpu_images.get(patch.page_id) else {
+            index += 1;
+            continue;
+        };
+        render_queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &gpu_image.texture,
+                mip_level: 0,
+                origin: Origin3d {
+                    x: patch.origin_x,
+                    y: patch.origin_y,
+                    z: 0,
+                },
+                aspect: TextureAspect::All,
+            },
+            &patch.data,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(patch.width * 4),
+                rows_per_image: Some(patch.height),
+            },
+            Extent3d {
+                width: patch.width,
+                height: patch.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        uploaded_bytes += patch.data.len();
+        uploaded_count += 1;
+        patches.remove(index);
+    }
+}
+
+fn build_atlas_patch(
+    page_id: AssetId<Image>,
+    placement: super::texture_store::AtlasPlacement,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Option<AtlasPatch> {
+    let expected = width as usize * height as usize * 4;
+    if rgba.len() < expected || width == 0 || height == 0 {
+        return None;
+    }
+    let slot_size = TextureStore::atlas_slot_size() as usize;
+    let padding = TextureStore::atlas_padding() as usize;
+    let pad_x = (width as usize + padding * 2 <= slot_size) as usize * padding;
+    let pad_y = (height as usize + padding * 2 <= slot_size) as usize * padding;
+    let patch_w = width as usize + pad_x * 2;
+    let patch_h = height as usize + pad_y * 2;
+    let patch_stride = patch_w * 4;
+    let row_bytes = width as usize * 4;
+    let mut data = vec![0u8; patch_w * patch_h * 4];
+    for row in 0..height as usize {
+        let source = &rgba[row * row_bytes..(row + 1) * row_bytes];
+        let dst_row = (pad_y + row) * patch_stride;
+        let dst_inner = dst_row + pad_x * 4;
+        data[dst_inner..dst_inner + row_bytes].copy_from_slice(source);
+        if pad_x > 0 {
+            data[dst_row..dst_inner].copy_from_slice(&source[..4]);
+            let right = dst_inner + row_bytes;
+            data[right..right + 4].copy_from_slice(&source[row_bytes - 4..row_bytes]);
+        }
+    }
+    if pad_y > 0 {
+        let first_inner = pad_y * patch_stride;
+        let last_inner = (pad_y + height as usize - 1) * patch_stride;
+        data.copy_within(first_inner..first_inner + patch_stride, 0);
+        data.copy_within(
+            last_inner..last_inner + patch_stride,
+            (patch_h - 1) * patch_stride,
+        );
+    }
+    Some(AtlasPatch {
+        page_id,
+        origin_x: placement.offset.x,
+        origin_y: placement.offset.y,
+        width: patch_w as u32,
+        height: patch_h as u32,
+        data,
+    })
+}
+
+fn write_atlas_pixels(
+    image: &mut Image,
+    placement: super::texture_store::AtlasPlacement,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) {
+    let Some(data) = image.data.as_mut() else {
+        return;
+    };
+    let expected = width as usize * height as usize * 4;
+    if rgba.len() < expected {
+        return;
+    }
+    let page_size = TextureStore::atlas_page_size() as usize;
+    let slot_size = TextureStore::atlas_slot_size() as usize;
+    let padding = TextureStore::atlas_padding() as usize;
+    let pad_x = (width as usize + padding * 2 <= slot_size) as usize * padding;
+    let pad_y = (height as usize + padding * 2 <= slot_size) as usize * padding;
+    let origin_x = placement.offset.x as usize + pad_x;
+    let origin_y = placement.offset.y as usize + pad_y;
+    let page_stride = page_size * 4;
+    let row_bytes = width as usize * 4;
+    for row in 0..height as usize {
+        let source = &rgba[row * row_bytes..(row + 1) * row_bytes];
+        let destination = (origin_y + row) * page_stride + origin_x * 4;
+        data[destination..destination + row_bytes].copy_from_slice(source);
+        if pad_x > 0 {
+            data[destination - 4..destination].copy_from_slice(&source[..4]);
+            let right = destination + row_bytes;
+            data[right..right + 4].copy_from_slice(&source[row_bytes - 4..row_bytes]);
+        }
+    }
+    if pad_y > 0 {
+        let copy_bytes = (width as usize + pad_x * 2) * 4;
+        let first = origin_y * page_stride + (origin_x - pad_x) * 4;
+        let last = (origin_y + height as usize - 1) * page_stride + (origin_x - pad_x) * 4;
+        let top = first - page_stride;
+        let bottom = last + page_stride;
+        let first_row = data[first..first + copy_bytes].to_vec();
+        let last_row = data[last..last + copy_bytes].to_vec();
+        data[top..top + copy_bytes].copy_from_slice(&first_row);
+        data[bottom..bottom + copy_bytes].copy_from_slice(&last_row);
+    }
+}
 
 fn locked_color(node: &crate::protocol::GraphNode, color: Color) -> Color {
     if node
@@ -51,16 +248,11 @@ pub(crate) fn sync_textures(
         &mut CanvasTextureSprite,
     )>,
     mut last_scope: Local<Option<u64>>,
+    flags: Option<Res<crate::app::FrameFlags>>,
+    changes: Option<Res<crate::app::RuntimeChanges>>,
+    cards: Option<Res<super::CardBlockCache>>,
+    patch_queue: Option<Res<AtlasPatchQueue>>,
 ) {
-    let by_id: std::collections::HashMap<&str, Entity> = nodes
-        .iter()
-        .map(|(entity, id)| (id.0.as_str(), entity))
-        .collect();
-    let ids: Vec<String> = batch.0.keys().cloned().collect();
-    let receipt_scope = batch.1;
-    // batch.1=None 表示尚未有新作用域场景，不能提前清理当前画面。
-    // 仅当出现新的 scope token 时才退役旧 sprite；Commands 延迟执行，本帧查询仍能看到它们。
-    let mut retired = std::collections::HashSet::new();
     let scope_changed = match batch.1 {
         Some(scope) if *last_scope != Some(scope) => {
             *last_scope = Some(scope);
@@ -68,15 +260,146 @@ pub(crate) fn sync_textures(
         }
         _ => false,
     };
+    if batch.0.is_empty() && !scope_changed {
+        if let Some(flags) = flags.as_deref() {
+            let only_camera = flags.camera_changed
+                && !flags.scene_received
+                && !flags.positions_received
+                && !flags.observer_changed
+                && !flags.surface_changed;
+            let only_positions = flags.positions_received
+                && !flags.scene_received
+                && !flags.observer_changed
+                && !flags.surface_changed
+                && !flags.camera_changed;
+            if !flags.scene_received
+                && !flags.positions_received
+                && !flags.observer_changed
+                && !flags.surface_changed
+                && !flags.camera_changed
+            {
+                return;
+            }
+            if only_camera {
+                if !cfg!(feature = "canvas-reference") && scene.0.model_focus.is_none() {
+                    if let Some(cards) = cards.as_deref() {
+                        for (_, _, _, mut visibility, sprite) in &mut sprites {
+                            let next = if cards.owner_visible(sprite.owner) {
+                                Visibility::Inherited
+                            } else {
+                                Visibility::Hidden
+                            };
+                            if *visibility != next {
+                                *visibility = next;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            if only_positions {
+                let changed_ids = changes
+                    .as_deref()
+                    .map(|changes| changes.changed_node_ids.as_slice())
+                    .unwrap_or(flags.changed_node_ids.as_slice());
+                let changed: std::collections::HashSet<&str> =
+                    changed_ids.iter().map(String::as_str).collect();
+                let overlay = crate::canvas_query::focus_context::overlay(&scene.0);
+                let shown = scene.0.model_focus.is_none();
+                let cards = if !cfg!(feature = "canvas-reference") && shown {
+                    cards.as_deref()
+                } else {
+                    None
+                };
+                let targets: Vec<(Entity, String, Entity)> = sprites
+                    .iter()
+                    .filter(|(_, _, _, _, owner)| changed.contains(owner.node_id.as_str()))
+                    .map(|(entity, _, _, _, owner)| (entity, owner.node_id.clone(), owner.owner))
+                    .collect();
+                for (entity, node_id, owner_entity) in targets {
+                    let Some((index, node)) = index
+                        .node(&scene.0, &node_id)
+                        .filter(|(_, node)| node.texture)
+                    else {
+                        continue;
+                    };
+                    let display = crate::canvas_query::focus_context::node(&scene.0, node);
+                    let node_index =
+                        crate::canvas_query::focus_context::index(&scene.0, &node.id, index);
+                    let Some((_, texture_px)) = texture_store.binding(&node_id) else {
+                        continue;
+                    };
+                    let (custom_size, center, color, z) = super::image_focus::sprite_layout(
+                        &overlay, &display, texture_px, node_index,
+                    );
+                    let visibility = if !shown {
+                        Visibility::Hidden
+                    } else if cards.is_some_and(|cards| cards.owner_visible(owner_entity)) {
+                        Visibility::Inherited
+                    } else if cards.is_some() {
+                        Visibility::Hidden
+                    } else {
+                        Visibility::Inherited
+                    };
+                    if let Ok((_, mut sprite, mut transform, mut current_visibility, _)) =
+                        sprites.get_mut(entity)
+                    {
+                        sprite.custom_size = Some(custom_size);
+                        sprite.rect = texture_store.rect(&node_id);
+                        sprite.color = locked_color(node, color);
+                        transform.translation = Vec3::new(center.x, -center.y, z);
+                        *current_visibility = visibility;
+                    }
+                }
+                return;
+            }
+        }
+    }
+    let by_id: std::collections::HashMap<&str, Entity> = nodes
+        .iter()
+        .map(|(entity, id)| (id.0.as_str(), entity))
+        .collect();
+    let mut ids: Vec<String> = batch.0.keys().cloned().collect();
+    // Ensure entries carrying pixel data (`!rgba.is_empty()`) are processed before
+    // 0-byte shared-content rebinds arriving in the same frame batch.
+    ids.sort_by_key(|id| {
+        batch
+            .0
+            .get(id)
+            .is_none_or(|(_, _, rgba, _)| rgba.is_empty())
+    });
+    let receipt_scope = batch.1;
+    // batch.1=None 表示尚未有新作用域场景，不能提前清理当前画面。
+    // 仅当出现新的 scope token 时才退役旧 sprite；Commands 延迟执行，本帧查询仍能看到它们。
+    let mut retired = std::collections::HashSet::new();
     if scope_changed {
         for (entity, _, _, _, _) in &sprites {
             commands.entity(entity).try_despawn();
             retired.insert(entity);
         }
+        if let Some(queue) = patch_queue.as_deref() {
+            if let Ok(mut patches) = queue.0.lock() {
+                patches.clear();
+            }
+        }
         for released in texture_store.clear() {
             images.remove(released.id());
         }
     }
+    let sprite_by_owner: std::collections::HashMap<Entity, (Entity, String, Option<String>)> =
+        if scope_changed {
+            std::collections::HashMap::new()
+        } else {
+            sprites
+                .iter()
+                .map(|(entity, _, _, _, sprite)| {
+                    (
+                        sprite.owner,
+                        (entity, sprite.node_id.clone(), sprite.content_id.clone()),
+                    )
+                })
+                .collect()
+        };
     for id in ids {
         let Some((width, height, rgba, content)) = batch.0.remove(&id) else {
             continue;
@@ -102,19 +425,73 @@ pub(crate) fn sync_textures(
         let replace_shared = texture_store.is_shared(&id);
         // 同内容同尺寸已有共享纹理：只把该节点绑过去，不重复建 GPU 资源。
         // 切 scope 后旧 sprite 仍在本帧查询里，但不能当作可复用绑定；新上传必须当帧新建。
-        let existing = if scope_changed {
-            None
-        } else {
-            sprites
-                .iter()
-                .find(|(_, _, _, _, sprite)| sprite.owner == owner)
-                .map(|(entity, _, _, _, sprite)| {
-                    (entity, sprite.node_id.clone(), sprite.content_id.clone())
-                })
-        };
-        let handle = match texture_store.resolve(content, texture_px) {
-            TextureAction::Reused(shared) => shared,
-            TextureAction::Fresh => {
+        let existing = sprite_by_owner.get(&owner).cloned();
+        let placement = content
+            .filter(|_| TextureStore::atlas_eligible(content, texture_px))
+            .and_then(|content| texture_store.ensure_atlas_slot(content, texture_px));
+        let handle = match (placement, texture_store.resolve(content, texture_px)) {
+            (Some(_placement), TextureAction::Reused(shared)) => shared,
+            (Some(placement), TextureAction::Fresh) => {
+                if rgba.is_empty() {
+                    continue;
+                }
+                let use_gpu_patch = patch_queue.is_some() && !super::video_diagnostics::enabled();
+                let page_handle = if let Some(handle) = texture_store.atlas_page_handle(placement) {
+                    handle
+                } else {
+                    let page_size = TextureStore::atlas_page_size();
+                    let usages = if use_gpu_patch {
+                        RenderAssetUsages::RENDER_WORLD
+                    } else {
+                        RenderAssetUsages::default()
+                    };
+                    let size = Extent3d {
+                        width: page_size,
+                        height: page_size,
+                        depth_or_array_layers: 1,
+                    };
+                    let mut image = if use_gpu_patch {
+                        Image::new_uninit(
+                            size,
+                            TextureDimension::D2,
+                            TextureFormat::Rgba8UnormSrgb,
+                            usages,
+                        )
+                    } else {
+                        Image::new(
+                            size,
+                            TextureDimension::D2,
+                            vec![0; page_size as usize * page_size as usize * 4],
+                            TextureFormat::Rgba8UnormSrgb,
+                            usages,
+                        )
+                    };
+                    if super::video_diagnostics::enabled() {
+                        image.texture_descriptor.usage |=
+                            bevy::render::render_resource::TextureUsages::COPY_SRC;
+                    }
+                    let handle = images.add(image);
+                    texture_store.set_atlas_page_handle(placement, handle.clone());
+                    handle
+                };
+                if use_gpu_patch {
+                    if let Some(queue) = patch_queue.as_deref()
+                        && let Some(patch) =
+                            build_atlas_patch(page_handle.id(), placement, width, height, &rgba)
+                        && let Ok(mut patches) = queue.0.lock()
+                    {
+                        patches.push(patch);
+                    }
+                } else if let Some(mut image) = images.get_mut(&page_handle) {
+                    write_atlas_pixels(&mut image, placement, width, height, &rgba);
+                }
+                page_handle
+            }
+            (_, TextureAction::Reused(shared)) => shared,
+            (None, TextureAction::Fresh) => {
+                if rgba.is_empty() {
+                    continue;
+                }
                 let mut image = Image::new(
                     Extent3d {
                         width,
@@ -139,7 +516,7 @@ pub(crate) fn sync_textures(
                             .map(|(_, sprite, _, _, _)| sprite.image.clone());
                         match previous {
                             Some(previous) if images.contains(previous.id()) => {
-                                images.insert(previous.id(), image);
+                                let _ = images.insert(previous.id(), image);
                                 previous
                             }
                             _ => images.add(image),
@@ -155,12 +532,30 @@ pub(crate) fn sync_textures(
         // 纹理已进入 Bevy 资产表：前端据此结束「加载中」。缺回执会让图片显示后
         // 仍停在加载环上（`textureApplied` 一直等这条内容+尺寸的确认）。
         match receipt_scope {
-            Some(token) => crate::bridge::texture_receipts::applied_scoped(token, "node", &id, width, height, content.unwrap_or("")),
-            None => crate::bridge::texture_receipts::applied("node", &id, width, height, content.unwrap_or("")),
+            Some(token) => crate::bridge::texture_receipts::applied_scoped(
+                token,
+                "node",
+                &id,
+                width,
+                height,
+                content.unwrap_or(""),
+            ),
+            None => crate::bridge::texture_receipts::applied(
+                "node",
+                &id,
+                width,
+                height,
+                content.unwrap_or(""),
+            ),
         }
         for stale in released {
             if stale != handle {
                 images.remove(stale.id());
+                if let Some(queue) = patch_queue.as_deref()
+                    && let Ok(mut patches) = queue.0.lock()
+                {
+                    patches.retain(|patch| patch.page_id != stale.id());
+                }
             }
         }
         let display = crate::canvas_query::focus_context::node(scene, node);
@@ -182,6 +577,7 @@ pub(crate) fn sync_textures(
                     sprites.get_mut(entity)
                 {
                     sprite.image = handle.clone();
+                    sprite.rect = texture_store.rect(&id);
                     sprite.custom_size = Some(custom_size);
                     sprite.color = color;
                     transform.translation = Vec3::new(center.x, -center.y, z);
@@ -193,6 +589,7 @@ pub(crate) fn sync_textures(
                     Sprite {
                         image: handle.clone(),
                         custom_size: Some(custom_size),
+                        rect: texture_store.rect(&id),
                         // 运行中上传的纹理先隐藏，避免盖住进度环
                         // （change: add-node-running-progress）。
                         color,
@@ -229,6 +626,11 @@ pub(crate) fn sync_textures(
         commands.entity(entity).despawn();
         for released in texture_store.release(&id) {
             images.remove(released.id());
+            if let Some(queue) = patch_queue.as_deref()
+                && let Ok(mut patches) = queue.0.lock()
+            {
+                patches.retain(|patch| patch.page_id != released.id());
+            }
         }
     }
     // 纯位置/尺寸/聚焦增量：已绑定的 Sprite 必须跟随节点布局。
@@ -237,6 +639,17 @@ pub(crate) fn sync_textures(
     // （或移动带动成员位移的组）后缩略图会留在旧位置，直到缩放画布触发换档重新上传才
     // 恢复。这里复用同一 `sprite_layout`，让位置、contain 尺寸、busy 透明与聚焦可见性
     // 都以当前 accepted 场景为准。
+    // 当帧若有 Flags 且既无 scene_received / positions_received / observer_changed / surface_changed，
+    // 说明只是新纹理到达或资源标记变化，已有其它 Sprite 的位置/尺寸并未改动，无需全表重排。
+    let layout_may_have_changed = flags.as_deref().is_none_or(|flags| {
+        flags.scene_received
+            || flags.positions_received
+            || flags.observer_changed
+            || flags.surface_changed
+    });
+    if !layout_may_have_changed {
+        return;
+    }
     let followed: Vec<(Entity, String)> = sprites
         .iter()
         .filter(|(entity, _, _, _, _)| !retired.contains(entity))
@@ -253,10 +666,18 @@ pub(crate) fn sync_textures(
         let Ok((_, sprite, _, _, _)) = sprites.get(entity) else {
             continue;
         };
-        let Some(image) = images.get(&sprite.image) else {
+        let (texture_px, rect) = texture_store
+            .binding(&id)
+            .map(|(_, size)| (size, texture_store.rect(&id)))
+            .or_else(|| {
+                images
+                    .get(&sprite.image)
+                    .map(|image| (Vec2::new(image.width() as f32, image.height() as f32), None))
+            })
+            .unwrap_or((Vec2::ZERO, None));
+        if texture_px == Vec2::ZERO {
             continue;
-        };
-        let texture_px = Vec2::new(image.width() as f32, image.height() as f32);
+        }
         let (custom_size, center, color, z) =
             super::image_focus::sprite_layout(&overlay, &display, texture_px, node_index);
         let color = locked_color(node, color);
@@ -274,6 +695,9 @@ pub(crate) fn sync_textures(
             }
             if sprite.custom_size != Some(custom_size) {
                 sprite.custom_size = Some(custom_size);
+            }
+            if sprite.rect != rect {
+                sprite.rect = rect;
             }
             if sprite.color != color {
                 sprite.color = color;
@@ -384,6 +808,40 @@ mod tests {
             .unwrap_or_else(|| panic!("node {node_id} sprite missing"))
     }
 
+    fn sprite_pixels(world: &mut World, node_id: &str) -> Vec<u8> {
+        let (handle, rect) = {
+            let mut query = world.query::<(&CanvasTextureSprite, &Sprite)>();
+            query
+                .iter(world)
+                .find(|(owner, _)| owner.node_id == node_id)
+                .map(|(_, sprite)| (sprite.image.clone(), sprite.rect))
+                .unwrap_or_else(|| panic!("node {node_id} sprite missing"))
+        };
+        let image = world.resource::<Assets<Image>>().get(&handle).unwrap();
+        let data = image.data.as_ref().unwrap();
+        let Some(rect) = rect else {
+            return data.clone();
+        };
+        let width = (rect.max.x - rect.min.x) as usize;
+        let height = (rect.max.y - rect.min.y) as usize;
+        let stride = image.width() as usize * 4;
+        let row_bytes = width * 4;
+        let mut pixels = Vec::with_capacity(width * height * 4);
+        for row in 0..height {
+            let start = (rect.min.y as usize + row) * stride + rect.min.x as usize * 4;
+            pixels.extend_from_slice(&data[start..start + row_bytes]);
+        }
+        pixels
+    }
+
+    fn sprite_rect(world: &mut World, node_id: &str) -> Option<Rect> {
+        let mut query = world.query::<(&CanvasTextureSprite, &Sprite)>();
+        query
+            .iter(world)
+            .find(|(owner, _)| owner.node_id == node_id)
+            .and_then(|(_, sprite)| sprite.rect)
+    }
+
     /// 纹理进入资产表后必须回执内容身份与尺寸；前端靠它结束图片的「加载中」。
     #[test]
     fn applied_texture_emits_receipt_for_loading_state() {
@@ -454,11 +912,11 @@ mod tests {
         let private = sprite_image(&mut world, "a");
         assert_ne!(private, shared);
         assert_eq!(sprite_image(&mut world, "b"), shared);
-        let images = world.resource::<Assets<Image>>();
-        let poster_pixels = images.get(&shared).unwrap().data.clone().unwrap();
-        assert_eq!(poster_pixels, poster);
-        let frame_pixels = images.get(&private).unwrap().data.clone().unwrap();
-        assert_eq!(frame_pixels, vec![0u8, 255, 0, 255, 0, 255, 0, 255]);
+        assert_eq!(sprite_pixels(&mut world, "b"), poster);
+        assert_eq!(
+            sprite_pixels(&mut world, "a"),
+            vec![0u8, 255, 0, 255, 0, 255, 0, 255]
+        );
     }
 
     #[test]
@@ -486,6 +944,7 @@ mod tests {
         world.run_system_once(sync_textures).unwrap();
         world.flush();
         let shared = sprite_image(&mut world, "a");
+        let shared_rect = sprite_rect(&mut world, "a");
         assert_eq!(sprite_image(&mut world, "b"), shared);
 
         world.resource_mut::<TextureBatch>().0.insert(
@@ -500,12 +959,12 @@ mod tests {
         world.run_system_once(sync_textures).unwrap();
         world.flush();
         let private = sprite_image(&mut world, "a");
-        assert_ne!(private, shared);
+        assert_eq!(private, shared);
+        assert_ne!(sprite_rect(&mut world, "a"), shared_rect);
         assert_eq!(sprite_image(&mut world, "b"), shared);
-        let images = world.resource::<Assets<Image>>();
-        assert_eq!(images.get(&shared).unwrap().data.clone().unwrap(), poster);
+        assert_eq!(sprite_pixels(&mut world, "b"), poster);
         assert_eq!(
-            images.get(&private).unwrap().data.clone().unwrap(),
+            sprite_pixels(&mut world, "a"),
             vec![0u8, 255, 0, 255, 0, 255, 0, 255]
         );
     }
@@ -528,11 +987,22 @@ mod tests {
         {
             let mut batch = world.resource_mut::<TextureBatch>();
             batch.1 = Some(parsed);
-            batch.0.insert("img".into(), (2, 1, vec![255, 0, 0, 255, 255, 0, 0, 255], Some("poster".into())));
+            batch.0.insert(
+                "img".into(),
+                (
+                    2,
+                    1,
+                    vec![255, 0, 0, 255, 255, 0, 0, 255],
+                    Some("poster".into()),
+                ),
+            );
         }
         world.run_system_once(sync_textures).unwrap();
         let rows = crate::poll_texture_receipts_scoped(&token).unwrap();
-        assert!(rows.contains(r#"["node","img",2,1,"poster"]"#), "missing scoped receipt: {rows}");
+        assert!(
+            rows.contains(r#"["node","img",2,1,"poster"]"#),
+            "missing scoped receipt: {rows}"
+        );
         assert_eq!(crate::poll_texture_receipts_scoped(&token).unwrap(), "[]");
         crate::end_canvas_scope(&token).unwrap();
         crate::bridge::begin_canvas_renderer();
@@ -548,13 +1018,19 @@ mod tests {
         assert!(crate::canvas_scope_current(&first).unwrap());
         let second = crate::begin_canvas_scope("access-b").unwrap();
         assert!(crate::canvas_scope_current(&second).unwrap());
-        assert!(!crate::canvas_scope_current(&first).unwrap(), "old visit must not be current");
+        assert!(
+            !crate::canvas_scope_current(&first).unwrap(),
+            "old visit must not be current"
+        );
         // The query itself is read-only: asking again keeps the same answer.
         assert!(!crate::canvas_scope_current(&first).unwrap());
         assert!(crate::canvas_scope_current(&second).unwrap());
         assert!(crate::canvas_scope_current("0").is_err());
         crate::end_canvas_scope(&second).unwrap();
-        assert!(!crate::canvas_scope_current(&second).unwrap(), "ended visit must not be current");
+        assert!(
+            !crate::canvas_scope_current(&second).unwrap(),
+            "ended visit must not be current"
+        );
         crate::bridge::begin_canvas_renderer();
     }
 
@@ -573,7 +1049,10 @@ mod tests {
         {
             let mut batch = app.world_mut().resource_mut::<TextureBatch>();
             batch.1 = Some(1);
-            batch.0.insert("img".into(), (1, 1, vec![255, 0, 0, 255], Some("old".into())));
+            batch.0.insert(
+                "img".into(),
+                (1, 1, vec![255, 0, 0, 255], Some("old".into())),
+            );
         }
         app.add_systems(Update, sync_textures);
         app.update();
@@ -581,7 +1060,11 @@ mod tests {
         assert!(app.world().resource::<Assets<Image>>().get(&old).is_some());
         app.world_mut().resource_mut::<TextureBatch>().1 = Some(2);
         app.update();
-        let count = app.world_mut().query::<&CanvasTextureSprite>().iter(app.world()).count();
+        let count = app
+            .world_mut()
+            .query::<&CanvasTextureSprite>()
+            .iter(app.world())
+            .count();
         assert_eq!(count, 0, "new scope must not display the old canvas sprite");
         assert!(app.world().resource::<Assets<Image>>().get(&old).is_none());
     }
@@ -601,7 +1084,10 @@ mod tests {
         {
             let mut batch = app.world_mut().resource_mut::<TextureBatch>();
             batch.1 = Some(11);
-            batch.0.insert("img".into(), (1, 1, vec![255, 0, 0, 255], Some("old".into())));
+            batch.0.insert(
+                "img".into(),
+                (1, 1, vec![255, 0, 0, 255], Some("old".into())),
+            );
         }
         app.add_systems(Update, sync_textures);
         app.update();
@@ -609,16 +1095,78 @@ mod tests {
         {
             let mut batch = app.world_mut().resource_mut::<TextureBatch>();
             batch.1 = Some(12);
-            batch.0.insert("img".into(), (1, 1, vec![0, 0, 255, 255], Some("new".into())));
+            batch.0.insert(
+                "img".into(),
+                (1, 1, vec![0, 0, 255, 255], Some("new".into())),
+            );
         }
         app.update();
-        let count = app.world_mut().query::<&CanvasTextureSprite>().iter(app.world()).count();
+        let count = app
+            .world_mut()
+            .query::<&CanvasTextureSprite>()
+            .iter(app.world())
+            .count();
         assert_eq!(count, 1);
         let new = sprite_image(app.world_mut(), "img");
         assert_ne!(old.id(), new.id());
-        let images = app.world().resource::<Assets<Image>>();
-        assert!(images.get(&old).is_none());
-        assert_eq!(images.get(&new).unwrap().data.as_deref(), Some(&[0, 0, 255, 255][..]));
-        assert!(app.world().resource::<TextureStore>().binding("img").is_some_and(|(h, _)| h == new));
+        assert!(app.world().resource::<Assets<Image>>().get(&old).is_none());
+        assert_eq!(sprite_pixels(app.world_mut(), "img"), vec![0, 0, 255, 255]);
+        assert!(
+            app.world()
+                .resource::<TextureStore>()
+                .binding("img")
+                .is_some_and(|(h, _)| h == new)
+        );
+    }
+
+    #[test]
+    fn atlas_sub_upload_queues_patch_and_zero_byte_rebinds_shared_slot() {
+        let _guard = crate::bridge::test_global_state_guard();
+        let mut app = App::new();
+        let mut s = scene();
+        let mut second = s.nodes[0].clone();
+        second.id = "img2".into();
+        s.nodes.push(second);
+        app.insert_resource(CurrentScene(s.clone()));
+        let mut index = NodeIndex::default();
+        index.rebuild(&s);
+        app.insert_resource(index);
+        app.insert_resource(TextureStore::default());
+        app.insert_resource(TextureBatch::default());
+        app.insert_resource(Assets::<Image>::default());
+        let queue = AtlasPatchQueue::default();
+        app.insert_resource(queue.clone());
+        app.world_mut().spawn(CanvasNodeId("img".into()));
+        app.world_mut().spawn(CanvasNodeId("img2".into()));
+        {
+            let mut batch = app.world_mut().resource_mut::<TextureBatch>();
+            batch.1 = Some(1);
+            batch.0.insert(
+                "img".into(),
+                (
+                    2,
+                    2,
+                    vec![10, 20, 30, 255].repeat(4),
+                    Some("shared-k".into()),
+                ),
+            );
+            // Second node shares the same content_id and sends a 0-byte payload in the same batch
+            batch
+                .0
+                .insert("img2".into(), (2, 2, Vec::new(), Some("shared-k".into())));
+        }
+        app.add_systems(Update, sync_textures);
+        app.update();
+
+        let patches = queue.0.lock().unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].width, 4); // 2 + 2px edge padding
+        assert_eq!(patches[0].height, 4);
+        assert_eq!(patches[0].data.len(), 4 * 4 * 4);
+        drop(patches);
+
+        let h1 = sprite_image(app.world_mut(), "img");
+        let h2 = sprite_image(app.world_mut(), "img2");
+        assert_eq!(h1.id(), h2.id());
     }
 }

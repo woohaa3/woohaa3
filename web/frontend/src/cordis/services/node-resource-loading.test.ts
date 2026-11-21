@@ -51,4 +51,23 @@ describe("节点资源加载状态", () => {
     expect(busy.nodes.find(node => node.id === "video")?.busy).toBe(true);
     expect(busy.nodes.find(node => node.id === "video")?.mediaLoading).toBeUndefined();
   });
+
+  it("batch 合并多次变更通知但保留逐节点变更回调", () => {
+    let onChangeCount = 0;
+    let listenerCount = 0;
+    const changedNodes: string[] = [];
+    const loading = new NodeResourceLoading(
+      () => { onChangeCount += 1; },
+      nodeId => { changedNodes.push(nodeId); }
+    );
+    loading.subscribe(() => { listenerCount += 1; });
+    loading.batch(() => {
+      const a = loading.track("a", "src-a");
+      loading.track("b", "src-b");
+      loading.setLoading(a, false);
+    });
+    expect(changedNodes).toEqual(["a", "b", "a"]);
+    expect(onChangeCount).toBe(1);
+    expect(listenerCount).toBe(1);
+  });
 });

@@ -918,9 +918,15 @@ mod tests {
             let mut state = app.world_mut().resource_mut::<ActiveWorldCapture>();
             state.frames = READBACK_TIMEOUT_FRAMES + 2;
             state.job = Some(Job {
-                request_id: 107, generation: 3, canvas_visit: visit,
-                camera, image: image.clone(), started_at: 0,
-                submitted: true, submitted_at: 0, instance_id: None,
+                request_id: 107,
+                generation: 3,
+                canvas_visit: visit,
+                camera,
+                image: image.clone(),
+                started_at: 0,
+                submitted: true,
+                submitted_at: 0,
+                instance_id: None,
             });
         }
         app.add_systems(Update, sync);
@@ -928,10 +934,17 @@ mod tests {
         let state = app.world().resource::<ActiveWorldCapture>();
         assert!(state.job.is_none());
         assert!(state.retired_images.contains_key(&image.id()));
-        assert!(app.world().resource::<Assets<Image>>().get(&image).is_some());
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&image)
+                .is_some()
+        );
         assert!(app.world().get_entity(camera).is_err());
         let result = bridge::take_world_capture_result(107, 3).expect("timeout result");
-        assert!(matches!(result.outcome, WorldCaptureOutcome::Failed { code } if code == "capture-readback-timeout"));
+        assert!(
+            matches!(result.outcome, WorldCaptureOutcome::Failed { code } if code == "capture-readback-timeout")
+        );
     }
 
     #[test]
@@ -942,7 +955,10 @@ mod tests {
         let mut app = capture_app();
         for _ in 0..MAX_IN_FLIGHT_READBACKS {
             let image = create_target(&mut app.world_mut().resource_mut::<Assets<Image>>(), 8, 8);
-            app.world_mut().resource_mut::<ActiveWorldCapture>().retired_images.insert(image.id(), image);
+            app.world_mut()
+                .resource_mut::<ActiveWorldCapture>()
+                .retired_images
+                .insert(image.id(), image);
         }
         let images_before = app.world().resource::<Assets<Image>>().len();
         app.add_systems(Update, sync);
@@ -952,7 +968,9 @@ mod tests {
         assert_eq!(state.retired_images.len(), MAX_IN_FLIGHT_READBACKS);
         assert_eq!(app.world().resource::<Assets<Image>>().len(), images_before);
         let result = bridge::take_world_capture_result(108, 4).expect("busy result");
-        assert!(matches!(result.outcome, WorldCaptureOutcome::Failed { code } if code == "capture-readback-busy"));
+        assert!(
+            matches!(result.outcome, WorldCaptureOutcome::Failed { code } if code == "capture-readback-busy")
+        );
     }
 
     #[test]
@@ -967,30 +985,61 @@ mod tests {
         {
             let mut state = app.world_mut().resource_mut::<ActiveWorldCapture>();
             state.frames = SETTLE_FRAMES;
-            state.job = Some(Job { request_id: 109, generation: 5, canvas_visit: old_visit,
-                camera: old_camera, image: old_image.clone(), started_at: 0, submitted: false,
-                submitted_at: 0, instance_id: None });
+            state.job = Some(Job {
+                request_id: 109,
+                generation: 5,
+                canvas_visit: old_visit,
+                camera: old_camera,
+                image: old_image.clone(),
+                started_at: 0,
+                submitted: false,
+                submitted_at: 0,
+                instance_id: None,
+            });
         }
         app.add_systems(Update, sync);
         app.update();
-        let screenshot = app.world_mut().query_filtered::<Entity, With<Screenshot>>()
-            .single(app.world()).expect("submitted screenshot");
+        let screenshot = app
+            .world_mut()
+            .query_filtered::<Entity, With<Screenshot>>()
+            .single(app.world())
+            .expect("submitted screenshot");
         bridge::queue_scene(scene("canvas-b"));
         app.update();
-        assert!(app.world().resource::<ActiveWorldCapture>().retired_images.contains_key(&old_image.id()));
+        assert!(
+            app.world()
+                .resource::<ActiveWorldCapture>()
+                .retired_images
+                .contains_key(&old_image.id())
+        );
         bridge::queue_world_capture_request(request(109, 5, "cam"));
         let new_visit = bridge::take_world_capture_request().unwrap().canvas_visit;
         let new_camera = app.world_mut().spawn(Transform::default()).id();
         let new_image = create_target(&mut app.world_mut().resource_mut::<Assets<Image>>(), 8, 8);
         app.world_mut().resource_mut::<ActiveWorldCapture>().job = Some(Job {
-            request_id: 109, generation: 5, canvas_visit: new_visit, camera: new_camera,
-            image: new_image.clone(), started_at: 0, submitted: false, submitted_at: 0, instance_id: None,
+            request_id: 109,
+            generation: 5,
+            canvas_visit: new_visit,
+            camera: new_camera,
+            image: new_image.clone(),
+            started_at: 0,
+            submitted: false,
+            submitted_at: 0,
+            instance_id: None,
         });
-        app.world_mut().trigger(ScreenshotCaptured { entity: screenshot, image: solid_image() });
+        app.world_mut().trigger(ScreenshotCaptured {
+            entity: screenshot,
+            image: solid_image(),
+        });
         app.world_mut().flush();
         let state = app.world().resource::<ActiveWorldCapture>();
         assert!(!state.retired_images.contains_key(&old_image.id()));
-        assert!(state.job.as_ref().is_some_and(|job| job.image.id() == new_image.id()));
+        assert!(
+            state
+                .job
+                .as_ref()
+                .is_some_and(|job| job.image.id() == new_image.id())
+        );
         let images = app.world().resource::<Assets<Image>>();
         assert!(images.get(&old_image).is_none());
         assert!(images.get(&new_image).is_some());
@@ -1009,32 +1058,66 @@ mod tests {
         {
             let mut state = app.world_mut().resource_mut::<ActiveWorldCapture>();
             state.frames = SETTLE_FRAMES;
-            state.job = Some(Job { request_id: 109, generation: 5, canvas_visit: old_visit,
-                camera: old_camera, image: old_image.clone(), started_at: 0, submitted: false,
-                submitted_at: 0, instance_id: None });
+            state.job = Some(Job {
+                request_id: 109,
+                generation: 5,
+                canvas_visit: old_visit,
+                camera: old_camera,
+                image: old_image.clone(),
+                started_at: 0,
+                submitted: false,
+                submitted_at: 0,
+                instance_id: None,
+            });
         }
         app.add_systems(Update, sync);
         app.update();
-        let screenshot = app.world_mut().query_filtered::<Entity, With<Screenshot>>()
-            .single(app.world()).expect("submitted screenshot");
-        app.world_mut().resource_mut::<ActiveWorldCapture>().frames = READBACK_TIMEOUT_FRAMES + SETTLE_FRAMES + 2;
+        let screenshot = app
+            .world_mut()
+            .query_filtered::<Entity, With<Screenshot>>()
+            .single(app.world())
+            .expect("submitted screenshot");
+        app.world_mut().resource_mut::<ActiveWorldCapture>().frames =
+            READBACK_TIMEOUT_FRAMES + SETTLE_FRAMES + 2;
         app.update();
         let timeout = bridge::take_world_capture_result(109, 5).expect("timeout");
-        assert!(matches!(timeout.outcome, WorldCaptureOutcome::Failed { code } if code == "capture-readback-timeout"));
-        assert!(app.world().resource::<ActiveWorldCapture>().retired_images.contains_key(&old_image.id()));
+        assert!(
+            matches!(timeout.outcome, WorldCaptureOutcome::Failed { code } if code == "capture-readback-timeout")
+        );
+        assert!(
+            app.world()
+                .resource::<ActiveWorldCapture>()
+                .retired_images
+                .contains_key(&old_image.id())
+        );
         bridge::queue_world_capture_request(request(109, 5, "cam"));
         let new_visit = bridge::take_world_capture_request().unwrap().canvas_visit;
         let new_camera = app.world_mut().spawn(Transform::default()).id();
         let new_image = create_target(&mut app.world_mut().resource_mut::<Assets<Image>>(), 8, 8);
         app.world_mut().resource_mut::<ActiveWorldCapture>().job = Some(Job {
-            request_id: 109, generation: 5, canvas_visit: new_visit, camera: new_camera,
-            image: new_image.clone(), started_at: 0, submitted: false, submitted_at: 0, instance_id: None,
+            request_id: 109,
+            generation: 5,
+            canvas_visit: new_visit,
+            camera: new_camera,
+            image: new_image.clone(),
+            started_at: 0,
+            submitted: false,
+            submitted_at: 0,
+            instance_id: None,
         });
-        app.world_mut().trigger(ScreenshotCaptured { entity: screenshot, image: solid_image() });
+        app.world_mut().trigger(ScreenshotCaptured {
+            entity: screenshot,
+            image: solid_image(),
+        });
         app.world_mut().flush();
         let state = app.world().resource::<ActiveWorldCapture>();
         assert!(!state.retired_images.contains_key(&old_image.id()));
-        assert!(state.job.as_ref().is_some_and(|job| job.image.id() == new_image.id()));
+        assert!(
+            state
+                .job
+                .as_ref()
+                .is_some_and(|job| job.image.id() == new_image.id())
+        );
         let images = app.world().resource::<Assets<Image>>();
         assert!(images.get(&old_image).is_none());
         assert!(images.get(&new_image).is_some());

@@ -1,8 +1,8 @@
 //! Consume the sampled camera after rig derivation and before preview rendering.
 use super::{AnimationCameraState, CurrentScene, FrameFlags, ModelAssetTable};
 use crate::model3d::{
-    shot_adapter::{focused_model_bounds, sampled_camera_pose, ShotAdapterState},
     ModelVisuals,
+    shot_adapter::{ShotAdapterState, focused_model_bounds, sampled_camera_pose},
 };
 use crate::shot_camera::ShotCameraDerived;
 use bevy::prelude::*;

@@ -8,7 +8,8 @@ pub struct NativeEditorTarget(pub Option<String>);
 pub fn install(app: &mut App) {
     app.init_resource::<NativeEditorTarget>().add_systems(
         PostUpdate,
-        sync.before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate).run_if(crate::canvas_activity::running),
+        sync.before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate)
+            .run_if(crate::canvas_activity::running),
     );
 }
 fn sync(

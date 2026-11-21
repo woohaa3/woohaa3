@@ -17,10 +17,7 @@ pub(super) fn begin(mut timing: ResMut<StartupTiming>) {
 }
 /// 渲染工作快照是 `Option`：没有安装渲染工作资源时（例如最小装配的原生画布）
 /// 只跳过该读数，不让系统参数校验失败并中断帧循环。
-pub(super) fn end(
-    timing: Res<StartupTiming>,
-    work: Option<Res<crate::render_work::RenderWork>>,
-) {
+pub(super) fn end(timing: Res<StartupTiming>, work: Option<Res<crate::render_work::RenderWork>>) {
     let (Some(start), Some(work)) = (timing.started, work.as_deref()) else {
         return;
     };

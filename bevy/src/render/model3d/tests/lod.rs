@@ -7,11 +7,13 @@ use std::collections::HashSet;
 
 /// 两个共享世界模型：`a` 位于原点，`b` 的世界 `u` 可调（世界画布按 zoom 投影）。
 fn scene() -> (Scene, ModelAssets) {
-    let instance = |id: &str, u: f64| serde_json::json!({
-        "kind": "world-instance", "version": "shared-world-v1", "instanceId": format!("instance-{id}"),
-        "transform": {"version": "shared-world-v1", "position": {"u": u, "v": 0.0, "h": 0.0},
-            "rotation": [0.0, 0.0, 0.0, 1.0], "scale": 1.0}
-    });
+    let instance = |id: &str, u: f64| {
+        serde_json::json!({
+            "kind": "world-instance", "version": "shared-world-v1", "instanceId": format!("instance-{id}"),
+            "transform": {"version": "shared-world-v1", "position": {"u": u, "v": 0.0, "h": 0.0},
+                "rotation": [0.0, 0.0, 0.0, 1.0], "scale": 1.0}
+        })
+    };
     let nodes = serde_json::from_value(serde_json::json!([
         {"id":"a","type":"model","x":0.0,"y":0.0,"width":120.0,"height":100.0,
             "model":{"resourceKey":"s","signature":"s"},"sharedWorldInstance": instance("a", 0.0)},
@@ -132,7 +134,10 @@ fn invisible_prewarm_stays_low_until_visible_but_capture_pins_high() {
 #[test]
 fn custom_mesh_stays_high_and_keeps_part_identity_under_world_camera() {
     use super::super::{scene::ModelGeometry, simplification::tests::sphere};
-    let ModelGeometry::Mesh { vertices, faces, .. } = sphere() else {
+    let ModelGeometry::Mesh {
+        vertices, faces, ..
+    } = sphere()
+    else {
         panic!()
     };
     // 首次跑完会留下同内容的其他世界模型：删除它们后按单节点场景重新同步。
@@ -177,9 +182,13 @@ fn custom_mesh_stays_high_and_keeps_part_identity_under_world_camera() {
     );
     // 捕获/聚焦仍强制 High，且不改变网格身份。
     quality(&mut world, &scene, None, 3.0, &HashSet::from(["a".into()]));
-    assert_eq!(world.resource::<ModelVisuals>().roots["a"].quality, Quality::High);
     assert_eq!(
-        world.resource::<Assets<Mesh>>()
+        world.resource::<ModelVisuals>().roots["a"].quality,
+        Quality::High
+    );
+    assert_eq!(
+        world
+            .resource::<Assets<Mesh>>()
             .get(&original)
             .unwrap()
             .indices()

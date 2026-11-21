@@ -92,8 +92,16 @@ thread_local! {
 pub(crate) fn accept_editor_camera(scene: &crate::protocol::Scene) {
     let camera = scene.world_camera_edit.as_ref().map(|edit| {
         let bound_node = edit.camera.bound_instance_id.as_ref().map(|id| {
-            scene.nodes.iter().find(|node| node.shared_world_instance.as_ref().is_some_and(|instance| &instance.instance_id == id))
-                .map(|node| node.id.clone()).unwrap_or_default()
+            scene
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.shared_world_instance
+                        .as_ref()
+                        .is_some_and(|instance| &instance.instance_id == id)
+                })
+                .map(|node| node.id.clone())
+                .unwrap_or_default()
         });
         (edit.camera.clone(), bound_node)
     });
@@ -135,7 +143,8 @@ pub(crate) fn plan_positions(
         slot.borrow().plan(deltas, |base, delta| {
             let mut next = base.clone();
             if !base.shared_world {
-                (next.min, next.max) = super::position_basis::shift_bounds(base.min, base.max, delta)?;
+                (next.min, next.max) =
+                    super::position_basis::shift_bounds(base.min, base.max, delta)?;
             }
             Ok(next)
         })
@@ -230,32 +239,72 @@ pub(crate) fn pick_query_json(json: &str) -> String {
     #[cfg(feature = "canvas-core")]
     if request.kind.as_deref() == Some("camera-editor") {
         use bevy::prelude::*;
-        let Some((camera, bound_node)) = EDITOR_CAMERA.with(|slot| slot.borrow().clone()) else { return stale_result("unavailable") };
-        if ![request.x, request.y, request.width, request.height].iter().all(|n| n.is_finite()) || request.width <= 0.0 || request.height <= 0.0 {
+        let Some((camera, bound_node)) = EDITOR_CAMERA.with(|slot| slot.borrow().clone()) else {
+            return stale_result("unavailable");
+        };
+        if ![request.x, request.y, request.width, request.height]
+            .iter()
+            .all(|n| n.is_finite())
+            || request.width <= 0.0
+            || request.height <= 0.0
+        {
             return stale_result("unavailable");
         }
-        let crate::protocol::WorldCameraProjection::Perspective { vertical_fov_radians, near_meters, far_meters } = camera.projection else { return stale_result("unavailable") };
+        let crate::protocol::WorldCameraProjection::Perspective {
+            vertical_fov_radians,
+            near_meters,
+            far_meters,
+        } = camera.projection
+        else {
+            return stale_result("unavailable");
+        };
         let aspect = (camera.aspect.width / camera.aspect.height) as f32;
-        let (x, y, width, height) = crate::world_camera_preview::editor_rect(Vec2::new(request.width, request.height), aspect);
+        let (x, y, width, height) = crate::world_camera_preview::editor_rect(
+            Vec2::new(request.width, request.height),
+            aspect,
+        );
         if request.x < x || request.x > x + width || request.y < y || request.y > y + height {
             return serde_json::json!({"available": true, "generation": request.generation, "surface": null}).to_string();
         }
         let pose = crate::world_camera_view::pose(&camera);
         let half = (vertical_fov_radians as f32 / 2.0).tan();
-        let direction = (pose.rotation * Vec3::new(((request.x - x) / width * 2.0 - 1.0) * half * aspect,
-            (1.0 - (request.y - y) / height * 2.0) * half, -1.0)).normalize();
+        let direction = (pose.rotation
+            * Vec3::new(
+                ((request.x - x) / width * 2.0 - 1.0) * half * aspect,
+                (1.0 - (request.y - y) / height * 2.0) * half,
+                -1.0,
+            ))
+        .normalize();
         let near = (near_meters * crate::protocol::UNITS_PER_METER) as f32;
         let far = (far_meters * crate::protocol::UNITS_PER_METER) as f32;
-        let hit = SHARED_CURRENT.with(|slot| slot.borrow().iter()
-            .filter(|candidate| !candidate.empty_marker && bound_node.as_ref().is_none_or(|id| id == &candidate.node_id))
-            .filter(|candidate| ray_hits_aabb_clipped(pose.translation.to_array(), direction.to_array(), candidate.min, candidate.max, far).is_some())
-            .filter_map(|candidate| candidate.triangles.as_ref())
-            .flat_map(|triangles| triangles.iter())
-            .filter_map(|triangle| ray_triangle(pose.translation, direction, triangle))
-            .filter(|t| *t >= near && *t <= far)
-            .min_by(f32::total_cmp));
+        let hit = SHARED_CURRENT.with(|slot| {
+            slot.borrow()
+                .iter()
+                .filter(|candidate| {
+                    !candidate.empty_marker
+                        && bound_node
+                            .as_ref()
+                            .is_none_or(|id| id == &candidate.node_id)
+                })
+                .filter(|candidate| {
+                    ray_hits_aabb_clipped(
+                        pose.translation.to_array(),
+                        direction.to_array(),
+                        candidate.min,
+                        candidate.max,
+                        far,
+                    )
+                    .is_some()
+                })
+                .filter_map(|candidate| candidate.triangles.as_ref())
+                .flat_map(|triangles| triangles.iter())
+                .filter_map(|triangle| ray_triangle(pose.translation, direction, triangle))
+                .filter(|t| *t >= near && *t <= far)
+                .min_by(f32::total_cmp)
+        });
         let surface = hit.map(|distance| {
-            let point = (pose.translation + direction * distance) / crate::protocol::UNITS_PER_METER as f32;
+            let point =
+                (pose.translation + direction * distance) / crate::protocol::UNITS_PER_METER as f32;
             serde_json::json!({"u": point.x, "v": -point.z, "h": point.y})
         });
         return serde_json::json!({"available": true, "generation": request.generation, "surface": surface}).to_string();
@@ -265,18 +314,35 @@ pub(crate) fn pick_query_json(json: &str) -> String {
             return stale_result("unavailable");
         }
         let camera = CAMERA.with(|slot| *slot.borrow());
-        if !camera.ordinary { return stale_result("unavailable"); }
+        if !camera.ordinary {
+            return stale_result("unavailable");
+        }
         let view = crate::isometric_grid::IsometricGridView {
-            x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2],
+            x: camera.viewport[0],
+            y: camera.viewport[1],
+            zoom: camera.viewport[2],
         };
-        let p = crate::isometric_grid::screen_to_ground(&view, bevy::prelude::Vec2::new(request.x, request.y));
+        let p = crate::isometric_grid::screen_to_ground(
+            &view,
+            bevy::prelude::Vec2::new(request.x, request.y),
+        );
         let u = p.x as f64 / crate::protocol::UNITS_PER_METER;
         let v = -(p.y as f64) / crate::protocol::UNITS_PER_METER;
-        if !u.is_finite() || !v.is_finite() { return stale_result("unavailable"); }
+        if !u.is_finite() || !v.is_finite() {
+            return stale_result("unavailable");
+        }
         return serde_json::json!({"available": true, "generation": request.generation, "ground": {"u": u, "v": v}}).to_string();
     }
-    if request.kind.is_some() { return stale_result("unsupported"); }
-    let mut candidates = CANDIDATES.with(|slot| slot.borrow().iter().filter(|candidate| !candidate.shared_world).cloned().collect::<Vec<_>>());
+    if request.kind.is_some() {
+        return stale_result("unsupported");
+    }
+    let mut candidates = CANDIDATES.with(|slot| {
+        slot.borrow()
+            .iter()
+            .filter(|candidate| !candidate.shared_world)
+            .cloned()
+            .collect::<Vec<_>>()
+    });
     SHARED_CURRENT.with(|slot| candidates.extend(slot.borrow().iter().cloned()));
     let camera = CAMERA.with(|slot| *slot.borrow());
     // 普通正交画布才提供像素容差的兜底（聚焦是单模型透视编辑，点选保持精确）。
@@ -314,11 +380,20 @@ pub(crate) fn pick_query_json(json: &str) -> String {
         .normalize_or_zero();
         (position, (rotation * local).normalize_or_zero(), 200_000.0)
     } else {
-        let view = crate::isometric_grid::IsometricGridView { x: camera.viewport[0], y: camera.viewport[1], zoom: camera.viewport[2] };
+        let view = crate::isometric_grid::IsometricGridView {
+            x: camera.viewport[0],
+            y: camera.viewport[1],
+            zoom: camera.viewport[2],
+        };
         ordinary_view = Some(view);
         let projection = crate::isometric_grid::canvas_camera_projection();
-        let origin = crate::isometric_grid::screen_point_to_world(bevy::prelude::Vec2::new(request.x, request.y), CANVAS_CAMERA_Z - projection.near, &view);
-        let direction = crate::isometric_grid::canvas_camera_rotation() * bevy::prelude::Vec3::NEG_Z;
+        let origin = crate::isometric_grid::screen_point_to_world(
+            bevy::prelude::Vec2::new(request.x, request.y),
+            CANVAS_CAMERA_Z - projection.near,
+            &view,
+        );
+        let direction =
+            crate::isometric_grid::canvas_camera_rotation() * bevy::prelude::Vec3::NEG_Z;
         (origin, direction, projection.far - projection.near)
     };
     let mut picked = pick_candidates(&candidates, origin, direction, max_t);
@@ -375,7 +450,9 @@ pub(crate) fn marquee_query_json(json: &str) -> String {
     }
     let request = match serde_json::from_str::<Request>(json) {
         Ok(request) => request,
-        Err(_) => return serde_json::json!({"available": false, "reason": "unavailable"}).to_string(),
+        Err(_) => {
+            return serde_json::json!({"available": false, "reason": "unavailable"}).to_string();
+        }
     };
     if !READY.with(std::cell::Cell::get) {
         return serde_json::json!({"available": false, "reason": "unavailable"}).to_string();
@@ -383,7 +460,10 @@ pub(crate) fn marquee_query_json(json: &str) -> String {
     if request.generation != GENERATION.with(std::cell::Cell::get) {
         return serde_json::json!({"available": false, "reason": "stale"}).to_string();
     }
-    if ![request.x, request.y, request.width, request.height].iter().all(|n| n.is_finite()) {
+    if ![request.x, request.y, request.width, request.height]
+        .iter()
+        .all(|n| n.is_finite())
+    {
         return serde_json::json!({"available": false, "reason": "unavailable"}).to_string();
     }
     let camera = CAMERA.with(|slot| *slot.borrow());
@@ -397,7 +477,14 @@ pub(crate) fn marquee_query_json(json: &str) -> String {
     };
     let mut candidates = CANDIDATES.with(|slot| slot.borrow().clone());
     SHARED_CURRENT.with(|slot| candidates.extend(slot.borrow().iter().cloned()));
-    let node_ids = marquee_node_ids(&candidates, &view, request.x, request.y, request.width, request.height);
+    let node_ids = marquee_node_ids(
+        &candidates,
+        &view,
+        request.x,
+        request.y,
+        request.width,
+        request.height,
+    );
     serde_json::json!({
         "available": true,
         "generation": request.generation,
@@ -424,7 +511,9 @@ fn marquee_node_ids(
         if !seen.insert(candidate.node_id.as_str()) {
             continue;
         }
-        let Some((low, high)) = near::screen_bounds(candidate.min, candidate.max, view) else { continue };
+        let Some((low, high)) = near::screen_bounds(candidate.min, candidate.max, view) else {
+            continue;
+        };
         if low.x < right && high.x > left && low.y < bottom && high.y > top {
             out.push(candidate.node_id.clone());
         }
@@ -432,14 +521,37 @@ fn marquee_node_ids(
     out
 }
 
-pub(crate) fn pick_candidates(candidates: &[ModelCandidate], origin: bevy::prelude::Vec3, direction: bevy::prelude::Vec3, max_t: f32) -> Option<(String, [f32; 3], f32)> {
+pub(crate) fn pick_candidates(
+    candidates: &[ModelCandidate],
+    origin: bevy::prelude::Vec3,
+    direction: bevy::prelude::Vec3,
+    max_t: f32,
+) -> Option<(String, [f32; 3], f32)> {
     let mut best = None;
     let mut best_t = max_t;
     for candidate in candidates {
-        let Some(broad) = ray_hits_aabb_clipped(origin.to_array(), direction.to_array(), candidate.min, candidate.max, max_t) else { continue };
+        let Some(broad) = ray_hits_aabb_clipped(
+            origin.to_array(),
+            direction.to_array(),
+            candidate.min,
+            candidate.max,
+            max_t,
+        ) else {
+            continue;
+        };
         let t = if let Some(triangles) = &candidate.triangles {
-            triangles.iter().filter_map(|triangle| ray_triangle(origin, direction, triangle)).filter(|t| *t <= max_t).fold(None, |best: Option<f32>, t| Some(best.map_or(t, |b| b.min(t))))
-        } else if candidate.empty_marker || !candidate.shared_world { Some(broad) } else { None };
+            triangles
+                .iter()
+                .filter_map(|triangle| ray_triangle(origin, direction, triangle))
+                .filter(|t| *t <= max_t)
+                .fold(None, |best: Option<f32>, t| {
+                    Some(best.map_or(t, |b| b.min(t)))
+                })
+        } else if candidate.empty_marker || !candidate.shared_world {
+            Some(broad)
+        } else {
+            None
+        };
         if let Some(t) = t.filter(|t| *t < best_t) {
             best_t = t;
             let (center, radius) = center_radius(candidate.min, candidate.max);
@@ -449,21 +561,31 @@ pub(crate) fn pick_candidates(candidates: &[ModelCandidate], origin: bevy::prelu
     best
 }
 
-fn ray_triangle(origin: bevy::prelude::Vec3, direction: bevy::prelude::Vec3, triangle: &SurfaceTriangle) -> Option<f32> {
+fn ray_triangle(
+    origin: bevy::prelude::Vec3,
+    direction: bevy::prelude::Vec3,
+    triangle: &SurfaceTriangle,
+) -> Option<f32> {
     use bevy::prelude::Vec3;
     let [a, b, c] = triangle.vertices.map(Vec3::from_array);
     let edge1 = b - a;
     let edge2 = c - a;
     let p = direction.cross(edge2);
     let determinant = edge1.dot(p);
-    if determinant.abs() < 1e-8 || (triangle.cull_back && determinant <= 0.0) { return None; }
+    if determinant.abs() < 1e-8 || (triangle.cull_back && determinant <= 0.0) {
+        return None;
+    }
     let inverse = determinant.recip();
     let s = origin - a;
     let u = s.dot(p) * inverse;
-    if !(0.0..=1.0).contains(&u) { return None; }
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
     let q = s.cross(edge1);
     let v = direction.dot(q) * inverse;
-    if v < 0.0 || u + v > 1.0 { return None; }
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
     let t = edge2.dot(q) * inverse;
     (t >= 0.0 && t.is_finite()).then_some(t)
 }
@@ -693,17 +815,28 @@ mod camera_editor_tests {
         EDITOR_CAMERA.with(|slot| *slot.borrow_mut() = Some((camera, None)));
         accept_models(Vec::new(), 7, ModelPickCamera::default());
         let candidate = |id: &str, z: f32| ModelCandidate {
-            node_id: id.into(), shared_world: true, empty_marker: false,
-            min: [-200., 0., z], max: [200., 400., z],
+            node_id: id.into(),
+            shared_world: true,
+            empty_marker: false,
+            min: [-200., 0., z],
+            max: [200., 400., z],
             triangles: Some(Arc::new(vec![SurfaceTriangle {
-                vertices: [[-200., 0., z], [200., 0., z], [0., 400., z]], cull_back: false
+                vertices: [[-200., 0., z], [200., 0., z], [0., 400., z]],
+                cull_back: false,
             }])),
         };
-        replace_shared_models(vec![candidate("near", -1.5 * crate::protocol::UNITS_PER_METER as f32), candidate("far", -3.0 * crate::protocol::UNITS_PER_METER as f32)]);
+        replace_shared_models(vec![
+            candidate("near", -1.5 * crate::protocol::UNITS_PER_METER as f32),
+            candidate("far", -3.0 * crate::protocol::UNITS_PER_METER as f32),
+        ]);
     }
     fn query(generation: u32, x: f32) -> serde_json::Value {
-        serde_json::from_str(&pick_query_json(&serde_json::json!({"kind":"camera-editor", "generation":generation,
-            "x":x,"y":356,"width":1000,"height":800}).to_string())).unwrap()
+        serde_json::from_str(&pick_query_json(
+            &serde_json::json!({"kind":"camera-editor", "generation":generation,
+            "x":x,"y":356,"width":1000,"height":800})
+            .to_string(),
+        ))
+        .unwrap()
     }
     #[test]
     fn camera_editor_picks_the_visible_surface_in_meters_and_respects_binding() {

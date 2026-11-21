@@ -853,6 +853,8 @@ mod tests {
         set_world_capture_result(failed_capture(&new, "new-unbound"));
         set_world_capture_result(failed_capture(&old, "old-unbound"));
         let result = take_world_capture_result(113, 8).expect("new unbound result");
-        assert!(matches!(result.outcome, WorldCaptureOutcome::Failed { code } if code == "new-unbound"));
+        assert!(
+            matches!(result.outcome, WorldCaptureOutcome::Failed { code } if code == "new-unbound")
+        );
     }
 }

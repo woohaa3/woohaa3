@@ -156,25 +156,39 @@ fn world_request() -> RenderRequest {
 fn world_capture_accepts_an_empty_world_and_preserves_perspective() {
     let req = world_request();
     assert!(validate_request(&req).is_ok());
-    assert!(matches!(crate::world_camera_view::projection(&req.world.as_ref().unwrap().camera, bevy::prelude::UVec2::splat(512)),
-        bevy::prelude::Projection::Perspective(_)));
+    assert!(matches!(
+        crate::world_camera_view::projection(
+            &req.world.as_ref().unwrap().camera,
+            bevy::prelude::UVec2::splat(512)
+        ),
+        bevy::prelude::Projection::Perspective(_)
+    ));
 }
 
 #[test]
 fn world_capture_rejects_legacy_worker_protocol_and_auto_framing() {
     let mut req = world_request();
     req.protocol_version = RENDERER_PROTOCOL_VERSION.into();
-    assert_eq!(validate_request(&req).unwrap_err().0, RenderErrorCode::UnsupportedProtocolVersion);
+    assert_eq!(
+        validate_request(&req).unwrap_err().0,
+        RenderErrorCode::UnsupportedProtocolVersion
+    );
     req.protocol_version = WORLD_RENDERER_PROTOCOL_VERSION.into();
     req.ops = request("woohaa-model-scene-ir-v2").ops;
-    assert_eq!(validate_request(&req).unwrap_err().0, RenderErrorCode::InvalidScene);
+    assert_eq!(
+        validate_request(&req).unwrap_err().0,
+        RenderErrorCode::InvalidScene
+    );
 }
 
 #[test]
 fn bound_world_capture_cannot_silently_render_the_whole_world() {
     let mut req = world_request();
     req.world.as_mut().unwrap().camera.bound_instance_id = Some("missing".into());
-    assert_eq!(validate_request(&req).unwrap_err().0, RenderErrorCode::InvalidScene);
+    assert_eq!(
+        validate_request(&req).unwrap_err().0,
+        RenderErrorCode::InvalidScene
+    );
 }
 
 #[test]
@@ -182,8 +196,15 @@ fn world_camera_uses_metric_pose_and_real_perspective_foreshortening() {
     use bevy::{camera::CameraProjection, prelude::*};
     let req = world_request();
     let camera = &req.world.as_ref().unwrap().camera;
-    assert_eq!(crate::world_camera_view::pose(camera).translation, Vec3::new(192.0, 256.0, 128.0));
-    let Projection::Perspective(mut projection) = crate::world_camera_view::projection(camera, UVec2::new(1600, 900)) else { panic!("perspective required") };
+    assert_eq!(
+        crate::world_camera_view::pose(camera).translation,
+        Vec3::new(192.0, 256.0, 128.0)
+    );
+    let Projection::Perspective(mut projection) =
+        crate::world_camera_view::projection(camera, UVec2::new(1600, 900))
+    else {
+        panic!("perspective required")
+    };
     projection.update(1600.0, 900.0);
     let clip = projection.get_clip_from_view();
     let near_object = clip.project_point3(Vec3::new(10.0, 0.0, -100.0));
@@ -197,9 +218,18 @@ fn world_camera_uses_metric_pose_and_real_perspective_foreshortening() {
 fn version_json_declares_static_pose_capability_and_current_protocols() {
     let value: serde_json::Value = serde_json::from_str(&super::version_json()).unwrap();
     assert_eq!(value["protocolVersion"], super::RENDERER_PROTOCOL_VERSION);
-    assert_eq!(value["worldProtocolVersion"], super::WORLD_RENDERER_PROTOCOL_VERSION);
-    assert_eq!(value["capabilities"], serde_json::json!([super::MODEL_STATIC_POSE_CAPABILITY]));
-    assert_eq!(value["sceneVersions"], serde_json::json!(super::SUPPORTED_SCENE_VERSIONS));
+    assert_eq!(
+        value["worldProtocolVersion"],
+        super::WORLD_RENDERER_PROTOCOL_VERSION
+    );
+    assert_eq!(
+        value["capabilities"],
+        serde_json::json!([super::MODEL_STATIC_POSE_CAPABILITY])
+    );
+    assert_eq!(
+        value["sceneVersions"],
+        serde_json::json!(super::SUPPORTED_SCENE_VERSIONS)
+    );
 }
 
 #[test]
@@ -223,7 +253,10 @@ fn accepts_group_pose_and_rejects_empty_pose_at_the_boundary() {
     let request = parse_request(json).expect("pose request parses");
     assert!(validate_request(&request).is_ok());
 
-    let empty = json.replace(r#""pose":{"rotation":[0,30,0],"position":[0,0.5,0]}"#, r#""pose":{}"#);
+    let empty = json.replace(
+        r#""pose":{"rotation":[0,30,0],"position":[0,0.5,0]}"#,
+        r#""pose":{}"#,
+    );
     let request = parse_request(&empty).expect("empty pose still parses");
     assert_eq!(
         validate_request(&request).unwrap_err().0,

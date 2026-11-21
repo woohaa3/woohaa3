@@ -2,7 +2,10 @@
 //! （change: refactor-bevy-rust-file-size，任务 4.1 / design D4；
 //!  change: optimize-model-scene-snapshot-hot-path 改为节点引用 + 独立资源表）。
 
-use super::{reference_for, resource_table, run_sync, scene_with, with_world_instance, world_instance_for, world_with_resources};
+use super::{
+    reference_for, resource_table, run_sync, scene_with, with_world_instance, world_instance_for,
+    world_with_resources,
+};
 use crate::protocol::{GraphNode, ModelOp, ModelPlacement, ModelReference, ModelSnapshot, Scene};
 use bevy::prelude::*;
 
@@ -61,11 +64,14 @@ fn shared_world_roots_survive_relayout_and_resource_recreation() {
     use super::super::runtime::ModelRootLayout;
     let mut world = world_with_resources();
     let mut node = model_node();
-    node.shared_world_instance = Some(serde_json::from_value(serde_json::json!({
-        "kind": "world-instance", "version": "shared-world-v1", "instanceId": "one",
-        "transform": { "version": "shared-world-v1", "position": {"u": 1, "v": 2, "h": 3},
-            "rotation": [0, 0, 0, 1], "scale": 2 }
-    })).unwrap());
+    node.shared_world_instance = Some(
+        serde_json::from_value(serde_json::json!({
+            "kind": "world-instance", "version": "shared-world-v1", "instanceId": "one",
+            "transform": { "version": "shared-world-v1", "position": {"u": 1, "v": 2, "h": 3},
+                "rotation": [0, 0, 0, 1], "scale": 2 }
+        }))
+        .unwrap(),
+    );
     let snapshot = sphere_snapshot("shared");
     let reference = reference_for(&snapshot, ModelPlacement::default());
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
@@ -74,21 +80,62 @@ fn shared_world_roots_survive_relayout_and_resource_recreation() {
         let ModelRootLayout::V2 { root } = visuals.roots["m"].layout;
         (root, *world.get::<Transform>(root).unwrap())
     };
-    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &resources);
+    run_sync(
+        &mut world,
+        &scene_with(&node, Some(reference.clone())),
+        &resources,
+    );
     let (entity, original) = root(&world);
     assert_eq!(original.translation, Vec3::new(64., 192., -128.));
     assert_eq!(original.scale, Vec3::splat(128.));
     // 旧卡片坐标与 `modelPlacement` 都不再影响世界根（change: 2026-11-10）。
-    node.x = 900.; node.y = -400.;
-    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &resources);
+    node.x = 900.;
+    node.y = -400.;
+    run_sync(
+        &mut world,
+        &scene_with(&node, Some(reference.clone())),
+        &resources,
+    );
     assert_eq!(root(&world), (entity, original));
-    node.shared_world_instance.as_mut().unwrap().transform.position.u = 4.;
-    node.shared_world_instance.as_mut().unwrap().transform.rotation = [0., 0., std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
-    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &resources);
+    node.shared_world_instance
+        .as_mut()
+        .unwrap()
+        .transform
+        .position
+        .u = 4.;
+    node.shared_world_instance
+        .as_mut()
+        .unwrap()
+        .transform
+        .rotation = [
+        0.,
+        0.,
+        std::f64::consts::FRAC_1_SQRT_2,
+        std::f64::consts::FRAC_1_SQRT_2,
+    ];
+    run_sync(
+        &mut world,
+        &scene_with(&node, Some(reference.clone())),
+        &resources,
+    );
     assert_eq!(root(&world).1.translation.x, 256.);
-    assert!(root(&world).1.rotation.abs_diff_eq(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), 1e-6));
-    run_sync(&mut world, &scene_with(&node, Some(reference.clone())), &Default::default());
-    assert!(world.resource::<super::super::runtime::ModelVisuals>().roots.is_empty());
+    assert!(
+        root(&world)
+            .1
+            .rotation
+            .abs_diff_eq(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), 1e-6)
+    );
+    run_sync(
+        &mut world,
+        &scene_with(&node, Some(reference.clone())),
+        &Default::default(),
+    );
+    assert!(
+        world
+            .resource::<super::super::runtime::ModelVisuals>()
+            .roots
+            .is_empty()
+    );
     run_sync(&mut world, &scene_with(&node, Some(reference)), &resources);
     assert_eq!(root(&world).1.translation.x, 256.);
     let parent = Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
@@ -104,25 +151,49 @@ fn shared_resource_instances_keep_independent_roots_and_child_hierarchy() {
     let mut world = world_with_resources();
     let mut snapshot = sphere_snapshot("hierarchy");
     snapshot.ops = vec![
-        ModelOp::Group { id: "parent".into(), parent: None, position: [0., 0., 0.],
-            rotation: [0., 90., 0.], scale: [2., 2., 2.], pose: None },
-        ModelOp::Sphere { id: "child".into(), parent: Some("parent".into()),
-            position: [1., 0., 0.], rotation: [0.; 3], scale: [1.; 3],
-            color: Some("#ffffff".into()), material: None, radius: 0.3 },
+        ModelOp::Group {
+            id: "parent".into(),
+            parent: None,
+            position: [0., 0., 0.],
+            rotation: [0., 90., 0.],
+            scale: [2., 2., 2.],
+            pose: None,
+        },
+        ModelOp::Sphere {
+            id: "child".into(),
+            parent: Some("parent".into()),
+            position: [1., 0., 0.],
+            rotation: [0.; 3],
+            scale: [1.; 3],
+            color: Some("#ffffff".into()),
+            material: None,
+            radius: 0.3,
+        },
     ];
     let reference = reference_for(&snapshot, ModelPlacement::default());
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut a = model_node();
     a.model = Some(reference.clone());
-    a.shared_world_instance = Some(serde_json::from_value(serde_json::json!({
-        "kind":"world-instance", "version":"shared-world-v1", "instanceId":"a",
-        "transform":{"version":"shared-world-v1", "position":{"u":0,"v":0,"h":0},
-            "rotation":[0,0,0,1], "scale":1}
-    })).unwrap());
+    a.shared_world_instance = Some(
+        serde_json::from_value(serde_json::json!({
+            "kind":"world-instance", "version":"shared-world-v1", "instanceId":"a",
+            "transform":{"version":"shared-world-v1", "position":{"u":0,"v":0,"h":0},
+                "rotation":[0,0,0,1], "scale":1}
+        }))
+        .unwrap(),
+    );
     let mut b = a.clone();
     b.id = "b".into();
-    b.shared_world_instance.as_mut().unwrap().transform.position.u = 3.;
-    let scene = Scene { nodes: vec![a, b], ..Scene::default() };
+    b.shared_world_instance
+        .as_mut()
+        .unwrap()
+        .transform
+        .position
+        .u = 3.;
+    let scene = Scene {
+        nodes: vec![a, b],
+        ..Scene::default()
+    };
     run_sync(&mut world, &scene, &resources);
     let visuals = world.resource::<super::super::runtime::ModelVisuals>();
     let first = &visuals.roots["m"];
@@ -244,7 +315,11 @@ fn placement_preview_keeps_entity_and_resource_identity() {
         let instance = node.shared_world_instance.as_mut().unwrap();
         instance.transform.position.u = placement.offset.x as f64;
         instance.transform.scale = placement.scale as f64;
-        run_sync(&mut world, &scene_with(&node, Some(base.clone())), &resources);
+        run_sync(
+            &mut world,
+            &scene_with(&node, Some(base.clone())),
+            &resources,
+        );
     }
     assert_eq!(
         world.iter_entities().count(),

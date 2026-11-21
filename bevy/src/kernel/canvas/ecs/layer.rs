@@ -10,7 +10,9 @@ pub(crate) fn find_or_spawn<M: Component + Default>(
     material: Handle<ColorMaterial>,
 ) -> Entity {
     if let Some(entity) = layers.iter().next() {
-        commands.entity(entity).insert((Mesh2d(mesh), MeshMaterial2d(material)));
+        commands
+            .entity(entity)
+            .insert((Mesh2d(mesh), MeshMaterial2d(material)));
         entity
     } else {
         commands
@@ -27,24 +29,37 @@ mod tests {
     #[test]
     fn layer_marker_is_stable_across_empty_content_cycles() {
         let mut app = App::new();
-        app.add_systems(Update, |mut commands: Commands, layers: Query<Entity, With<NodeActionLayer>>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>| {
-            let mesh = meshes.add(Mesh::from(Rectangle::new(1.0, 1.0)));
-            let material = materials.add(ColorMaterial::default());
-            let _ = find_or_spawn::<NodeActionLayer>(&mut commands, &layers, mesh, material);
-        });
+        app.add_systems(
+            Update,
+            |mut commands: Commands,
+             layers: Query<Entity, With<NodeActionLayer>>,
+             mut meshes: ResMut<Assets<Mesh>>,
+             mut materials: ResMut<Assets<ColorMaterial>>| {
+                let mesh = meshes.add(Mesh::from(Rectangle::new(1.0, 1.0)));
+                let material = materials.add(ColorMaterial::default());
+                let _ = find_or_spawn::<NodeActionLayer>(&mut commands, &layers, mesh, material);
+            },
+        );
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<ColorMaterial>>();
         app.update();
         let first = {
             let world = app.world_mut();
-            world.query_filtered::<Entity, With<NodeActionLayer>>().iter(world).next().unwrap()
+            world
+                .query_filtered::<Entity, With<NodeActionLayer>>()
+                .iter(world)
+                .next()
+                .unwrap()
         };
         app.update();
         let second = {
             let world = app.world_mut();
-            world.query_filtered::<Entity, With<NodeActionLayer>>().iter(world).next().unwrap()
+            world
+                .query_filtered::<Entity, With<NodeActionLayer>>()
+                .iter(world)
+                .next()
+                .unwrap()
         };
         assert_eq!(first, second);
     }
 }
-

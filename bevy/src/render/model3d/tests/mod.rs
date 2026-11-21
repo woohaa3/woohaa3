@@ -5,12 +5,12 @@
 //! world/场景 helper。
 
 mod batching;
-mod ownership;
 #[cfg(feature = "explicit-instancing")]
 mod instancing;
 mod lifecycle;
 mod lod;
 mod motion_playback;
+mod ownership;
 mod playback;
 mod playback_representation;
 mod units;
@@ -61,9 +61,15 @@ pub(super) fn scene_with(node: &GraphNode, model: Option<ModelReference>) -> Sce
 /// 由内容快照构造节点模型引用（resource_key = sceneVersion:signature）。
 ///
 /// `modelPlacement` 已不再进入场景 wire；参数只为兼容既有夹具签名。
-pub(super) fn reference_for(snapshot: &ModelSnapshot, _placement: ModelPlacement) -> ModelReference {
+pub(super) fn reference_for(
+    snapshot: &ModelSnapshot,
+    _placement: ModelPlacement,
+) -> ModelReference {
     let scene_version = snapshot.scene_version.clone();
-    ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
+    ModelReference {
+        ground_anchor_local: None,
+        part_rotations: None,
+        part_positions: None,
         resource_key: format!(
             "{}:{}",
             scene_version.clone().unwrap_or_default(),
@@ -128,8 +134,10 @@ pub(super) fn world_with_resources() -> World {
 pub(super) fn opacity_instances(
     world: &mut World,
 ) -> HashMap<Entity, crate::canvas_ecs::components::OpacityMaterialInstance> {
-    let mut query = world
-        .query::<(Entity, &crate::canvas_ecs::components::OpacityMaterialInstance)>();
+    let mut query = world.query::<(
+        Entity,
+        &crate::canvas_ecs::components::OpacityMaterialInstance,
+    )>();
     query
         .iter(world)
         .map(|(entity, instance)| (entity, instance.clone()))

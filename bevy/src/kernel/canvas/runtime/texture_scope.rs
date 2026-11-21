@@ -9,7 +9,9 @@ pub(crate) struct TextureScopeGate {
 
 impl TextureScopeGate {
     pub(crate) fn begin(&mut self, canvas_id: &str) -> Result<u64, &'static str> {
-        if canvas_id.is_empty() { return Err("empty canvas id"); }
+        if canvas_id.is_empty() {
+            return Err("empty canvas id");
+        }
         let token = self.next.checked_add(1).ok_or("texture scope exhausted")?;
         self.next = token;
         self.active = Some((token, canvas_id.to_owned()));
@@ -18,11 +20,15 @@ impl TextureScopeGate {
     }
 
     pub(crate) fn accept_upload(&self, token: u64) -> bool {
-        self.active.as_ref().is_some_and(|(current, _)| *current == token)
+        self.active
+            .as_ref()
+            .is_some_and(|(current, _)| *current == token)
     }
 
     pub(crate) fn matches_scene(&self, token: u64, canvas_id: &str) -> bool {
-        self.active.as_ref().is_some_and(|(current, id)| *current == token && id == canvas_id)
+        self.active
+            .as_ref()
+            .is_some_and(|(current, id)| *current == token && id == canvas_id)
     }
 
     pub(crate) fn accept_scene(&mut self, token: u64, canvas_id: &str) -> bool {
@@ -37,7 +43,10 @@ impl TextureScopeGate {
         self.accept_upload(token) && self.accepted_scene == Some(token)
     }
 
-    pub(crate) fn invalidate(&mut self) { self.active = None; self.accepted_scene = None; }
+    pub(crate) fn invalidate(&mut self) {
+        self.active = None;
+        self.accepted_scene = None;
+    }
 }
 
 #[cfg(test)]

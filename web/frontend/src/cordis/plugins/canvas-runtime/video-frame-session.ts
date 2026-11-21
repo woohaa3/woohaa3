@@ -125,6 +125,9 @@ export type VideoFrameSessions = {
   hasRealFrame(nodeId: string): boolean;
   /** 首帧解码或播放缓冲中；只存在于浏览器呈现状态。 */
   isLoading?(nodeId: string): boolean;
+  /** 资源状态增量（供 frame-submission 走 `setResourceStates` 避免整幅场景重建）。 */
+  resourceStateChanges?(): readonly { id: string; loading: boolean; hasRealFrame: boolean }[];
+  acknowledgeResourceStates?(): void;
   /** 当前活动会话的节点 id（供 E2E / 排障观察）。 */
   activeNodeIds(): string[];
   /** 诊断：首帧名额的真实占用（含 draining）。 */
@@ -193,7 +196,9 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   let boundCameraShots = worldCameraShotStore.snapshot();
   let boundSources: Map<string, { url: string; posterUrl: string | null }> | null = null;
   const notify = () => options.onChange?.();
-  const loading = new NodeResourceLoading(notify);
+  const resourceDirty = new Set<string>();
+  const acknowledged = new Map<string, { loading: boolean; hasRealFrame: boolean }>();
+  const loading = new NodeResourceLoading(notify, id => resourceDirty.add(id));
   const purposeOf = (nodeId: string): ResidencyPurpose => options.purposeOf?.(nodeId) ?? "visible";
 
   /** 首帧名额：只有显式 release 才归还（完成/失败/超时/清理）。 */
@@ -246,6 +251,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     uploads.clear(`poster:${session.nodeId}`);
     uploads.clear(`decode-video:${session.nodeId}`);
     loading.remove(session.load);
+    resourceDirty.add(session.nodeId);
     session.state = "idle";
     cancelFrameHandle(session);
     releaseStatic(session.nodeId);
@@ -301,6 +307,7 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
     });
     if (!accepted) { loading.setLoading(session.load, false); return false; }
     session.hasRealFrame = true;
+    resourceDirty.add(session.nodeId);
     loading.setLoading(session.load, false);
     session.lastUploadedAt = uploadedAt;
     return true;
@@ -540,103 +547,105 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
   return {
     sync() {
       if (disposed) return;
-      const nextScope = options.runtime.currentCanvasScope?.() ?? null;
-      if (nextScope !== activeScope) {
-        activeScope = nextScope;
-        staticQueue.length = 0;
-        for (const session of sessions.values()) detachSession(session);
-        sessions.clear();
-        for (const nodeId of [...staticActive.keys()]) releaseStatic(nodeId);
-        pendingRestores.clear(); overriddenTextures.clear();
-        uploads.retainNodes(new Set()); loading.clear();
-        hovered = null; boundCanvas = null; boundStructure = ''; boundSources = null;
-      }
-      const retry = options.runtime.retryVersion?.() ?? 0;
-      const retrying = retry !== retryVersion;
-      retryVersion = retry;
-      const suspended = options.isSuspended?.() ?? false;
-      const resuming = wasSuspended && !suspended;
-      wasSuspended = suspended;
-      if (suspended) {
-        for (const session of sessions.values()) stopPlayback(session);
-        hovered = null;
-      }
-      const canvas = options.getCanvas();
-      if (!canvas) {
-        for (const session of sessions.values()) detachSession(session);
-        sessions.clear();
-        hovered = null;
-        return;
-      }
-    const next = new Map<string, { url: string; posterUrl: string | null }>();
-      // 需求集合 memo（design D7 / 任务 7.1）：画布身份与结构指纹都没变时复用上一帧解析结果，
-      // 静止帧不重新解析全量节点视频来源。
-      const structure = `${canvasStructureKey(canvas)}|${canvas.id}`;
-      const cameraShots = worldCameraShotStore.snapshot();
-      if (canvas !== boundCanvas || structure !== boundStructure || cameraShots !== boundCameraShots || !boundSources) {
-        for (const node of canvas.document.nodes) {
-          if (node.type !== "video" && node.type !== "world-camera") continue;
-          const resolved = resolveNodeVideoSource(canvas, node.id, options.getMediaAsset?.(node.id));
-          if (resolved) next.set(node.id, resolved);
+      loading.batch(() => {
+        const nextScope = options.runtime.currentCanvasScope?.() ?? null;
+        if (nextScope !== activeScope) {
+          activeScope = nextScope;
+          staticQueue.length = 0;
+          for (const session of sessions.values()) detachSession(session);
+          sessions.clear();
+          for (const nodeId of [...staticActive.keys()]) releaseStatic(nodeId);
+          pendingRestores.clear(); overriddenTextures.clear();
+          uploads.retainNodes(new Set()); loading.clear();
+          hovered = null; boundCanvas = null; boundStructure = ''; boundSources = null;
         }
-        boundCanvas = canvas;
-        boundStructure = structure;
-        boundCameraShots = cameraShots;
-        boundSources = next;
-      } else {
-        for (const [nodeId, source] of boundSources) next.set(nodeId, source);
-      }
-
-      // 先算准入集合，再创建：未准入节点不创建 decoder（不再 create-all/prune-later）。
-      const admittedIds = new Set(admitted(next));
-      uploads.retainNodes(new Set(next.keys()));
-      for (const [nodeId, session] of sessions) {
-        const want = next.get(nodeId);
-        if (!want || want.url !== session.sourceUrl || !admittedIds.has(nodeId)) {
-          detachSession(session);
-          sessions.delete(nodeId);
-          if (hovered === nodeId) hovered = null;
+        const retry = options.runtime.retryVersion?.() ?? 0;
+        const retrying = retry !== retryVersion;
+        retryVersion = retry;
+        const suspended = options.isSuspended?.() ?? false;
+        const resuming = wasSuspended && !suspended;
+        wasSuspended = suspended;
+        if (suspended) {
+          for (const session of sessions.values()) stopPlayback(session);
+          hovered = null;
         }
-      }
-
-      for (const nodeId of admittedIds) {
-        if (sessions.has(nodeId)) continue;
-        const { url, posterUrl } = next.get(nodeId)!;
-        const session = uploads.run(`video-session:${nodeId}`, url, nodeId, () => createSession(nodeId, url, posterUrl));
-        if (!session) continue;
-        sessions.set(nodeId, session);
-        // 普通静态卡片优先 poster：有 poster 时不抢首帧名额（design D3 / 任务 3.3）。
-        if (posterUrl) uploadPosterFallback(session, session.generation);
-        // 只有真正需要真帧的目标（hover/聚焦/无 poster）才取首帧。
-        if (!posterUrl && nodeId === hovered) ensureFirstFrame(session, session.generation);
-      }
-      const overridden = options.getFocusTextureNodeId?.();
-      if (overridden && sessions.has(overridden)) overriddenTextures.add(overridden);
-      for (const nodeId of overriddenTextures) if (!sessions.has(nodeId)) overriddenTextures.delete(nodeId);
-
-      // 只恢复被聚焦覆盖的纹理或尚未取得的首帧；图片聚焦不使视频纹理失效。
-      if (resuming || retrying) {
-        for (const session of sessions.values()) {
-          if (!retrying && (session.hasRealFrame || session.hasPosterTexture) && !overriddenTextures.has(session.nodeId)) continue;
-          pendingRestores.set(session.nodeId, session);
+        const canvas = options.getCanvas();
+        if (!canvas) {
+          for (const session of sessions.values()) detachSession(session);
+          sessions.clear();
+          hovered = null;
+          return;
         }
-        overriddenTextures.clear();
-      }
-
-      // 一帧最多恢复一个视频；暂停期间保留队列，退出后继续。
-      if (!suspended && pendingRestores.size) {
-        const [nodeId, session] = pendingRestores.entries().next().value!;
-        pendingRestores.delete(nodeId);
-        if (isCurrent(session, session.generation)) {
-          if (uploadRealFrame(session, session.generation)) notify();
-          else { session.posterSettled = false; uploadPosterFallback(session, session.generation); }
+        const next = new Map<string, { url: string; posterUrl: string | null }>();
+        // 需求集合 memo（design D7 / 任务 7.1）：画布身份与结构指纹都没变时复用上一帧解析结果，
+        // 静止帧不重新解析全量节点视频来源。
+        const structure = `${canvasStructureKey(canvas)}|${canvas.id}`;
+        const cameraShots = worldCameraShotStore.snapshot();
+        if (canvas !== boundCanvas || structure !== boundStructure || cameraShots !== boundCameraShots || !boundSources) {
+          for (const node of canvas.document.nodes) {
+            if (node.type !== "video" && node.type !== "world-camera") continue;
+            const resolved = resolveNodeVideoSource(canvas, node.id, options.getMediaAsset?.(node.id));
+            if (resolved) next.set(node.id, resolved);
+          }
+          boundCanvas = canvas;
+          boundStructure = structure;
+          boundCameraShots = cameraShots;
+          boundSources = next;
+        } else {
+          for (const [nodeId, source] of boundSources) next.set(nodeId, source);
         }
-      }
 
-      if (hovered) {
-        const session = sessions.get(hovered);
-        if (session) startPlayback(session, session.generation);
-      }
+        // 先算准入集合，再创建：未准入节点不创建 decoder（不再 create-all/prune-later）。
+        const admittedIds = new Set(admitted(next));
+        uploads.retainNodes(new Set(next.keys()));
+        for (const [nodeId, session] of sessions) {
+          const want = next.get(nodeId);
+          if (!want || want.url !== session.sourceUrl || !admittedIds.has(nodeId)) {
+            detachSession(session);
+            sessions.delete(nodeId);
+            if (hovered === nodeId) hovered = null;
+          }
+        }
+
+        for (const nodeId of admittedIds) {
+          if (sessions.has(nodeId)) continue;
+          const { url, posterUrl } = next.get(nodeId)!;
+          const session = uploads.run(`video-session:${nodeId}`, url, nodeId, () => createSession(nodeId, url, posterUrl));
+          if (!session) continue;
+          sessions.set(nodeId, session);
+          // 普通静态卡片优先 poster：有 poster 时不抢首帧名额（design D3 / 任务 3.3）。
+          if (posterUrl) uploadPosterFallback(session, session.generation);
+          // 只有真正需要真帧的目标（hover/聚焦/无 poster）才取首帧。
+          if (!posterUrl && nodeId === hovered) ensureFirstFrame(session, session.generation);
+        }
+        const overridden = options.getFocusTextureNodeId?.();
+        if (overridden && sessions.has(overridden)) overriddenTextures.add(overridden);
+        for (const nodeId of overriddenTextures) if (!sessions.has(nodeId)) overriddenTextures.delete(nodeId);
+
+        // 只恢复被聚焦覆盖的纹理或尚未取得的首帧；图片聚焦不使视频纹理失效。
+        if (resuming || retrying) {
+          for (const session of sessions.values()) {
+            if (!retrying && (session.hasRealFrame || session.hasPosterTexture) && !overriddenTextures.has(session.nodeId)) continue;
+            pendingRestores.set(session.nodeId, session);
+          }
+          overriddenTextures.clear();
+        }
+
+        // 一帧最多恢复一个视频；暂停期间保留队列，退出后继续。
+        if (!suspended && pendingRestores.size) {
+          const [nodeId, session] = pendingRestores.entries().next().value!;
+          pendingRestores.delete(nodeId);
+          if (isCurrent(session, session.generation)) {
+            if (uploadRealFrame(session, session.generation)) notify();
+            else { session.posterSettled = false; uploadPosterFallback(session, session.generation); }
+          }
+        }
+
+        if (hovered) {
+          const session = sessions.get(hovered);
+          if (session) startPlayback(session, session.generation);
+        }
+      });
     },
 
     setHovered(nodeId: string | null) {
@@ -676,6 +685,26 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
 
     isLoading: loading.isLoading,
 
+    resourceStateChanges() {
+      const changed: { id: string; loading: boolean; hasRealFrame: boolean }[] = [];
+      for (const id of resourceDirty) {
+        const state = { id, loading: loading.isLoading(id), hasRealFrame: sessions.get(id)?.hasRealFrame ?? false };
+        const old = acknowledged.get(id);
+        if (!old || old.loading !== state.loading || old.hasRealFrame !== state.hasRealFrame) changed.push(state);
+      }
+      return changed;
+    },
+
+    acknowledgeResourceStates() {
+      for (const id of resourceDirty) {
+        const nextLoading = loading.isLoading(id);
+        const hasRealFrame = sessions.get(id)?.hasRealFrame ?? false;
+        if (nextLoading || hasRealFrame) acknowledged.set(id, { loading: nextLoading, hasRealFrame });
+        else acknowledged.delete(id);
+      }
+      resourceDirty.clear();
+    },
+
     activeNodeIds() {
       return [...sessions.keys()];
     },
@@ -695,6 +724,8 @@ export function createVideoFrameSessions(options: VideoFrameSessionOptions): Vid
       for (const session of sessions.values()) detachSession(session);
       sessions.clear();
       loading.clear();
+      resourceDirty.clear();
+      acknowledged.clear();
       staticQueue.length = 0;
       for (const nodeId of [...staticActive.keys()]) releaseStatic(nodeId);
       hovered = null;

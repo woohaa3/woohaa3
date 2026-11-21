@@ -256,7 +256,12 @@ mod tests {
     use crate::video_encode::h264::EncodedIndexFrame;
 
     fn u32_at(bytes: &[u8], offset: usize) -> u32 {
-        u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+        u32::from_be_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ])
     }
 
     fn boxes(bytes: &[u8], start: usize, end: usize) -> Vec<(String, usize, usize, usize)> {
@@ -274,7 +279,10 @@ mod tests {
         out
     }
 
-    fn find<'a>(list: &'a [(String, usize, usize, usize)], kind: &str) -> Option<&'a (String, usize, usize, usize)> {
+    fn find<'a>(
+        list: &'a [(String, usize, usize, usize)],
+        kind: &str,
+    ) -> Option<&'a (String, usize, usize, usize)> {
         list.iter().find(|entry| entry.0 == kind)
     }
 

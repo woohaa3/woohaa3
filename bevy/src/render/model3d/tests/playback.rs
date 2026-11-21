@@ -137,7 +137,13 @@ fn active_model(world: &World) -> Option<String> {
 fn hover_keeps_active_model_and_animated_root_distinct() {
     let mut world = world_with_resources();
     let node = model_node();
-    for (snapshot, animated) in [(sphere_snapshot("static"), false), (animated_snapshot("animated", crate::protocol::MODEL_SCENE_IR_V2), true)] {
+    for (snapshot, animated) in [
+        (sphere_snapshot("static"), false),
+        (
+            animated_snapshot("animated", crate::protocol::MODEL_SCENE_IR_V2),
+            true,
+        ),
+    ] {
         let reference = reference_for(&snapshot, ModelPlacement::default());
         let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
         let mut scene = scene_with(&node, Some(reference));

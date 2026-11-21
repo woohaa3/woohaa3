@@ -114,7 +114,10 @@ pub(super) struct Jobs {
 }
 impl Jobs {
     pub fn enqueue(&mut self, key: String, geometry: Arc<ModelGeometry>, quality: Quality) {
-        let ModelGeometry::Mesh { vertices, faces, .. } = geometry.as_ref() else {
+        let ModelGeometry::Mesh {
+            vertices, faces, ..
+        } = geometry.as_ref()
+        else {
             return;
         };
         if faces.len() < 64 {

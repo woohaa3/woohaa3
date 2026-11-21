@@ -399,7 +399,9 @@ fn shooting_views_ignore_global_light_without_switching_off_the_canvas() {
     assert!(!key.shadow_maps_enabled, "拍摄主光不得投影");
     assert_eq!(key.intensity, WORLD_CAMERA_KEY_LUMENS);
     assert!(
-        key_layers.intersects(&RenderLayers::layer(crate::preview_layers::SHOOTING_KEY_LAYER)),
+        key_layers.intersects(&RenderLayers::layer(
+            crate::preview_layers::SHOOTING_KEY_LAYER
+        )),
         "主光必须能被拍摄视图的层集合命中"
     );
     assert!(

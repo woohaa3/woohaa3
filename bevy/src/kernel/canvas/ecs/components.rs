@@ -89,7 +89,12 @@ impl CardVisual {
                 model: node.model.is_some(),
                 ghost: node.ghost,
             },
-            labels: CardLabelsInput { title: node.title.clone(), type_label: node.type_label.clone(), body: node.body.clone(), card_label: node.card_label.clone() },
+            labels: CardLabelsInput {
+                title: node.title.clone(),
+                type_label: node.type_label.clone(),
+                body: node.body.clone(),
+                card_label: node.card_label.clone(),
+            },
         }
     }
 }

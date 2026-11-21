@@ -86,6 +86,26 @@ function harness(options: { writable?: boolean } = {}) {
 }
 
 describe("拖动合并候选（任务 2.2）", () => {
+  it("起拖时源中心已被同类目标覆盖时不提示合并", () => {
+    woohaa3CanvasStore.getState().applyRemoteCanvas(canvasOf([
+      { id: "source", x: 0, y: 0 },
+      { id: "underlying", x: 0, y: 0 }
+    ]));
+    const { gesture, state } = harness();
+    const preview = vi.fn();
+    const drop = vi.fn(() => true);
+    cleanups.push(nodeMerge.bind({ preview, drop }));
+
+    const drag = dragGesture([["source", { x: 0, y: 0 }]]);
+    state.gesture = drag;
+    state.localPositions = new Map([["source", { x: 0, y: 0 }]]);
+    gesture.evaluate();
+
+    expect(preview).toHaveBeenLastCalledWith(null);
+    gesture.commit(drag, state.localPositions);
+    expect(drop).not.toHaveBeenCalled();
+  });
+
   it("命中同类型候选：evaluate 驱动 preview，释放消费且不提交位置命令", () => {
     woohaa3CanvasStore.getState().applyRemoteCanvas(canvasOf([
       { id: "source", x: 0, y: 0 },

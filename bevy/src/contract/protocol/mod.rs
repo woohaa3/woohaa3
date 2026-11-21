@@ -17,6 +17,7 @@ mod animation_playback;
 pub(crate) mod focus_details;
 mod focus_transition;
 mod image_focus;
+mod hover;
 mod model;
 mod observer;
 mod position;
@@ -27,9 +28,9 @@ mod scene;
 mod scene_instant;
 mod shared_world;
 mod theme;
-mod world_camera;
 mod video_focus;
 mod viewport;
+mod world_camera;
 
 // 保留既有 `crate::protocol::*` 消费路径：facade 是唯一对外入口（design D1）。
 //
@@ -43,8 +44,9 @@ pub(crate) use image_focus::{IMAGE_FOCUS_VERSION, ImageFocus, ImageFocusViewport
 pub(crate) use model::{
     CANVAS_RENDER_SCENE_VERSION, DEFAULT_BLEND_OPACITY, MODEL_ASSET_VERSION,
     MODEL_DESCRIPTOR_VERSION, MODEL_SCENE_IR_V2, ModelAabbDto, ModelAssetDescriptor,
-    ModelSkin, ModelDescriptor, ModelDescriptorDto, ModelOffset, ModelOp, ModelPose, ModelPlacement, ModelReference,
-    ModelSnapshot, canonical_signature, fnv1a64_utf16, validate_model_poses,
+    ModelDescriptor, ModelDescriptorDto, ModelOffset, ModelOp, ModelPlacement, ModelPose,
+    ModelReference, ModelSkin, ModelSnapshot, canonical_signature, fnv1a64_utf16,
+    validate_model_poses,
 };
 #[allow(unused_imports)]
 pub(crate) use observer::{CANVAS_OBSERVER_UPDATE_VERSION, ObserverUpdateRequest, apply_observer};
@@ -57,8 +59,8 @@ pub(crate) use position::{
 pub(crate) use prepared::{PreparedModelMetadata, PreparedModelRequest};
 #[allow(unused_imports)]
 pub(crate) use scene::{
-    Edge, EditScopeState, GraphNode, HistoryStripDot, HistoryStripPresentation, NodeChrome, Scene, SceneArea,
-    SceneAreaBounds, SceneAreaPlayback, SceneAreaPoint, Selection, Viewport,
+    Edge, EditScopeState, GraphNode, HistoryStripDot, HistoryStripPresentation, NodeChrome, Scene,
+    SceneArea, SceneAreaBounds, SceneAreaPlayback, SceneAreaPoint, Selection, Viewport,
 };
 #[allow(unused_imports)]
 pub(crate) use scene_instant::{
@@ -69,20 +71,20 @@ pub(crate) use scene_instant::{
 };
 #[allow(unused_imports)]
 pub(crate) use shared_world::{
-    WorldInstance,
-    UNITS_PER_METER, renderer_rotation_to_world, renderer_to_world, world_rotation_to_renderer,
-    world_to_renderer,
+    UNITS_PER_METER, WorldInstance, renderer_rotation_to_world, renderer_to_world,
+    world_rotation_to_renderer, world_to_renderer,
 };
 #[allow(unused_imports)]
 pub(crate) use theme::{Theme, is_known_theme_token, parse_theme_hex};
 #[allow(unused_imports)]
-pub(crate) use world_camera::{
-    WorldCamera, WorldCameraAspect, WorldCameraCaptureMode, WorldCameraPoint,
-    WorldCameraProjection, WORLD_CAMERA_VERSION,
-};
-#[allow(unused_imports)]
 pub(crate) use video_focus::{VIDEO_FOCUS_VERSION, VideoFocus};
 pub(crate) use viewport::{CANVAS_VIEWPORT_UPDATE_VERSION, ViewportUpdateRequest};
+pub(crate) use hover::{CANVAS_HOVER_UPDATE_VERSION, HoverUpdateRequest};
+#[allow(unused_imports)]
+pub(crate) use world_camera::{
+    WORLD_CAMERA_VERSION, WorldCamera, WorldCameraAspect, WorldCameraCaptureMode, WorldCameraPoint,
+    WorldCameraProjection,
+};
 
 /// 节点默认宽高（world ≈ CSS 像素）。与 contracts 的默认节点尺寸一致。
 pub(crate) const DEFAULT_NODE_WIDTH: f32 = 224.0;
@@ -111,4 +113,3 @@ mod tests;
 mod tests_instant;
 #[cfg(test)]
 mod tests_progress;
-

@@ -166,19 +166,31 @@ fn native_renderer_png() {
 #[test]
 #[ignore = "requires hardware GPU"]
 fn shared_world_canvas_hardware() {
-    use bevy::{prelude::*, asset::RenderAssetUsages, camera::RenderTarget,
-        render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
-        app::ScheduleRunnerPlugin};
-    use std::sync::{Arc, Mutex};
-    use crate::model3d::{runtime::{FocusVisuals, ModelVisuals, sync_models}, scene::prepare_snapshot};
+    use crate::model3d::{
+        runtime::{FocusVisuals, ModelVisuals, sync_models},
+        scene::prepare_snapshot,
+    };
     use crate::protocol::{GraphNode, ModelPlacement, ModelReference, ModelSnapshot, Scene};
+    use bevy::{
+        app::ScheduleRunnerPlugin,
+        asset::RenderAssetUsages,
+        camera::RenderTarget,
+        prelude::*,
+        render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+    };
+    use std::sync::{Arc, Mutex};
 
     fn frame(swap: bool, moved_cards: bool, parent_changed: bool) -> Vec<u8> {
         let pixels = Arc::new(Mutex::new(None));
         let mut app = App::new();
-        app.add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: None,
-            exit_condition: bevy::window::ExitCondition::DontExit, ..default() }));
-        app.add_plugins(ScheduleRunnerPlugin::run_loop(std::time::Duration::from_millis(8)));
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: None,
+            exit_condition: bevy::window::ExitCondition::DontExit,
+            ..default()
+        }));
+        app.add_plugins(ScheduleRunnerPlugin::run_loop(
+            std::time::Duration::from_millis(8),
+        ));
         let ready = super::readiness::install(&mut app);
         let output = pixels.clone();
         app.add_systems(Startup, move |mut commands: Commands, mut images: ResMut<Assets<Image>>,
@@ -246,13 +258,35 @@ fn shared_world_canvas_hardware() {
     assert_ne!(a, swapped);
     assert_ne!(a, parent);
     let center = (128 * 256 + 128) * 4;
-    println!("center original={:?} swapped={:?}", &a[center..center+4], &swapped[center..center+4]);
+    println!(
+        "center original={:?} swapped={:?}",
+        &a[center..center + 4],
+        &swapped[center..center + 4]
+    );
     assert!(a[center] > a[center + 1] && swapped[center + 1] > swapped[center]);
     let dir = std::env::var("WOOHAA_WORLD_EVIDENCE").unwrap();
-    for (name, pixels) in [("original", a), ("reordered", reordered), ("swapped", swapped), ("parent", parent)] {
-        println!("{name}: red={}, green={}", pixels.chunks_exact(4).filter(|p| p[0] > 200 && p[1] < 80).count(),
-            pixels.chunks_exact(4).filter(|p| p[1] > 200 && p[0] < 80).count());
-        std::fs::write(format!("{dir}/{name}.png"), encode_png(&pixels, 256, 256).unwrap()).unwrap();
+    for (name, pixels) in [
+        ("original", a),
+        ("reordered", reordered),
+        ("swapped", swapped),
+        ("parent", parent),
+    ] {
+        println!(
+            "{name}: red={}, green={}",
+            pixels
+                .chunks_exact(4)
+                .filter(|p| p[0] > 200 && p[1] < 80)
+                .count(),
+            pixels
+                .chunks_exact(4)
+                .filter(|p| p[1] > 200 && p[0] < 80)
+                .count()
+        );
+        std::fs::write(
+            format!("{dir}/{name}.png"),
+            encode_png(&pixels, 256, 256).unwrap(),
+        )
+        .unwrap();
     }
 }
 

@@ -49,7 +49,8 @@ fn store() -> &'static Mutex<TextureStore> {
 /// 路由前缀只用于把模型纹理与片场媒体平面分开；纹理表按**去掉前缀的内容 id** 存取，
 /// 与材质 op 的 `baseColorTexture` 值一致。
 fn store_key(id: &str) -> Option<&str> {
-    id.strip_prefix(MODEL_TEXTURE_ID_PREFIX).filter(|key| !key.is_empty())
+    id.strip_prefix(MODEL_TEXTURE_ID_PREFIX)
+        .filter(|key| !key.is_empty())
 }
 
 /// 按内容 id 取纹理句柄；缺失时材质保持纯色。
@@ -75,7 +76,11 @@ pub(crate) fn sync_model_textures(
     if *last_scope != batch.1 {
         *last_scope = batch.1;
         if let Ok(mut store) = store().lock() {
-            let old: Vec<_> = store.entries.drain().map(|(_, entry)| entry.handle).collect();
+            let old: Vec<_> = store
+                .entries
+                .drain()
+                .map(|(_, entry)| entry.handle)
+                .collect();
             store.bytes = 0;
             store.revision = store.revision.wrapping_add(1);
             for handle in old {
@@ -123,15 +128,16 @@ pub(crate) fn sync_model_textures(
             RenderAssetUsages::default(),
         );
         // glTF 默认 wrap 为 REPEAT；UV 超出 [0,1] 时不应被钳制（会改变外观）。
-        image.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
-            address_mode_u: bevy::image::ImageAddressMode::Repeat,
-            address_mode_v: bevy::image::ImageAddressMode::Repeat,
-            address_mode_w: bevy::image::ImageAddressMode::Repeat,
-            mag_filter: bevy::image::ImageFilterMode::Linear,
-            min_filter: bevy::image::ImageFilterMode::Linear,
-            mipmap_filter: bevy::image::ImageFilterMode::Linear,
-            ..Default::default()
-        });
+        image.sampler =
+            bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+                address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                address_mode_w: bevy::image::ImageAddressMode::Repeat,
+                mag_filter: bevy::image::ImageFilterMode::Linear,
+                min_filter: bevy::image::ImageFilterMode::Linear,
+                mipmap_filter: bevy::image::ImageFilterMode::Linear,
+                ..Default::default()
+            });
         let handle = images.add(image);
         store.order += 1;
         let order = store.order;
@@ -176,14 +182,17 @@ pub(crate) fn sync_model_textures(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::{asset::Assets, ecs::system::RunSystemOnce};
     use crate::app::ModelTextureBatch;
+    use bevy::{asset::Assets, ecs::system::RunSystemOnce};
 
     #[test]
     fn prefix_is_stable_and_material_lookup_is_best_effort() {
         assert_eq!(MODEL_TEXTURE_ID_PREFIX, "modeltex:");
         // 路由前缀不进入材质查找键：材质 op 使用的是去前缀的内容 id。
-        assert_eq!(store_key("modeltex:glbtex:0123456789abcdef"), Some("glbtex:0123456789abcdef"));
+        assert_eq!(
+            store_key("modeltex:glbtex:0123456789abcdef"),
+            Some("glbtex:0123456789abcdef")
+        );
         assert_eq!(store_key("plane-7"), None);
         assert_eq!(store_key("modeltex:"), None);
         assert!(handle("glbtex:missing").is_none());
@@ -199,23 +208,33 @@ mod tests {
         {
             let mut batch = app.world_mut().resource_mut::<ModelTextureBatch>();
             batch.1 = Some(1);
-            batch.0.insert("modeltex:glbtex:a".into(), (1, 1, vec![1, 2, 3, 4]));
+            batch
+                .0
+                .insert("modeltex:glbtex:a".into(), (1, 1, vec![1, 2, 3, 4]));
         }
-        app.world_mut().run_system_once(sync_model_textures).unwrap();
+        app.world_mut()
+            .run_system_once(sync_model_textures)
+            .unwrap();
         assert!(handle("glbtex:a").is_some());
 
         {
             let mut batch = app.world_mut().resource_mut::<ModelTextureBatch>();
             batch.1 = Some(2);
-            batch.0.insert("modeltex:glbtex:b".into(), (1, 1, vec![5, 6, 7, 8]));
+            batch
+                .0
+                .insert("modeltex:glbtex:b".into(), (1, 1, vec![5, 6, 7, 8]));
         }
-        app.world_mut().run_system_once(sync_model_textures).unwrap();
+        app.world_mut()
+            .run_system_once(sync_model_textures)
+            .unwrap();
         assert!(handle("glbtex:a").is_none());
         assert!(handle("glbtex:b").is_some());
 
         // Leave the process-global store empty for other unit tests.
         app.world_mut().resource_mut::<ModelTextureBatch>().1 = Some(3);
-        app.world_mut().run_system_once(sync_model_textures).unwrap();
+        app.world_mut()
+            .run_system_once(sync_model_textures)
+            .unwrap();
         assert!(handle("glbtex:b").is_none());
     }
 }

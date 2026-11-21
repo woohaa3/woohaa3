@@ -2,8 +2,8 @@
 use super::store::MAX_PENDING_DIRTY_KEYS;
 use super::*;
 use crate::app::CurrentScene;
-use crate::canvas2d::text_presentation;
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
+use crate::canvas2d::text_presentation;
 use bevy::ecs::system::RunSystemOnce;
 
 fn world() -> World {
@@ -546,10 +546,12 @@ fn overflow_tombstone_is_consumed_and_the_entity_is_recycled() {
     world.run_system_once(sync_canvas_labels).unwrap();
     world.flush();
     assert!(labels_of(&mut world, recycled).is_empty());
-    assert!(world
-        .resource::<LabelRequests>()
-        .applied_key(recycled)
-        .is_none());
+    assert!(
+        world
+            .resource::<LabelRequests>()
+            .applied_key(recycled)
+            .is_none()
+    );
     let epoch = world.resource::<LabelRequests>().queue_epoch();
     world
         .resource_mut::<LabelRequests>()
@@ -629,14 +631,18 @@ fn despawned_parent_does_not_leave_an_index_for_a_recycled_entity() {
     world.run_system_once(sync_canvas_labels).unwrap();
     world.flush();
     assert!(labels_of(&mut world, recycled).is_empty());
-    assert!(world
-        .resource::<LabelRequests>()
-        .applied_key(recycled)
-        .is_none());
-    assert!(world
-        .resource::<LabelRequests>()
-        .applied_key(parent)
-        .is_none());
+    assert!(
+        world
+            .resource::<LabelRequests>()
+            .applied_key(recycled)
+            .is_none()
+    );
+    assert!(
+        world
+            .resource::<LabelRequests>()
+            .applied_key(parent)
+            .is_none()
+    );
 }
 
 #[test]

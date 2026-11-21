@@ -17,24 +17,49 @@ use crate::app::CurrentScene;
 use crate::protocol::Scene;
 
 #[derive(Resource, Default)]
-pub(crate) struct OverlayStamp(Option<u64>);
+pub(crate) struct OverlayStamp {
+    value: Option<u64>,
+    body_digest: Option<u64>,
+}
 
 impl OverlayStamp {
     /// Stamp that never matches a fresh digest (test fixtures that bypass the refresh system).
     #[cfg(test)]
     pub(crate) fn never_matching() -> Self {
-        Self(Some(u64::MAX))
+        Self {
+            value: Some(u64::MAX),
+            body_digest: None,
+        }
     }
 
     pub(crate) fn get(&self) -> Option<u64> {
-        self.0
+        self.value
     }
 }
 
 /// Refresh the stamp from the accepted scene. Reads `&CurrentScene` only, so it never dirties the
 /// scene resource the overlays also read.
-pub(crate) fn refresh(scene: Res<CurrentScene>, mut stamp: ResMut<OverlayStamp>) {
-    stamp.0 = Some(digest(&scene.0));
+pub(crate) fn refresh(
+    scene: Res<CurrentScene>,
+    flags: Option<Res<crate::app::FrameFlags>>,
+    mut stamp: ResMut<OverlayStamp>,
+) {
+    let body_unchanged = flags.as_ref().is_some_and(|flags| {
+        !flags.scene_received
+            && !flags.positions_received
+            && !flags.theme_changed
+            && !flags.surface_changed
+            && !flags.observer_changed
+    });
+    let body = match stamp.body_digest.filter(|_| body_unchanged) {
+        Some(cached) => cached,
+        None => {
+            let computed = digest_without_viewport(&scene.0);
+            stamp.body_digest = Some(computed);
+            computed
+        }
+    };
+    stamp.value = Some(finish_with_viewport(body, &scene.0));
 }
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -130,6 +155,19 @@ fn digest_world_camera(digest: &mut Digest, node: &crate::protocol::GraphNode) {
 
 /// Digest of everything the dynamic overlays may derive from the accepted scene.
 pub(crate) fn digest(scene: &Scene) -> u64 {
+    finish_with_viewport(digest_without_viewport(scene), scene)
+}
+
+fn finish_with_viewport(body: u64, scene: &Scene) -> u64 {
+    let mut digest = Digest(body);
+    digest
+        .f32(scene.viewport.x)
+        .f32(scene.viewport.y)
+        .f32(scene.viewport.zoom);
+    digest.0
+}
+
+fn digest_without_viewport(scene: &Scene) -> u64 {
     let mut digest = Digest::new();
     digest
         .str(&scene.canvas_id)
@@ -141,9 +179,6 @@ pub(crate) fn digest(scene: &Scene) -> u64 {
                 .is_none_or(|scope| scope.three_d == "edit"),
         )
         .str(&scene.theme.fingerprint)
-        .f32(scene.viewport.x)
-        .f32(scene.viewport.y)
-        .f32(scene.viewport.zoom)
         .u32(scene.nodes.len() as u32);
     for node in &scene.nodes {
         digest

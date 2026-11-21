@@ -70,6 +70,27 @@ export type MergeTargetResolution = {
 };
 
 /**
+ * Returns whether a point is inside a candidate's complete rectangle.
+ *
+ * Kept beside `resolveMergeTarget` so drag callers can distinguish entering a
+ * target during this gesture from a target that already covered the source at
+ * pointerdown (the latter is not an intentional merge gesture).
+ */
+export function mergeTargetContainsCenter(
+  center: { x: number; y: number },
+  candidate: Pick<MergeTargetCandidate, "x" | "y" | "width" | "height">
+): boolean {
+  if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return false;
+  const { x, y, width, height } = candidate;
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return false;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const halfRatio = MERGE_TARGET_CENTER_RATIO / 2;
+  return Math.abs(center.x - centerX) <= halfRatio * width
+    && Math.abs(center.y - centerY) <= halfRatio * height;
+}
+
+/**
  * 在拖动中心命中的同类型候选里取唯一目标；无合法候选返回 `null`。
  *
  * `candidates` 必须按文档顺序（越靠后越上层）；同距离时后者胜出。
@@ -82,20 +103,16 @@ export function resolveMergeTarget(input: {
 }): MergeTargetResolution | null {
   const { sourceType, center } = input;
   if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return null;
-  const halfRatio = MERGE_TARGET_CENTER_RATIO / 2;
   let best: MergeTargetResolution | null = null;
   for (const candidate of input.candidates) {
     if (candidate.type !== sourceType) continue;
     if (input.excludeNodeIds?.has(candidate.nodeId)) continue;
     const { width, height } = candidate;
-    if (![candidate.x, candidate.y, width, height].every(Number.isFinite)) continue;
-    if (width <= 0 || height <= 0) continue;
+    if (!mergeTargetContainsCenter(center, candidate)) continue;
     const centerX = candidate.x + width / 2;
     const centerY = candidate.y + height / 2;
     const dx = center.x - centerX;
     const dy = center.y - centerY;
-    if (Math.abs(dx) > halfRatio * width) continue;
-    if (Math.abs(dy) > halfRatio * height) continue;
     const distance = Math.hypot(dx, dy);
     // 同距离取文档顺序更靠后的候选（视觉上层）；`>=` 让后者替换前者。
     if (!best || distance <= best.distance) best = { nodeId: candidate.nodeId, distance };

@@ -14,7 +14,7 @@ use std::fmt::Write as _;
 use bevy::{camera::visibility::RenderLayers, prelude::*};
 
 use crate::protocol::{
-    world_rotation_to_renderer, world_to_renderer, Scene, WorldCamera, WorldCameraProjection,
+    Scene, WorldCamera, WorldCameraProjection, world_rotation_to_renderer, world_to_renderer,
 };
 use crate::theme::ThemeResource;
 
@@ -182,7 +182,11 @@ pub(crate) struct CameraPickRegion {
 
 impl CameraPickRegion {
     fn bounds((min, max): ([f32; 3], [f32; 3])) -> Self {
-        Self { min, max, triangles: None }
+        Self {
+            min,
+            max,
+            triangles: None,
+        }
     }
 }
 
@@ -216,36 +220,62 @@ fn segment_region(start: Vec3, end: Vec3, pad: f32) -> CameraPickRegion {
     let center = (start + end) * 0.5;
     let half = Vec3::new(pad, delta.length() * 0.5 + pad, pad);
     let vertices = [
-        [-1., -1., -1.], [1., -1., -1.], [1., 1., -1.], [-1., 1., -1.],
-        [-1., -1., 1.], [1., -1., 1.], [1., 1., 1.], [-1., 1., 1.],
-    ].map(|v| center + rotation * (Vec3::from_array(v) * half));
-    let min = vertices.iter().copied().fold(Vec3::splat(f32::INFINITY), Vec3::min);
-    let max = vertices.iter().copied().fold(Vec3::splat(f32::NEG_INFINITY), Vec3::max);
+        [-1., -1., -1.],
+        [1., -1., -1.],
+        [1., 1., -1.],
+        [-1., 1., -1.],
+        [-1., -1., 1.],
+        [1., -1., 1.],
+        [1., 1., 1.],
+        [-1., 1., 1.],
+    ]
+    .map(|v| center + rotation * (Vec3::from_array(v) * half));
+    let min = vertices
+        .iter()
+        .copied()
+        .fold(Vec3::splat(f32::INFINITY), Vec3::min);
+    let max = vertices
+        .iter()
+        .copied()
+        .fold(Vec3::splat(f32::NEG_INFINITY), Vec3::max);
     let triangles = [
-        [0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6],
-        [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2],
-        [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0],
-    ].map(|face| crate::canvas_query::model_pick::SurfaceTriangle {
+        [0, 1, 2],
+        [0, 2, 3],
+        [4, 6, 5],
+        [4, 7, 6],
+        [0, 4, 5],
+        [0, 5, 1],
+        [1, 5, 6],
+        [1, 6, 2],
+        [2, 6, 7],
+        [2, 7, 3],
+        [3, 7, 4],
+        [3, 4, 0],
+    ]
+    .map(|face| crate::canvas_query::model_pick::SurfaceTriangle {
         vertices: face.map(|index| vertices[index].to_array()),
         cull_back: false,
-    }).to_vec();
-    CameraPickRegion { min: min.to_array(), max: max.to_array(), triangles: Some(triangles) }
+    })
+    .to_vec();
+    CameraPickRegion {
+        min: min.to_array(),
+        max: max.to_array(),
+        triangles: Some(triangles),
+    }
 }
 
 /// 世界镜头呈现指纹：主题、选择/悬停、焦点与全部相机参数共同决定重建。
 fn presentation_key(scene: &Scene, theme: &ThemeResource) -> String {
     let mut key = String::new();
     let _ = write!(key, "t{};", theme.fingerprint());
-    key.push_str(
-        scene
-            .edit_scope
-            .as_ref()
-            .map_or("3d-edit;", |scope| match scope.three_d.as_str() {
-                "hidden" => "3d-hidden;",
-                "locked" => "3d-locked;",
-                _ => "3d-edit;",
-            }),
-    );
+    key.push_str(scene.edit_scope.as_ref().map_or(
+        "3d-edit;",
+        |scope| match scope.three_d.as_str() {
+            "hidden" => "3d-hidden;",
+            "locked" => "3d-locked;",
+            _ => "3d-edit;",
+        },
+    ));
     for node in &scene.nodes {
         let Some(camera) = &node.world_camera else {
             continue;
@@ -542,30 +572,50 @@ mod tests {
         assert!((frustum.position.y - 6.928203230275509 * 64.0).abs() < 1.0);
         let regions = pick_regions(&value);
         assert_eq!(regions.len(), 10);
-        assert!(regions
-            .iter()
-            .all(|region| region.min.iter().zip(region.max).all(|(a, b)| *a <= b)));
+        assert!(
+            regions
+                .iter()
+                .all(|region| region.min.iter().zip(region.max).all(|(a, b)| *a <= b))
+        );
     }
 
     #[test]
     fn diagonal_wireframe_keeps_empty_corners_click_through_and_lines_pickable() {
+        use crate::canvas_query::model_pick::{ModelCandidate, SurfaceTriangle, pick_candidates};
         use std::sync::Arc;
-        use crate::canvas_query::model_pick::{pick_candidates, ModelCandidate, SurfaceTriangle};
         let region = segment_region(Vec3::ZERO, Vec3::new(100., 100., 0.), 1.6);
         let camera = ModelCandidate {
-            node_id: "camera".into(), shared_world: true, empty_marker: true,
-            min: region.min, max: region.max, triangles: region.triangles.map(Arc::new),
+            node_id: "camera".into(),
+            shared_world: true,
+            empty_marker: true,
+            min: region.min,
+            max: region.max,
+            triangles: region.triangles.map(Arc::new),
         };
         let origin = Vec3::new(0., 100., -10.);
         assert!(pick_candidates(&[camera.clone()], origin, Vec3::Z, 100.).is_none());
-        assert_eq!(pick_candidates(&[camera.clone()], Vec3::new(50., 50., -10.), Vec3::Z, 100.).unwrap().0, "camera");
+        assert_eq!(
+            pick_candidates(&[camera.clone()], Vec3::new(50., 50., -10.), Vec3::Z, 100.)
+                .unwrap()
+                .0,
+            "camera"
+        );
         let model = ModelCandidate {
-            node_id: "product".into(), shared_world: true, empty_marker: false,
-            min: [-10., 90., 10.], max: [10., 110., 10.],
+            node_id: "product".into(),
+            shared_world: true,
+            empty_marker: false,
+            min: [-10., 90., 10.],
+            max: [10., 110., 10.],
             triangles: Some(Arc::new(vec![SurfaceTriangle {
-                vertices: [[-10., 90., 10.], [10., 90., 10.], [0., 110., 10.]], cull_back: false,
+                vertices: [[-10., 90., 10.], [10., 90., 10.], [0., 110., 10.]],
+                cull_back: false,
             }])),
         };
-        assert_eq!(pick_candidates(&[camera, model], origin, Vec3::Z, 100.).unwrap().0, "product");
+        assert_eq!(
+            pick_candidates(&[camera, model], origin, Vec3::Z, 100.)
+                .unwrap()
+                .0,
+            "product"
+        );
     }
 }

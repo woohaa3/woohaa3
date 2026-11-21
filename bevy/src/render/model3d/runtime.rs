@@ -49,18 +49,27 @@ pub(crate) fn sync_editor_scope_opacity(
             let needs_new = record.is_none_or(|entry| entry.instance != mesh.0);
             if needs_new {
                 if let Some(entry) = record {
-                    commands.entity(entity).insert(MeshMaterial3d(entry.original.clone()));
+                    commands
+                        .entity(entity)
+                        .insert(MeshMaterial3d(entry.original.clone()));
                     let _ = materials.remove(entry.instance.id());
                 }
-                let Some(source) = materials.get(&mesh.0).cloned() else { continue };
+                let Some(source) = materials.get(&mesh.0).cloned() else {
+                    continue;
+                };
                 let original = mesh.0.clone();
                 let mut instance = source;
                 instance.alpha_mode = bevy::prelude::AlphaMode::Blend;
-                instance.base_color.set_alpha(instance.base_color.alpha() * 0.6);
+                instance
+                    .base_color
+                    .set_alpha(instance.base_color.alpha() * 0.6);
                 let handle = materials.add(instance);
                 commands.entity(entity).insert((
                     MeshMaterial3d(handle.clone()),
-                    EditorScopeOpacity { original, instance: handle },
+                    EditorScopeOpacity {
+                        original,
+                        instance: handle,
+                    },
                 ));
             } else if let Some(entry) = record {
                 if let Some(mut material) = materials.get_mut(&entry.instance) {
@@ -70,7 +79,10 @@ pub(crate) fn sync_editor_scope_opacity(
                 }
             }
         } else if let Some(entry) = record {
-            commands.entity(entity).insert(MeshMaterial3d(entry.original.clone())).remove::<EditorScopeOpacity>();
+            commands
+                .entity(entity)
+                .insert(MeshMaterial3d(entry.original.clone()))
+                .remove::<EditorScopeOpacity>();
             let _ = materials.remove(entry.instance.id());
         }
     }
@@ -365,11 +377,17 @@ pub(crate) fn sync_models(
         // Joint samples address stable hierarchical part entities. Keep this instance
         // unbatched for the whole timeline, including frames before its first key.
         let part_motion = reference.part_rotations.is_some() || reference.part_positions.is_some();
-        let batched = allowed && !resource.ops.iter().any(|op|matches!(op,crate::protocol::ModelOp::Mesh{skin:Some(_),..})) && !part_motion
-            && !models.high_demand.contains(&node.id) && !scene
-            .model_editor
-            .as_ref()
-            .is_some_and(|e| e.node_id == node.id)
+        let batched = allowed
+            && !resource
+                .ops
+                .iter()
+                .any(|op| matches!(op, crate::protocol::ModelOp::Mesh { skin: Some(_), .. }))
+            && !part_motion
+            && !models.high_demand.contains(&node.id)
+            && !scene
+                .model_editor
+                .as_ref()
+                .is_some_and(|e| e.node_id == node.id)
             && !scene
                 .model_focus
                 .as_ref()
@@ -377,10 +395,17 @@ pub(crate) fn sync_models(
         let texture_revision = super::model_textures::revision();
         // 只有真正引用内嵌纹理的模型需要在纹理表变化时重建；脚本模型与无纹理 GLB 不受影响。
         let needs_textures = resource.ops.iter().any(|op| {
-            matches!(op, crate::protocol::ModelOp::Material { base_color_texture: Some(_), .. })
+            matches!(
+                op,
+                crate::protocol::ModelOp::Material {
+                    base_color_texture: Some(_),
+                    ..
+                }
+            )
         });
         let rebuild = models.roots.get(&node.id).is_none_or(|root| {
-            root.content_signature != content_signature || root.batched != batched
+            root.content_signature != content_signature
+                || root.batched != batched
                 || (needs_textures && root.texture_revision != texture_revision)
                 || !Arc::ptr_eq(&root.resource, resource)
         });
@@ -438,10 +463,16 @@ pub(crate) fn sync_models(
             apply_root_transform(commands, &root.layout, node);
         }
         if let Some(root) = models.roots.get(&node.id) {
-            let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && scope.mode == "locked");
+            let locked = node
+                .edit_scope
+                .as_ref()
+                .is_some_and(|scope| scope.category == "3d" && scope.mode == "locked");
             for entity in &root.entities {
-                if locked { commands.entity(*entity).insert(EditorScopeLocked); }
-                else { commands.entity(*entity).remove::<EditorScopeLocked>(); }
+                if locked {
+                    commands.entity(*entity).insert(EditorScopeLocked);
+                } else {
+                    commands.entity(*entity).remove::<EditorScopeLocked>();
+                }
             }
         }
         if let Some(root) = models.roots.get(&node.id) {
@@ -538,7 +569,10 @@ impl ModelVisuals {
 
     pub(crate) fn is_active_animated_model(&self, id: &str) -> bool {
         self.is_active_model(id)
-            && self.roots.get(id).is_some_and(|root| !root.animation_entities.is_empty())
+            && self
+                .roots
+                .get(id)
+                .is_some_and(|root| !root.animation_entities.is_empty())
     }
 
     /// 只更新可见性；退出镜头过渡期间也可保留指定模型，不重建场景。

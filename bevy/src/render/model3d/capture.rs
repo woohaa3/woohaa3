@@ -40,7 +40,10 @@ impl ShotCaptureRouting {
     /// 直到结果发布或失败，避免在 GPU ready/readback 前降档或回收（B1.6）。
     ///
     /// 同时覆盖仍在 bridge slot 中、尚未被 `route_capture_request` 取走的一帧窗口。
-    pub(crate) fn pins(&self, _scene: &crate::protocol::Scene) -> std::collections::HashSet<String> {
+    pub(crate) fn pins(
+        &self,
+        _scene: &crate::protocol::Scene,
+    ) -> std::collections::HashSet<String> {
         let mut pins: std::collections::HashSet<String> = self
             .pending
             .iter()
@@ -175,7 +178,6 @@ pub(crate) fn route_capture_request(
         bridge: bridge_request,
     });
 }
-
 
 pub(crate) fn publish_capture_results(
     mut routing: ResMut<ShotCaptureRouting>,

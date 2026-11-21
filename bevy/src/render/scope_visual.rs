@@ -72,11 +72,12 @@ impl ScopeStyle {
         let mut style = Self::resolve(
             theme,
             !locked && scene.selection.nodes.iter().any(|selected| selected == id),
-            if !locked && scene
-                .hover
-                .as_ref()
-                .and_then(|hover| hover.node_id.as_deref())
-                == Some(id)
+            if !locked
+                && scene
+                    .hover
+                    .as_ref()
+                    .and_then(|hover| hover.node_id.as_deref())
+                    == Some(id)
             {
                 1.0
             } else {
@@ -301,7 +302,11 @@ pub(crate) fn sync(
                 .find(|area| area.node_id == id)
                 .and_then(|area| area.edit_scope.as_ref())
                 .is_some_and(|scope| scope.mode == "locked");
-        let mut style = ScopeStyle::resolve(&theme, !locked && selected, if locked { 0.0 } else { fade.value });
+        let mut style = ScopeStyle::resolve(
+            &theme,
+            !locked && selected,
+            if locked { 0.0 } else { fade.value },
+        );
         style.locked = locked;
         if locked {
             style.border = muted_color(style.border);
@@ -321,18 +326,38 @@ mod tests {
     use super::*;
     #[test]
     fn execution_trails_follow_the_perimeter_through_corners_and_wrap_continuously() {
-        let path = [Vec2::ZERO, Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)];
+        let path = [
+            Vec2::ZERO,
+            Vec2::new(100.0, 0.0),
+            Vec2::new(100.0, 60.0),
+            Vec2::new(0.0, 60.0),
+        ];
         let on_edge = |point: Vec2| {
-            point.x >= -0.001 && point.x <= 100.001 && point.y >= -0.001 && point.y <= 60.001
-                && (point.x.abs() < 0.001 || (point.x - 100.0).abs() < 0.001
-                    || point.y.abs() < 0.001 || (point.y - 60.0).abs() < 0.001)
+            point.x >= -0.001
+                && point.x <= 100.001
+                && point.y >= -0.001
+                && point.y <= 60.001
+                && (point.x.abs() < 0.001
+                    || (point.x - 100.0).abs() < 0.001
+                    || point.y.abs() < 0.001
+                    || (point.y - 60.0).abs() < 0.001)
         };
         for seconds in [0.0, 0.4, 1.6, 3.19, 3.2] {
             let trail = execution_trail(&path, seconds);
             assert!(trail.len() <= 2 * (EXECUTION_TRAIL_STEPS + 4));
-            assert!(trail.iter().all(|segment| on_edge(segment.start) && on_edge(segment.end)));
-            let length: f32 = trail.iter().map(|segment| segment.start.distance(segment.end)).sum();
-            assert!((length - 320.0 * 0.24).abs() < 0.001, "trail must not disappear at the seam");
+            assert!(
+                trail
+                    .iter()
+                    .all(|segment| on_edge(segment.start) && on_edge(segment.end))
+            );
+            let length: f32 = trail
+                .iter()
+                .map(|segment| segment.start.distance(segment.end))
+                .sum();
+            assert!(
+                (length - 320.0 * 0.24).abs() < 0.001,
+                "trail must not disappear at the seam"
+            );
         }
         let start = execution_trail(&path, 0.0);
         let moved = execution_trail(&path, 0.4);
@@ -344,11 +369,23 @@ mod tests {
 
     #[test]
     fn execution_stroke_has_a_clear_periodic_light_dark_range_in_both_themes() {
-        for (background, accent, foreground) in [("#f3f6f4", "#16846c", "#30443a"), ("#101713", "#55c9a7", "#e6efe9")] {
+        for (background, accent, foreground) in [
+            ("#f3f6f4", "#16846c", "#30443a"),
+            ("#101713", "#55c9a7", "#e6efe9"),
+        ] {
             let mut theme = ThemeResource::default();
-            theme.0.tokens.insert("webBackdrop".into(), background.into());
-            theme.0.tokens.insert("interactionAccent".into(), accent.into());
-            theme.0.tokens.insert("webTextPrimary".into(), foreground.into());
+            theme
+                .0
+                .tokens
+                .insert("webBackdrop".into(), background.into());
+            theme
+                .0
+                .tokens
+                .insert("interactionAccent".into(), accent.into());
+            theme
+                .0
+                .tokens
+                .insert("webTextPrimary".into(), foreground.into());
             let (low, _) = execution_border(&theme, 0.0);
             let (high, _) = execution_border(&theme, 0.9);
             let luminance = |color: u32| {
@@ -362,8 +399,10 @@ mod tests {
             assert_eq!(high, theme.token_u32("interactionAccent"));
             let head = execution_trail_color(&theme, 0.9, EXECUTION_TRAIL_STEPS - 1);
             let backdrop = luminance(theme.token_u32("webBackdrop"));
-            assert!((luminance(head) - backdrop).abs() > (luminance(high) - backdrop).abs(),
-                "the traveling head must stand out from the breathing border in both themes");
+            assert!(
+                (luminance(head) - backdrop).abs() > (luminance(high) - backdrop).abs(),
+                "the traveling head must stand out from the breathing border in both themes"
+            );
             assert_eq!(execution_border(&theme, 0.0), execution_border(&theme, 1.8));
         }
     }

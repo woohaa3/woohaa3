@@ -58,6 +58,7 @@ pub(crate) fn setup(
     commands.insert_resource(super::CardDecorationCache::default());
     commands.insert_resource(super::CardBlockCache::default());
     commands.insert_resource(super::EdgeBlockCache::default());
+    commands.insert_resource(super::text_batch::TextBatchCache::default());
 }
 
 /// 字体 asset 是否已就绪（供 app 发布 ready，本模块不依赖 bridge）。

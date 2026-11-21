@@ -148,6 +148,37 @@ export function resolveResidencyPolicy(override: Partial<ResidencyPolicy> = {}):
   return resolved;
 }
 
+/**
+ * 按当前设备的 `hardwareConcurrency` 自适应计算图片 Worker 实例上限（4 ~ 8）。
+ */
+export function adaptiveImageDecodeMaxInstances(hardwareConcurrency?: number): number {
+  const raw = hardwareConcurrency
+    ?? (typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined);
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_RESIDENCY_POLICY.imageDecodeMaxInstances;
+  }
+  return Math.min(8, Math.max(4, Math.floor(raw * 0.75)));
+}
+
+/**
+ * 生产环境画布会话的自适应驻留策略（按 CPU 核心数扩展图片并发与单帧共享绑定吞吐）。
+ */
+export function adaptiveResidencyPolicy(hardwareConcurrency?: number): Partial<ResidencyPolicy> {
+  const maxInstances = adaptiveImageDecodeMaxInstances(hardwareConcurrency);
+  const decodeConcurrency = Math.max(2, Math.floor(maxInstances / 2));
+  const fetchConcurrency = Math.max(DEFAULT_RESIDENCY_POLICY.imageFetchConcurrency, maxInstances * 2);
+  return {
+    imageDecodeConcurrency: decodeConcurrency,
+    imageDecodeMaxInstances: maxInstances,
+    imageFetchConcurrency: fetchConcurrency,
+    // Keep the JS admission budget aligned with Rust's WebGL patch flush. A large
+    // queue only defers the stall into the render thread instead of increasing throughput.
+    uploadBytesPerFrame: DEFAULT_RESIDENCY_POLICY.uploadBytesPerFrame,
+    uploadCountPerFrame: DEFAULT_RESIDENCY_POLICY.uploadCountPerFrame,
+    uploadBudgetMs: DEFAULT_RESIDENCY_POLICY.uploadBudgetMs
+  };
+}
+
 /** 某通道的并发上限；`upload` / `preview` 由字节或槽策略约束，返回 Infinity 表示无计数上限。 */
 export function concurrencyLimit(policy: ResidencyPolicy, channel: ResidencyChannel): number {
   switch (channel) {

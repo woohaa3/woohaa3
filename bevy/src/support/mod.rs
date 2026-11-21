@@ -1,7 +1,7 @@
 //! Shared diagnostics, timing and generated presentation support.
 
-pub(crate) mod clock;
 pub mod canvas_activity;
+pub(crate) mod clock;
 pub(crate) mod frame_samples;
 pub(crate) mod generation_progress;
 #[cfg(feature = "canvas-core")]

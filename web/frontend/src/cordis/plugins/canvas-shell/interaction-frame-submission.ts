@@ -12,6 +12,7 @@ import type { InteractionControllerOptions } from "./interaction-types.js";
 type Baseline = {
   runtime: BevyRuntime; generation: number; base: number; index: CanvasNodeIndex;
   scene: CanvasRenderScene; previews: Map2D; transient: string;
+  hoveredHistory: InteractionState["hoveredHistory"];
 };
 type Outcome = { error: string | null; retry: boolean };
 
@@ -78,6 +79,41 @@ export function createFrameSubmission(deps: {
     const onlyPositions=!force && reasons.has("position-preview")
       && [...reasons].every(r=>r==="position-preview" || r==="viewport" || r==="viewport-transition");
     const block = runtime && index ? baselineBlock(runtime, index, reasons) : runtime ? "index-unavailable" : "runtime-unavailable";
+    const hoverOnly = !force && runtime && index && baseline && runtime.setHover
+      && (!block || block === "transient-changed")
+      && reasons.has("input") && [...reasons].every(r => r === "input" || r === "viewport" || r === "viewport-transition")
+      && baseline.transient !== transientNow()
+      && !baseline.hoveredHistory && !deps.state.hoveredHistory
+      && JSON.stringify(baseline.scene.selection) === JSON.stringify({ nodes: deps.state.selected, edge: deps.state.selectedEdgeId ?? null })
+      && JSON.stringify(baseline.scene.draft) === JSON.stringify(deps.state.draft)
+      && !deps.transient().dragAttach && !deps.transient().aggregateConnect;
+    if (hoverOnly) {
+      const accepted = baseline!;
+      const setHover = runtime!.setHover!;
+      try {
+        const hover = deps.state.hoveredNodeId
+          ? { nodeId: deps.state.hoveredNodeId, port: deps.state.hoveredPort, ...(deps.state.hoverPointer ? { cursor: deps.state.hoverPointer } : {}) }
+          : deps.state.hoveredEdgeId
+            ? { edgeId: deps.state.hoveredEdgeId, ...(deps.state.hoverPointer ? { cursor: deps.state.hoverPointer } : {}) }
+            : null;
+        const viewport = deps.viewport();
+        const oldViewport = accepted.scene.viewport;
+        const viewChanged = viewport.x !== oldViewport.x || viewport.y !== oldViewport.y || viewport.zoom !== oldViewport.zoom;
+        if (viewChanged) {
+          const error = commitViewportUpdate(runtime!, viewport);
+          if (error) return fail(error);
+        }
+        setHover({ baseSceneGeneration: accepted.base, hover });
+        accepted.scene = { ...accepted.scene, hover: hover ?? undefined };
+        if (viewChanged) accepted.scene = { ...accepted.scene, viewport: { ...viewport } };
+        accepted.transient = transientNow();
+        accepted.hoveredHistory = deps.state.hoveredHistory;
+        noteSceneSubmitRoute("hover", reasons);
+        deps.options.onScene?.(accepted.scene);
+        deps.options.onSceneSubmitted?.();
+        return {error:null,retry:false};
+      } catch (error) { return fail(error); }
+    }
     const editorUnchanged = JSON.stringify(baseline?.scene.modelEditor ?? null)
       === JSON.stringify(deps.options.getModelEditor?.() ?? null);
     if (runtime && index && baseline && runtime.setObserver && runtime.baseSceneGeneration?.()
@@ -140,21 +176,47 @@ export function createFrameSubmission(deps: {
         return {error:null,retry:false};
       }
     }
-    // Image readiness may share a wheel frame. Both deltas keep the same full
+    // Image/video readiness may share a wheel frame. Both deltas keep the same full
     // baseline; combining them must not rebuild all nodes or hash the full scene.
+    const wantsImageDelta = reasons.has("image-resources");
+    const wantsVideoDelta = reasons.has("video-frames");
     if (runtime && index && baseline && !block && !force && reasons.size > 0
-      && reasons.has("image-resources")
-      && [...reasons].every(reason => reason === "image-resources" || reason === "viewport" || reason === "viewport-transition")
-      && runtime.setResourceStates && deps.options.textureSync?.resourceStateChanges) {
-      const rows = deps.options.textureSync.resourceStateChanges();
-      const safe = rows.every(row => {
+      && (wantsImageDelta || wantsVideoDelta)
+      && [...reasons].every(reason =>
+        reason === "image-resources" || reason === "video-frames"
+        || reason === "viewport" || reason === "viewport-transition")
+      && runtime.setResourceStates
+      && (!wantsImageDelta || !!deps.options.textureSync?.resourceStateChanges)
+      && (!wantsVideoDelta || !!deps.options.videoSessions?.resourceStateChanges)) {
+      const imageRows = deps.options.textureSync?.resourceStateChanges?.() ?? [];
+      const videoRows = deps.options.videoSessions?.resourceStateChanges?.() ?? [];
+      const safeImages = imageRows.every(row => {
         const node = mirror.node(baseline!.scene, row.id);
         return node?.type === "image" && !node.model && !node.ghost;
       });
-      if (safe) {
+      const safeVideos = videoRows.every(row => {
+        const node = mirror.node(baseline!.scene, row.id);
+        return !!node && !node.model && !node.ghost && (node.type === "video" || !!node.worldCamera);
+      });
+      if (safeImages && safeVideos) {
         try {
-          const changed = rows.map(row => ({ ...row,
-            mediaLoading: !mirror.node(baseline!.scene, row.id)!.busy && row.mediaLoading }));
+          const changedMap = new Map<string, { id: string; texture: boolean; mediaLoading: boolean }>();
+          for (const row of imageRows) {
+            const node = mirror.node(baseline.scene, row.id)!;
+            const mediaLoading = !node.busy && row.mediaLoading;
+            if (node.texture !== row.texture || Boolean(node.mediaLoading) !== mediaLoading) {
+              changedMap.set(row.id, { id: row.id, texture: row.texture, mediaLoading });
+            }
+          }
+          for (const row of videoRows) {
+            const node = mirror.node(baseline.scene, row.id)!;
+            const texture = node.worldCamera ? row.hasRealFrame : node.texture;
+            const mediaLoading = !node.busy && ["image", "video", "model"].includes(node.type) && row.loading;
+            if (node.texture !== texture || Boolean(node.mediaLoading) !== mediaLoading) {
+              changedMap.set(row.id, { id: row.id, texture, mediaLoading });
+            }
+          }
+          const changed = [...changedMap.values()];
           const viewport = deps.viewport(), previous = baseline.scene.viewport;
           const viewChanged = viewport.x !== previous.x || viewport.y !== previous.y || viewport.zoom !== previous.zoom;
           if (viewChanged) {
@@ -167,7 +229,8 @@ export function createFrameSubmission(deps: {
             const node = mirror.node(baseline.scene, row.id)!;
             node.texture = row.texture; node.mediaLoading = row.mediaLoading;
           }
-          deps.options.textureSync.acknowledgeResourceStates?.();
+          deps.options.textureSync?.acknowledgeResourceStates?.();
+          deps.options.videoSessions?.acknowledgeResourceStates?.();
           if (changed.length) fingerprint = null;
           noteSceneSubmitRoute("resources", reasons);
           if (changed.length) deps.options.onScene?.(baseline.scene);
@@ -184,6 +247,8 @@ export function createFrameSubmission(deps: {
     const sameRuntime=baseline?.runtime===runtime && baseline.generation===(runtime.generation?.() ?? 0)
       && baseline.base===runtime.baseSceneGeneration?.();
     if (fingerprint===nextFingerprint && sameRuntime && !runtime.getRenderIssues?.().length) {
+      deps.options.textureSync?.acknowledgeResourceStates?.();
+      deps.options.videoSessions?.acknowledgeResourceStates?.();
       noteSceneSubmitRoute("dedupe", reasons);
       sceneDiagnostics.sceneDedupes+=1;
       return {error:null,retry:false};
@@ -193,6 +258,7 @@ export function createFrameSubmission(deps: {
       noteSceneSubmitRoute("full", reasons);
       runtime.setScene(built.scene,built.resources);
       deps.options.textureSync?.acknowledgeResourceStates?.();
+      deps.options.videoSessions?.acknowledgeResourceStates?.();
       fingerprint=nextFingerprint;
       // Building the scene may bind the working canvas and advance the edit-scope
       // revision. Capture the post-build index identity so the accepted baseline
@@ -201,7 +267,7 @@ export function createFrameSubmission(deps: {
       const acceptedIndex = indexNow();
       const previews=acceptedIndex && expandPositionPreviews(acceptedIndex,deps.state.localPositions);
       baseline=acceptedIndex && previews ? {runtime,index:acceptedIndex,previews,scene:mirror.reset(built.scene),
-        generation:runtime.generation?.() ?? 0,base:runtime.baseSceneGeneration?.() ?? 0,transient:transientNow()} : null;
+        generation:runtime.generation?.() ?? 0,base:runtime.baseSceneGeneration?.() ?? 0,transient:transientNow(), hoveredHistory: deps.state.hoveredHistory} : null;
       deps.options.onSceneSubmitted?.();
       return {error:null,retry:false};
     } catch(error) { return fail(error); }

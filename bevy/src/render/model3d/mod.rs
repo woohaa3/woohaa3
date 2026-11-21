@@ -54,10 +54,10 @@ mod diagnostics;
 #[cfg(feature = "explicit-instancing")]
 pub(crate) mod instancing;
 mod mesh;
-mod normals;
 pub(crate) mod model_textures;
 mod motion_plan;
 mod motion_reset;
+mod normals;
 mod opacity;
 mod playback_prepare;
 pub(crate) mod quality;
@@ -65,11 +65,11 @@ mod resource_ownership;
 mod resource_work;
 mod resources;
 mod runtime;
-pub(crate) mod world_presence;
 mod simplification;
 mod simplification_allocator;
 mod simplification_jobs;
 mod spawn;
+pub(crate) mod world_presence;
 
 pub(crate) use spawn::{PreviewRoot, spawn_preview_root};
 
@@ -78,14 +78,14 @@ pub(crate) use animation::TransformAnimationSet;
 #[cfg(feature = "canvas-core")]
 pub(crate) use grid::{setup as setup_grid, setup_camera};
 
+#[cfg(test)]
+pub(crate) use runtime::ModelAnchor;
+#[cfg(feature = "canvas-core")]
+pub(crate) use runtime::sync_editor_scope_visibility;
 pub(crate) use runtime::{
     FocusVisuals, ModelAssets, ModelVisuals, apply_animation_playback, apply_motion_playback,
     sync_editor_scope_opacity, sync_models, sync_quality, sync_quality_with_demand,
 };
-#[cfg(feature = "canvas-core")]
-pub(crate) use runtime::sync_editor_scope_visibility;
-#[cfg(test)]
-pub(crate) use runtime::ModelAnchor;
 
 /// `compose_channels` 仅 native renderer 的离屏预览复用；wasm 侧走 `runtime` 内部调用。
 #[cfg(feature = "native-renderer")]
@@ -114,7 +114,11 @@ use bevy::camera::visibility::RenderLayers;
 pub(crate) fn model_render_layers() -> RenderLayers {
     #[cfg(feature = "canvas-core")]
     {
-        RenderLayers::from_layers(&[0, capture::CAPTURE_LAYER, crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER])
+        RenderLayers::from_layers(&[
+            0,
+            capture::CAPTURE_LAYER,
+            crate::preview_layers::WORLD_CAMERA_CONTENT_LAYER,
+        ])
     }
     #[cfg(not(feature = "canvas-core"))]
     {
@@ -172,5 +176,5 @@ pub(crate) fn set_bound_instance_layer(
 #[cfg(test)]
 mod tests;
 
-pub(crate) mod skin;
 mod pose_math;
+pub(crate) mod skin;

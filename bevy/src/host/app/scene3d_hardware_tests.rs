@@ -1,10 +1,7 @@
 use super::*;
 use crate::{
     bridge,
-    protocol::{
-        GraphNode, ModelAssetDescriptor, ModelOp, ModelReference, NodePosition,
-        Scene,
-    },
+    protocol::{GraphNode, ModelAssetDescriptor, ModelOp, ModelReference, NodePosition, Scene},
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -71,7 +68,10 @@ fn scene(swap: bool, parent_changed: bool) -> Scene {
         let mut node: GraphNode = serde_json::from_value(serde_json::json!({"id":format!("n{i}"),"type":"model", "x":9000.,"y":0.,"width":100.,"height":50.,
             "sharedWorldInstance":{"kind":"world-instance","version":"shared-world-v1","instanceId":format!("i{i}"),
               "transform":{"version":"shared-world-v1","position":{"u":point.x,"v":-point.z,"h":point.y},"rotation":[0,0,0,1],"scale":1}}})).unwrap();
-        node.model = Some(ModelReference { ground_anchor_local: None, part_rotations: None, part_positions: None,
+        node.model = Some(ModelReference {
+            ground_anchor_local: None,
+            part_rotations: None,
+            part_positions: None,
             resource_key: asset.resource_key,
             scene_version: asset.scene_version,
             signature: asset.signature,
@@ -224,11 +224,12 @@ fn shared_world_production_frame_hardware() {
     let elapsed = app.world().resource::<Time>().elapsed_secs_f64() - start;
     println!("card relocation virtual elapsed={elapsed:.3}s");
     for id in ["n0", "n1"] {
-        assert!(app
-            .world()
-            .resource::<model3d::ModelVisuals>()
-            .test_root(id)
-            .is_some());
+        assert!(
+            app.world()
+                .resource::<model3d::ModelVisuals>()
+                .test_root(id)
+                .is_some()
+        );
     }
     let reordered = capture(&mut app, "reordered");
     assert_eq!(original, reordered);

@@ -64,7 +64,8 @@ fn part_motion_playback_keeps_authored_hierarchy() {
     })).unwrap();
     let node: GraphNode = serde_json::from_value(serde_json::json!({
         "id":"a", "type":"model", "x":0,"y":0,"width":120,"height":100
-    })).unwrap();
+    }))
+    .unwrap();
     let reference = reference_for(&snapshot, ModelPlacement::default());
     let resources = resource_table([(reference.resource_key.clone(), snapshot)]);
     let mut scene = scene_with(&node, Some(reference));

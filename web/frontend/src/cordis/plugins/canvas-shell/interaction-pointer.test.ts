@@ -507,3 +507,58 @@ describe("节点组边框 cursor 生命周期", () => {
     expect(style.cursor).toBe("");
   });
 });
+
+describe("资源加载状态增量提交（video-frames）", () => {
+  it("video-frames 仅变更 loading 时走 setResourceStates，不触发全量 setScene 重建", () => {
+    const source = createEmptyWoohaa3ServerCanvas("c1");
+    source.document.nodes.push({ id: "v1", type: "video", position: { x: 0, y: 0 }, width: 260, height: 195 });
+    woohaa3CanvasStore.getState().applyRemoteCanvas(source);
+    const dom = harness();
+    const rafQueue: Array<(time: number) => void> = [];
+    dom.target.requestAnimationFrame = (cb: (time: number) => void) => { rafQueue.push(cb); return rafQueue.length; };
+    dom.target.cancelAnimationFrame = () => undefined;
+    const { runtime, scenes } = runtimeCapturing();
+    const resourceUpdates: Array<Array<{ id: string; texture: boolean; mediaLoading: boolean }>> = [];
+    runtime.setResourceStates = input => {
+      resourceUpdates.push(input.nodes.map(node => ({ ...node })));
+      return runtime.interactionGeneration?.() ?? 1;
+    };
+    let loading = true;
+    let dirty = true;
+    let acked = 0;
+    const videoSessions = {
+      sync: () => undefined,
+      setHovered: () => undefined,
+      playingNodeId: () => null,
+      pauseAll: () => undefined,
+      hasRealFrame: () => false,
+      isLoading: (id: string) => id === "v1" && loading,
+      activeNodeIds: () => ["v1"],
+      resourceStateChanges: () => dirty ? [{ id: "v1", loading, hasRealFrame: false }] : [],
+      acknowledgeResourceStates: () => { acked += 1; dirty = false; },
+      dispose: () => undefined
+    };
+    const controller = installInteractionController({
+      canvas: dom.canvas,
+      getRuntime: () => runtime,
+      getSession: () => getSession() as never,
+      target: dom.target as never,
+      videoSessions
+    });
+    controller.flush();
+    expect(scenes).toHaveLength(1);
+    expect(acked).toBe(1);
+
+    loading = false;
+    dirty = true;
+    videoSessions.resourceStateChanges = () => [{ id: "v1", loading: false, hasRealFrame: true }];
+    controller.invalidate("video-frames");
+    expect(rafQueue.length).toBeGreaterThan(0);
+    const tick = rafQueue.shift()!;
+    tick(16);
+    expect(scenes).toHaveLength(1);
+    expect(resourceUpdates).toEqual([[{ id: "v1", texture: false, mediaLoading: false }]]);
+    expect(acked).toBe(2);
+    controller.dispose();
+  });
+});

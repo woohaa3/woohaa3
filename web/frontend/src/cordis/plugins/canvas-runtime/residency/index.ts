@@ -8,6 +8,8 @@ export {
   DEFAULT_RESIDENCY_POLICY,
   PURPOSE_RANK,
   THUMBNAIL_TIERS,
+  adaptiveImageDecodeMaxInstances,
+  adaptiveResidencyPolicy,
   byteBudget,
   concurrencyLimit,
   estimateRgbaBytes,

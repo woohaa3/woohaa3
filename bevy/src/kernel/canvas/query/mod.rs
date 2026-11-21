@@ -17,10 +17,10 @@ pub(crate) mod gizmo;
 pub(crate) mod grip;
 pub(crate) mod interaction;
 pub(crate) mod layout;
-pub(crate) mod scene_area_player;
 pub(crate) mod media_focus;
 pub(crate) mod model_pick;
 mod position_basis;
+pub(crate) mod scene_area_player;
 
 /// Renderer-side visibility rule for the node action toolbar. The interaction snapshot applies the
 /// same rule when exposing hits, so a hidden toolbar cannot remain clickable.

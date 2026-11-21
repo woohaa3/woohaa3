@@ -35,22 +35,33 @@ pub(crate) use host::bridge::{shot_capture_wire, texture_upload};
 #[cfg(feature = "native-renderer")]
 pub use host::video_encode;
 
-pub(crate) use kernel::canvas::{depth_order, ecs as canvas_ecs, preview_layers, preview_readiness, query as canvas_query, render_work, runtime as canvas_runtime};
 #[cfg(feature = "canvas-core")]
 pub(crate) use kernel::canvas::pick_index;
-pub use kernel::motion::{animation_session, camera_transition, gizmo_layout, isometric_grid, orbit_camera, transform_animation, transform_gizmo};
+pub(crate) use kernel::canvas::{
+    depth_order, ecs as canvas_ecs, preview_layers, preview_readiness, query as canvas_query,
+    render_work, runtime as canvas_runtime,
+};
+pub use kernel::motion::{
+    animation_session, camera_transition, gizmo_layout, isometric_grid, orbit_camera,
+    transform_animation, transform_gizmo,
+};
 
 #[cfg(feature = "canvas-core")]
 pub(crate) use render::canvas2d;
-#[cfg(feature = "canvas-core")]
-pub(crate) use render::world::{binding as world_camera_binding, camera as world_camera, capture as world_capture, history_preview, preview as world_camera_preview};
 #[cfg(any(feature = "canvas-core", feature = "native-renderer"))]
 pub(crate) use render::world::view as world_camera_view;
+#[cfg(feature = "canvas-core")]
+pub(crate) use render::world::{
+    binding as world_camera_binding, camera as world_camera, capture as world_capture,
+    history_preview, preview as world_camera_preview,
+};
 
-pub(crate) use support::{clock, frame_samples, generation_progress, startup_trace, theme, theme_generated};
 pub(crate) use render::scope_visual;
 #[cfg(feature = "canvas-core")]
 pub(crate) use support::runtime_health;
+pub(crate) use support::{
+    clock, frame_samples, generation_progress, startup_trace, theme, theme_generated,
+};
 
 /// 跨语言 golden 测试用的纯函数门面（change: 2026-09-29-move-canvas-hot-paths-to-rust-wasm，任务 7.2）。
 ///
@@ -63,12 +74,20 @@ pub mod golden_api {
     /// Inspect the validated shared-world input through the production coordinate adapter.
     #[cfg(feature = "canvas-core")]
     pub fn shared_world_projection(json: &str) -> Result<([f64; 3], [f64; 4], f64), String> {
-        let scene: crate::protocol::Scene = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let scene: crate::protocol::Scene =
+            serde_json::from_str(json).map_err(|e| e.to_string())?;
         scene.validate().map_err(str::to_owned)?;
-        let instance = scene.nodes.first().and_then(|node| node.shared_world_instance.as_ref()).ok_or("Missing instance")?;
+        let instance = scene
+            .nodes
+            .first()
+            .and_then(|node| node.shared_world_instance.as_ref())
+            .ok_or("Missing instance")?;
         let t = &instance.transform;
-        Ok((crate::protocol::world_to_renderer([t.position.u, t.position.v, t.position.h]),
-            crate::protocol::world_rotation_to_renderer(t.rotation), t.scale))
+        Ok((
+            crate::protocol::world_to_renderer([t.position.u, t.position.v, t.position.h]),
+            crate::protocol::world_rotation_to_renderer(t.rotation),
+            t.scale,
+        ))
     }
 
     /// FNV-1a 64-bit（16 位小写 hex），按 JS UTF-16 code unit 计算。
@@ -148,11 +167,16 @@ fn wake_canvas() {
 
 #[cfg(feature = "canvas-core")]
 pub use texture_upload::{
-    begin_canvas_scope, canvas_scope_current, end_canvas_scope, poll_texture_receipts, poll_texture_receipts_scoped, set_image_focus_details, set_image_focus_details_scoped, set_model_media_texture, set_model_media_texture_scoped, set_resource_states, set_texture, set_texture_scoped,
+    begin_canvas_scope, canvas_scope_current, end_canvas_scope, poll_texture_receipts,
+    poll_texture_receipts_scoped, set_image_focus_details, set_image_focus_details_scoped,
+    set_model_media_texture, set_model_media_texture_scoped, set_resource_states, set_texture,
+    set_texture_scoped,
 };
 #[cfg(all(feature = "canvas-core", not(feature = "wasm")))]
 pub use texture_upload::{
-    set_model_media_texture_owned, set_model_media_texture_scoped_owned, set_texture_owned, set_texture_scoped_owned};
+    set_model_media_texture_owned, set_model_media_texture_scoped_owned, set_texture_owned,
+    set_texture_scoped_owned,
+};
 
 /// 提交一份完整渲染快照；通过校验后覆盖未消费的旧快照（latest-wins）。
 ///
@@ -196,7 +220,9 @@ fn set_scene_inner(json: &str, scope: Option<u64>) -> Result<u32, BoundaryError>
             return Err(BoundaryError::from_str("Stale canvas scope"));
         }
     } else if !bridge::texture_scope_legacy_allowed() {
-        return Err(BoundaryError::from_str("Scoped canvas requires scoped scene"));
+        return Err(BoundaryError::from_str(
+            "Scoped canvas requires scoped scene",
+        ));
     }
     // 接受点先结算 3D 根逐像素平局偏移：后续模型候选 AABB、徽章底座与根锚点都读同一份结果
     // （change: 2026-10-27-order-canvas-layers-by-ground-anchor，design D1/D3/D4）。
@@ -259,6 +285,23 @@ pub fn set_viewport(json: &str) -> Result<u32, BoundaryError> {
     bridge::queue_viewport(request.viewport);
     Ok(generation)
 }
+
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn set_hover(json: &str) -> Result<u32, BoundaryError> {
+    wake_canvas();
+    let request: protocol::HoverUpdateRequest = serde_json::from_str(json)
+        .map_err(|err| BoundaryError::from_str(&err.to_string()))?;
+    request.validate().map_err(BoundaryError::from_str)?;
+    let generation = canvas_query::interaction::accept_hover(request.base_scene_generation, request.hover.clone())
+        .map_err(BoundaryError::from_str)?;
+    bridge::queue_hover(request.hover);
+    Ok(generation)
+}
+
+#[cfg(feature = "canvas-core")]
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub fn hover_capability() -> String { protocol::CANVAS_HOVER_UPDATE_VERSION.to_owned() }
 
 /// 聚焦观察镜头增量：复用最近 full scene 的世界几何，只更新 `modelFocus`。
 #[cfg(feature = "canvas-core")]
@@ -348,15 +391,20 @@ fn model_pick_camera(scene: &protocol::Scene) -> canvas_query::model_pick::Model
     canvas_query::model_pick::ModelPickCamera {
         viewport: [scene.viewport.x, scene.viewport.y, scene.viewport.zoom],
         surface,
-        ordinary: scene.model_focus.is_none() && scene.image_focus.is_none()
-            && scene.video_focus.is_none() && scene.focus_transition.is_none(),
-        focus: scene.model_focus.as_ref().map(|focus| canvas_query::model_pick::ModelPickFocus {
-            target: focus.target,
-            yaw: focus.yaw,
-            pitch: focus.pitch,
-            distance: focus.distance,
-            fov: focus.fov,
-        }),
+        ordinary: scene.model_focus.is_none()
+            && scene.image_focus.is_none()
+            && scene.video_focus.is_none()
+            && scene.focus_transition.is_none(),
+        focus: scene
+            .model_focus
+            .as_ref()
+            .map(|focus| canvas_query::model_pick::ModelPickFocus {
+                target: focus.target,
+                yaw: focus.yaw,
+                pitch: focus.pitch,
+                distance: focus.distance,
+                fov: focus.fov,
+            }),
     }
 }
 

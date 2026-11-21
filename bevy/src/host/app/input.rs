@@ -35,6 +35,7 @@ pub(crate) fn ingest_bridge(
     flags.theme_changed = false;
     flags.viewport_only = false;
     flags.observer_changed = false;
+    flags.hover_changed = false;
     flags.mesh_rebuilt = false;
     flags.card_blocks_rebuilt = 0;
     flags.card_decorations_rebuilt = 0;
@@ -74,6 +75,15 @@ pub(crate) fn ingest_bridge(
         crate::protocol::apply_observer(&mut scene.0, &observer);
         flags.observer_changed = !flags.scene_received;
     }
+    if let Some(hover) = input.hover {
+        scene.0.hover = hover;
+        flags.hover_changed = true;
+        if !flags.scene_received && input.positions.is_empty() {
+            if let Some(changes) = runtime_changes.as_mut() {
+                changes.current = crate::canvas_runtime::ChangeSet::default();
+            }
+        }
+    }
     // Taking a mutable scene reference marks it changed even when there is no input.
     if !input.positions.is_empty() {
         let changed = super::positions::apply(&index, &mut scene.0, input.positions);
@@ -82,7 +92,9 @@ pub(crate) fn ingest_bridge(
             if !flags.scene_received {
                 changes.current = crate::canvas_runtime::ChangeSet::default();
             }
-            changes.current.add_positions(&changed, &*index, &changes.edges);
+            changes
+                .current
+                .add_positions(&changed, &*index, &changes.edges);
             changes.changed_node_ids = changed;
             flags.changed_node_ids = changes.changed_node_ids.clone();
         } else {
@@ -246,7 +258,7 @@ mod tests {
     #[test]
     fn native_observer_keeps_director_edges_aligned_with_ground_queries() {
         use crate::isometric_grid::{self, IsometricGridView};
-        use bevy::camera::{CameraProjection, visibility::RenderLayers};
+        use bevy::camera::{visibility::RenderLayers, CameraProjection};
 
         let mut world = World::new();
         world.insert_resource(CurrentScene::default());
@@ -255,16 +267,28 @@ mod tests {
         world.insert_resource(SurfaceState::default());
         world.insert_resource(Messages::<WindowResized>::default());
         let window = world.spawn((Window::default(), PrimaryWindow)).id();
-        let observer = world.spawn((
-            Camera::default(),
-            crate::model3d::grid::ModelCanvasCamera,
-            RenderLayers::default(),
-        )).id();
+        let observer = world
+            .spawn((
+                Camera::default(),
+                crate::model3d::grid::ModelCanvasCamera,
+                RenderLayers::default(),
+            ))
+            .id();
         let mut schedule = Schedule::default();
         // Run both writers in their real frame order: the later observer routing
         // must preserve the viewport chosen by surface synchronization.
-        schedule.add_systems((sync_surface, super::super::scene3d::drive_observer_from_shot).chain());
-        let view = IsometricGridView { x: 210., y: 160., zoom: 0.75 };
+        schedule.add_systems(
+            (
+                sync_surface,
+                super::super::scene3d::drive_observer_from_shot,
+            )
+                .chain(),
+        );
+        let view = IsometricGridView {
+            x: 210.,
+            y: 160.,
+            zoom: 0.75,
+        };
         let ground = Vec2::new(120., -80.);
         let point = Vec3::new(ground.x, 0., ground.y);
         let expected = isometric_grid::screen_point_from_world(point, &view);
@@ -282,22 +306,34 @@ mod tests {
             schedule.run(&mut world);
             let window = world.get::<Window>(window).unwrap();
             let viewport = world.get::<Camera>(observer).unwrap().viewport.as_ref();
-            let position = viewport.map(|v| v.physical_position.as_vec2()).unwrap_or(Vec2::ZERO) / dpr;
-            let size = viewport.map(|v| v.physical_size.as_vec2()).unwrap_or(Vec2::new(
-                window.physical_width() as f32, window.physical_height() as f32,
-            )) / dpr;
+            let position = viewport
+                .map(|v| v.physical_position.as_vec2())
+                .unwrap_or(Vec2::ZERO)
+                / dpr;
+            let size = viewport
+                .map(|v| v.physical_size.as_vec2())
+                .unwrap_or(Vec2::new(
+                    window.physical_width() as f32,
+                    window.physical_height() as f32,
+                ))
+                / dpr;
             let mut lens = isometric_grid::canvas_camera_projection_for_view(&view);
             lens.update(size.x, size.y);
-            let pose = isometric_grid::canvas_camera_transform_for_view(Vec2::new(width, height), &view);
+            let pose =
+                isometric_grid::canvas_camera_transform_for_view(Vec2::new(width, height), &view);
             let clip = lens.get_clip_from_view() * pose.to_matrix().inverse() * point.extend(1.);
             let ndc = clip.truncate() / clip.w;
             let client = position + Vec2::new(ndc.x + 1., 1. - ndc.y) * size * 0.5;
             let local = client - Vec2::new(left, top);
-            assert!((local - expected).length() < 0.01,
-                "rendered director edge must match CSS picking at DPR {dpr}: {local:?} != {expected:?}");
+            assert!(
+                (local - expected).length() < 0.01,
+                "rendered director edge must match CSS picking at DPR {dpr}: {local:?} != {expected:?}"
+            );
             let picked = isometric_grid::screen_to_ground(&view, local);
-            assert!((picked - ground).length() < 0.05,
-                "pointer on the rendered edge must recover its actual ground position");
+            assert!(
+                (picked - ground).length() < 0.05,
+                "pointer on the rendered edge must recover its actual ground position"
+            );
         }
     }
 
@@ -326,12 +362,10 @@ mod tests {
         world.clear_trackers();
         schedule.run(&mut world);
         assert!(!world.resource::<FrameFlags>().surface_changed);
-        assert!(
-            !world
-                .get_resource_ref::<SurfaceState>()
-                .unwrap()
-                .is_changed()
-        );
+        assert!(!world
+            .get_resource_ref::<SurfaceState>()
+            .unwrap()
+            .is_changed());
         assert_eq!(
             world
                 .query_filtered::<Entity, Changed<Camera>>()
@@ -373,12 +407,10 @@ mod tests {
         assert!(world.get::<Camera>(camera).unwrap().viewport.is_none());
         world.clear_trackers();
         schedule.run(&mut world);
-        assert!(
-            !world
-                .get_resource_ref::<SurfaceState>()
-                .unwrap()
-                .is_changed()
-        );
+        assert!(!world
+            .get_resource_ref::<SurfaceState>()
+            .unwrap()
+            .is_changed());
         assert_eq!(
             world
                 .query_filtered::<Entity, Changed<Camera>>()

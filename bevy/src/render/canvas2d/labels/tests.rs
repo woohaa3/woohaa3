@@ -2,8 +2,8 @@
 //! （change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs，任务 4.1）。
 use super::*;
 use crate::app::CurrentScene;
-use crate::canvas2d::text_presentation;
 use crate::canvas_ecs::components::{CanvasLabel, CanvasLabelRole};
+use crate::canvas2d::text_presentation;
 use bevy::ecs::system::RunSystemOnce;
 
 fn world() -> World {

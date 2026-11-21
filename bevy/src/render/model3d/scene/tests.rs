@@ -360,7 +360,12 @@ fn file_mesh_attributes_and_material_texture_parse_additively() {
     )
     .expect("file mesh");
     match mesh {
-        crate::protocol::ModelOp::Mesh { normals, uvs, colors, .. } => {
+        crate::protocol::ModelOp::Mesh {
+            normals,
+            uvs,
+            colors,
+            ..
+        } => {
             assert_eq!(normals.map(|values| values.len()), Some(3));
             assert_eq!(uvs.map(|values| values.len()), Some(3));
             assert_eq!(colors.map(|values| values.len()), Some(3));
@@ -374,7 +379,12 @@ fn file_mesh_attributes_and_material_texture_parse_additively() {
     .expect("legacy mesh");
     assert!(matches!(
         legacy,
-        crate::protocol::ModelOp::Mesh { normals: None, uvs: None, colors: None, .. }
+        crate::protocol::ModelOp::Mesh {
+            normals: None,
+            uvs: None,
+            colors: None,
+            ..
+        }
     ));
 }
 
@@ -397,7 +407,10 @@ fn file_material_texture_id_is_preserved_and_unresolved_texture_stays_plain() {
         }],
     ));
     let spec = materials.get("glb-m0").expect("material");
-    assert_eq!(spec.base_color_texture.as_deref(), Some("glbtex:0123456789abcdef"));
+    assert_eq!(
+        spec.base_color_texture.as_deref(),
+        Some("glbtex:0123456789abcdef")
+    );
     // 纹理尚未上传时材质仍可构建（纯色回退），不阻塞节点其余部分。
     assert!(spec.to_material().base_color_texture.is_none());
 }
@@ -431,7 +444,11 @@ fn static_pose_is_independent_from_bind_trs_and_changes_prepared_bounds() {
     // 绑定事实原样保留；静态姿势单独表述。
     assert_eq!(root.position, [0.0; 3]);
     assert_eq!(root.rotation_radians, [0.0; 3]);
-    assert!(root.bind_transform().rotation.abs_diff_eq(Quat::IDENTITY, 1e-6));
+    assert!(
+        root.bind_transform()
+            .rotation
+            .abs_diff_eq(Quat::IDENTITY, 1e-6)
+    );
     assert!((root.static_transform().rotation.y - 45f32.to_radians().sin()).abs() < 1e-5);
     assert!((root.static_transform().translation.y - 1.0).abs() < 1e-6);
     // prepared AABB 来自有效姿势：90° 旋转把 +X 的部件转到 Z 轴，且整体抬高 1。
@@ -504,15 +521,19 @@ fn prepared_bounds_use_fk_lbs_for_static_skinned_pose() {
     assert!((posed_aabb.max[1] - 3.5).abs() < 1e-5);
     assert!(posed_aabb.min[1] > bind_aabb.max[1]);
     // model_local_aabb / 原生预览取景走同一份 prepared bounds。
-    assert_eq!(model_local_aabb(&posed).map(|aabb| aabb.min[1]), Some(posed_aabb.min[1]));
+    assert_eq!(
+        model_local_aabb(&posed).map(|aabb| aabb.min[1]),
+        Some(posed_aabb.min[1])
+    );
 }
 
 /// 跨语言共享向量（TS 与 Rust 消费同一份 fixtures）。
 #[test]
 fn shared_static_pose_channel_vectors_match_rust_semantics() {
-    let vectors: Vec<serde_json::Value> =
-        serde_json::from_str(include_str!("../../../../tests/fixtures/model-static-pose/channels.json"))
-            .expect("channels fixture");
+    let vectors: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/model-static-pose/channels.json"
+    ))
+    .expect("channels fixture");
     assert!(!vectors.is_empty());
     for vector in vectors {
         let group = &vector["group"];
@@ -541,12 +562,16 @@ fn shared_static_pose_channel_vectors_match_rust_semantics() {
                 position: pose.get("position").map(vec3),
             }),
         };
-        let rotation = animation.get("rotation").map(degrees).map(quat_from_xyz_radians);
+        let rotation = animation
+            .get("rotation")
+            .map(degrees)
+            .map(quat_from_xyz_radians);
         let position = animation.get("position").map(vec3).map(Vec3::from_array);
         let transform = spec.effective_transform(rotation, position, None);
         let expected_translation = vec3(&expected["translation"]);
         let expected_scale = vec3(&expected["scale"]);
-        let expected_rotation: Vec<f32> = serde_json::from_value(expected["rotation"].clone()).unwrap();
+        let expected_rotation: Vec<f32> =
+            serde_json::from_value(expected["rotation"].clone()).unwrap();
         let name = vector["name"].as_str().unwrap();
         for axis in 0..3 {
             assert!(
@@ -617,8 +642,14 @@ fn affine_bounds_preserve_shear_from_nonuniform_parent_scale() {
         )),
     ] {
         let aabb = derive_aabb(&posed).expect("bounds");
-        assert!((aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
-        assert!((aabb.max[2] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "{aabb:?}");
+        assert!(
+            (aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3,
+            "{aabb:?}"
+        );
+        assert!(
+            (aabb.max[2] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3,
+            "{aabb:?}"
+        );
     }
 }
 
@@ -673,7 +704,10 @@ fn skinned_affine_bounds_preserve_parent_shear() {
     ));
     let aabb = derive_aabb(&model).expect("bounds");
     // S(2,1,1)·R(45°)·[0,0,1] = [√2, 0, 0.707]；TRS 重建会得到 x=0.707。
-    assert!((aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
+    assert!(
+        (aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3,
+        "{aabb:?}"
+    );
 }
 
 #[test]
@@ -723,7 +757,10 @@ fn unused_vertices_do_not_enlarge_mesh_aabb() {
     };
     for model in [mesh(false), mesh(true)] {
         let aabb = derive_aabb(&model).expect("bounds");
-        assert!(aabb.max[0] < 1.01, "unused vertex leaked into AABB: {aabb:?}");
+        assert!(
+            aabb.max[0] < 1.01,
+            "unused vertex leaked into AABB: {aabb:?}"
+        );
     }
 }
 
@@ -763,8 +800,14 @@ fn posed_sparse_mesh_uses_exact_referenced_vertices_not_corner_aabb() {
     ));
     let aabb = derive_aabb(&model).expect("bounds");
     // 引用顶点 (1,0,0) 经 S(2,1,1)·R45 后 (√2, 0, -√2)；未引用的 x=100 必须忽略。
-    assert!((aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
-    assert!((aabb.min[2] + std::f32::consts::SQRT_2).abs() < 1e-3, "{aabb:?}");
+    assert!(
+        (aabb.max[0] - std::f32::consts::SQRT_2).abs() < 1e-3,
+        "{aabb:?}"
+    );
+    assert!(
+        (aabb.min[2] + std::f32::consts::SQRT_2).abs() < 1e-3,
+        "{aabb:?}"
+    );
     assert!(aabb.max[0] < 2.0, "{aabb:?}");
 }
 

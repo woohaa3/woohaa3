@@ -84,7 +84,8 @@ impl Plugin for ShotCameraPlugin {
                     super::components::update_shot_camera_diagnostics
                         .in_set(ShotCameraSet::Diagnostics),
                 )
-                    .chain().run_if(crate::canvas_activity::running),
+                    .chain()
+                    .run_if(crate::canvas_activity::running),
             );
         super::preview_readiness::install(app);
     }

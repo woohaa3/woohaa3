@@ -150,8 +150,7 @@ pub(crate) fn sync(
         live.insert(node.id.clone());
         // 单实例绑定：三处相机输出（卡片、编辑预览、捕获）共用同一解析规则。缺目标渲染空层，
         // 绝不退回整层 0；未绑定仍是全世界。
-        let resolution =
-            bindings.resolve(&scene.0, &mut pool, camera.bound_instance_id.as_deref());
+        let resolution = bindings.resolve(&scene.0, &mut pool, camera.bound_instance_id.as_deref());
         if let (Some(instance_id), BindingResolution::Instance { node_id, layer }) =
             (camera.bound_instance_id.as_deref(), &resolution)
         {
@@ -308,8 +307,10 @@ pub(crate) fn sync(
                 previews.retired.push(old);
             }
         }
-        let view_layers =
-            crate::world_camera_binding::camera_layers(&resolution, editing && edit.is_some_and(|edit| edit.show_helpers));
+        let view_layers = crate::world_camera_binding::camera_layers(
+            &resolution,
+            editing && edit.is_some_and(|edit| edit.show_helpers),
+        );
         commands.entity(camera_entity).insert((
             pose,
             lens,
@@ -385,7 +386,13 @@ fn card_on_screen(node: &crate::protocol::GraphNode, scene: &Scene, surface: Vec
 }
 
 pub(crate) fn editor_rect(surface: Vec2, aspect: f32) -> (f32, f32, f32, f32) {
-    fit_aspect(24.0, 68.0, (surface.x - 48.0).max(1.0), (surface.y - 224.0).max(1.0), aspect)
+    fit_aspect(
+        24.0,
+        68.0,
+        (surface.x - 48.0).max(1.0),
+        (surface.y - 224.0).max(1.0),
+        aspect,
+    )
 }
 
 fn fit_aspect(x: f32, y: f32, width: f32, height: f32, aspect: f32) -> (f32, f32, f32, f32) {
@@ -677,7 +684,10 @@ mod tests {
             &RenderLayers::layer(crate::world_camera::WORLD_CAMERA_GIZMO_LAYER)
         );
         let mesh_count = app.world().resource::<Assets<Mesh>>().len();
-        assert_eq!(mesh_count, 0, "camera editing no longer creates a helper ground grid");
+        assert_eq!(
+            mesh_count, 0,
+            "camera editing no longer creates a helper ground grid"
+        );
         assert_eq!(
             app.world().resource::<CurrentScene>().0.nodes[0]
                 .world_camera
@@ -693,10 +703,21 @@ mod tests {
         );
         // Output inspection only removes the director-area layer. The canonical
         // camera and scene binding remain untouched.
-        app.world_mut().resource_mut::<CurrentScene>().0.world_camera_edit.as_mut().unwrap().show_helpers = false;
+        app.world_mut()
+            .resource_mut::<CurrentScene>()
+            .0
+            .world_camera_edit
+            .as_mut()
+            .unwrap()
+            .show_helpers = false;
         app.update();
         let card = &app.world().resource::<WorldCameraPreviews>().cards["camera-node"];
-        assert!(!app.world().get::<RenderLayers>(card.camera).unwrap().intersects(&RenderLayers::layer(DIRECTOR_AREA_LAYER)));
+        assert!(
+            !app.world()
+                .get::<RenderLayers>(card.camera)
+                .unwrap()
+                .intersects(&RenderLayers::layer(DIRECTOR_AREA_LAYER))
+        );
         app.world_mut()
             .resource_mut::<CurrentScene>()
             .0
@@ -801,7 +822,9 @@ mod tests {
     #[test]
     fn unbound_camera_renders_the_whole_world_layer() {
         let app = run_sync(camera_scene(serde_json::Value::Null));
-        assert!(preview_camera_layers(&app).intersects(&RenderLayers::layer(crate::world_camera_binding::WORLD_LAYER)));
+        assert!(preview_camera_layers(&app).intersects(&RenderLayers::layer(
+            crate::world_camera_binding::WORLD_LAYER
+        )));
         assert!(!preview_camera_layers(&app).intersects(&RenderLayers::layer(0)));
     }
 

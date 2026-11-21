@@ -29,7 +29,11 @@ fn explicit_requests_recover_shadow_capable_entities_and_keep_shared_ownership()
     assert_eq!(models.roots["a"].part_entities.len(), 8);
     for &entity in models.roots["a"].part_entities.values() {
         assert!(world.get::<Instances>(entity).is_none());
-        assert!(world.get::<MeshMaterial3d<StandardMaterial>>(entity).is_some());
+        assert!(
+            world
+                .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                .is_some()
+        );
     }
     let mesh = models.roots["a"].mesh_handles[0].clone();
     assert_eq!(mesh, models.roots["b"].mesh_handles[0]);
@@ -107,7 +111,11 @@ fn explicit_fallback_playback_keeps_unique_parts_and_standard_materials() {
     assert!(root.instance_parts.is_empty());
     assert_eq!(root.part_entities["p1"], unaffected);
     assert!(world.get::<Instances>(affected).is_none());
-    assert!(world.get::<MeshMaterial3d<StandardMaterial>>(affected).is_some());
+    assert!(
+        world
+            .get::<MeshMaterial3d<StandardMaterial>>(affected)
+            .is_some()
+    );
     let count = world.entities().len();
     scene.animation_playback = None;
     run_sync(&mut world, &scene, &resources);

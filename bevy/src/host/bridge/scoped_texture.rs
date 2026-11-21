@@ -1,6 +1,6 @@
 //! 同一访问的纹理先暂存，直到带相同 token 的场景接受后才交给 ECS。
-use std::collections::HashMap;
 use crate::canvas_runtime::texture_scope::TextureScopeGate;
+use std::collections::HashMap;
 
 pub(crate) type Texture = (u32, u32, Vec<u8>, Option<String>);
 
@@ -26,7 +26,9 @@ impl ScopedTextureInbox {
     }
 
     pub(crate) fn end(&mut self, token: u64) -> bool {
-        if !self.gate.accept_upload(token) { return false; }
+        if !self.gate.accept_upload(token) {
+            return false;
+        }
         self.gate.invalidate();
         self.active = None;
         self.pending.clear();
@@ -35,7 +37,9 @@ impl ScopedTextureInbox {
         true
     }
 
-    pub(crate) fn legacy_allowed(&self) -> bool { !self.sealed }
+    pub(crate) fn legacy_allowed(&self) -> bool {
+        !self.sealed
+    }
 
     pub(crate) fn matches_scene(&self, token: u64, canvas_id: &str) -> bool {
         self.gate.matches_scene(token, canvas_id)
@@ -46,19 +50,35 @@ impl ScopedTextureInbox {
     }
 
     pub(crate) fn queue(&mut self, token: u64, id: String, texture: Texture) -> bool {
-        if !self.gate.accept_upload(token) { return false; }
+        if !self.gate.accept_upload(token) {
+            return false;
+        }
         self.pending.insert(id, texture);
         true
     }
 
-    pub(crate) fn queue_model(&mut self, token: u64, id: String, texture: (u32, u32, Vec<u8>)) -> bool {
-        if !self.gate.accept_upload(token) { return false; }
+    pub(crate) fn queue_model(
+        &mut self,
+        token: u64,
+        id: String,
+        texture: (u32, u32, Vec<u8>),
+    ) -> bool {
+        if !self.gate.accept_upload(token) {
+            return false;
+        }
         self.model_pending.insert(id, texture);
         true
     }
 
-    pub(crate) fn queue_focus(&mut self, token: u64, frame: Option<crate::protocol::focus_details::FocusDetails>, bytes: &[u8]) -> Result<(), &'static str> {
-        if !self.gate.accept_upload(token) { return Err("Stale canvas scope"); }
+    pub(crate) fn queue_focus(
+        &mut self,
+        token: u64,
+        frame: Option<crate::protocol::focus_details::FocusDetails>,
+        bytes: &[u8],
+    ) -> Result<(), &'static str> {
+        if !self.gate.accept_upload(token) {
+            return Err("Stale canvas scope");
+        }
         self.focus.queue(frame, bytes)
     }
 
@@ -66,7 +86,9 @@ impl ScopedTextureInbox {
         self.gate.accept_scene(token, canvas_id)
     }
 
-    pub(crate) fn drain_scope(&self) -> Option<u64> { self.active.filter(|token| self.gate.can_drain(*token)) }
+    pub(crate) fn drain_scope(&self) -> Option<u64> {
+        self.active.filter(|token| self.gate.can_drain(*token))
+    }
 
     pub(crate) fn drain(&mut self) -> HashMap<String, Texture> {
         if !self.active.is_some_and(|token| self.gate.can_drain(token)) {
@@ -82,22 +104,35 @@ impl ScopedTextureInbox {
         std::mem::take(&mut self.model_pending)
     }
 
-    pub(crate) fn drain_focus(&mut self) -> Option<Option<crate::protocol::focus_details::FocusDetailUpload>> {
+    pub(crate) fn drain_focus(
+        &mut self,
+    ) -> Option<Option<crate::protocol::focus_details::FocusDetailUpload>> {
         if !self.active.is_some_and(|token| self.gate.can_drain(token)) {
             return None;
         }
         self.focus.take()
     }
 
-    pub(crate) fn invalidate(&mut self) { self.gate.invalidate(); self.active = None; self.pending.clear(); self.model_pending.clear(); self.focus = crate::protocol::focus_details::FocusDetailInbox::new(); self.sealed = false; }
+    pub(crate) fn invalidate(&mut self) {
+        self.gate.invalidate();
+        self.active = None;
+        self.pending.clear();
+        self.model_pending.clear();
+        self.focus = crate::protocol::focus_details::FocusDetailInbox::new();
+        self.sealed = false;
+    }
 
-    pub(crate) fn is_active(&self) -> bool { self.active.is_some() }
+    pub(crate) fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn texture(byte: u8) -> Texture { (1, 1, vec![byte; 4], None) }
+    fn texture(byte: u8) -> Texture {
+        (1, 1, vec![byte; 4], None)
+    }
 
     #[test]
     fn scoped_texture_waits_for_new_scene_and_rejects_late_old() {
@@ -214,10 +249,12 @@ mod tests {
         let b = inbox.begin("canvas-b").unwrap();
         assert!(!inbox.queue_model(a, "plane".into(), (1, 1, vec![9; 4])));
         assert!(inbox.queue_model(b, "plane".into(), (1, 1, vec![2; 4])));
-        let frame: crate::protocol::focus_details::FocusDetails = serde_json::from_value(serde_json::json!({
-            "nodeId":"img", "width":1, "height":1,
-            "tiles":[{"x":0,"y":0,"width":1,"height":1}]
-        })).unwrap();
+        let frame: crate::protocol::focus_details::FocusDetails =
+            serde_json::from_value(serde_json::json!({
+                "nodeId":"img", "width":1, "height":1,
+                "tiles":[{"x":0,"y":0,"width":1,"height":1}]
+            }))
+            .unwrap();
         assert!(inbox.queue_focus(a, Some(frame.clone()), &[9; 4]).is_err());
         inbox.queue_focus(b, Some(frame), &[3; 4]).unwrap();
         assert!(inbox.drain_model().is_empty());

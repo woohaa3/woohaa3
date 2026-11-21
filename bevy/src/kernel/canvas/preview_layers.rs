@@ -20,7 +20,18 @@ use std::collections::BTreeMap;
 /// 世界镜头内容（11）、拍摄主光（12），以及「已注册但没有卡片视图」的模型根停放层 31。
 ///
 /// `1` 同时是 transform gizmo 与 shot gizmo；`2` 是片场小相机；`7` 是 capture。
-pub const RESERVED_LAYERS: [usize; 10] = [0, 1, 2, 3, 4, 7, 8, WORLD_CAMERA_CONTENT_LAYER, SHOOTING_KEY_LAYER, PARKED_LAYER];
+pub const RESERVED_LAYERS: [usize; 10] = [
+    0,
+    1,
+    2,
+    3,
+    4,
+    7,
+    8,
+    WORLD_CAMERA_CONTENT_LAYER,
+    SHOOTING_KEY_LAYER,
+    PARKED_LAYER,
+];
 
 /// 没有卡片视图的模型根停放在此层：任何预览/主相机都不看它，但仍保留合法渲染层身份。
 pub const PARKED_LAYER: usize = 31;

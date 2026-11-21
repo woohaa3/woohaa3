@@ -629,4 +629,38 @@ describe("createVideoFrameSessions", () => {
     expect(v1.playCalls).toBe(1);
     sessions.dispose();
   });
+
+  it("videoSessions.sync 批量合并 onChange 且增量跟踪 loading/hasRealFrame 状态变化", () => {
+    const { runtime } = runtimeRecorder();
+    const videos: FakeVideo[] = [];
+    let onChangeCount = 0;
+    const sessions = createVideoFrameSessions({
+      runtime,
+      getCanvas: () =>
+        videoCanvas([
+          { id: "n1", outputAssetId: "asset-1" },
+          { id: "n2", outputAssetId: "asset-2" }
+        ]),
+      createVideo: () => { const video = fakeVideo(); videos.push(video); return video; },
+      createCanvas: fakeCanvas,
+      onChange: () => { onChangeCount += 1; }
+    });
+    sessions.sync();
+    expect(onChangeCount).toBe(1);
+    expect(sessions.resourceStateChanges?.()).toEqual([
+      { id: "n1", loading: true, hasRealFrame: false },
+      { id: "n2", loading: true, hasRealFrame: false }
+    ]);
+    sessions.acknowledgeResourceStates?.();
+    expect(sessions.resourceStateChanges?.()).toEqual([]);
+
+    videos[0]!.emit("loadedmetadata");
+    videos[0]!.emitFrame();
+    expect(sessions.resourceStateChanges?.()).toEqual([
+      { id: "n1", loading: false, hasRealFrame: true }
+    ]);
+    sessions.acknowledgeResourceStates?.();
+    expect(sessions.resourceStateChanges?.()).toEqual([]);
+    sessions.dispose();
+  });
 });

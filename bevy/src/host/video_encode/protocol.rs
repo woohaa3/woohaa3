@@ -43,14 +43,21 @@ pub struct VideoEncoderSession {
 impl VideoEncoderSession {
     pub fn start(json: &str) -> Result<Self, String> {
         let begin: BeginJson = serde_json::from_str(json).map_err(|error| error.to_string())?;
-        if begin.width == 0 || begin.height == 0 || begin.width > MAX_VIDEO_EDGE || begin.height > MAX_VIDEO_EDGE {
+        if begin.width == 0
+            || begin.height == 0
+            || begin.width > MAX_VIDEO_EDGE
+            || begin.height > MAX_VIDEO_EDGE
+        {
             return Err("video dimensions out of range".to_owned());
         }
         if begin.fps == 0 || begin.fps > MAX_VIDEO_FPS {
             return Err("video fps out of range".to_owned());
         }
         let encoder = H264Encoder::new(begin.width, begin.height, begin.fps)?;
-        Ok(Self { encoder, fps: begin.fps })
+        Ok(Self {
+            encoder,
+            fps: begin.fps,
+        })
     }
 
     pub fn push_frame(&mut self, rgba: &[u8]) -> Result<usize, String> {
@@ -71,7 +78,14 @@ impl VideoEncoderSession {
         let width = video.width;
         let height = video.height;
         let bytes = build_mp4(&video)?;
-        Ok(FinishedVideo { bytes, width, height, fps: self.fps, frames: video.frames, duration_seconds })
+        Ok(FinishedVideo {
+            bytes,
+            width,
+            height,
+            fps: self.fps,
+            frames: video.frames,
+            duration_seconds,
+        })
     }
 }
 
@@ -114,7 +128,10 @@ fn read_json_frame(input: &mut impl Read, limit: usize) -> std::io::Result<Optio
     }
     let length = u32::from_be_bytes(header) as usize;
     if length == 0 || length > limit {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid frame length"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid frame length",
+        ));
     }
     let mut payload = vec![0u8; length];
     input.read_exact(&mut payload)?;
@@ -141,7 +158,9 @@ fn write_error(output: &mut impl Write, code: &str, message: &str) -> std::io::R
 
 /// 常驻一轮录制；成功时写入 MP4 字节并返回。
 pub fn run_session(input: &mut impl Read, output: &mut impl Write) -> std::io::Result<bool> {
-    let Some(begin) = read_json_frame(input, MAX_JSON_BYTES)? else { return Ok(false) };
+    let Some(begin) = read_json_frame(input, MAX_JSON_BYTES)? else {
+        return Ok(false);
+    };
     let mut session = match VideoEncoderSession::start(&begin) {
         Ok(session) => session,
         Err(message) => {
@@ -154,7 +173,9 @@ pub fn run_session(input: &mut impl Read, output: &mut impl Write) -> std::io::R
     output.flush()?;
 
     loop {
-        let Some(message) = read_json_frame(input, MAX_JSON_BYTES)? else { return Ok(false) };
+        let Some(message) = read_json_frame(input, MAX_JSON_BYTES)? else {
+            return Ok(false);
+        };
         if let Ok(frame) = serde_json::from_str::<FrameJson>(&message) {
             let length = frame.frame_length as usize;
             if length == 0 || length > MAX_FRAME_BYTES {
@@ -233,7 +254,12 @@ mod tests {
         let mut out = Vec::new();
         let mut offset = 0;
         while offset + 4 <= bytes.len() {
-            let length = u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]) as usize;
+            let length = u32::from_be_bytes([
+                bytes[offset],
+                bytes[offset + 1],
+                bytes[offset + 2],
+                bytes[offset + 3],
+            ]) as usize;
             offset += 4;
             if offset + length > bytes.len() {
                 break;
@@ -271,7 +297,11 @@ mod tests {
 
         let mut output = Vec::new();
         let ok = run_session(&mut input.as_slice(), &mut output).expect("session");
-        assert!(ok, "session should finish: {}", String::from_utf8_lossy(&output));
+        assert!(
+            ok,
+            "session should finish: {}",
+            String::from_utf8_lossy(&output)
+        );
         let messages = read_all_frames(&output);
         let last_json = &messages[messages.len() - 2].0;
         assert!(last_json.contains("\"mp4Len\""), "{last_json}");

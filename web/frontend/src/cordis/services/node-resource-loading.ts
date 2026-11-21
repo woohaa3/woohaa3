@@ -8,8 +8,24 @@ export type NodeResourceLoadingReader = { isLoading?(nodeId: string): boolean; i
 export class NodeResourceLoading {
   private readonly loads = new Map<string, NodeResourceLoad>();
   private readonly listeners = new Set<() => void>();
+  private batchDepth = 0;
+  private batchDirty = false;
 
   constructor(private readonly onChange?: () => void, private readonly onNodeChange?: (nodeId: string) => void) {}
+
+  batch<T>(fn: () => T): T {
+    this.batchDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this.batchDepth -= 1;
+      if (this.batchDepth === 0 && this.batchDirty) {
+        this.batchDirty = false;
+        this.onChange?.();
+        for (const listener of this.listeners) listener();
+      }
+    }
+  }
 
   track(nodeId: string, source: string): NodeResourceLoad {
     const previous = this.loads.get(nodeId);
@@ -33,9 +49,11 @@ export class NodeResourceLoading {
   }
 
   retain(sources: ReadonlyMap<string, string>): void {
-    for (const load of this.loads.values()) {
-      if (sources.get(load.nodeId) !== load.source) this.remove(load);
-    }
+    this.batch(() => {
+      for (const load of this.loads.values()) {
+        if (sources.get(load.nodeId) !== load.source) this.remove(load);
+      }
+    });
   }
 
   isLoading = (nodeId: string): boolean => this.loads.get(nodeId)?.loading ?? false;
@@ -51,6 +69,10 @@ export class NodeResourceLoading {
   }
   private emit(nodeId?: string): void {
     if (nodeId !== undefined) this.onNodeChange?.(nodeId);
+    if (this.batchDepth > 0) {
+      this.batchDirty = true;
+      return;
+    }
     this.onChange?.();
     for (const listener of this.listeners) listener();
   }

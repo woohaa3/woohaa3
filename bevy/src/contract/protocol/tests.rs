@@ -5,7 +5,6 @@
 
 use super::*;
 
-
 fn parse(json: &str) -> Scene {
     serde_json::from_str(&with_theme(json)).expect("valid scene json")
 }
@@ -82,7 +81,6 @@ fn world_camera_editor_requires_a_valid_camera_and_matching_node() {
     assert!(scene.validate().is_err());
 }
 
-
 #[test]
 fn focus_transition_wire_field_parses_and_validates() {
     // 公共聚焦进度瞬时更新（change: 2026-10-12-unify-node-editors-and-focus-transitions，
@@ -156,7 +154,6 @@ fn node_defaults_match_contracts() {
     assert_eq!(node.height, DEFAULT_NODE_HEIGHT);
     assert!(node.model.is_none());
 }
-
 
 #[test]
 fn viewport_zoom_is_bounded() {
@@ -555,5 +552,3 @@ fn capabilities_are_independent_of_palette_and_old_renderer_contract_is_rejected
     scene.version = "woohaa-canvas-render-scene-v26".into();
     assert!(scene.validate().is_err());
 }
-
-

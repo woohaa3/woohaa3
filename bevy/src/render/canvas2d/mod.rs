@@ -41,6 +41,7 @@ mod render;
 mod render_edges;
 mod scene_area_label;
 mod shared_key;
+pub(crate) mod text_batch;
 pub(crate) mod text_presentation;
 mod texture_store;
 mod textures;
@@ -92,7 +93,7 @@ pub(crate) use render::{
     produce_card_selection, produce_edges, sync_canvas_overlay,
 };
 pub(crate) use scene_area_label::sync_scene_area_labels;
-pub(crate) use textures::sync_textures;
+pub(crate) use textures::{AtlasSubUploadPlugin, sync_textures};
 pub(crate) use world_camera_connector::sync as sync_world_camera_connectors;
 
 /// 2D 渲染的共享材质、字体与主卡片块资源。装饰、容器、连线块和纹理内容表分别由

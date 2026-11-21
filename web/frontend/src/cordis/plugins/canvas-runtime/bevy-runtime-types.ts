@@ -106,6 +106,8 @@ export type BevyModule = {
   set_observer?: (json: string) => number;
   observer_capability?: () => string;
   set_positions?: (json: string) => number;
+  set_hover?: (json: string) => number;
+  hover_capability?: () => string;
   position_capability?: () => string;
   /** 最近一次完整场景接受的 base generation（base 身份缓存；change: 同上）。 */
   base_scene_generation?: () => number;
@@ -255,6 +257,7 @@ export type BevyRuntime = {
   setObserver?(input: Omit<CanvasObserverUpdate, "version">): number;
   setResourceStates?(input: Omit<import("@woohaa3/contracts").CanvasResourceStateUpdate, "version">): number;
   setPositions?(input: Omit<CanvasPositionUpdate, "version">): number;
+  setHover?(input: { baseSceneGeneration: number; hover: NonNullable<CanvasRenderScene["hover"]> | null }): number;
   /** 上传/更新一张 RGBA 纹理。 */
   flushTextureReceipts?(): void;
   textureApplied?(id: string, width: number, height: number, content: string, plane?: boolean): boolean;

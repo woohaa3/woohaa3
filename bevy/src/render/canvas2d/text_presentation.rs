@@ -17,6 +17,7 @@
 //! 由 `1 / zoom` 的实体尺度抵消相机，不随缩放产生字号键。
 
 use bevy::{prelude::*, text::TextBounds};
+use std::collections::HashSet;
 
 use crate::app::{CurrentScene, SurfaceState};
 
@@ -209,6 +210,10 @@ fn effective_zoom(scene: &CurrentScene) -> f32 {
 pub(crate) struct PresentationCache {
     zoom: f32,
     dpr: f32,
+    /// 相邻帧之间只要仍在同一带内，世界文字的档位就不会改变。
+    world_band: Option<u8>,
+    /// 屏幕文字需要在同档缩放时更新；缓存实体避免为识别它们重新扫描世界文字。
+    screen_entities: Vec<Entity>,
 }
 
 impl Default for PresentationCache {
@@ -217,7 +222,59 @@ impl Default for PresentationCache {
         Self {
             zoom: f32::NAN,
             dpr: f32::NAN,
+            world_band: None,
+            screen_entities: Vec::new(),
         }
+    }
+}
+
+/// `step_for` 的所有可能转档边界。把升级边界和滞回降档边界都纳入同一带，
+/// 才能证明同带缩放不会改变任何已有世界文字的呈现目标。
+const WORLD_BAND_BOUNDARIES: [f32; 9] = [0.85, 1.0, 1.7, 2.0, 3.4, 4.0, 6.8, 8.0, 12.0];
+
+fn world_step_band(zoom: f32) -> Option<u8> {
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return None;
+    }
+    Some(
+        WORLD_BAND_BOUNDARIES
+            .iter()
+            .take_while(|boundary| zoom >= **boundary)
+            .count() as u8,
+    )
+}
+
+fn apply_presentation(
+    meta: &mut Mut<LogicalText>,
+    font: &mut Mut<TextFont>,
+    transform: &mut Mut<Transform>,
+    bounds: &mut Mut<TextBounds>,
+    zoom: f32,
+    dpr: f32,
+) {
+    let Some(target) = present(meta, zoom, dpr) else {
+        // 非法 zoom/DPR：保留最近合法表示，不取倒数、不写组件。
+        return;
+    };
+    if meta.mode == TextScaleMode::World && meta.applied_step != Some(target.step) {
+        meta.applied_step = Some(target.step);
+    }
+    let font_size = FontSize::Px(target.font_size);
+    if font.font_size != font_size {
+        font.font_size = font_size;
+    }
+    let scale = Vec3::new(target.scale, target.scale, 1.0);
+    if transform.scale != scale {
+        transform.scale = scale;
+    }
+    // `TextBounds` 未实现 `PartialEq`：按字段比较，避免静止帧无谓地标记文字为已变更。
+    let next = target
+        .bounds
+        .map(|bounds| (Some(bounds.x), Some(bounds.y)))
+        .unwrap_or((None, None));
+    if bounds.width != next.0 || bounds.height != next.1 {
+        bounds.width = next.0;
+        bounds.height = next.1;
     }
 }
 
@@ -231,9 +288,10 @@ pub(crate) fn sync(
     surface: Res<SurfaceState>,
     mut cache: ResMut<PresentationCache>,
     mut params: ParamSet<(
-        Query<(), (Changed<LogicalText>, Without<Sprite>)>,
+        Query<Entity, (Changed<LogicalText>, Without<Sprite>)>,
         Query<
             (
+                Entity,
                 &mut LogicalText,
                 &mut TextFont,
                 &mut Transform,
@@ -245,43 +303,81 @@ pub(crate) fn sync(
 ) {
     let zoom = effective_zoom(&scene);
     let dpr = surface.pixel_ratio;
+    let world_band = world_step_band(zoom);
+    let changed_entities: Vec<Entity> = params.p0().iter().collect();
+    let changed_set: HashSet<Entity> = changed_entities.iter().copied().collect();
     let camera_changed =
         cache.zoom.to_bits() != zoom.to_bits() || cache.dpr.to_bits() != dpr.to_bits();
-    if !camera_changed && params.p0().is_empty() {
+    if !camera_changed && changed_entities.is_empty() {
         return;
     }
-    if zoom.is_finite() && zoom > 0.0 && dpr.is_finite() && dpr > 0.0 {
+    let valid_surface = zoom.is_finite() && zoom > 0.0 && dpr.is_finite() && dpr > 0.0;
+    let same_dpr = cache.dpr.to_bits() == dpr.to_bits();
+    let same_world_band = valid_surface && same_dpr && cache.world_band == world_band;
+    let full_scan = !same_world_band;
+    if valid_surface {
         cache.zoom = zoom;
         cache.dpr = dpr;
+        cache.world_band = world_band;
     }
-    for (mut meta, mut font, mut transform, mut bounds) in &mut params.p1() {
-        let Some(target) = present(&meta, zoom, dpr) else {
-            // 非法 zoom/DPR：保留最近合法表示，不取倒数、不写组件。
-            continue;
-        };
-        if meta.mode == TextScaleMode::World && meta.applied_step != Some(target.step) {
-            meta.applied_step = Some(target.step);
+
+    if full_scan {
+        let mut screen_entities = Vec::new();
+        for (entity, mut meta, mut font, mut transform, mut bounds) in &mut params.p1() {
+            apply_presentation(&mut meta, &mut font, &mut transform, &mut bounds, zoom, dpr);
+            if meta.mode == TextScaleMode::Screen {
+                screen_entities.push(entity);
+            }
         }
-        let font_size = FontSize::Px(target.font_size);
-        if font.font_size != font_size {
-            font.font_size = font_size;
+        cache.screen_entities = screen_entities;
+        return;
+    }
+
+    // 同一世界档位带内，世界文字的目标值完全不变。只处理本帧变更的逻辑元数据，
+    // 再按缓存实体更新屏幕文字的 1/zoom 尺度。
+    for entity in changed_entities {
+        if let Ok((_, mut meta, mut font, mut transform, mut bounds)) = params.p1().get_mut(entity)
+        {
+            apply_presentation(&mut meta, &mut font, &mut transform, &mut bounds, zoom, dpr);
+            let is_screen = meta.mode == TextScaleMode::Screen;
+            if is_screen {
+                if !cache.screen_entities.contains(&entity) {
+                    cache.screen_entities.push(entity);
+                }
+            } else {
+                cache.screen_entities.retain(|cached| *cached != entity);
+            }
         }
-        let scale = Vec3::new(target.scale, target.scale, 1.0);
-        if transform.scale != scale {
-            transform.scale = scale;
+    }
+    if camera_changed {
+        let cached = std::mem::take(&mut cache.screen_entities);
+        let mut live_screen_entities = Vec::with_capacity(cached.len());
+        for entity in cached {
+            if changed_set.contains(&entity) {
+                if let Ok((_, meta, _, _, _)) = params.p1().get_mut(entity) {
+                    if meta.mode == TextScaleMode::Screen {
+                        live_screen_entities.push(entity);
+                    }
+                }
+                continue;
+            }
+            if let Ok((_, mut meta, mut font, mut transform, mut bounds)) =
+                params.p1().get_mut(entity)
+            {
+                if meta.mode == TextScaleMode::Screen {
+                    apply_presentation(
+                        &mut meta,
+                        &mut font,
+                        &mut transform,
+                        &mut bounds,
+                        zoom,
+                        dpr,
+                    );
+                    live_screen_entities.push(entity);
+                }
+            }
         }
-        // 行高保持既有语义：画布文字不设置显式 `LineHeight`（默认 `RelativeToFont(1.2)`），
-        // 它随字号等比变化，再被实体尺度换回原逻辑行距。显式绝对行高若将来引入，须同样乘以
-        // `font_size / size`（design D1）。
-        let next = target
-            .bounds
-            .map(|bounds| (Some(bounds.x), Some(bounds.y)))
-            .unwrap_or((None, None));
-        // `TextBounds` 未实现 `PartialEq`：按字段比较，避免静止帧无谓地标记文字为已变更。
-        if bounds.width != next.0 || bounds.height != next.1 {
-            bounds.width = next.0;
-            bounds.height = next.1;
-        }
+        cache.screen_entities = live_screen_entities;
     }
 }
 

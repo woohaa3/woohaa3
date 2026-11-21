@@ -22,19 +22,42 @@ pub(crate) fn mesh_key(geometry: &ModelGeometry) -> String {
             format!("cyl:{:08x}:{:08x}", radius.to_bits(), height.to_bits())
         }
         ModelGeometry::Sphere { radius } => format!("sphere:{:08x}", radius.to_bits()),
-        ModelGeometry::Capsule { radius, height } => format!("capsule:{:08x}:{:08x}", radius.to_bits(), height.to_bits()),
-        ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => {
+        ModelGeometry::Capsule { radius, height } => {
+            format!("capsule:{:08x}:{:08x}", radius.to_bits(), height.to_bits())
+        }
+        ModelGeometry::Mesh {
+            vertices,
+            faces,
+            normals,
+            uvs,
+            colors,
+        } => {
             use std::hash::{Hash, Hasher};
             let mut hash = std::collections::hash_map::DefaultHasher::new();
             vertices.len().hash(&mut hash);
             faces.len().hash(&mut hash);
-            for value in vertices.iter().flatten() { value.to_bits().hash(&mut hash); }
-            for value in faces.iter().flatten() { value.hash(&mut hash); }
-            for value in normals.iter().flatten().flatten() { value.to_bits().hash(&mut hash); }
-            for value in uvs.iter().flatten().flatten() { value.to_bits().hash(&mut hash); }
-            for value in colors.iter().flatten().flatten() { value.to_bits().hash(&mut hash); }
-            format!("mesh-hash-v2:{}:{}:{:016x}", vertices.len(), faces.len(), hash.finish())
-        },
+            for value in vertices.iter().flatten() {
+                value.to_bits().hash(&mut hash);
+            }
+            for value in faces.iter().flatten() {
+                value.hash(&mut hash);
+            }
+            for value in normals.iter().flatten().flatten() {
+                value.to_bits().hash(&mut hash);
+            }
+            for value in uvs.iter().flatten().flatten() {
+                value.to_bits().hash(&mut hash);
+            }
+            for value in colors.iter().flatten().flatten() {
+                value.to_bits().hash(&mut hash);
+            }
+            format!(
+                "mesh-hash-v2:{}:{}:{:016x}",
+                vertices.len(),
+                faces.len(),
+                hash.finish()
+            )
+        }
     }
 }
 
@@ -67,9 +90,13 @@ pub(super) fn effective_quality(geometry: &ModelGeometry, requested: Quality) ->
     match geometry {
         ModelGeometry::Box { .. } => Quality::High,
         // 带顶点属性（GLB 文件模型）的网格不做简化：简化会丢弃法线/UV/顶点色，改变外观。
-        ModelGeometry::Mesh { normals: Some(_), .. }
+        ModelGeometry::Mesh {
+            normals: Some(_), ..
+        }
         | ModelGeometry::Mesh { uvs: Some(_), .. }
-        | ModelGeometry::Mesh { colors: Some(_), .. } => Quality::High,
+        | ModelGeometry::Mesh {
+            colors: Some(_), ..
+        } => Quality::High,
         _ => requested,
     }
 }
@@ -87,16 +114,37 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
     let legal = match geometry {
         ModelGeometry::Box { size } => size.iter().all(|v| valid(*v)),
         ModelGeometry::Sphere { radius } => valid(*radius),
-        ModelGeometry::Cylinder { radius, height } | ModelGeometry::Capsule { radius, height } => valid(*radius) && valid(*height),
-        ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => !vertices.is_empty() && !faces.is_empty()
-            && vertices.iter().flatten().all(|v| v.is_finite())
-            && faces.iter().flatten().all(|i| (*i as usize) < vertices.len())
-            && normals.as_ref().is_none_or(|values| values.len() == vertices.len()
-                && values.iter().flatten().all(|v| v.is_finite()))
-            && uvs.as_ref().is_none_or(|values| values.len() == vertices.len()
-                && values.iter().flatten().all(|v| v.is_finite()))
-            && colors.as_ref().is_none_or(|values| values.len() == vertices.len()
-                && values.iter().flatten().all(|v| v.is_finite() && (0.0..=1.0).contains(v))),
+        ModelGeometry::Cylinder { radius, height } | ModelGeometry::Capsule { radius, height } => {
+            valid(*radius) && valid(*height)
+        }
+        ModelGeometry::Mesh {
+            vertices,
+            faces,
+            normals,
+            uvs,
+            colors,
+        } => {
+            !vertices.is_empty()
+                && !faces.is_empty()
+                && vertices.iter().flatten().all(|v| v.is_finite())
+                && faces
+                    .iter()
+                    .flatten()
+                    .all(|i| (*i as usize) < vertices.len())
+                && normals.as_ref().is_none_or(|values| {
+                    values.len() == vertices.len() && values.iter().flatten().all(|v| v.is_finite())
+                })
+                && uvs.as_ref().is_none_or(|values| {
+                    values.len() == vertices.len() && values.iter().flatten().all(|v| v.is_finite())
+                })
+                && colors.as_ref().is_none_or(|values| {
+                    values.len() == vertices.len()
+                        && values
+                            .iter()
+                            .flatten()
+                            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+                })
+        }
     };
     if !legal {
         return None;
@@ -124,7 +172,13 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
                     .into(),
             )
         }
-        ModelGeometry::Mesh { vertices, faces, normals, uvs, colors } => {
+        ModelGeometry::Mesh {
+            vertices,
+            faces,
+            normals,
+            uvs,
+            colors,
+        } => {
             let mut mesh = Mesh::new(
                 PrimitiveTopology::TriangleList,
                 RenderAssetUsages::default(),
@@ -143,7 +197,10 @@ pub(super) fn build_mesh_quality(geometry: &ModelGeometry, quality: Quality) -> 
             if let Some(values) = uvs.as_ref().filter(|values| values.len() == vertices.len()) {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, values.clone());
             }
-            if let Some(values) = colors.as_ref().filter(|values| values.len() == vertices.len()) {
+            if let Some(values) = colors
+                .as_ref()
+                .filter(|values| values.len() == vertices.len())
+            {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, values.clone());
             }
             mesh.insert_indices(Indices::U32(faces.iter().flatten().copied().collect()));
@@ -234,15 +291,28 @@ mod tests {
     fn metre_scale_mesh_details_get_unit_normals() {
         let geometry = ModelGeometry::Mesh {
             vertices: vec![[0., 0., 0.], [0.001, 0., 0.], [0., 0.001, 0.]],
-            faces: vec![[0, 1, 2]], normals: None, uvs: None, colors: None,
+            faces: vec![[0, 1, 2]],
+            normals: None,
+            uvs: None,
+            colors: None,
         };
         let mesh = build_mesh_quality(&geometry, Quality::High).unwrap();
-        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { panic!("normals") };
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("normals")
+        };
         assert_eq!(normals, &vec![[0., 0., 1.]; 3]);
         let mut imported = geometry;
-        if let ModelGeometry::Mesh { normals, .. } = &mut imported { *normals = Some(vec![[1., 0., 0.]; 3]); }
+        if let ModelGeometry::Mesh { normals, .. } = &mut imported {
+            *normals = Some(vec![[1., 0., 0.]; 3]);
+        }
         let mesh = build_mesh_quality(&imported, Quality::High).unwrap();
-        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { panic!("normals") };
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("normals")
+        };
         assert_eq!(normals, &vec![[1., 0., 0.]; 3]);
     }
     #[test]

@@ -17,7 +17,10 @@ impl Aabb {
         let zoom = viewport.zoom.max(0.01);
         Self {
             min: [-viewport.x / zoom, -viewport.y / zoom],
-            max: [(surface[0] - viewport.x) / zoom, (surface[1] - viewport.y) / zoom],
+            max: [
+                (surface[0] - viewport.x) / zoom,
+                (surface[1] - viewport.y) / zoom,
+            ],
         }
     }
     pub(crate) fn intersects(self, other: Self) -> bool {
@@ -122,7 +125,9 @@ impl WorksetIndex {
             for cell in cells {
                 if let Some(ids) = self.cells.get_mut(&cell) {
                     ids.remove(&block);
-                    if ids.is_empty() { self.cells.remove(&cell); }
+                    if ids.is_empty() {
+                        self.cells.remove(&cell);
+                    }
                 }
             }
         }
@@ -148,7 +153,9 @@ impl WorksetIndex {
         let mut candidates = BTreeSet::new();
         if let Some(cells) = cells_for(enter, 4096) {
             for cell in cells {
-                if let Some(ids) = self.cells.get(&cell) { candidates.extend(ids); }
+                if let Some(ids) = self.cells.get(&cell) {
+                    candidates.extend(ids);
+                }
             }
         } else {
             candidates.extend(self.blocks.keys().copied());
@@ -166,20 +173,37 @@ impl WorksetIndex {
 /// Bounded grid enumeration; very large or invalid rectangles take the conservative path.
 fn cells_for(bounds: Aabb, limit: u64) -> Option<Vec<(i32, i32)>> {
     const CELL_SIZE: f32 = 1024.0;
-    if !bounds.min.iter().chain(bounds.max.iter()).all(|v| v.is_finite())
-        || bounds.min[0] > bounds.max[0] || bounds.min[1] > bounds.max[1] {
+    if !bounds
+        .min
+        .iter()
+        .chain(bounds.max.iter())
+        .all(|v| v.is_finite())
+        || bounds.min[0] > bounds.max[0]
+        || bounds.min[1] > bounds.max[1]
+    {
         return None;
     }
     let cell = |value: f32| -> Option<i32> {
         let value = (value as f64 / CELL_SIZE as f64).floor();
         (value >= i32::MIN as f64 && value <= i32::MAX as f64).then_some(value as i32)
     };
-    let (x0, y0, x1, y1) = (cell(bounds.min[0])?, cell(bounds.min[1])?, cell(bounds.max[0])?, cell(bounds.max[1])?);
+    let (x0, y0, x1, y1) = (
+        cell(bounds.min[0])?,
+        cell(bounds.min[1])?,
+        cell(bounds.max[0])?,
+        cell(bounds.max[1])?,
+    );
     let width = (i64::from(x1) - i64::from(x0) + 1) as u64;
     let height = (i64::from(y1) - i64::from(y0) + 1) as u64;
-    if width.checked_mul(height)? > limit { return None; }
+    if width.checked_mul(height)? > limit {
+        return None;
+    }
     let mut result = Vec::with_capacity((width * height) as usize);
-    for x in x0..=x1 { for y in y0..=y1 { result.push((x, y)); } }
+    for x in x0..=x1 {
+        for y in y0..=y1 {
+            result.push((x, y));
+        }
+    }
     Some(result)
 }
 
@@ -188,13 +212,23 @@ mod tests {
     use super::*;
 
     fn box2(x: f32, y: f32, w: f32, h: f32) -> Aabb {
-        Aabb { min: [x, y], max: [x + w, y + h] }
+        Aabb {
+            min: [x, y],
+            max: [x + w, y + h],
+        }
     }
 
     #[test]
     fn viewport_translation_and_zoom_produce_world_bounds() {
-        let view = crate::protocol::Viewport { x: -200., y: 100., zoom: 2. };
-        assert_eq!(Aabb::from_viewport(&view, [800., 600.]), box2(100., -50., 400., 300.));
+        let view = crate::protocol::Viewport {
+            x: -200.,
+            y: 100.,
+            zoom: 2.,
+        };
+        assert_eq!(
+            Aabb::from_viewport(&view, [800., 600.]),
+            box2(100., -50., 400., 300.)
+        );
     }
 
     #[test]
@@ -209,9 +243,27 @@ mod tests {
     #[test]
     fn delta_is_stable_and_sorted() {
         let mut workset = Workset::default();
-        assert_eq!(workset.update([3, 1]), WorksetDelta { entered: vec![1, 3], left: vec![] });
-        assert_eq!(workset.update([2, 3]), WorksetDelta { entered: vec![2], left: vec![1] });
-        assert_eq!(workset.reset(), WorksetDelta { entered: vec![], left: vec![2, 3] });
+        assert_eq!(
+            workset.update([3, 1]),
+            WorksetDelta {
+                entered: vec![1, 3],
+                left: vec![]
+            }
+        );
+        assert_eq!(
+            workset.update([2, 3]),
+            WorksetDelta {
+                entered: vec![2],
+                left: vec![1]
+            }
+        );
+        assert_eq!(
+            workset.reset(),
+            WorksetDelta {
+                entered: vec![],
+                left: vec![2, 3]
+            }
+        );
     }
 
     #[test]
@@ -219,13 +271,16 @@ mod tests {
         let mut index = WorksetIndex::default();
         index.insert(1, box2(110., 0., 10., 10.));
         let mut workset = Workset::default();
-        let next = index.query_with_hysteresis(box2(0., 0., 100., 100.), 20., 36., workset.active());
+        let next =
+            index.query_with_hysteresis(box2(0., 0., 100., 100.), 20., 36., workset.active());
         assert_eq!(workset.update(next).entered, vec![1]);
         for _ in 0..3 {
-            let next = index.query_with_hysteresis(box2(-15., 0., 100., 100.), 20., 36., workset.active());
+            let next =
+                index.query_with_hysteresis(box2(-15., 0., 100., 100.), 20., 36., workset.active());
             assert_eq!(workset.update(next), WorksetDelta::default());
         }
-        let next = index.query_with_hysteresis(box2(-27., 0., 100., 100.), 20., 36., workset.active());
+        let next =
+            index.query_with_hysteresis(box2(-27., 0., 100., 100.), 20., 36., workset.active());
         assert_eq!(workset.update(next).left, vec![1]);
     }
 
@@ -240,7 +295,10 @@ mod tests {
         assert_eq!(index.query(box2(3000., 3000., 1., 1.), 0.), vec![1, 2]);
         index.remove(2);
         assert_eq!(index.query(box2(3000., 3000., 1., 1.), 0.), vec![1]);
-        assert_eq!(index.query(box2(-1_000_000., -1_000_000., 2_000_000., 2_000_000.), 0.), vec![1]);
+        assert_eq!(
+            index.query(box2(-1_000_000., -1_000_000., 2_000_000., 2_000_000.), 0.),
+            vec![1]
+        );
     }
 
     #[test]
@@ -248,21 +306,43 @@ mod tests {
         let mut index = WorksetIndex::default();
         let mut bounds = HashMap::new();
         for id in 0..300 {
-            let rect = box2((id % 20) as f32 * 700. - 7000., (id / 20) as f32 * 900. - 6000., 200., 350.);
+            let rect = box2(
+                (id % 20) as f32 * 700. - 7000.,
+                (id / 20) as f32 * 900. - 6000.,
+                200.,
+                350.,
+            );
             index.insert(id, rect);
             bounds.insert(id, rect);
         }
         let mut active = BTreeSet::new();
         for step in 0..80 {
             let moved = step % 300;
-            let rect = box2(step as f32 * 317. - 9000., step as f32 * -211. + 7000., 200., 350.);
+            let rect = box2(
+                step as f32 * 317. - 9000.,
+                step as f32 * -211. + 7000.,
+                200.,
+                350.,
+            );
             index.insert(moved, rect);
             bounds.insert(moved, rect);
-            let viewport = box2(step as f32 * 250. - 8000., step as f32 * 145. - 6500., 1600., 1100.);
-            let expected: BTreeSet<_> = bounds.iter().filter_map(|(&id, &rect)| {
-                rect.intersects(viewport.expand(if active.contains(&id) { 80. } else { 64. })).then_some(id)
-            }).collect();
-            let actual: BTreeSet<_> = index.query_with_hysteresis(viewport, 64., 80., &active).into_iter().collect();
+            let viewport = box2(
+                step as f32 * 250. - 8000.,
+                step as f32 * 145. - 6500.,
+                1600.,
+                1100.,
+            );
+            let expected: BTreeSet<_> = bounds
+                .iter()
+                .filter_map(|(&id, &rect)| {
+                    rect.intersects(viewport.expand(if active.contains(&id) { 80. } else { 64. }))
+                        .then_some(id)
+                })
+                .collect();
+            let actual: BTreeSet<_> = index
+                .query_with_hysteresis(viewport, 64., 80., &active)
+                .into_iter()
+                .collect();
             assert_eq!(actual, expected, "step {step}");
             active = actual;
         }

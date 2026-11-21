@@ -154,8 +154,6 @@ impl Quality {
             _ => Self::Medium,
         }
     }
-
-
 }
 
 /// Shared entities use the highest consumer requirement. Focus/edit/capture use
@@ -171,9 +169,11 @@ pub(super) fn desired(
     if purpose.requires_high() {
         return Quality::High;
     }
-    let Some(surface) = scene.surface.as_ref().filter(|surface| {
-        surface.height.is_finite() && surface.height > 0.0
-    }) else {
+    let Some(surface) = scene
+        .surface
+        .as_ref()
+        .filter(|surface| surface.height.is_finite() && surface.height > 0.0)
+    else {
         return Quality::High;
     };
     let radius = node
@@ -202,7 +202,10 @@ fn projected_world_fraction(radius: f32, zoom: f32, viewport_height: f32) -> f32
     if !radius.is_finite() || radius < 0.0 {
         return f32::INFINITY;
     }
-    if [zoom, viewport_height].iter().any(|v| !v.is_finite() || *v <= 0.0) {
+    if [zoom, viewport_height]
+        .iter()
+        .any(|v| !v.is_finite() || *v <= 0.0)
+    {
         return f32::INFINITY;
     }
     2.0 * radius.max(0.01) * zoom / viewport_height
@@ -225,8 +228,14 @@ mod tests {
         }
         // 选中缩放与世界画布都按实际投影占比分档，不再恒为 High。
         assert!(!ViewPurpose::World.requires_high());
-        assert_eq!(ViewPurpose::World.select(0.01, Quality::Medium), Quality::Low);
-        assert_eq!(ViewPurpose::World.select(10.0, Quality::Medium), Quality::High);
+        assert_eq!(
+            ViewPurpose::World.select(0.01, Quality::Medium),
+            Quality::Low
+        );
+        assert_eq!(
+            ViewPurpose::World.select(10.0, Quality::Medium),
+            Quality::High
+        );
     }
 
     #[test]
@@ -239,10 +248,16 @@ mod tests {
         assert!(projected_world_fraction(10.0, 1.0, 800.0) > base);
         assert!(projected_world_fraction(0.1, 1.0, 800.0) < base);
         for radius in [f32::NAN, f32::INFINITY, -1.0] {
-            assert_eq!(Quality::for_fraction(projected_world_fraction(radius, 1.0, 800.0), Quality::Low), Quality::High);
+            assert_eq!(
+                Quality::for_fraction(projected_world_fraction(radius, 1.0, 800.0), Quality::Low),
+                Quality::High
+            );
         }
         for zoom in [0.0, -1.0, f32::NAN] {
-            assert_eq!(Quality::for_fraction(projected_world_fraction(1.0, zoom, 800.0), Quality::Low), Quality::High);
+            assert_eq!(
+                Quality::for_fraction(projected_world_fraction(1.0, zoom, 800.0), Quality::Low),
+                Quality::High
+            );
         }
     }
 
@@ -252,7 +267,10 @@ mod tests {
         assert_eq!(Quality::for_fraction(0.10, Quality::Low), Quality::Low);
         assert_eq!(Quality::for_fraction(0.10, Quality::Medium), Quality::Low);
         // 0.30（中档）：Medium 保持；High 降到 Medium。
-        assert_eq!(Quality::for_fraction(0.30, Quality::Medium), Quality::Medium);
+        assert_eq!(
+            Quality::for_fraction(0.30, Quality::Medium),
+            Quality::Medium
+        );
         assert_eq!(Quality::for_fraction(0.30, Quality::High), Quality::Medium);
         // 0.50（高档）：High 保持，Medium 提到 High。
         assert_eq!(Quality::for_fraction(0.50, Quality::High), Quality::High);
@@ -264,7 +282,10 @@ mod tests {
 
     #[test]
     fn models_without_world_instance_have_no_world_quality() {
-        let path = format!("{}/tests/fixtures/shared-world/render-scene.json", env!("CARGO_MANIFEST_DIR"));
+        let path = format!(
+            "{}/tests/fixtures/shared-world/render-scene.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
         let scene: Scene = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         let node = &scene.nodes[0];
         let resource = ModelSnapshot::new(
@@ -276,11 +297,20 @@ mod tests {
         );
         // 世界模型（无聚焦/编辑）使用世界投影占比分档。
         assert_eq!(purpose(node, &scene, None, false), ViewPurpose::World);
-        assert_eq!(desired(node, &scene, None, Quality::Medium, &resource), Quality::High);
+        assert_eq!(
+            desired(node, &scene, None, Quality::Medium, &resource),
+            Quality::High
+        );
         // 旧卡片节点没有世界实例，因此没有世界 AABB：保守保持 High，不伪造尺寸。
         let mut legacy = node.clone();
         legacy.shared_world_instance = None;
-        assert_eq!(crate::model3d::layout::model_bounds_for_node(&resource, &legacy), None);
-        assert_eq!(desired(&legacy, &scene, None, Quality::Low, &resource), Quality::High);
+        assert_eq!(
+            crate::model3d::layout::model_bounds_for_node(&resource, &legacy),
+            None
+        );
+        assert_eq!(
+            desired(&legacy, &scene, None, Quality::Low, &resource),
+            Quality::High
+        );
     }
 }

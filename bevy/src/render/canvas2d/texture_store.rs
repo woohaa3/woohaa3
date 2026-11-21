@@ -17,6 +17,38 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+const ATLAS_PAGE_SIZE: u32 = 4096;
+const ATLAS_SLOT_SIZE: u32 = 512;
+const ATLAS_SLOTS_PER_SIDE: u32 = ATLAS_PAGE_SIZE / ATLAS_SLOT_SIZE;
+const ATLAS_SLOT_COUNT: usize = (ATLAS_SLOTS_PER_SIDE * ATLAS_SLOTS_PER_SIDE) as usize;
+const ATLAS_PADDING: u32 = 1;
+
+/// A source rectangle inside a shared thumbnail atlas page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AtlasPlacement {
+    pub(crate) page: usize,
+    pub(crate) slot: usize,
+    pub(crate) offset: UVec2,
+}
+
+impl AtlasPlacement {
+    pub(crate) fn rect(self, size: Vec2) -> Rect {
+        let pad_x = if size.x + ATLAS_PADDING as f32 * 2.0 <= ATLAS_SLOT_SIZE as f32 {
+            ATLAS_PADDING
+        } else {
+            0
+        };
+        let pad_y = if size.y + ATLAS_PADDING as f32 * 2.0 <= ATLAS_SLOT_SIZE as f32 {
+            ATLAS_PADDING
+        } else {
+            0
+        };
+        let x = self.offset.x + pad_x;
+        let y = self.offset.y + pad_y;
+        Rect::new(x as f32, y as f32, x as f32 + size.x, y as f32 + size.y)
+    }
+}
+
 /// 共享键：内容身份 + 尺寸。尺寸必须参与，否则不同档位会把彼此的 handle 覆盖掉。
 fn shared_key(content: &str, size: Vec2) -> String {
     format!("{content}\u{0}{}x{}", size.x, size.y)
@@ -27,6 +59,7 @@ fn shared_key(content: &str, size: Vec2) -> String {
 struct Content {
     handle: Handle<Image>,
     refs: usize,
+    atlas: Option<AtlasPlacement>,
 }
 
 /// 一个节点到内容的绑定。
@@ -36,6 +69,22 @@ struct Binding {
     shared: Option<String>,
     handle: Handle<Image>,
     size: Vec2,
+    atlas: Option<AtlasPlacement>,
+}
+
+#[derive(Debug)]
+struct AtlasPage {
+    handle: Option<Handle<Image>>,
+    used: [bool; ATLAS_SLOT_COUNT],
+}
+
+impl Default for AtlasPage {
+    fn default() -> Self {
+        Self {
+            handle: None,
+            used: [false; ATLAS_SLOT_COUNT],
+        }
+    }
 }
 
 /// 一次上传应当如何处理。
@@ -52,6 +101,9 @@ pub(crate) enum TextureAction {
 pub(crate) struct TextureStore {
     contents: HashMap<String, Content>,
     nodes: HashMap<String, Binding>,
+    atlas_pages: Vec<AtlasPage>,
+    /// A slot reserved for a new content key before the first page Image exists.
+    pending_atlas: HashMap<String, AtlasPlacement>,
 }
 
 impl TextureStore {
@@ -78,6 +130,97 @@ impl TextureStore {
             Some(shared) => TextureAction::Reused(shared),
             None => TextureAction::Fresh,
         }
+    }
+
+    pub(crate) fn atlas_eligible(content: Option<&str>, size: Vec2) -> bool {
+        content.is_some_and(|content| !content.is_empty())
+            && size.x.is_finite()
+            && size.y.is_finite()
+            && size.x > 0.0
+            && size.y > 0.0
+            && size.x <= ATLAS_SLOT_SIZE as f32
+            && size.y <= ATLAS_SLOT_SIZE as f32
+    }
+
+    /// Reserve or retrieve the atlas slot for an eligible content key.
+    ///
+    /// The page handle is installed by `textures.rs` when the page Image is first created;
+    /// keeping allocation here makes slot reuse and reference release independent of ECS.
+    pub(crate) fn ensure_atlas_slot(
+        &mut self,
+        content: &str,
+        size: Vec2,
+    ) -> Option<AtlasPlacement> {
+        if !Self::atlas_eligible(Some(content), size) {
+            return None;
+        }
+        let key = shared_key(content, size);
+        if let Some(entry) = self.contents.get(&key) {
+            return entry.atlas;
+        }
+        if let Some(slot) = self.pending_atlas.get(&key) {
+            return Some(*slot);
+        }
+        for (page_index, page) in self.atlas_pages.iter_mut().enumerate() {
+            if let Some(slot) = page.used.iter().position(|used| !*used) {
+                page.used[slot] = true;
+                let placement = AtlasPlacement {
+                    page: page_index,
+                    slot,
+                    offset: UVec2::new(
+                        (slot as u32 % ATLAS_SLOTS_PER_SIDE) * ATLAS_SLOT_SIZE,
+                        (slot as u32 / ATLAS_SLOTS_PER_SIDE) * ATLAS_SLOT_SIZE,
+                    ),
+                };
+                self.pending_atlas.insert(key, placement);
+                return Some(placement);
+            }
+        }
+        let page_index = self.atlas_pages.len();
+        let mut page = AtlasPage::default();
+        page.used[0] = true;
+        self.atlas_pages.push(page);
+        let placement = AtlasPlacement {
+            page: page_index,
+            slot: 0,
+            offset: UVec2::ZERO,
+        };
+        self.pending_atlas.insert(key, placement);
+        Some(placement)
+    }
+
+    pub(crate) fn atlas_page_handle(&self, placement: AtlasPlacement) -> Option<Handle<Image>> {
+        self.atlas_pages
+            .get(placement.page)
+            .and_then(|page| page.handle.clone())
+    }
+
+    pub(crate) fn set_atlas_page_handle(
+        &mut self,
+        placement: AtlasPlacement,
+        handle: Handle<Image>,
+    ) {
+        if let Some(page) = self.atlas_pages.get_mut(placement.page) {
+            page.handle = Some(handle);
+        }
+    }
+
+    pub(crate) fn atlas_page_size() -> u32 {
+        ATLAS_PAGE_SIZE
+    }
+
+    pub(crate) fn atlas_slot_size() -> u32 {
+        ATLAS_SLOT_SIZE
+    }
+
+    pub(crate) fn atlas_padding() -> u32 {
+        ATLAS_PADDING
+    }
+
+    pub(crate) fn rect(&self, node_id: &str) -> Option<Rect> {
+        self.nodes
+            .get(node_id)
+            .and_then(|binding| binding.atlas.map(|atlas| atlas.rect(binding.size)))
     }
 
     /// 节点当前是否绑在共享内容上（独占上传不得原地覆盖共享纹理）。
@@ -109,9 +252,11 @@ impl TextureStore {
         }
         let mut released = self.release(node_id);
         if let Some(key) = &key {
+            let atlas = self.pending_atlas.remove(key);
             let entry = self.contents.entry(key.clone()).or_insert(Content {
                 handle: handle.clone(),
                 refs: 0,
+                atlas,
             });
             // 共享键已含尺寸，唯一可能的不一致是「同键但 handle 已被重建」。
             if entry.handle != handle {
@@ -128,6 +273,9 @@ impl TextureStore {
                 shared: key,
                 handle,
                 size,
+                atlas: content
+                    .and_then(|content| self.contents.get(&shared_key(content, size)))
+                    .and_then(|entry| entry.atlas),
             },
         );
         released
@@ -150,7 +298,18 @@ impl TextureStore {
             return Vec::new();
         }
         let handle = entry.handle.clone();
+        let atlas = entry.atlas;
+        if let Some(atlas) = atlas {
+            if let Some(page) = self.atlas_pages.get_mut(atlas.page) {
+                page.used[atlas.slot] = false;
+            }
+        }
         self.contents.remove(&key);
+        // Atlas pages stay resident so a later thumbnail can reuse the freed slot. The page
+        // handle is released together with the whole store in `clear`.
+        if atlas.is_some() {
+            return Vec::new();
+        }
         if handle == binding.handle {
             vec![handle]
         } else {
@@ -163,6 +322,14 @@ impl TextureStore {
     pub(crate) fn clear(&mut self) -> Vec<Handle<Image>> {
         let mut seen = std::collections::HashSet::new();
         let mut handles = Vec::new();
+        for page in self.atlas_pages.drain(..) {
+            if let Some(handle) = page.handle {
+                if seen.insert(handle.id()) {
+                    handles.push(handle);
+                }
+            }
+        }
+        self.pending_atlas.clear();
         for (_, content) in self.contents.drain() {
             if seen.insert(content.handle.id()) {
                 handles.push(content.handle);
@@ -315,5 +482,28 @@ mod tests {
         handles.sort();
         assert_eq!(handles, vec![handle(7), handle(8)]);
         assert_eq!(store.binding_count(), 0);
+    }
+
+    #[test]
+    fn eligible_content_uses_reusable_atlas_slots() {
+        let mut store = TextureStore::default();
+        assert!(TextureStore::atlas_eligible(
+            Some("asset"),
+            Vec2::new(512.0, 512.0)
+        ));
+        assert!(!TextureStore::atlas_eligible(
+            Some("asset"),
+            Vec2::new(513.0, 512.0)
+        ));
+        let first = store.ensure_atlas_slot("one", SIZE).unwrap();
+        let second = store.ensure_atlas_slot("two", SIZE).unwrap();
+        assert_ne!(first.slot, second.slot);
+        let page = handle(100);
+        store.set_atlas_page_handle(first, page.clone());
+        store.bind("a", Some("one"), SIZE, page.clone());
+        assert!(store.rect("a").is_some());
+        assert!(store.release("a").is_empty(), "释放缩略图只归还槽位");
+        let reused = store.ensure_atlas_slot("three", SIZE).unwrap();
+        assert_eq!(reused.slot, first.slot);
     }
 }

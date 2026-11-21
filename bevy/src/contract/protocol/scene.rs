@@ -72,11 +72,19 @@ pub(crate) struct GraphNode {
     /// the frontend; locked remains renderable for future visual variants.
     #[serde(default, rename = "editScope")]
     pub(crate) edit_scope: Option<EditScopePresentation>,
-    #[serde(default, rename = "sharedWorldInstance", deserialize_with = "super::shared_world::deserialize_instance")]
+    #[serde(
+        default,
+        rename = "sharedWorldInstance",
+        deserialize_with = "super::shared_world::deserialize_instance"
+    )]
     pub(crate) shared_world_instance: Option<super::shared_world::WorldInstance>,
     /// Shared-world camera pose/projection (Render Scene v39). The node keeps its card
     /// identity; the renderer draws and picks a frustum from this pose.
-    #[serde(default, rename = "worldCamera", deserialize_with = "super::world_camera::deserialize_camera")]
+    #[serde(
+        default,
+        rename = "worldCamera",
+        deserialize_with = "super::world_camera::deserialize_camera"
+    )]
     pub(crate) world_camera: Option<super::world_camera::WorldCamera>,
     /// 可选画布外壳；缺省 `card` 保持旧帧兼容。
     #[serde(default)]
@@ -378,10 +386,16 @@ pub(crate) struct SceneAreaPlayback {
 }
 
 #[derive(Clone, Deserialize)]
-pub(crate) struct SceneAreaBounds { pub(crate) min: SceneAreaPoint, pub(crate) max: SceneAreaPoint }
+pub(crate) struct SceneAreaBounds {
+    pub(crate) min: SceneAreaPoint,
+    pub(crate) max: SceneAreaPoint,
+}
 
 #[derive(Clone, Deserialize)]
-pub(crate) struct SceneAreaPoint { pub(crate) u: f64, pub(crate) v: f64 }
+pub(crate) struct SceneAreaPoint {
+    pub(crate) u: f64,
+    pub(crate) v: f64,
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -402,7 +416,9 @@ pub(crate) struct WorldCameraEdit {
     pub(crate) show_helpers: bool,
 }
 
-fn default_camera_editor_helpers() -> bool { true }
+fn default_camera_editor_helpers() -> bool {
+    true
+}
 
 impl Scene {
     /// 边界级防御校验；错误文案与重构前 `set_scene` 保持一致。
@@ -411,9 +427,16 @@ impl Scene {
         self.theme.validate()?;
         if let Some(edit) = &self.world_camera_edit {
             edit.camera.validate()?;
-            if self.model_focus.is_some() || self.image_focus.is_some() || self.video_focus.is_some()
-                || !self.nodes.iter().any(|node| node.id == edit.node_id
-                    && node.world_camera.as_ref().is_some_and(|camera| camera.camera_id == edit.camera.camera_id))
+            if self.model_focus.is_some()
+                || self.image_focus.is_some()
+                || self.video_focus.is_some()
+                || !self.nodes.iter().any(|node| {
+                    node.id == edit.node_id
+                        && node
+                            .world_camera
+                            .as_ref()
+                            .is_some_and(|camera| camera.camera_id == edit.camera.camera_id)
+                })
             {
                 return Err("Invalid world camera editor");
             }
@@ -436,8 +459,12 @@ impl Scene {
             }
         }
         for node in &self.nodes {
-            if let Some(instance) = &node.shared_world_instance { instance.validate()?; }
-            if let Some(camera) = &node.world_camera { camera.validate()?; }
+            if let Some(instance) = &node.shared_world_instance {
+                instance.validate()?;
+            }
+            if let Some(camera) = &node.world_camera {
+                camera.validate()?;
+            }
             node.chrome.validate()?;
             if node
                 .progress_started_at

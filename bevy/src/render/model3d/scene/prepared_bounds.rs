@@ -29,9 +29,17 @@ struct Part {
 enum AccurateShape {
     /// 被面引用的顶点（重复的姿势场景求值只变换这些点，不套 AABB 角）。
     Points(Vec<[f32; 3]>),
-    Sphere { radius: f32 },
-    Cylinder { radius: f32, half_y: f32 },
-    Capsule { radius: f32, half_y: f32 },
+    Sphere {
+        radius: f32,
+    },
+    Cylinder {
+        radius: f32,
+        half_y: f32,
+    },
+    Capsule {
+        radius: f32,
+        half_y: f32,
+    },
 }
 
 impl AccurateShape {
@@ -220,7 +228,9 @@ impl PreparedBounds {
             if posed {
                 part.accurate = accurate_shape(spec);
             }
-            let Some(skin) = skins.get(spec.id.as_str()) else { continue };
+            let Some(skin) = skins.get(spec.id.as_str()) else {
+                continue;
+            };
             // 绑定/无姿势路径保留原行为：蒙皮网格用几何顶点 AABB，不做 LBS。
             if !posed {
                 continue;
@@ -279,9 +289,7 @@ impl PreparedBounds {
         model
             .prepared_bounds
             .clone()
-            .unwrap_or_else(|| {
-                Arc::new(Self::new(&super::build_entity_specs(model), model))
-            })
+            .unwrap_or_else(|| Arc::new(Self::new(&super::build_entity_specs(model), model)))
     }
 
     pub(crate) fn placed_local(&self, bases: &HashMap<String, Transform>) -> Option<ModelAabb> {
@@ -303,18 +311,29 @@ impl PreparedBounds {
                 .iter()
                 .map(|part| {
                     let points = match &part.accurate {
-                        Some(AccurateShape::Points(points)) => points.capacity() * std::mem::size_of::<[f32; 3]>(),
+                        Some(AccurateShape::Points(points)) => {
+                            points.capacity() * std::mem::size_of::<[f32; 3]>()
+                        }
                         _ => 0,
                     };
                     let skin = part.skin.as_ref().map_or(0, |skin| {
                         skin.vertices.capacity() * std::mem::size_of::<[f32; 3]>()
                             + skin.referenced.capacity() * std::mem::size_of::<usize>()
                             + skin.joints.capacity() * std::mem::size_of::<u32>()
-                            + skin.inverse_bind_matrices.capacity() * std::mem::size_of::<[f32; 16]>()
+                            + skin.inverse_bind_matrices.capacity()
+                                * std::mem::size_of::<[f32; 16]>()
                             + skin.indices.capacity() * std::mem::size_of::<Vec<usize>>()
-                            + skin.indices.iter().map(|row| row.capacity() * std::mem::size_of::<usize>()).sum::<usize>()
+                            + skin
+                                .indices
+                                .iter()
+                                .map(|row| row.capacity() * std::mem::size_of::<usize>())
+                                .sum::<usize>()
                             + skin.weights.capacity() * std::mem::size_of::<Vec<f32>>()
-                            + skin.weights.iter().map(|row| row.capacity() * std::mem::size_of::<f32>()).sum::<usize>()
+                            + skin
+                                .weights
+                                .iter()
+                                .map(|row| row.capacity() * std::mem::size_of::<f32>())
+                                .sum::<usize>()
                     });
                     part.id.capacity() + points + skin
                 })
@@ -421,7 +440,11 @@ fn override_at(overrides: &[(u32, Transform)], offset: usize) -> Option<Transfor
 }
 
 /// 解析后的部件拓扑：按 `parts` 顺序推进世界变换，返回 `(部件下标, 世界包围盒)`。
-fn evaluate(parts: &[Part], overrides: &[(u32, Transform)], posed: bool) -> Vec<(usize, ModelAabb)> {
+fn evaluate(
+    parts: &[Part],
+    overrides: &[(u32, Transform)],
+    posed: bool,
+) -> Vec<(usize, ModelAabb)> {
     let mut worlds: Vec<Option<Mat4>> = Vec::with_capacity(parts.len());
     for (offset, part) in parts.iter().enumerate() {
         // The original placement adapter only overrides group operations.
@@ -461,7 +484,9 @@ fn evaluate(parts: &[Part], overrides: &[(u32, Transform)], posed: bool) -> Vec<
 /// 姿势场景的精确形状声明；与 TS `evaluateModelPoseGeometry` 使用同一分类。
 fn accurate_shape(spec: &ModelEntitySpec) -> Option<AccurateShape> {
     match spec.geometry.as_ref()? {
-        super::ModelGeometry::Mesh { vertices, faces, .. } => {
+        super::ModelGeometry::Mesh {
+            vertices, faces, ..
+        } => {
             let mut referenced: Vec<usize> = faces
                 .iter()
                 .flatten()
@@ -473,7 +498,10 @@ fn accurate_shape(spec: &ModelEntitySpec) -> Option<AccurateShape> {
                 referenced.extend(0..vertices.len());
             }
             Some(AccurateShape::Points(
-                referenced.into_iter().map(|index| vertices[index]).collect(),
+                referenced
+                    .into_iter()
+                    .map(|index| vertices[index])
+                    .collect(),
             ))
         }
         super::ModelGeometry::Sphere { radius } => Some(AccurateShape::Sphere {

@@ -68,7 +68,11 @@ impl PresenceAssets {
 }
 
 /// 世界实例的呈现输入指纹；主题、资源身份和选择/悬停/聚焦都参与。
-fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<String, std::sync::Arc<crate::protocol::ModelSnapshot>>) -> String {
+fn presentation_key(
+    scene: &Scene,
+    theme: &ThemeResource,
+    resources: &HashMap<String, std::sync::Arc<crate::protocol::ModelSnapshot>>,
+) -> String {
     let mut key = String::new();
     let _ = write!(key, "t{};", theme.fingerprint());
     let three_d_hidden = scene
@@ -86,7 +90,9 @@ fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<St
         if node.shared_world_instance.is_none() || !node.chrome.is_none() {
             continue;
         }
-        if node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")) {
+        if node.edit_scope.as_ref().is_some_and(|scope| {
+            scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")
+        }) {
             continue;
         }
         let _ = write!(
@@ -119,7 +125,13 @@ fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<St
                 transform.scale.x
             );
         }
-        let _ = write!(key, "g{:?};", node.model.as_ref().and_then(|model| model.ground_anchor_local));
+        let _ = write!(
+            key,
+            "g{:?};",
+            node.model
+                .as_ref()
+                .and_then(|model| model.ground_anchor_local)
+        );
         match node
             .model
             .as_ref()
@@ -131,7 +143,12 @@ fn presentation_key(scene: &Scene, theme: &ThemeResource, resources: &HashMap<St
             None => key.push_str("empty;"),
         }
     }
-    key.push_str(scene.model_focus.as_ref().map_or("-", |focus| focus.node_id.as_str()));
+    key.push_str(
+        scene
+            .model_focus
+            .as_ref()
+            .map_or("-", |focus| focus.node_id.as_str()),
+    );
     key
 }
 
@@ -165,12 +182,17 @@ pub(crate) fn sync(
         return;
     }
     let cube = presence.assets.cube(meshes);
-    let focus = scene.model_focus.as_ref().map(|focus| focus.node_id.as_str());
+    let focus = scene
+        .model_focus
+        .as_ref()
+        .map(|focus| focus.node_id.as_str());
     for node in &scene.nodes {
         if node.shared_world_instance.is_none() || !node.chrome.is_none() {
             continue;
         }
-        if node.edit_scope.as_ref().is_some_and(|scope| scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")) {
+        if node.edit_scope.as_ref().is_some_and(|scope| {
+            scope.category == "3d" && matches!(scope.mode.as_str(), "hidden" | "locked")
+        }) {
             continue;
         }
         // 聚焦时只保留目标对象；其他世界对象由模型可见性系统隐藏。
@@ -228,7 +250,11 @@ pub(crate) fn sync(
                 // Bounds outline plus a restrained selected-only ground anchor.
                 spawn_aabb_edges(commands, presence, &cube, materials, color, min, max);
                 if selected && focus.is_none() {
-                    if let Some(local) = node.model.as_ref().and_then(|model| model.ground_anchor_local) {
+                    if let Some(local) = node
+                        .model
+                        .as_ref()
+                        .and_then(|model| model.ground_anchor_local)
+                    {
                         let point = transform.transform_point(Vec3::from_array(local));
                         let model_extent = (max - min).abs().max_element();
                         let radius = (model_extent * 0.0325).min(9.0);
@@ -236,13 +262,24 @@ pub(crate) fn sync(
                         if point.is_finite() && radius > f32::EPSILON && thickness > f32::EPSILON {
                             let material = presence.assets.material(materials, color);
                             active_anchors.insert(node.id.clone());
-                            let pair = *presence.ground_anchors.entry(node.id.clone()).or_insert_with(|| [commands.spawn_empty().id(), commands.spawn_empty().id()]);
-                            for (entity, scale) in pair.into_iter().zip([Vec3::new(radius * 2.0, thickness, thickness), Vec3::new(thickness, thickness, radius * 2.0)]) {
+                            let pair = *presence
+                                .ground_anchors
+                                .entry(node.id.clone())
+                                .or_insert_with(|| {
+                                    [commands.spawn_empty().id(), commands.spawn_empty().id()]
+                                });
+                            for (entity, scale) in pair.into_iter().zip([
+                                Vec3::new(radius * 2.0, thickness, thickness),
+                                Vec3::new(thickness, thickness, radius * 2.0),
+                            ]) {
                                 commands.entity(entity).insert((
                                     WorldPresenceMarker,
-                                    RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER),
+                                    RenderLayers::layer(
+                                        crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER,
+                                    ),
                                     bevy::light::NotShadowCaster,
-                                    Mesh3d(cube.clone()), MeshMaterial3d(material.clone()),
+                                    Mesh3d(cube.clone()),
+                                    MeshMaterial3d(material.clone()),
                                     Transform::from_xyz(point.x, 0.0, point.z).with_scale(scale),
                                     Visibility::Inherited,
                                 ));
@@ -300,9 +337,8 @@ pub(crate) fn sync(
                         bevy::light::NotShadowCaster,
                         Mesh3d(cube.clone()),
                         MeshMaterial3d(presence.assets.material(materials, color)),
-                        Transform::from_xyz(ground.x, ground.y + height, ground.z).with_scale(
-                            Vec3::splat((unit * 0.09).clamp(2.0, 14.0)),
-                        ),
+                        Transform::from_xyz(ground.x, ground.y + height, ground.z)
+                            .with_scale(Vec3::splat((unit * 0.09).clamp(2.0, 14.0))),
                         Visibility::Inherited,
                     ))
                     .id();
@@ -311,8 +347,12 @@ pub(crate) fn sync(
         }
     }
     presence.ground_anchors.retain(|id, pair| {
-        if active_anchors.contains(id) { return true; }
-        for entity in pair { commands.entity(*entity).try_despawn(); }
+        if active_anchors.contains(id) {
+            return true;
+        }
+        for entity in pair {
+            commands.entity(*entity).try_despawn();
+        }
         false
     });
 }
@@ -484,9 +524,13 @@ mod tests {
 
     fn marker_count(app: &mut App) -> usize {
         let world = app.world_mut();
-        let mut query = world.query_filtered::<Has<bevy::light::NotShadowCaster>, With<WorldPresenceMarker>>();
+        let mut query =
+            world.query_filtered::<Has<bevy::light::NotShadowCaster>, With<WorldPresenceMarker>>();
         let markers: Vec<_> = query.iter(world).collect();
-        assert!(markers.iter().all(|excluded| *excluded), "selection and presence helpers must never cast shadows");
+        assert!(
+            markers.iter().all(|excluded| *excluded),
+            "selection and presence helpers must never cast shadows"
+        );
         markers.len()
     }
 
@@ -530,9 +574,12 @@ mod tests {
             nodes: vec![world_node(NodeChrome::None)],
             ..Scene::default()
         };
-        scene.nodes[0].model = Some(serde_json::from_value(serde_json::json!({
-            "resourceKey": "v:sig", "groundAnchorLocal": [0.25, -0.5, 0.75]
-        })).unwrap());
+        scene.nodes[0].model = Some(
+            serde_json::from_value(serde_json::json!({
+                "resourceKey": "v:sig", "groundAnchorLocal": [0.25, -0.5, 0.75]
+            }))
+            .unwrap(),
+        );
         scene.selection.nodes = vec![scene.nodes[0].id.clone()];
         app.world_mut().resource_mut::<TestScene>().0 = scene;
         app.world_mut()
@@ -547,19 +594,43 @@ mod tests {
         assert_eq!(app.world().resource::<WorldPresence>().entities, before);
         let world = app.world_mut();
         let mut markers = world.query::<(&Transform, &RenderLayers)>();
-        let ground: Vec<_> = markers.iter(world).filter(|(pose, _)| pose.translation.y == 0.0).collect();
+        let ground: Vec<_> = markers
+            .iter(world)
+            .filter(|(pose, _)| pose.translation.y == 0.0)
+            .collect();
         assert_eq!(ground.len(), 2);
         for (pose, layers) in ground {
             assert!((pose.translation.x - 152.0).abs() < 0.001);
             assert!((pose.translation.z + 120.0).abs() < 0.001);
-            assert_eq!(*layers, RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER));
+            assert_eq!(
+                *layers,
+                RenderLayers::layer(crate::preview_layers::WORLD_CAMERA_GIZMO_LAYER)
+            );
         }
-        let anchors = app.world().resource::<WorldPresence>().ground_anchors.clone();
-        app.world_mut().resource_mut::<TestScene>().0.nodes[0].shared_world_instance.as_mut().unwrap().transform.position.u += 2.0;
+        let anchors = app
+            .world()
+            .resource::<WorldPresence>()
+            .ground_anchors
+            .clone();
+        app.world_mut().resource_mut::<TestScene>().0.nodes[0]
+            .shared_world_instance
+            .as_mut()
+            .unwrap()
+            .transform
+            .position
+            .u += 2.0;
         app.update();
-        assert_eq!(app.world().resource::<WorldPresence>().ground_anchors, anchors);
+        assert_eq!(
+            app.world().resource::<WorldPresence>().ground_anchors,
+            anchors
+        );
         let half = std::f64::consts::FRAC_1_SQRT_2;
-        app.world_mut().resource_mut::<TestScene>().0.nodes[0].shared_world_instance.as_mut().unwrap().transform.rotation = [half, 0.0, 0.0, half];
+        app.world_mut().resource_mut::<TestScene>().0.nodes[0]
+            .shared_world_instance
+            .as_mut()
+            .unwrap()
+            .transform
+            .rotation = [half, 0.0, 0.0, half];
         app.update();
         for entity in anchors["world"] {
             let pose = app.world().get::<Transform>(entity).unwrap();
@@ -568,17 +639,29 @@ mod tests {
             assert!((pose.translation.z + 240.0).abs() < 0.001);
             assert_eq!(pose.translation.y, 0.0);
         }
-        app.world_mut().resource_mut::<TestScene>().0.nodes[0].model.as_mut().unwrap().ground_anchor_local = None;
+        app.world_mut().resource_mut::<TestScene>().0.nodes[0]
+            .model
+            .as_mut()
+            .unwrap()
+            .ground_anchor_local = None;
         app.update();
         assert_eq!(marker_count(&mut app), 12);
-        app.world_mut().resource_mut::<TestScene>().0.selection.nodes.clear();
+        app.world_mut()
+            .resource_mut::<TestScene>()
+            .0
+            .selection
+            .nodes
+            .clear();
         app.update();
         assert_eq!(marker_count(&mut app), 0);
     }
 
     #[test]
     fn card_nodes_do_not_claim_world_presence() {
-        let scene = Scene { nodes: vec![world_node(NodeChrome::Card)], ..Scene::default() };
+        let scene = Scene {
+            nodes: vec![world_node(NodeChrome::Card)],
+            ..Scene::default()
+        };
         let theme = ThemeResource::default();
         let key = presentation_key(&scene, &theme, &HashMap::new());
         assert_eq!(key, format!("t{};-", theme.fingerprint()));
@@ -586,7 +669,10 @@ mod tests {
 
     #[test]
     fn empty_world_anchor_uses_instance_pose_not_card() {
-        let scene = Scene { nodes: vec![world_node(NodeChrome::None)], ..Scene::default() };
+        let scene = Scene {
+            nodes: vec![world_node(NodeChrome::None)],
+            ..Scene::default()
+        };
         let transform = layout::world_instance_transform(&scene.nodes[0]).unwrap();
         assert!((transform.translation.x - 128.0).abs() < 0.001);
         assert!((transform.translation.y - 64.0).abs() < 0.001);

@@ -75,6 +75,21 @@ fn accept_scene_bumps_generation_and_rejects_stale() {
 }
 
 #[test]
+fn hover_keeps_query_generation_available() {
+    clear_snapshot();
+    let generation = accept_scene(&scene(
+        vec![node("n", 0.0, 0.0, 100.0, 50.0)],
+        vec![],
+    ));
+    let after_hover = accept_hover(generation, None).expect("hover accepted");
+    assert_eq!(after_hover, generation);
+    assert!(point_query(after_hover, 10.0, 10.0, 1.0, None).available);
+    let after_second_hover = accept_hover(after_hover, None).expect("second hover accepted");
+    assert_eq!(after_second_hover, generation);
+    assert!(point_query(after_second_hover, 20.0, 10.0, 1.0, None).available);
+}
+
+#[test]
 fn unavailable_without_snapshot() {
     clear_snapshot();
     let result = point_query(1, 0.0, 0.0, 1.0, None);
@@ -152,7 +167,6 @@ fn resize_only_hits_selected_node() {
         );
     }
 }
-
 
 #[test]
 fn edge_hit_uses_broad_phase() {
@@ -277,9 +291,6 @@ fn json_entrypoint_round_trips() {
     assert!(bad.contains("\"available\":false"));
     assert!(bad.contains("unavailable"));
 }
-
-
-
 
 #[test]
 fn accept_viewport_reuses_world_index_and_bumps_generation() {
@@ -464,7 +475,6 @@ fn visible_aggregate_handles_are_queryable_and_removed_with_projection() {
     assert!(!point_query(generation, 418.0, 210.0, 1.0, None).available);
 }
 
-
 #[test]
 fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
     clear_snapshot();
@@ -520,7 +530,6 @@ fn history_dots_hit_inside_node_and_single_version_does_not_capture() {
         })
     );
 }
-
 
 #[test]
 fn chrome_none_world_model_has_no_card_port_history_or_resize_hits() {

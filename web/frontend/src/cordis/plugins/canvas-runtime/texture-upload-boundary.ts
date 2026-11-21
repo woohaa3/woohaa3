@@ -10,14 +10,15 @@ export class TextureUploadBoundary {
   private readonly uploaded = new Set<string>();
   private readonly pendingIdentity = new Map<string,string>();
   private readonly appliedIdentity = new Map<string,string>();
+  private readonly sharedUploaded = new Set<string>();
   private readonly pixelIds = new WeakMap<object, number>();
   private nextPixelId = 0;
   constructor(private readonly issues: RuntimeIssues) {}
 
-  reset = (): void => { this.failed.clear(); this.uploaded.clear(); this.pendingIdentity.clear(); this.appliedIdentity.clear(); };
-  retry = (): void => { this.failed.clear(); };
+  reset = (): void => { this.failed.clear(); this.uploaded.clear(); this.pendingIdentity.clear(); this.appliedIdentity.clear(); this.sharedUploaded.clear(); };
+  retry = (): void => { this.failed.clear(); this.sharedUploaded.clear(); };
   upload(channel: "node" | "plane", id: string, width: number, height: number, pixels: import("@woohaa3/contracts").ImagePixelSource,
-    invoke: () => void, source?: TextureUploadSource): boolean {
+    invoke: (alreadyShared: boolean) => void, source?: TextureUploadSource): boolean {
     const key = `texture:${channel}:${id}`;
     let sourceKey = source?.sourceKey;
     if (!sourceKey) {
@@ -27,13 +28,18 @@ export class TextureUploadBoundary {
     }
     const identity = `${sourceKey}:${width}:${height}`;
     if (this.failed.get(key) === identity) return false;
+    const sharedKey = channel === "node" && source?.sourceKey
+      ? `${source.scope?.token ?? ""}\u0000${source.sourceKey}\u0000${width}x${height}`
+      : null;
+    const alreadyShared = sharedKey !== null && this.sharedUploaded.has(sharedKey);
     try {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0
         || width > BEVY_TEXTURE_MAX_DIMENSION || height > BEVY_TEXTURE_MAX_DIMENSION
         || (isNativeImage(pixels) ? pixels.width !== width || pixels.height !== height : pixels.length !== width * height * 4)) throw new Error(`Invalid texture (${width}×${height})`);
       this.appliedIdentity.delete(key);
       this.pendingIdentity.set(key,identity);
-      invoke();
+      invoke(alreadyShared);
+      if (sharedKey !== null) this.sharedUploaded.add(sharedKey);
       this.uploaded.add(key);
       // A lower-quality fallback must not erase the failed focus-source issue.
       if (!source?.preserveFailure) {
@@ -67,6 +73,7 @@ export class TextureUploadBoundary {
     return this.appliedIdentity.get(`texture:${channel}:${id}`)===`${content}:${width}:${height}`;
   }
   retain(nodeIds: ReadonlySet<string>, planeIds: ReadonlySet<string>): void {
+    if (nodeIds.size === 0) this.sharedUploaded.clear();
     for (const key of new Set([...this.failed.keys(), ...this.uploaded])) {
       const isNode = key.startsWith("texture:node:");
       const id = key.slice(isNode ? "texture:node:".length : "texture:plane:".length);

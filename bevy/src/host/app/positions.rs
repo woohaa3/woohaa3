@@ -84,25 +84,65 @@ mod tests {
     #[test]
     fn accepted_moves_mark_only_affected_document_and_incident_edge_blocks() {
         let mut scene = Scene::default();
-        scene.nodes = (0..35).map(|i| serde_json::from_value(serde_json::json!({
-            "id": format!("n{i}"), "type":"text", "x":i, "y":0
-        })).unwrap()).collect();
-        scene.edges = (0..34).map(|i| serde_json::from_value(serde_json::json!({
-            "id":format!("e{i}"), "source":format!("n{i}"), "target":format!("n{}", i + 1)
-        })).unwrap()).collect();
+        scene.nodes = (0..35)
+            .map(|i| {
+                serde_json::from_value(serde_json::json!({
+                "id": format!("n{i}"), "type":"text", "x":i, "y":0
+                    }))
+                .unwrap()
+            })
+            .collect();
+        scene.edges = (0..34)
+            .map(|i| {
+                serde_json::from_value(serde_json::json!({
+                "id":format!("e{i}"), "source":format!("n{i}"), "target":format!("n{}", i + 1)
+                    }))
+                .unwrap()
+            })
+            .collect();
         let mut index = NodeIndex::default();
         index.rebuild(&scene);
         let edges = crate::canvas_runtime::EdgeIndex::build(&scene.edges);
-        let changed = apply(&index, &mut scene, [
-            ("n17".into(), NodePosition { id:"n17".into(), x: 300., y: 2. }),
-            ("n20".into(), NodePosition { id:"n20".into(), x: 20., y: 0. }),
-            ("missing".into(), NodePosition { id:"missing".into(), x: 1., y: 1. }),
-        ].into_iter().collect());
+        let changed = apply(
+            &index,
+            &mut scene,
+            [
+                (
+                    "n17".into(),
+                    NodePosition {
+                        id: "n17".into(),
+                        x: 300.,
+                        y: 2.,
+                    },
+                ),
+                (
+                    "n20".into(),
+                    NodePosition {
+                        id: "n20".into(),
+                        x: 20.,
+                        y: 0.,
+                    },
+                ),
+                (
+                    "missing".into(),
+                    NodePosition {
+                        id: "missing".into(),
+                        x: 1.,
+                        y: 1.,
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
         let mut changes = crate::canvas_runtime::ChangeSet::default();
         changes.add_positions(&changed, &index, &edges);
         assert_eq!(changed, vec!["n17"]);
         assert_eq!(changes.card_blocks.into_iter().collect::<Vec<_>>(), vec![1]);
-        assert_eq!(changes.incident_edges.into_iter().collect::<Vec<_>>(), vec![16, 17]);
+        assert_eq!(
+            changes.incident_edges.into_iter().collect::<Vec<_>>(),
+            vec![16, 17]
+        );
         assert_eq!(changes.edge_blocks.into_iter().collect::<Vec<_>>(), vec![1]);
         assert_eq!(scene.nodes[17].x, 300.);
     }

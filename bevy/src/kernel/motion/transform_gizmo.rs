@@ -48,7 +48,10 @@ impl Plugin for TransformGizmoPlugin {
         app.init_resource::<TransformGizmoSelection>()
             .init_resource::<TransformGizmoStyle>()
             .init_resource::<GizmoRenderAssets>()
-            .add_systems(PostUpdate, sync_transform_gizmo.run_if(crate::canvas_activity::running));
+            .add_systems(
+                PostUpdate,
+                sync_transform_gizmo.run_if(crate::canvas_activity::running),
+            );
     }
 }
 impl TransformGizmoSelection {
@@ -95,8 +98,7 @@ pub(crate) fn sync_transform_gizmo(
         .zip(selection.target)
         .zip(selection.view)
         .and_then(|((mode, target), view)| {
-            transform_handles(&view, target.focus, mode, selection.basis)
-                .map(|lines| (view, lines))
+            transform_handles(&view, target.focus, mode, selection.basis).map(|lines| (view, lines))
         });
     if let Some((view, lines)) = layout {
         let hover = selection.hover.clone();
@@ -163,14 +165,20 @@ pub(crate) fn transform_handles(
             let v = v * scale * YAW_RADIUS_CSS / size;
             let point = |angle: f32| origin + u * angle.cos() + v * angle.sin();
             for i in 0..crate::gizmo_layout::RING_SEGMENTS {
-                let a = i as f32 / crate::gizmo_layout::RING_SEGMENTS as f32
-                    * std::f32::consts::TAU;
+                let a =
+                    i as f32 / crate::gizmo_layout::RING_SEGMENTS as f32 * std::f32::consts::TAU;
                 let b = (i + 1) as f32 / crate::gizmo_layout::RING_SEGMENTS as f32
                     * std::f32::consts::TAU;
-                push(&mut lines, GizmoShape::Stroke, point(a), point(b), 3.0, "yaw-ring");
-                let rear = (((point(a) + point(b)) * 0.5) - origin)
-                    .dot(view.position - origin)
-                    < 0.0;
+                push(
+                    &mut lines,
+                    GizmoShape::Stroke,
+                    point(a),
+                    point(b),
+                    3.0,
+                    "yaw-ring",
+                );
+                let rear =
+                    (((point(a) + point(b)) * 0.5) - origin).dot(view.position - origin) < 0.0;
                 if let Some(line) = lines.last_mut() {
                     line.rear = rear;
                 }
@@ -203,7 +211,14 @@ pub(crate) fn transform_handles(
                 }
                 let handle = ["x", "y", "z"][index];
                 let end = tip - axis * scale * 15.0;
-                push(&mut lines, GizmoShape::Stroke, origin + axis * scale * 10.0, end, 2.5, handle);
+                push(
+                    &mut lines,
+                    GizmoShape::Stroke,
+                    origin + axis * scale * 10.0,
+                    end,
+                    2.5,
+                    handle,
+                );
                 push(&mut lines, GizmoShape::Cone, end, tip, 11.0, handle);
             }
             push(

@@ -3,9 +3,9 @@
 //! change: 2026-10-28-migrate-canvas-rendering-to-bevy-ecs —— 端点读取 ECS `CanvasLayout`，
 //! 连线标签通过 `LabelRequests`（owner = 边批次实体）同步，块内不再保存标签实体。
 use super::{
+    CanvasMaterials,
     geometry::Geometry,
     labels::{Label, LabelOwner, LabelRequests, LabelStyle, LabelWriter},
-    CanvasMaterials,
 };
 use crate::canvas_ecs::components::{CanvasLabelRole, CanvasLayout, EdgeVisual};
 use crate::canvas_runtime::{Aabb, Workset, WorksetIndex};
@@ -14,9 +14,12 @@ use crate::{
     theme::ThemeResource,
 };
 use bevy::{camera::visibility::NoFrustumCulling, prelude::*};
-use std::collections::HashMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 pub(super) const BLOCK_SIZE: usize = 16;
+pub(super) fn curve_segments(zoom: f32) -> usize {
+    super::geometry::edge_curve_segments(zoom)
+}
 type Bounds = Option<([f32; 2], [f32; 2])>;
 fn bounds(edge: &Edge, layouts: &HashMap<&str, CanvasLayout>) -> Bounds {
     Some((
@@ -76,6 +79,13 @@ pub(super) struct Block {
     entity: Option<Entity>,
     mesh: Option<Handle<Mesh>>,
     labels: Vec<Label>,
+    curve_segments: usize,
+}
+
+#[derive(Clone, PartialEq)]
+struct EdgeHoverState {
+    edge_id: Option<String>,
+    cursor: Option<[f32; 2]>,
 }
 
 #[derive(Resource, Default)]
@@ -86,9 +96,53 @@ pub(crate) struct EdgeBlockCache {
     workset_index: WorksetIndex,
     workset: Workset,
     new_block_visibility: BTreeSet<u32>,
+    curve_segments: usize,
+    edge_blocks_by_id: HashMap<String, u32>,
+    last_hover: EdgeHoverState,
+    last_selection: Option<String>,
+}
+
+impl Default for EdgeHoverState {
+    fn default() -> Self {
+        Self {
+            edge_id: None,
+            cursor: None,
+        }
+    }
 }
 
 impl EdgeBlockCache {
+    pub(crate) fn lod_changed(&self, zoom: f32) -> bool {
+        self.curve_segments != curve_segments(zoom)
+    }
+
+    pub(crate) fn interaction_dirty_blocks(
+        &self,
+        scene: &Scene,
+        base: &BTreeSet<u32>,
+    ) -> BTreeSet<u32> {
+        let current_hover = edge_hover_state(scene);
+        let current_selection = scene.selection.edge.clone();
+        if self.last_hover == current_hover && self.last_selection == current_selection {
+            return base.clone();
+        }
+        let mut dirty = base.clone();
+        for id in [
+            self.last_hover.edge_id.as_deref(),
+            current_hover.edge_id.as_deref(),
+            self.last_selection.as_deref(),
+            current_selection.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(&block) = self.edge_blocks_by_id.get(id) {
+                dirty.insert(block);
+            }
+        }
+        dirty
+    }
+
     pub(crate) fn can_update_blocks(&self, edge_count: usize) -> bool {
         !self.labels_stale && self.blocks.len() == edge_count.div_ceil(BLOCK_SIZE)
     }
@@ -97,21 +151,54 @@ impl EdgeBlockCache {
         self.labels_stale = true;
     }
 
-    pub(crate) fn sync_workset(&mut self, commands: &mut Commands, viewport: &crate::protocol::Viewport, surface: Vec2) {
+    pub(crate) fn entity_block(&self, entity: Entity) -> Option<u32> {
+        self.blocks
+            .iter()
+            .position(|block| block.entity == Some(entity))
+            .map(|index| index as u32)
+    }
+
+    pub(crate) fn block_visible(&self, block: u32) -> bool {
+        self.workset.active().contains(&block)
+    }
+
+    pub(crate) fn block_count(&self) -> u32 {
+        self.blocks.len() as u32
+    }
+
+    pub(crate) fn sync_workset(
+        &mut self,
+        commands: &mut Commands,
+        viewport: &crate::protocol::Viewport,
+        surface: Vec2,
+    ) {
         let zoom = viewport.zoom.max(0.01);
         let visible = Aabb::from_viewport(viewport, surface.to_array());
         let next = if cfg!(feature = "canvas-reference") {
             (0..self.blocks.len() as u32).collect()
         } else {
-            self.workset_index.query_with_hysteresis(visible, 64.0 / zoom, 80.0 / zoom, self.workset.active())
+            self.workset_index.query_with_hysteresis(
+                visible,
+                64.0 / zoom,
+                80.0 / zoom,
+                self.workset.active(),
+            )
         };
         let delta = self.workset.update(next);
         let mut changed = std::mem::take(&mut self.new_block_visibility);
         changed.extend(delta.entered);
         changed.extend(delta.left);
         for index in changed {
-            if let Some(entity) = self.blocks.get(index as usize).and_then(|block| block.entity) {
-                let visibility = if self.workset.active().contains(&index) { Visibility::Visible } else { Visibility::Hidden };
+            if let Some(entity) = self
+                .blocks
+                .get(index as usize)
+                .and_then(|block| block.entity)
+            {
+                let visibility = if self.workset.active().contains(&index) {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                };
                 commands.entity(entity).insert(visibility);
             }
         }
@@ -135,7 +222,10 @@ fn block_bounds(block: &Block) -> Option<Aabb> {
         }
         any = true;
     }
-    any.then_some(Aabb { min: min.to_array(), max: max.to_array() })
+    any.then_some(Aabb {
+        min: min.to_array(),
+        max: max.to_array(),
+    })
 }
 impl Block {
     fn clear(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>) {
@@ -148,6 +238,7 @@ impl Block {
         self.labels.clear();
         self.keys.clear();
         self.theme.clear();
+        self.curve_segments = 0;
     }
     #[cfg(test)]
     pub(super) fn state(&self) -> (bevy::asset::AssetId<Mesh>, usize) {
@@ -175,7 +266,15 @@ pub(super) fn sync(
     let mut rebuilt = 0;
     let mut blocks = std::mem::take(&mut visuals.blocks);
     let count = scene.edges.len().div_ceil(BLOCK_SIZE);
-    let dirty_blocks = dirty_blocks.filter(|_| blocks.len() == count && !visuals.labels_stale);
+    let zoom = scene.viewport.zoom;
+    let current_curve_segments = curve_segments(zoom);
+    // A LOD transition changes every edge mesh, even when the accepted scene only names a
+    // smaller set of dirty document blocks.
+    let dirty_blocks = dirty_blocks.filter(|_| {
+        blocks.len() == count
+            && !visuals.labels_stale
+            && visuals.curve_segments == current_curve_segments
+    });
     for (index, block) in blocks.iter_mut().enumerate().skip(count) {
         release_edge_block(requests, index);
         block.clear(commands, meshes);
@@ -183,7 +282,12 @@ pub(super) fn sync(
     blocks.truncate(count);
     blocks.resize_with(count, Block::default);
     let indices: Box<dyn Iterator<Item = usize> + '_> = match dirty_blocks {
-        Some(dirty) => Box::new(dirty.iter().map(|&index| index as usize).filter(|&index| index < count)),
+        Some(dirty) => Box::new(
+            dirty
+                .iter()
+                .map(|&index| index as usize)
+                .filter(|&index| index < count),
+        ),
         None => Box::new(0..count),
     };
     for index in indices {
@@ -194,8 +298,10 @@ pub(super) fn sync(
         // of GPU batch order. Keep curves below GROUP_Z=1 and all label backgrounds
         // below draft z=2; all label text stays above all label backgrounds.
         let depth_offset = -0.05 * (count - index) as f32 / (count + 1) as f32;
-        if !cfg!(feature = "canvas-reference") && block.theme == theme.fingerprint()
+        if !cfg!(feature = "canvas-reference")
+            && block.theme == theme.fingerprint()
             && block.depth_offset == depth_offset
+            && block.curve_segments == current_curve_segments
             && block.keys.len() == edges.len()
             && block
                 .keys
@@ -239,6 +345,7 @@ pub(super) fn sync(
             &mut geometry,
             overlay_z,
             depth_offset,
+            zoom,
             node_index,
         );
         let owner = edge_owner(index);
@@ -261,9 +368,21 @@ pub(super) fn sync(
             .collect();
         block.theme = theme.fingerprint().to_owned();
         block.depth_offset = depth_offset;
+        block.curve_segments = current_curve_segments;
     }
     visuals.blocks = blocks;
     visuals.labels_stale = false;
+    visuals.curve_segments = current_curve_segments;
+    visuals.edge_blocks_by_id.clear();
+    for (index, block) in visuals.blocks.iter().enumerate() {
+        for key in &block.keys {
+            visuals
+                .edge_blocks_by_id
+                .insert(key.id.clone(), index as u32);
+        }
+    }
+    visuals.last_hover = edge_hover_state(scene);
+    visuals.last_selection = scene.selection.edge.clone();
     if let Some(dirty) = dirty_blocks {
         for &index in dirty {
             visuals.workset_index.remove(index);
@@ -280,6 +399,17 @@ pub(super) fn sync(
         }
     }
     rebuilt
+}
+
+fn edge_hover_state(scene: &Scene) -> EdgeHoverState {
+    EdgeHoverState {
+        edge_id: scene.hover.as_ref().and_then(|hover| hover.edge_id.clone()),
+        cursor: scene
+            .hover
+            .as_ref()
+            .and_then(|hover| hover.cursor)
+            .map(|point| [point.x, point.y]),
+    }
 }
 
 /// 测试只打保留向量克隆计数，不重建边几何。

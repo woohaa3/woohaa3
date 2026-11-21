@@ -24,8 +24,17 @@ pub(super) fn draw_static(
         }
         NodeChrome::None => return Vec::new(),
     }
-    let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.mode == "locked");
-    let paint = |color: u32| if locked { crate::scope_visual::muted_color(color) } else { color };
+    let locked = node
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.mode == "locked");
+    let paint = |color: u32| {
+        if locked {
+            crate::scope_visual::muted_color(color)
+        } else {
+            color
+        }
+    };
     let (accent, tint, category) = theme.node_palette(&node.kind);
     let accent = paint(accent);
     let tint = paint(tint);
@@ -264,7 +273,10 @@ pub(super) fn draw_resize_grip(
     z: f32,
 ) {
     let grips = crate::canvas_query::grip::ResizeGrip::all_for_bounds(
-        node.x, node.y, node.width, node.height,
+        node.x,
+        node.y,
+        node.width,
+        node.height,
     );
     let color = theme.token_u32("canvasResizeHandle");
     for grip in grips {
@@ -303,7 +315,11 @@ mod tests {
     /// 卡片正文按预览区宽度换行：历史失败/取消原因不能被单行截断。
     #[test]
     fn long_failure_reason_wraps_into_multiple_body_lines() {
-        let node = card(&format!("失败：{}", "模型调用超时并重试失败".repeat(12)), 248.0, 232.0);
+        let node = card(
+            &format!("失败：{}", "模型调用超时并重试失败".repeat(12)),
+            248.0,
+            232.0,
+        );
         let labels = super::draw_static(
             &mut Geometry::default(),
             &ThemeResource::default(),
@@ -313,7 +329,9 @@ mod tests {
         let body: Vec<&str> = labels
             .iter()
             .map(|label| label.0.as_str())
-            .filter(|text| !text.is_empty() && (text.contains("失败：") || text.contains("模型调用超时")))
+            .filter(|text| {
+                !text.is_empty() && (text.contains("失败：") || text.contains("模型调用超时"))
+            })
             .collect();
         assert!(
             body.len() > 1,
@@ -344,4 +362,3 @@ mod tests {
         assert!(labels.iter().skip(2).all(|label| label.0.is_empty()));
     }
 }
-

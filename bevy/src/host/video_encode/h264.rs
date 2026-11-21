@@ -74,7 +74,13 @@ fn rgba_to_i420(rgba: &[u8], width: usize, height: usize) -> Result<I420Frame, S
         }
     }
 
-    Ok(I420Frame { width, height, y, u, v })
+    Ok(I420Frame {
+        width,
+        height,
+        y,
+        u,
+        v,
+    })
 }
 
 pub struct H264Encoder {
@@ -104,7 +110,15 @@ impl H264Encoder {
             .rate_control_mode(RateControlMode::Quality);
         let encoder = Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
             .map_err(|error| error.to_string())?;
-        Ok(Self { encoder, width, height, fps, samples: Vec::new(), sps: Vec::new(), pps: Vec::new() })
+        Ok(Self {
+            encoder,
+            width,
+            height,
+            fps,
+            samples: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
+        })
     }
 
     pub fn width(&self) -> u32 {
@@ -122,13 +136,20 @@ impl H264Encoder {
     /// 编码一帧 RGBA（自顶向下）。返回该帧是否为关键帧。
     pub fn push_rgba(&mut self, rgba: &[u8]) -> Result<bool, String> {
         let frame = rgba_to_i420(rgba, self.width as usize, self.height as usize)?;
-        let bitstream = self.encoder.encode(&frame).map_err(|error| error.to_string())?;
+        let bitstream = self
+            .encoder
+            .encode(&frame)
+            .map_err(|error| error.to_string())?;
         let keyframe = matches!(bitstream.frame_type(), FrameType::IDR | FrameType::I);
         let mut sample = Vec::new();
         for layer_index in 0..bitstream.num_layers() {
-            let Some(layer) = bitstream.layer(layer_index) else { continue };
+            let Some(layer) = bitstream.layer(layer_index) else {
+                continue;
+            };
             for nal_index in 0..layer.nal_count() {
-                let Some(raw) = layer.nal_unit(nal_index) else { continue };
+                let Some(raw) = layer.nal_unit(nal_index) else {
+                    continue;
+                };
                 for nal in split_annex_b(raw) {
                     if nal.is_empty() {
                         continue;
@@ -156,7 +177,10 @@ impl H264Encoder {
             }
         }
         if !sample.is_empty() {
-            self.samples.push(EncodedIndexFrame { bytes: sample, keyframe });
+            self.samples.push(EncodedIndexFrame {
+                bytes: sample,
+                keyframe,
+            });
         }
         Ok(keyframe)
     }

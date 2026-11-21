@@ -237,7 +237,15 @@ fn prepared_rigid_geometry_has_local_mesh_bounds_and_lod_invalidates_stale_bound
                    pins: &std::collections::HashSet<String>| {
         let mut models = world.remove_resource::<ModelVisuals>().unwrap();
         let mut meshes = world.remove_resource::<Assets<Mesh>>().unwrap();
-        sync_quality(&mut world.commands(), &mut meshes, &mut models, scene, focus, now, pins);
+        sync_quality(
+            &mut world.commands(),
+            &mut meshes,
+            &mut models,
+            scene,
+            focus,
+            now,
+            pins,
+        );
         world.flush();
         world.insert_resource(meshes);
         world.insert_resource(models);
@@ -247,14 +255,25 @@ fn prepared_rigid_geometry_has_local_mesh_bounds_and_lod_invalidates_stale_bound
     scene.viewport.zoom = 0.01;
     scene.surface = serde_json::from_value(serde_json::json!({
         "width": 800, "height": 600, "pixelRatio": 1
-    })).ok();
+    }))
+    .ok();
     scene.animation_playback = Some(playback(Some("actor0")));
     let mut world = world_with_resources();
     run_sync(&mut world, &scene, &resources);
     // 世界相机按实际投影占比分档（change: 2026-11-10-remove-legacy-model-card-nodes）。
-    quality(&mut world, &scene, None, 0.5, &std::collections::HashSet::new());
+    quality(
+        &mut world,
+        &scene,
+        None,
+        0.5,
+        &std::collections::HashSet::new(),
+    );
     let root = &world.resource::<ModelVisuals>().roots["film"];
-    assert_eq!(root.quality, Quality::Medium, "缩小的世界投影应降到较低档几何");
+    assert_eq!(
+        root.quality,
+        Quality::Medium,
+        "缩小的世界投影应降到较低档几何"
+    );
     let entity = root.part_entities["actor0"];
     let mesh = world.entity(entity).get::<Mesh3d>().unwrap().0.clone();
     let bounds = world

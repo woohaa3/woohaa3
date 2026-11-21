@@ -21,8 +21,8 @@ fn area() -> SceneArea {
 
 #[test]
 fn scene_area_label_sits_on_the_lower_left_projected_edge_and_is_diagonal() {
-    let geometry = crate::canvas_query::layout::scene_area_label_geometry(&area())
-        .expect("label geometry");
+    let geometry =
+        crate::canvas_query::layout::scene_area_label_geometry(&area()).expect("label geometry");
     assert!(geometry.width > 0.0 && geometry.height > 0.0);
     assert!((geometry.axis.length() - 1.0).abs() < 1e-4);
     // 等距投影下地面轴边斜着落在屏幕上（不是水平/竖直）。
@@ -32,7 +32,11 @@ fn scene_area_label_sits_on_the_lower_left_projected_edge_and_is_diagonal() {
     assert!(geometry.center.y > 0.0);
     let layout = crate::canvas_query::layout::scene_area_label_outline(&geometry);
     assert!(layout.len() >= 18);
-    assert!(layout.iter().all(|point| point.x.is_finite() && point.y.is_finite()));
+    assert!(
+        layout
+            .iter()
+            .all(|point| point.x.is_finite() && point.y.is_finite())
+    );
 }
 
 #[test]
@@ -50,8 +54,19 @@ fn clicking_the_scene_area_label_selects_that_area() {
         })
     );
     // 标签中心明显在导演区边框之内，而不是整块画布任意点都能命中。
-    assert_ne!(point_query(generation, geometry.center.x, geometry.center.y - 80.0, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "area".into() }));
+    assert_ne!(
+        point_query(
+            generation,
+            geometry.center.x,
+            geometry.center.y - 80.0,
+            1.0,
+            None
+        )
+        .hit,
+        Some(PointHit::Node {
+            node_id: "area".into()
+        })
+    );
 }
 
 #[test]
@@ -69,12 +84,25 @@ fn workflow_group_label_selects_group_outside_the_frame() {
     let node = serde_json::from_value(serde_json::json!({
         "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":300,"height":200,
         "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
-    })).unwrap();
+    }))
+    .unwrap();
     let scene = scene(vec![node], vec![]);
     let generation = accept_scene(&scene);
-    let geometry = crate::canvas_query::layout::workflow_group_label_geometry(&scene.nodes[0]).unwrap();
-    assert_eq!(point_query(generation, geometry.center.x, geometry.center.y - 5.0, 1.0, None).hit,
-        Some(PointHit::Node { node_id: "g".into() }));
+    let geometry =
+        crate::canvas_query::layout::workflow_group_label_geometry(&scene.nodes[0]).unwrap();
+    assert_eq!(
+        point_query(
+            generation,
+            geometry.center.x,
+            geometry.center.y - 5.0,
+            1.0,
+            None
+        )
+        .hit,
+        Some(PointHit::Node {
+            node_id: "g".into()
+        })
+    );
 }
 
 #[test]
@@ -83,31 +111,47 @@ fn workflow_frame_only_hits_perimeter_leaving_interior_for_members_and_marquee()
     let frame = serde_json::from_value(serde_json::json!({
         "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":300,"height":200,
         "chrome":{"kind":"frame","groupId":"g","memberNodeIds":["m"]}
-    })).unwrap();
+    }))
+    .unwrap();
     let member = serde_json::from_value(serde_json::json!({
         "id":"m", "type":"image", "x":50,"y":50,"width":180,"height":100
-    })).unwrap();
+    }))
+    .unwrap();
     let scene = scene(vec![member, frame], vec![]);
     let generation = accept_scene(&scene);
-    assert_eq!(point_query(generation, 100., 80., 1., None).hit,
-        Some(PointHit::Node { node_id: "m".into() }));
+    assert_eq!(
+        point_query(generation, 100., 80., 1., None).hit,
+        Some(PointHit::Node {
+            node_id: "m".into()
+        })
+    );
     assert_eq!(point_query(generation, 260., 100., 1., None).hit, None);
     for zoom in [0.5, 1., 2.] {
         for x in [-5. / zoom, 5. / zoom] {
-            assert_eq!(point_query(generation, x, 100., zoom, None).hit,
-                Some(PointHit::Node { node_id: "g".into() }));
+            assert_eq!(
+                point_query(generation, x, 100., zoom, None).hit,
+                Some(PointHit::Node {
+                    node_id: "g".into()
+                })
+            );
         }
-        assert_eq!(point_query(generation, -8. / zoom, 100., zoom, None).hit, None);
+        assert_eq!(
+            point_query(generation, -8. / zoom, 100., zoom, None).hit,
+            None
+        );
     }
 }
 
 #[test]
 fn scope_titles_compensate_only_when_zoomed_out_and_have_room() {
     use crate::canvas_query::layout;
-    let group = |width| serde_json::from_value::<GraphNode>(serde_json::json!({
-        "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":width,"height":1000,
-        "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
-    })).unwrap();
+    let group = |width| {
+        serde_json::from_value::<GraphNode>(serde_json::json!({
+            "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":width,"height":1000,
+            "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
+        }))
+        .unwrap()
+    };
     let large = group(5000.0);
     let base = layout::workflow_group_label_geometry_for_zoom(&large, 1.0).unwrap();
     assert_eq!((base.width, base.height), (200.0, 22.0));
@@ -117,11 +161,16 @@ fn scope_titles_compensate_only_when_zoomed_out_and_have_room() {
         assert!((g.width / g.height - base.width / base.height).abs() < 0.001);
         assert!(g.width <= large.width * 0.72);
         assert!((g.center.x - g.width / 2.0 - 12.0).abs() < 0.001);
-        if zoom >= 1.0 { assert_eq!(g, base); }
+        if zoom >= 1.0 {
+            assert_eq!(g, base);
+        }
     }
     let small = group(200.0);
     let tiny = layout::workflow_group_label_geometry_for_zoom(&small, 0.1).unwrap();
-    assert_eq!(tiny.height, 22.0, "a tiny overview scope must not acquire an oversized title");
+    assert_eq!(
+        tiny.height, 22.0,
+        "a tiny overview scope must not acquire an oversized title"
+    );
     let mut area = area();
     area.bounds.max.u = 200.0;
     area.bounds.max.v = 200.0;
@@ -139,7 +188,8 @@ fn scope_title_hits_follow_viewport_and_position_increments() {
     let group: GraphNode = serde_json::from_value(serde_json::json!({
         "id":"g", "type":"workflow-group-2d", "x":0,"y":0,"width":5000,"height":1000,
         "chrome":{"kind":"frame","groupId":"g","memberNodeIds":[]}
-    })).unwrap();
+    }))
+    .unwrap();
     let mut s = scene(vec![group], vec![]);
     let mut area = area();
     area.bounds.max.u = 200.0;
@@ -149,23 +199,47 @@ fn scope_title_hits_follow_viewport_and_position_increments() {
     let large = layout::workflow_group_label_geometry_for_zoom(&s.nodes[0], 0.1).unwrap();
     let probe = Vec2::new(large.center.x, -large.height * 0.4);
     assert_eq!(point_query(base, probe.x, probe.y, 1.0, None).hit, None);
-    let view = crate::protocol::Viewport { x: 30.0, y: 50.0, zoom: 0.1 };
+    let view = crate::protocol::Viewport {
+        x: 30.0,
+        y: 50.0,
+        zoom: 0.1,
+    };
     let generation = accept_viewport(base, view).unwrap();
-    assert_eq!(point_query(generation, probe.x, probe.y, 0.1, None).hit,
-        Some(PointHit::Node { node_id: "g".into() }));
+    assert_eq!(
+        point_query(generation, probe.x, probe.y, 0.1, None).hit,
+        Some(PointHit::Node {
+            node_id: "g".into()
+        })
+    );
     let area_g = layout::scene_area_label_geometry_for_zoom(&s.scene_areas[0], 0.1).unwrap();
     let area_probe = area_g.center + area_g.axis * (area_g.width * 0.4);
-    assert_eq!(point_query(generation, area_probe.x, area_probe.y, 0.1, None).hit,
-        Some(PointHit::Node { node_id: "area".into() }));
+    assert_eq!(
+        point_query(generation, area_probe.x, area_probe.y, 0.1, None).hit,
+        Some(PointHit::Node {
+            node_id: "area".into()
+        })
+    );
     let (generation, _) = accept_positions(&crate::protocol::PositionUpdateRequest {
         version: crate::protocol::CANVAS_POSITION_UPDATE_VERSION.into(),
         base_scene_generation: base,
-        positions: vec![crate::protocol::NodePosition { id: "g".into(), x: 100.0, y: 500.0 }],
+        positions: vec![crate::protocol::NodePosition {
+            id: "g".into(),
+            x: 100.0,
+            y: 500.0,
+        }],
         viewport: None,
-    }).unwrap();
-    assert_eq!(point_query(generation, probe.x + 100.0, probe.y + 500.0, 0.1, None).hit,
-        Some(PointHit::Node { node_id: "g".into() }));
-    assert_eq!(point_query(generation, probe.x, probe.y, 0.1, None).hit, None);
+    })
+    .unwrap();
+    assert_eq!(
+        point_query(generation, probe.x + 100.0, probe.y + 500.0, 0.1, None).hit,
+        Some(PointHit::Node {
+            node_id: "g".into()
+        })
+    );
+    assert_eq!(
+        point_query(generation, probe.x, probe.y, 0.1, None).hit,
+        None
+    );
 }
 
 #[test]

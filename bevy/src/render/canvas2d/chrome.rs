@@ -21,7 +21,10 @@ pub(super) fn draw_frame(
     index: usize,
     style: crate::scope_visual::ScopeStyle,
 ) -> Vec<Label> {
-    let locked = node.edit_scope.as_ref().is_some_and(|scope| scope.mode == "locked");
+    let locked = node
+        .edit_scope
+        .as_ref()
+        .is_some_and(|scope| scope.mode == "locked");
     let mut style = style;
     if locked {
         style.border = crate::scope_visual::muted_color(style.border);
@@ -36,7 +39,11 @@ pub(super) fn draw_frame(
         node.height,
         crate::scope_visual::FRAME_RADIUS,
     );
-    let surface = if style.locked { crate::scope_visual::muted_color(theme.token_u32("canvasNodeSurface")) } else { theme.token_u32("canvasNodeSurface") };
+    let surface = if style.locked {
+        crate::scope_visual::muted_color(theme.token_u32("canvasNodeSurface"))
+    } else {
+        theme.token_u32("canvasNodeSurface")
+    };
     geometry.polygon_alpha(&path, 9.9, surface, 0.35);
     if style.tint > 0.0 {
         let accent = if style.locked {
@@ -44,12 +51,7 @@ pub(super) fn draw_frame(
         } else {
             theme.token_u32("interactionAccent")
         };
-        geometry.polygon_alpha(
-            &path,
-            9.901,
-            accent,
-            style.tint,
-        );
+        geometry.polygon_alpha(&path, 9.901, accent, style.tint);
     }
     // 单一圆角虚线框：选中/悬停只改变颜色与线宽，不再叠加实体方形边框。
     super::dash::dashed_rounded_rect(

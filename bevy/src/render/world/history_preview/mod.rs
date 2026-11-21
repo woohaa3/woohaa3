@@ -29,8 +29,8 @@ use bevy::{
 use crate::{
     app::PreviewLayerPool,
     bridge::{self, HistoryThumbnailOutcome, HistoryThumbnailRequest, HistoryThumbnailResult},
-    preview_readiness::{PreviewView, Ready},
     model3d::{self, PreviewRoot},
+    preview_readiness::{PreviewView, Ready},
     protocol::ModelSnapshot,
     theme::ThemeResource,
 };
