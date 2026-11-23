@@ -1,4 +1,4 @@
 .canvas-edit-scope-control { position: relative; display: inline-flex; }
-.canvas-edit-scope-control__popover { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; display: grid; gap: 8px; min-width: 250px; padding: 10px; border: 1px solid var(--app-border-subtle, rgba(0,0,0,.14)); border-radius: 10px; background: var(--app-surface-raised, #fff); box-shadow: 0 8px 24px rgba(0,0,0,.16); }
-.canvas-edit-scope-control__row { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 8px; color: var(--app-text-secondary, #667); font-size: 12px; }
+.canvas-edit-scope-control__popover { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; display: grid; gap: 8px; min-width: 250px; padding: 10px; border: 1px solid var(--app-web-border); border-radius: 10px; background: var(--app-web-panel); color: var(--app-web-text-primary); box-shadow: 0 8px 24px var(--app-web-shadow); }
+.canvas-edit-scope-control__row { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 8px; color: var(--app-web-text-muted); font-size: 12px; }
 .canvas-edit-scope-control__row .ui-segmented { min-width: 0; }
