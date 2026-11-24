@@ -2,7 +2,7 @@
  * 聚焦观察镜头增量 wire 协议。
  *
  * 断言固定结构、camelCase 键、有限值规范化，以及与 Rust
- * `bevy/src/protocol/observer.rs` 的版本字符串一致。
+ * `bevy/src/contract/protocol/observer.rs` 的版本字符串一致。
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -59,7 +59,7 @@ describe("observer update wire", () => {
 
   it("版本字符串与 Rust protocol/observer.rs 一致", () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const rust = readFileSync(resolve(here, "../../../../bevy/src/protocol/observer.rs"), "utf8");
+    const rust = readFileSync(resolve(here, "../../../../bevy/src/contract/protocol/observer.rs"), "utf8");
     const match = rust.match(/CANVAS_OBSERVER_UPDATE_VERSION: &str = "([^"]+)"/);
     expect(match, "bevy 缺少 CANVAS_OBSERVER_UPDATE_VERSION").toBeTruthy();
     expect(match![1]).toBe(CANVAS_OBSERVER_UPDATE_VERSION);

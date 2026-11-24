@@ -15,7 +15,7 @@ describe("position preview wire", () => {
     expect(Object.keys(parsed)).not.toContain("nodes");
   });
   it("keeps Rust version and bounds identical", () => {
-    const rust = readFileSync(fileURLToPath(new URL("../../../../bevy/src/protocol/position.rs", import.meta.url)), "utf8");
+    const rust = readFileSync(fileURLToPath(new URL("../../../../bevy/src/contract/protocol/position.rs", import.meta.url)), "utf8");
     expect(rust).toContain(`"${CANVAS_POSITION_UPDATE_VERSION}"`);
     expect(rust).toContain(`MAX_POSITION_UPDATES: usize = ${CANVAS_POSITION_MAX_UPDATES.toLocaleString("en-US").replaceAll(",", "_")}`);
     expect(CANVAS_POSITION_MAX_BYTES).toBe(1024 * 1024);

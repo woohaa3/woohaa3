@@ -2,7 +2,7 @@
  * 视口增量 wire 协议（change: 2026-10-10-optimize-canvas-interaction-hot-path，design D3）。
  *
  * 断言固定大小、camelCase 键、有限值规范化与 zoom clamp；版本与 Rust
- * `bevy/src/protocol/viewport.rs` 的 `CANVAS_VIEWPORT_UPDATE_VERSION` 逐字节一致。
+ * `bevy/src/contract/protocol/viewport.rs` 的 `CANVAS_VIEWPORT_UPDATE_VERSION` 逐字节一致。
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -49,7 +49,7 @@ describe("viewport update wire（design D3）", () => {
 
   it("版本字符串与 Rust protocol/viewport.rs 一致（不得静默分叉）", () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const rust = readFileSync(resolve(here, "../../../../bevy/src/protocol/viewport.rs"), "utf8");
+    const rust = readFileSync(resolve(here, "../../../../bevy/src/contract/protocol/viewport.rs"), "utf8");
     const match = rust.match(/CANVAS_VIEWPORT_UPDATE_VERSION: &str = "([^"]+)"/);
     expect(match, "bevy 缺少 CANVAS_VIEWPORT_UPDATE_VERSION").toBeTruthy();
     expect(match![1]).toBe(CANVAS_VIEWPORT_UPDATE_VERSION);
@@ -57,7 +57,7 @@ describe("viewport update wire（design D3）", () => {
 
   it("zoom 校验区间与 Rust viewport.rs 一致", () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const rust = readFileSync(resolve(here, "../../../../bevy/src/protocol/viewport.rs"), "utf8");
+    const rust = readFileSync(resolve(here, "../../../../bevy/src/contract/protocol/viewport.rs"), "utf8");
     const match = rust.match(/const MIN_ZOOM: f32 = ([\d.]+);[\s\S]*?const MAX_ZOOM: f32 = ([\d.]+);/);
     expect(match, "bevy 缺少 MIN_ZOOM/MAX_ZOOM").toBeTruthy();
     expect(Number(match![1])).toBe(WOOHAA3_CANVAS_MIN_ZOOM);
