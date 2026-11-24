@@ -206,7 +206,7 @@ export class TurnStore {
       // Node 的 setTimeout 只接受 32 位有符号毫秒数；超出会被**静默改成 1ms**，
       // 于是一个「很久才超时」的回合反而立即被取消。这里显式夹住，让超长超时退化成
       // 「实际上不超时」，而不是提前触发。
-      const delay = Math.min(input.timeoutMs, MAX_TIMER_DELAY_MS);
+      const delay = input.timeoutMs > MAX_TIMER_DELAY_MS ? MAX_TIMER_DELAY_MS : input.timeoutMs;
       record.timer = setTimeout(() => {
         if (record.status !== "running") return;
         withError(record, { code: "turn-timeout", message: `执行超过 ${input.timeoutMs}ms，已取消` });
