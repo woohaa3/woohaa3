@@ -575,3 +575,52 @@ describe("模型规模统计 MCP（change: 2026-10-18-align-model-statistics-wit
     expect(result.structuredContent).toMatchObject({ ok: true, source: "candidate" });
   });
 });
+
+describe("工具入参结构上限（GHSA-46jr-4wx8-v453）", () => {
+  it("超大批次数组在校验前被拒，不进入工具实现", async () => {
+    const calls: unknown[] = [];
+    const { base } = await start({
+      async getModelNodes(input: import("@woohaa3/contracts").GetModelNodesInput) {
+        calls.push(input);
+        return { ok: true, canvasId: input.canvasId, revision: 1, nodes: [] };
+      },
+      async submitScripts(input: import("@woohaa3/contracts").ModelScriptBatchRequest) {
+        calls.push(input);
+        return { ok: true, canvasId: input.canvasId, requestId: input.requestId, results: [] };
+      }
+    } as unknown as ModelMcpToolService);
+    // 20 万零 1 个成员：超过 MAX_TOOL_INPUT_ELEMENTS，但要保证请求体仍小于 4 MiB。
+    const nodeIds = Array.from({ length: 200_001 }, (_, index) => `n${index}`);
+    const replied = await mcpPost(base, {
+      jsonrpc: "2.0",
+      id: 41,
+      method: "tools/call",
+      params: { name: "get_model_nodes", arguments: { canvasId: DEFAULT_CANVAS, nodeIds } }
+    });
+    const text = JSON.stringify(replied.body);
+    expect(calls).toEqual([]);
+    expect(replied.status).toBeLessThan(500);
+    expect(text).toContain("maximum");
+  });
+
+  it("超过请求体字节上限的 POST 在解析前返回 413", async () => {
+    const { base } = await start();
+    const oversized = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 42,
+      method: "tools/call",
+      params: { name: "get_model_node", arguments: { canvasId: DEFAULT_CANVAS, padding: "x".repeat(4 * 1024 * 1024 + 1024) } }
+    });
+    const response = await fetch(`${base}${MODEL_MCP_HTTP_PATH}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2025-03-26"
+      },
+      body: oversized
+    });
+    expect(response.status).toBe(413);
+    await response.text();
+  });
+});

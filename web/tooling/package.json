@@ -12,7 +12,7 @@
     "@types/node": "^22.15.3",
     "typescript": "^7.0.2",
     "typescript-legacy": "npm:typescript@5.9.3",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@woohaa3/contracts": "workspace:*",

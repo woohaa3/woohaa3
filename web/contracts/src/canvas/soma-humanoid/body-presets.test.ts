@@ -60,6 +60,8 @@ it('reads retired v2 baby IDs as newborn bodies without exposing aliases', () =>
   )).toBeNull();
 });
 
+// 29 套人体逐个校验 18056 顶点 / 36108 面并重算 sha256，单次约 35s，必须显式放宽超时：
+// vitest 4 会对同步测试在返回后核对耗时（vitest 2 的定时器被同步执行阻塞，从未真正触发）。
 it('validates every packed body and its versioned skeleton identity', () => {
   for (const entry of SOMA_BODY_PRESETS) {
     const body = somaBodyData(entry.id), skin = body.skin;
@@ -102,7 +104,7 @@ it('validates every packed body and its versioned skeleton identity', () => {
     const reopened = executeModelScriptV2(directorCharacterScript('humanoid', entry.id));
     expect(reopened.ok).toBe(true);
   }
-});
+}, 180_000);
 
 it('uses Anny age anchors and average body dimensions for the v2 quick presets', () => {
   const byId = new Map(SOMA_BODY_MANIFEST_V2.entries.map(entry => [entry.id, entry]));

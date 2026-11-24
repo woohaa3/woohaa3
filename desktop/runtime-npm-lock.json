@@ -3,7 +3,7 @@
   "kind": "woohaa-runtime-npm-lock",
   "generatedFrom": {
     "lockfile": "client/locks/web/pnpm-lock.yaml",
-    "lockfileSha256": "29bf701129e4fc38280e71bb120dbfa1132822650c948ba444434b0bfc5a6d66"
+    "lockfileSha256": "863c884512829e73cf09ec01f989c25c73479a4ee1aaad67fc8b4749f45ace6c"
   },
   "registry": {
     "default": "https://registry.npmjs.org/",
@@ -402,7 +402,7 @@
             "@emnapi/runtime@1.11.3",
             "@eslint-community/regexpp@4.12.2",
             "@google/genai@2.21.0",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@img/colour@1.1.0",
             "@img/sharp-darwin-arm64@0.35.5",
             "@img/sharp-libvips-darwin-arm64@1.3.4",
@@ -412,8 +412,8 @@
             "@keyv/serialize@1.1.1",
             "@koromix/koffi-darwin-arm64@3.1.1",
             "@mixmark-io/domino@2.2.0",
-            "@modelcontextprotocol/client@2.2.0",
-            "@modelcontextprotocol/core@2.2.0",
+            "@modelcontextprotocol/client@2.4.0",
+            "@modelcontextprotocol/core@2.4.0",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api-logs@0.222.0",
             "@opentelemetry/api@1.9.1",
@@ -520,7 +520,6 @@
             "fast-sha256@1.3.0",
             "fast-uri@3.1.9",
             "fetch-blob@3.2.0",
-            "fflate@0.8.2",
             "fflate@0.8.3",
             "figures@6.1.0",
             "finalhandler@2.1.1",
@@ -541,7 +540,7 @@
             "got@14.6.6",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "hosted-git-info@9.0.3",
             "http-cache-semantics@4.3.0",
             "http-errors@2.0.1",
@@ -624,7 +623,7 @@
             "protobufjs@7.6.6",
             "proxy-addr@2.0.8",
             "proxy-agent-negotiate@1.1.0",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "quick-lru@5.1.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
@@ -669,8 +668,7 @@
             "typebox@1.3.27",
             "undici-types@6.21.0",
             "undici-types@8.9.0",
-            "undici@8.11.2",
-            "undici@8.12.3",
+            "undici@8.13.1",
             "unicode-properties@1.4.1",
             "unicode-trie@2.0.0",
             "unicorn-magic@0.3.0",
@@ -687,10 +685,9 @@
             "yocto-queue@1.2.2",
             "yoctocolors@2.2.0",
             "zod-to-json-schema@3.25.2",
-            "zod@4.4.3",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
-          "requests": 648
+          "requests": 645
         },
         "darwin-x64": {
           "packages": [
@@ -1055,7 +1052,7 @@
             "@emnapi/runtime@1.11.3",
             "@eslint-community/regexpp@4.12.2",
             "@google/genai@2.21.0",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@img/colour@1.1.0",
             "@img/sharp-darwin-x64@0.35.5",
             "@img/sharp-libvips-darwin-x64@1.3.4",
@@ -1065,8 +1062,8 @@
             "@keyv/serialize@1.1.1",
             "@koromix/koffi-darwin-x64@3.1.1",
             "@mixmark-io/domino@2.2.0",
-            "@modelcontextprotocol/client@2.2.0",
-            "@modelcontextprotocol/core@2.2.0",
+            "@modelcontextprotocol/client@2.4.0",
+            "@modelcontextprotocol/core@2.4.0",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api-logs@0.222.0",
             "@opentelemetry/api@1.9.1",
@@ -1173,7 +1170,6 @@
             "fast-sha256@1.3.0",
             "fast-uri@3.1.9",
             "fetch-blob@3.2.0",
-            "fflate@0.8.2",
             "fflate@0.8.3",
             "figures@6.1.0",
             "finalhandler@2.1.1",
@@ -1194,7 +1190,7 @@
             "got@14.6.6",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "hosted-git-info@9.0.3",
             "http-cache-semantics@4.3.0",
             "http-errors@2.0.1",
@@ -1277,7 +1273,7 @@
             "protobufjs@7.6.6",
             "proxy-addr@2.0.8",
             "proxy-agent-negotiate@1.1.0",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "quick-lru@5.1.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
@@ -1322,8 +1318,7 @@
             "typebox@1.3.27",
             "undici-types@6.21.0",
             "undici-types@8.9.0",
-            "undici@8.11.2",
-            "undici@8.12.3",
+            "undici@8.13.1",
             "unicode-properties@1.4.1",
             "unicode-trie@2.0.0",
             "unicorn-magic@0.3.0",
@@ -1340,10 +1335,9 @@
             "yocto-queue@1.2.2",
             "yoctocolors@2.2.0",
             "zod-to-json-schema@3.25.2",
-            "zod@4.4.3",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
-          "requests": 648
+          "requests": 645
         },
         "linux-x64": {
           "packages": [
@@ -1708,7 +1702,7 @@
             "@emnapi/runtime@1.11.3",
             "@eslint-community/regexpp@4.12.2",
             "@google/genai@2.21.0",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@img/colour@1.1.0",
             "@img/sharp-libvips-linux-x64@1.3.4",
             "@img/sharp-linux-x64@0.35.5",
@@ -1718,8 +1712,8 @@
             "@keyv/serialize@1.1.1",
             "@koromix/koffi-linux-x64@3.1.1",
             "@mixmark-io/domino@2.2.0",
-            "@modelcontextprotocol/client@2.2.0",
-            "@modelcontextprotocol/core@2.2.0",
+            "@modelcontextprotocol/client@2.4.0",
+            "@modelcontextprotocol/core@2.4.0",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api-logs@0.222.0",
             "@opentelemetry/api@1.9.1",
@@ -1826,7 +1820,6 @@
             "fast-sha256@1.3.0",
             "fast-uri@3.1.9",
             "fetch-blob@3.2.0",
-            "fflate@0.8.2",
             "fflate@0.8.3",
             "figures@6.1.0",
             "finalhandler@2.1.1",
@@ -1847,7 +1840,7 @@
             "got@14.6.6",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "hosted-git-info@9.0.3",
             "http-cache-semantics@4.3.0",
             "http-errors@2.0.1",
@@ -1930,7 +1923,7 @@
             "protobufjs@7.6.6",
             "proxy-addr@2.0.8",
             "proxy-agent-negotiate@1.1.0",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "quick-lru@5.1.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
@@ -1975,8 +1968,7 @@
             "typebox@1.3.27",
             "undici-types@6.21.0",
             "undici-types@8.9.0",
-            "undici@8.11.2",
-            "undici@8.12.3",
+            "undici@8.13.1",
             "unicode-properties@1.4.1",
             "unicode-trie@2.0.0",
             "unicorn-magic@0.3.0",
@@ -1993,10 +1985,9 @@
             "yocto-queue@1.2.2",
             "yoctocolors@2.2.0",
             "zod-to-json-schema@3.25.2",
-            "zod@4.4.3",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
-          "requests": 648
+          "requests": 645
         },
         "linux-arm64": {
           "packages": [
@@ -2361,7 +2352,7 @@
             "@emnapi/runtime@1.11.3",
             "@eslint-community/regexpp@4.12.2",
             "@google/genai@2.21.0",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@img/colour@1.1.0",
             "@img/sharp-libvips-linux-arm64@1.3.4",
             "@img/sharp-linux-arm64@0.35.5",
@@ -2371,8 +2362,8 @@
             "@keyv/serialize@1.1.1",
             "@koromix/koffi-linux-arm64@3.1.1",
             "@mixmark-io/domino@2.2.0",
-            "@modelcontextprotocol/client@2.2.0",
-            "@modelcontextprotocol/core@2.2.0",
+            "@modelcontextprotocol/client@2.4.0",
+            "@modelcontextprotocol/core@2.4.0",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api-logs@0.222.0",
             "@opentelemetry/api@1.9.1",
@@ -2479,7 +2470,6 @@
             "fast-sha256@1.3.0",
             "fast-uri@3.1.9",
             "fetch-blob@3.2.0",
-            "fflate@0.8.2",
             "fflate@0.8.3",
             "figures@6.1.0",
             "finalhandler@2.1.1",
@@ -2500,7 +2490,7 @@
             "got@14.6.6",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "hosted-git-info@9.0.3",
             "http-cache-semantics@4.3.0",
             "http-errors@2.0.1",
@@ -2583,7 +2573,7 @@
             "protobufjs@7.6.6",
             "proxy-addr@2.0.8",
             "proxy-agent-negotiate@1.1.0",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "quick-lru@5.1.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
@@ -2628,8 +2618,7 @@
             "typebox@1.3.27",
             "undici-types@6.21.0",
             "undici-types@8.9.0",
-            "undici@8.11.2",
-            "undici@8.12.3",
+            "undici@8.13.1",
             "unicode-properties@1.4.1",
             "unicode-trie@2.0.0",
             "unicorn-magic@0.3.0",
@@ -2646,10 +2635,9 @@
             "yocto-queue@1.2.2",
             "yoctocolors@2.2.0",
             "zod-to-json-schema@3.25.2",
-            "zod@4.4.3",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
-          "requests": 648
+          "requests": 645
         },
         "win32-x64": {
           "packages": [
@@ -3013,7 +3001,7 @@
             "@emnapi/runtime@1.11.3",
             "@eslint-community/regexpp@4.12.2",
             "@google/genai@2.21.0",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@img/colour@1.1.0",
             "@img/sharp-wasm32@0.35.5",
             "@img/sharp-win32-x64@0.35.5",
@@ -3022,8 +3010,8 @@
             "@keyv/serialize@1.1.1",
             "@koromix/koffi-win32-x64@3.1.1",
             "@mixmark-io/domino@2.2.0",
-            "@modelcontextprotocol/client@2.2.0",
-            "@modelcontextprotocol/core@2.2.0",
+            "@modelcontextprotocol/client@2.4.0",
+            "@modelcontextprotocol/core@2.4.0",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api-logs@0.222.0",
             "@opentelemetry/api@1.9.1",
@@ -3130,7 +3118,6 @@
             "fast-sha256@1.3.0",
             "fast-uri@3.1.9",
             "fetch-blob@3.2.0",
-            "fflate@0.8.2",
             "fflate@0.8.3",
             "figures@6.1.0",
             "finalhandler@2.1.1",
@@ -3151,7 +3138,7 @@
             "got@14.6.6",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "hosted-git-info@9.0.3",
             "http-cache-semantics@4.3.0",
             "http-errors@2.0.1",
@@ -3234,7 +3221,7 @@
             "protobufjs@7.6.6",
             "proxy-addr@2.0.8",
             "proxy-agent-negotiate@1.1.0",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "quick-lru@5.1.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
@@ -3279,8 +3266,7 @@
             "typebox@1.3.27",
             "undici-types@6.21.0",
             "undici-types@8.9.0",
-            "undici@8.11.2",
-            "undici@8.12.3",
+            "undici@8.13.1",
             "unicode-properties@1.4.1",
             "unicode-trie@2.0.0",
             "unicorn-magic@0.3.0",
@@ -3297,10 +3283,9 @@
             "yocto-queue@1.2.2",
             "yoctocolors@2.2.0",
             "zod-to-json-schema@3.25.2",
-            "zod@4.4.3",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
-          "requests": 646
+          "requests": 643
         },
         "win32-arm64": {
           "packages": [
@@ -3664,7 +3649,7 @@
             "@emnapi/runtime@1.11.3",
             "@eslint-community/regexpp@4.12.2",
             "@google/genai@2.21.0",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@img/colour@1.1.0",
             "@img/sharp-wasm32@0.35.5",
             "@img/sharp-win32-arm64@0.35.5",
@@ -3673,8 +3658,8 @@
             "@keyv/serialize@1.1.1",
             "@koromix/koffi-win32-arm64@3.1.1",
             "@mixmark-io/domino@2.2.0",
-            "@modelcontextprotocol/client@2.2.0",
-            "@modelcontextprotocol/core@2.2.0",
+            "@modelcontextprotocol/client@2.4.0",
+            "@modelcontextprotocol/core@2.4.0",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api-logs@0.222.0",
             "@opentelemetry/api@1.9.1",
@@ -3781,7 +3766,6 @@
             "fast-sha256@1.3.0",
             "fast-uri@3.1.9",
             "fetch-blob@3.2.0",
-            "fflate@0.8.2",
             "fflate@0.8.3",
             "figures@6.1.0",
             "finalhandler@2.1.1",
@@ -3802,7 +3786,7 @@
             "got@14.6.6",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "hosted-git-info@9.0.3",
             "http-cache-semantics@4.3.0",
             "http-errors@2.0.1",
@@ -3885,7 +3869,7 @@
             "protobufjs@7.6.6",
             "proxy-addr@2.0.8",
             "proxy-agent-negotiate@1.1.0",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "quick-lru@5.1.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
@@ -3929,8 +3913,7 @@
             "typebox@1.3.27",
             "undici-types@6.21.0",
             "undici-types@8.9.0",
-            "undici@8.11.2",
-            "undici@8.12.3",
+            "undici@8.13.1",
             "unicode-properties@1.4.1",
             "unicode-trie@2.0.0",
             "unicorn-magic@0.3.0",
@@ -3947,10 +3930,9 @@
             "yocto-queue@1.2.2",
             "yoctocolors@2.2.0",
             "zod-to-json-schema@3.25.2",
-            "zod@4.4.3",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
-          "requests": 645
+          "requests": 642
         }
       },
       "packages": {
@@ -5683,7 +5665,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -5941,7 +5923,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -6161,7 +6143,7 @@
             },
             {
               "name": "undici",
-              "target": "undici@8.11.2",
+              "target": "undici@8.13.1",
               "optional": false
             }
           ]
@@ -6277,7 +6259,7 @@
             },
             {
               "name": "@modelcontextprotocol/client",
-              "target": "@modelcontextprotocol/client@2.2.0",
+              "target": "@modelcontextprotocol/client@2.4.0",
               "optional": false
             }
           ]
@@ -6457,7 +6439,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -6579,7 +6561,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -6735,7 +6717,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -7041,7 +7023,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -7138,7 +7120,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -7385,7 +7367,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -7427,7 +7409,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -7484,7 +7466,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -8269,7 +8251,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -8358,7 +8340,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -9516,7 +9498,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -9595,7 +9577,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -9748,7 +9730,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -9830,7 +9812,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10102,7 +10084,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10161,7 +10143,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10289,7 +10271,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10346,7 +10328,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10519,7 +10501,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10793,7 +10775,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -10917,7 +10899,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -11157,7 +11139,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -11335,7 +11317,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -11476,7 +11458,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -11725,7 +11707,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -11879,7 +11861,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12095,7 +12077,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12152,7 +12134,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12204,7 +12186,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12305,7 +12287,7 @@
             },
             {
               "name": "undici",
-              "target": "undici@8.11.2",
+              "target": "undici@8.13.1",
               "optional": false
             }
           ]
@@ -12441,7 +12423,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12544,7 +12526,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12668,7 +12650,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12737,7 +12719,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12809,7 +12791,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -12990,7 +12972,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13001,10 +12983,10 @@
           "integrity": "sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==",
           "dependencies": []
         },
-        "zod@4.4.3": {
+        "zod@4.6.7": {
           "name": "zod",
-          "version": "4.4.3",
-          "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==",
+          "version": "4.6.7",
+          "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
           "dependencies": []
         },
         "@deepseek-ai/dsh-client-ui-plugin-market@0.2.2-rc.1": {
@@ -13126,7 +13108,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13361,7 +13343,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13447,7 +13429,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13643,10 +13625,10 @@
           "integrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==",
           "dependencies": []
         },
-        "undici@8.11.2": {
+        "undici@8.13.1": {
           "name": "undici",
-          "version": "8.11.2",
-          "integrity": "sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ==",
+          "version": "8.13.1",
+          "integrity": "sha512-Kt7EaPjh0s93lJH/PmW3d5rhkcpUa6fS3jqZ7+YGxNd9L7Xy/i827xe4C2uhhq+pJebM4tQOl5AgHmW11G5Skg==",
           "dependencies": []
         },
         "@deepseek-ai/dsh-jobs@0.2.2-rc.1": {
@@ -13727,14 +13709,14 @@
             }
           ]
         },
-        "@modelcontextprotocol/client@2.2.0": {
+        "@modelcontextprotocol/client@2.4.0": {
           "name": "@modelcontextprotocol/client",
-          "version": "2.2.0",
-          "integrity": "sha512-LxCou/CSYQ6dwEnjhLZY0KnEuc8V4UJ3IEQCl/uR2yHobSQIEdJKUlKLRYRF5i5FqRGHy1eK7une3aAWDHLtig==",
+          "version": "2.4.0",
+          "integrity": "sha512-LgrD2OphHuG12vfKFKz6SOnq7bKHQmhGJIAYdD+MZBn2npHEyry6uD8zvktodtl5CQM85MO0anUyD9JwmUmxww==",
           "dependencies": [
             {
               "name": "@modelcontextprotocol/core",
-              "target": "@modelcontextprotocol/core@2.2.0",
+              "target": "@modelcontextprotocol/core@2.4.0",
               "optional": false
             },
             {
@@ -13764,7 +13746,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13801,7 +13783,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13899,7 +13881,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13946,7 +13928,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -13983,7 +13965,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -14321,7 +14303,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -14422,7 +14404,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -14466,7 +14448,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -14493,7 +14475,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -14720,7 +14702,7 @@
             },
             {
               "name": "fflate",
-              "target": "fflate@0.8.2",
+              "target": "fflate@0.8.3",
               "optional": false
             },
             {
@@ -14815,7 +14797,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -14982,7 +14964,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15009,7 +14991,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15088,7 +15070,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15145,7 +15127,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15212,7 +15194,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15244,7 +15226,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15317,7 +15299,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -15667,7 +15649,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16048,7 +16030,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16138,7 +16120,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16419,7 +16401,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16468,7 +16450,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16542,7 +16524,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16574,7 +16556,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16885,7 +16867,7 @@
           "dependencies": [
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -16901,12 +16883,6 @@
               "optional": false
             }
           ]
-        },
-        "zod@4.6.5": {
-          "name": "zod",
-          "version": "4.6.5",
-          "integrity": "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==",
-          "dependencies": []
         },
         "fast-deep-equal@3.1.3": {
           "name": "fast-deep-equal",
@@ -17835,7 +17811,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.4.3",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -18176,14 +18152,14 @@
           "integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==",
           "dependencies": []
         },
-        "@modelcontextprotocol/core@2.2.0": {
+        "@modelcontextprotocol/core@2.4.0": {
           "name": "@modelcontextprotocol/core",
-          "version": "2.2.0",
-          "integrity": "sha512-iLhmprRmWI8EcosOA3wVvww22z02NkgqhV4fBH6f/odQBsi7xnJc0HGmi21yWO+/iKw2yzqVE127Zhna5/+JXw==",
+          "version": "2.4.0",
+          "integrity": "sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==",
           "dependencies": [
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -18443,10 +18419,10 @@
             }
           ]
         },
-        "fflate@0.8.2": {
+        "fflate@0.8.3": {
           "name": "fflate",
-          "version": "0.8.2",
-          "integrity": "sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==",
+          "version": "0.8.3",
+          "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==",
           "dependencies": []
         },
         "fontkit@2.0.4": {
@@ -18802,12 +18778,6 @@
               "optional": false
             }
           ]
-        },
-        "fflate@0.8.3": {
-          "name": "fflate",
-          "version": "0.8.3",
-          "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==",
-          "dependencies": []
         },
         "default-browser@5.5.1": {
           "name": "default-browser",
@@ -19328,7 +19298,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": true
             }
           ]
@@ -19521,7 +19491,7 @@
             },
             {
               "name": "undici",
-              "target": "undici@8.12.3",
+              "target": "undici@8.13.1",
               "optional": true
             },
             {
@@ -19531,7 +19501,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": true
             }
           ]
@@ -20807,7 +20777,7 @@
           "dependencies": [
             {
               "name": "@hono/node-server",
-              "target": "@hono/node-server@2.1.5",
+              "target": "@hono/node-server@2.1.11",
               "optional": false
             },
             {
@@ -20857,7 +20827,7 @@
             },
             {
               "name": "hono",
-              "target": "hono@4.11.4",
+              "target": "hono@4.13.21",
               "optional": false
             },
             {
@@ -20882,7 +20852,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             },
             {
@@ -20937,12 +20907,6 @@
               "optional": false
             }
           ]
-        },
-        "undici@8.12.3": {
-          "name": "undici",
-          "version": "8.12.3",
-          "integrity": "sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==",
-          "dependencies": []
         },
         "@types/http-cache-semantics@4.2.0": {
           "name": "@types/http-cache-semantics",
@@ -21656,14 +21620,14 @@
           "integrity": "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==",
           "dependencies": []
         },
-        "@hono/node-server@2.1.5": {
+        "@hono/node-server@2.1.11": {
           "name": "@hono/node-server",
-          "version": "2.1.5",
-          "integrity": "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==",
+          "version": "2.1.11",
+          "integrity": "sha512-KzKz9vl4vvr1vgLHamj+g5uonbrj5NwAdO3yzOS6cd2HjALVeOgTgeZOyAzNxejbkfOOPIcvuf/Tg8l1pEFLog==",
           "dependencies": [
             {
               "name": "hono",
-              "target": "hono@4.11.4",
+              "target": "hono@4.13.21",
               "optional": false
             }
           ]
@@ -21810,7 +21774,7 @@
             },
             {
               "name": "qs",
-              "target": "qs@6.17.0",
+              "target": "qs@6.17.1",
               "optional": false
             },
             {
@@ -21872,10 +21836,10 @@
             }
           ]
         },
-        "hono@4.11.4": {
+        "hono@4.13.21": {
           "name": "hono",
-          "version": "4.11.4",
-          "integrity": "sha512-U7tt8JsyrxSRKspfhtLET79pU8K+tInj5QZXs1jSugO1Vq5dFj3kmZsRldo29mTBfcjDRVRXrEZ6LS63Cog9ZA==",
+          "version": "4.13.21",
+          "integrity": "sha512-h9UsguqfVk4kjUwLvQpHOmOaJpW10jz9lp8bvKUUa04wJG/fabKFBqXZ06D6LFaeKQZtUZRVeg0gfkTTEsX7Mw==",
           "dependencies": []
         },
         "json-schema-typed@8.0.2": {
@@ -21918,7 +21882,7 @@
           "dependencies": [
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -22199,7 +22163,7 @@
             },
             {
               "name": "qs",
-              "target": "qs@6.17.0",
+              "target": "qs@6.17.1",
               "optional": false
             },
             {
@@ -22304,10 +22268,10 @@
             }
           ]
         },
-        "qs@6.17.0": {
+        "qs@6.17.1": {
           "name": "qs",
-          "version": "6.17.0",
-          "integrity": "sha512-5LK5BZ2XDHMvcUJaf0CQ5HL3aVgKbpklvByC7qLSxYkfE8COEEbJg5xCHWCTqzqi0Gs4Jn5Mv5v3R38W6edscA==",
+          "version": "6.17.1",
+          "integrity": "sha512-jd3COkaKVgGUW+ZHyEHCG9bH7RoaaiWuMgzsIBjUMVjLAaWGWpoUAVwljVvBHxRu/2qEHnadLGZrkutYUBPQJA==",
           "dependencies": [
             {
               "name": "es-define-property",
@@ -22869,7 +22833,7 @@
             "@anthropic-ai/claude-agent-sdk@0.3.301",
             "@anthropic-ai/sdk@0.135.0",
             "@babel/runtime@7.29.7",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api@1.9.1",
             "@stablelib/base64@1.0.1",
@@ -22913,7 +22877,7 @@
             "gopd@1.2.0",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "http-errors@2.0.1",
             "iconv-lite@0.7.3",
             "inherits@2.0.4",
@@ -22941,7 +22905,7 @@
             "path-to-regexp@8.4.2",
             "pkce-challenge@5.0.1",
             "proxy-addr@2.0.8",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
             "require-from-string@2.0.2",
@@ -22966,7 +22930,7 @@
             "which@2.0.2",
             "wrappy@1.0.2",
             "zod-to-json-schema@3.25.2",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
           "requests": 102
         },
@@ -22976,7 +22940,7 @@
             "@anthropic-ai/claude-agent-sdk@0.3.301",
             "@anthropic-ai/sdk@0.135.0",
             "@babel/runtime@7.29.7",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api@1.9.1",
             "@stablelib/base64@1.0.1",
@@ -23020,7 +22984,7 @@
             "gopd@1.2.0",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "http-errors@2.0.1",
             "iconv-lite@0.7.3",
             "inherits@2.0.4",
@@ -23048,7 +23012,7 @@
             "path-to-regexp@8.4.2",
             "pkce-challenge@5.0.1",
             "proxy-addr@2.0.8",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
             "require-from-string@2.0.2",
@@ -23073,7 +23037,7 @@
             "which@2.0.2",
             "wrappy@1.0.2",
             "zod-to-json-schema@3.25.2",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
           "requests": 102
         },
@@ -23083,7 +23047,7 @@
             "@anthropic-ai/claude-agent-sdk@0.3.301",
             "@anthropic-ai/sdk@0.135.0",
             "@babel/runtime@7.29.7",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api@1.9.1",
             "@stablelib/base64@1.0.1",
@@ -23127,7 +23091,7 @@
             "gopd@1.2.0",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "http-errors@2.0.1",
             "iconv-lite@0.7.3",
             "inherits@2.0.4",
@@ -23155,7 +23119,7 @@
             "path-to-regexp@8.4.2",
             "pkce-challenge@5.0.1",
             "proxy-addr@2.0.8",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
             "require-from-string@2.0.2",
@@ -23180,7 +23144,7 @@
             "which@2.0.2",
             "wrappy@1.0.2",
             "zod-to-json-schema@3.25.2",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
           "requests": 102
         },
@@ -23190,7 +23154,7 @@
             "@anthropic-ai/claude-agent-sdk@0.3.301",
             "@anthropic-ai/sdk@0.135.0",
             "@babel/runtime@7.29.7",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api@1.9.1",
             "@stablelib/base64@1.0.1",
@@ -23234,7 +23198,7 @@
             "gopd@1.2.0",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "http-errors@2.0.1",
             "iconv-lite@0.7.3",
             "inherits@2.0.4",
@@ -23262,7 +23226,7 @@
             "path-to-regexp@8.4.2",
             "pkce-challenge@5.0.1",
             "proxy-addr@2.0.8",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
             "require-from-string@2.0.2",
@@ -23287,7 +23251,7 @@
             "which@2.0.2",
             "wrappy@1.0.2",
             "zod-to-json-schema@3.25.2",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
           "requests": 102
         },
@@ -23297,7 +23261,7 @@
             "@anthropic-ai/claude-agent-sdk@0.3.301",
             "@anthropic-ai/sdk@0.135.0",
             "@babel/runtime@7.29.7",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api@1.9.1",
             "@stablelib/base64@1.0.1",
@@ -23341,7 +23305,7 @@
             "gopd@1.2.0",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "http-errors@2.0.1",
             "iconv-lite@0.7.3",
             "inherits@2.0.4",
@@ -23369,7 +23333,7 @@
             "path-to-regexp@8.4.2",
             "pkce-challenge@5.0.1",
             "proxy-addr@2.0.8",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
             "require-from-string@2.0.2",
@@ -23394,7 +23358,7 @@
             "which@2.0.2",
             "wrappy@1.0.2",
             "zod-to-json-schema@3.25.2",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
           "requests": 102
         },
@@ -23404,7 +23368,7 @@
             "@anthropic-ai/claude-agent-sdk@0.3.301",
             "@anthropic-ai/sdk@0.135.0",
             "@babel/runtime@7.29.7",
-            "@hono/node-server@2.1.5",
+            "@hono/node-server@2.1.11",
             "@modelcontextprotocol/sdk@1.32.1",
             "@opentelemetry/api@1.9.1",
             "@stablelib/base64@1.0.1",
@@ -23448,7 +23412,7 @@
             "gopd@1.2.0",
             "has-symbols@1.1.0",
             "hasown@2.0.4",
-            "hono@4.11.4",
+            "hono@4.13.21",
             "http-errors@2.0.1",
             "iconv-lite@0.7.3",
             "inherits@2.0.4",
@@ -23476,7 +23440,7 @@
             "path-to-regexp@8.4.2",
             "pkce-challenge@5.0.1",
             "proxy-addr@2.0.8",
-            "qs@6.17.0",
+            "qs@6.17.1",
             "range-parser@1.3.0",
             "raw-body@3.0.2",
             "require-from-string@2.0.2",
@@ -23501,7 +23465,7 @@
             "which@2.0.2",
             "wrappy@1.0.2",
             "zod-to-json-schema@3.25.2",
-            "zod@4.6.5"
+            "zod@4.6.7"
           ],
           "requests": 102
         }
@@ -23564,7 +23528,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -23591,7 +23555,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": true
             }
           ]
@@ -23603,7 +23567,7 @@
           "dependencies": [
             {
               "name": "@hono/node-server",
-              "target": "@hono/node-server@2.1.5",
+              "target": "@hono/node-server@2.1.11",
               "optional": false
             },
             {
@@ -23653,7 +23617,7 @@
             },
             {
               "name": "hono",
-              "target": "hono@4.11.4",
+              "target": "hono@4.13.21",
               "optional": false
             },
             {
@@ -23678,7 +23642,7 @@
             },
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             },
             {
@@ -23688,10 +23652,10 @@
             }
           ]
         },
-        "zod@4.6.5": {
+        "zod@4.6.7": {
           "name": "zod",
-          "version": "4.6.5",
-          "integrity": "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==",
+          "version": "4.6.7",
+          "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
           "dependencies": []
         },
         "@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.301": {
@@ -23842,14 +23806,14 @@
             }
           ]
         },
-        "@hono/node-server@2.1.5": {
+        "@hono/node-server@2.1.11": {
           "name": "@hono/node-server",
-          "version": "2.1.5",
-          "integrity": "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==",
+          "version": "2.1.11",
+          "integrity": "sha512-KzKz9vl4vvr1vgLHamj+g5uonbrj5NwAdO3yzOS6cd2HjALVeOgTgeZOyAzNxejbkfOOPIcvuf/Tg8l1pEFLog==",
           "dependencies": [
             {
               "name": "hono",
-              "target": "hono@4.11.4",
+              "target": "hono@4.13.21",
               "optional": false
             }
           ]
@@ -24063,7 +24027,7 @@
             },
             {
               "name": "qs",
-              "target": "qs@6.17.0",
+              "target": "qs@6.17.1",
               "optional": false
             },
             {
@@ -24125,10 +24089,10 @@
             }
           ]
         },
-        "hono@4.11.4": {
+        "hono@4.13.21": {
           "name": "hono",
-          "version": "4.11.4",
-          "integrity": "sha512-U7tt8JsyrxSRKspfhtLET79pU8K+tInj5QZXs1jSugO1Vq5dFj3kmZsRldo29mTBfcjDRVRXrEZ6LS63Cog9ZA==",
+          "version": "4.13.21",
+          "integrity": "sha512-h9UsguqfVk4kjUwLvQpHOmOaJpW10jz9lp8bvKUUa04wJG/fabKFBqXZ06D6LFaeKQZtUZRVeg0gfkTTEsX7Mw==",
           "dependencies": []
         },
         "jose@6.2.13": {
@@ -24183,7 +24147,7 @@
           "dependencies": [
             {
               "name": "zod",
-              "target": "zod@4.6.5",
+              "target": "zod@4.6.7",
               "optional": false
             }
           ]
@@ -24332,7 +24296,7 @@
             },
             {
               "name": "qs",
-              "target": "qs@6.17.0",
+              "target": "qs@6.17.1",
               "optional": false
             },
             {
@@ -24547,10 +24511,10 @@
             }
           ]
         },
-        "qs@6.17.0": {
+        "qs@6.17.1": {
           "name": "qs",
-          "version": "6.17.0",
-          "integrity": "sha512-5LK5BZ2XDHMvcUJaf0CQ5HL3aVgKbpklvByC7qLSxYkfE8COEEbJg5xCHWCTqzqi0Gs4Jn5Mv5v3R38W6edscA==",
+          "version": "6.17.1",
+          "integrity": "sha512-jd3COkaKVgGUW+ZHyEHCG9bH7RoaaiWuMgzsIBjUMVjLAaWGWpoUAVwljVvBHxRu/2qEHnadLGZrkutYUBPQJA==",
           "dependencies": [
             {
               "name": "es-define-property",

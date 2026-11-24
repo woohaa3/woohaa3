@@ -50,7 +50,7 @@
     "jsdom": "^30.1.1",
     "typescript": "^7.0.2",
     "typescript-legacy": "npm:typescript@5.9.3",
-    "vite": "^5.4.11",
-    "vitest": "^2.0.0"
+    "vite": "^6.4.6",
+    "vitest": "^4.1.12"
   }
 }

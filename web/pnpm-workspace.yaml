@@ -349,6 +349,7 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-workspace-changes@0.2.2-rc.1'
   - '@deepseek-ai/dsh-workspace@0.2.2-rc.1'
   - '@deepseek-ai/dsh@0.2.2-rc.1'
+  - hono@4.13.21
 
 # ADK 2.3.0 imports uuid from its public ESM entry but omits it from runtime dependencies.
 # Keep clean pnpm installs equivalent to a hoisted install without changing upstream code.
@@ -356,3 +357,29 @@ packageExtensions:
   '@google/adk@2.3.0':
     dependencies:
       uuid: 11.1.1
+
+# Dependabot 安全收口（docs/security/dependabot-triage-2026-11.md）。
+#
+# 这些包多半是被上游**精确 pin** 的传递依赖（`@deepseek-ai/dsh-*` 的 undici/zod/MCP client、
+# `@modelcontextprotocol/sdk` 的 @hono/node-server），改直接依赖改不动，只能在解析层收口。
+# 下限取「公告给出的最低安全版本」之上最近的已发布版本，避免刚好落在区间边界上。
+overrides:
+  # MCP 家族：node 2.1.2 的 peer 要求 server ^2.4.0，两者必须同时生效。
+  '@modelcontextprotocol/server': 2.4.0
+  '@modelcontextprotocol/node': 2.1.2
+  # dsh-mcp-client 精确 pin 2.2.0，跨域重定向会带走凭据（GHSA-6prh-2h8m-c8cw）。
+  '@modelcontextprotocol/client': 2.4.0
+  # hono 链：sdk 1.32.1 仍声明 @hono/node-server ^1.19.9，下限本身仍在受影响区间。
+  hono: 4.13.21
+  '@hono/node-server': 2.1.11
+  # zod 无界集合校验导致 OOM（GHSA-mrhx-c7xc-m3w5）；dsh 族 pin 4.4.3/4.6.5。
+  zod: 4.6.7
+  # undici 两条分支分别收口：dsh 族 pin 8.11.2，@ai-sdk/provider-utils 走 7.x。
+  # 用区间选择器，已安全的 8.12.3（jsdom/openai）不被降级或重复安装。
+  'undici@>=8.0.0 <8.12.2': 8.13.1
+  'undici@>=7.0.0 <7.30.1': 7.30.2
+  # 下面四个是收益有限的顺手收口，单独提交便于回滚。
+  qs: 6.17.1
+  uuid: 11.1.1
+  'decode-uri-component': 0.5.1
+  fflate: 0.8.3
