@@ -18,8 +18,9 @@
  * 因此新增/删除 token 必须提升 schema version 并同时更新两个消费者；任何一端手工漂移
  * 都会被 `--check` 捕获。
  */
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,9 @@ const OUT_TS_DEFAULT = join(root, "web", "contracts", "src", "theme", "generated
 const OUT_TS_DARK = join(root, "web", "contracts", "src", "theme", "generated-dark.ts");
 const OUT_CSS = join(root, "web", "ui", "src", "styles", "generated-theme.css");
 const OUT_RS = join(root, "bevy", "src", "support", "theme_generated.rs");
+
+/** 全部生成物；`assertOutputsTracked` 与写入两侧共用，避免加了输出忘了断言。 */
+const OUTPUTS = [OUT_TS_DEFAULT, OUT_TS_DARK, OUT_CSS, OUT_RS];
 
 const SCHEMA_VERSION = "woohaa-app-theme-v2";
 const MAX_ID_LENGTH = 80;
@@ -80,6 +84,72 @@ function fail(message) {
   process.stderr.write(`[theme-tokens] ${message}\n`);
   process.exit(1);
 }
+
+/**
+ * 输出路径必须指向**被 git 跟踪**的文件，且不得存在游离副本。
+ *
+ * 这条断言的存在理由是一个真实事故：`69365971` 把 `bevy/src/theme_generated.rs`
+ * 迁到 `bevy/src/support/` 后，本脚本的路径没跟着改。于是 `--check` 在干净检出
+ * 上报「生成物缺失」，而有人跑一次 `--generate` 就会在新路径凭空造出一个**未跟踪**
+ * 的副本——之后 `--check` 校验的正是这个副本，真正入库的产物反而再没人看。
+ *
+ * 教训是通用的：门禁「能跑通」不等于「在检查正确的东西」。生成器改路径时如果只
+ * 校验"我读到的内容与我要写的一致"，永远发现不了自己指错了地方。所以这里反向
+ * 确认两件事：
+ *
+ * 1. 每个输出都必须是 git 已跟踪的路径——否则说明它是新建的游离文件，
+ *    或者路径打错指向了别处；
+ * 2. 全仓不得出现**与本生成物同名**但未被跟踪的文件，那通常是路径漂移
+ *    留下的残骸（判据取「同名不同路径」，不取「名字像生成物」，避免误报
+ *    逼人给门禁加豁免）。
+ *
+ * 非 git 环境（如导出的 tarball、临时目录跑测试）跳过，不误判。
+ */
+function assertOutputsTracked() {
+  const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    git(["rev-parse", "--is-inside-work-tree"]);
+  } catch {
+    return; // 不在工作树里（打包产物、临时目录）：无从判断跟踪状态，跳过。
+  }
+  for (const out of OUTPUTS) {
+    const rel = relative(root, out).split(sep).join("/");
+    try {
+      git(["ls-files", "--error-unmatch", rel]);
+    } catch {
+      fail(`输出路径未被 git 跟踪：${rel}（生成物必须入库；路径写错会在这里暴露）`);
+    }
+  }
+  // 全仓范围内**与本生成物同名**的未跟踪文件：路径漂移留下的残骸。
+  //
+  // 判据刻意做成「同名不同路径」而不是「名字像生成物」：后者会把
+  // `docs/generated.md` 这类无关文件也算进来，误报会逼人给门禁加豁免，
+  // 反而削弱它。按输出基名比对既精确命中事故形态（一份 theme_generated.rs
+  // 的副本落在别处），又不需要维护豁免名单。
+  //
+  // 必须扫全仓而不是输出目录：事故里残骸落在 `bevy/src/`，而正确输出在
+  // `bevy/src/support/`——只扫输出目录正好漏掉它。
+  const expected = new Set(OUTPUTS.map((out) => relative(root, out).split(sep).join("/")));
+  const names = new Set([...expected].map((rel) => rel.slice(rel.lastIndexOf("/") + 1)));
+  let listing = "";
+  try {
+    listing = git(["ls-files", "--others", "--exclude-standard"]);
+  } catch {
+    return;
+  }
+  const strays = listing
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((file) => {
+      if (!file || expected.has(file)) return false;
+      return names.has(file.slice(file.lastIndexOf("/") + 1));
+    });
+  if (strays.length > 0) {
+    fail(`发现与本生成物同名的未跟踪文件：${strays.sort().join("、")}（生成器指向的路径可能与入库位置不一致）`);
+  }
+}
+
+assertOutputsTracked();
 
 function kebab(name) {
   return name.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);

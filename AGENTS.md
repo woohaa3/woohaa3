@@ -173,6 +173,27 @@ pnpm ext:release <extensionId>                       # 发布：先拒绝不可�
 
 单元测试通常与源码相邻。跨包门禁在 `web/tooling`，业务 E2E 在 `web/e2e`，Rust 测试在相邻 `tests.rs` 与 `bevy/tests`。
 
+### 门禁「绿」不等于「在检查正确的东西」
+
+生成物校验类脚本（`theme:check`、`runtime:npm:manifest --check`、`extensions:check` 的产物比对）有
+一类特殊失效：**它们只校验"我读到的内容与我要写的一致"，却不知道自己要读的位置对不对**。目录
+搬迁后路径没跟着改时，`--check` 会在干净检出上报缺失；而一旦有人跑 `--generate`，脚本就会在新
+路径凭空造出一个**未被 git 跟踪**的副本，此后 `--check` 校验的正是这个副本，真正入库的产物反而
+再没人看。门禁一直是"绿"的。
+
+真实事故：`69365971` 把 `bevy/src/theme_generated.rs` 迁到 `bevy/src/support/`，生成器路径没跟着
+改，于是 `pnpm theme:check` 在干净检出上必然失败，而在本地开发机上因为游离副本而假通过。
+
+因此改生成器/校验脚本时：
+
+1. **断言输出被 git 跟踪**（`git ls-files --error-unmatch`），路径写错会立刻暴露，而不是等下一次
+   干净检出才发现。参考 `scripts/generate-theme-tokens.mjs` 的 `assertOutputsTracked`。
+2. **全仓扫描与输出同名的未跟踪文件**。不要只扫输出目录——事故里残骸落在 `bevy/src/`、正确输出
+   在 `bevy/src/support/`，扫输出目录正好漏掉。判据用「同名不同路径」而非「名字像生成物」：后者会
+   把 `docs/generated.md` 这类无关文件算进来，误报会逼人给门禁加豁免，反而削弱它。
+3. **验证要能重现故障**：改完门禁后手工制造一次路径漂移与游离副本，确认它真的失败；只跑一遍正常
+   路径不算验证。
+
 ### E2E 走远端复核机
 
 `web/e2e` 与 `web/ui/showcase/e2e` 的 spec 统一从 `web/e2e/review-browser.ts` 引 `test` / `expect`：
