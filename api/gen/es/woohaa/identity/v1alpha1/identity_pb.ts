@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file woohaa/identity/v1alpha1/identity.proto.
  */
 export const file_woohaa_identity_v1alpha1_identity: GenFile = /*@__PURE__*/
-  fileDesc("Cid3b29oYWEvaWRlbnRpdHkvdjFhbHBoYTEvaWRlbnRpdHkucHJvdG8SGHdvb2hhYS5pZGVudGl0eS52MWFscGhhMSIdCgxMb2dpblJlcXVlc3QSDQoFdG9rZW4YASABKAkiFwoVR2V0QXV0aE1ldGhvZHNSZXF1ZXN0ImEKCkF1dGhNZXRob2QSNgoEa2luZBgBIAEoDjIoLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5BdXRoTWV0aG9kS2luZBIKCgJpZBgCIAEoCRIPCgdhbWJpZW50GAMgASgIIm0KFkdldEF1dGhNZXRob2RzUmVzcG9uc2USNQoHbWV0aG9kcxgBIAMoCzIkLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5BdXRoTWV0aG9kEhwKFGRldmljZV9sb2dpbl9lbmFibGVkGAIgASgIIikKFEJlZ2luVG9mTG9naW5SZXF1ZXN0EhEKCXJldHVybl90bxgBIAEoCSIqChVCZWdpblRvZkxvZ2luUmVzcG9uc2USEQoJbG9naW5fdXJsGAEgASgJIjAKF0NvbXBsZXRlVG9mTG9naW5SZXF1ZXN0EhUKDWV4Y2hhbmdlX2NvZGUYASABKAkiVgoZRXhjaGFuZ2VMb2NhbExvZ2luUmVxdWVzdBIMCgRjb2RlGAEgASgJEhUKDWNvZGVfdmVyaWZpZXIYAiABKAkSFAoMcmVkaXJlY3RfdXJpGAMgASgJIlsKGkV4Y2hhbmdlTG9jYWxMb2dpblJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc3ViamVjdF9pZBgCIAEoCRISCgpleHBpcmVzX2F0GAMgASgJIlkKGENvbXBsZXRlVG9mTG9naW5SZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnN1YmplY3RfaWQYAiABKAkSEgoKZXhwaXJlc19hdBgDIAEoCSJOCg1Mb2dpblJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc3ViamVjdF9pZBgCIAEoCRISCgpleHBpcmVzX2F0GAMgASgJIicKDlJlZnJlc2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiPAoPUmVmcmVzaFJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKZXhwaXJlc19hdBgCIAEoCSImCg1Mb2dvdXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiEAoOTG9nb3V0UmVzcG9uc2UiDwoNV2hvQW1JUmVxdWVzdCJ1Cg5XaG9BbUlSZXNwb25zZRISCgpzdWJqZWN0X2lkGAEgASgJEjsKDHN1YmplY3RfdHlwZRgCIAEoDjIlLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5TdWJqZWN0VHlwZRISCgpleHBpcmVzX2F0GAMgASgJIhcKFUxpc3RJZGVudGl0aWVzUmVxdWVzdCI0Cg1Cb3VuZElkZW50aXR5Eg4KBnNvdXJjZRgBIAEoCRITCgtleHRlcm5hbF9pZBgCIAEoCSJVChZMaXN0SWRlbnRpdGllc1Jlc3BvbnNlEjsKCmlkZW50aXRpZXMYASADKAsyJy53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQm91bmRJZGVudGl0eSI8ChVVbmJpbmRJZGVudGl0eVJlcXVlc3QSDgoGc291cmNlGAEgASgJEhMKC2V4dGVybmFsX2lkGAIgASgJIlUKFlVuYmluZElkZW50aXR5UmVzcG9uc2USOwoKaWRlbnRpdGllcxgBIAMoCzInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Cb3VuZElkZW50aXR5IjkKE0JpbmRJZGVudGl0eVJlcXVlc3QSDgoGc291cmNlGAEgASgJEhIKCmNyZWRlbnRpYWwYAiABKAkiZAoUQmluZElkZW50aXR5UmVzcG9uc2USOwoKaWRlbnRpdGllcxgBIAMoCzInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Cb3VuZElkZW50aXR5Eg8KB2NsYWltZWQYAiABKAgiGQoXU3RhcnREZXZpY2VMb2dpblJlcXVlc3QiigEKGFN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRITCgtkZXZpY2VfY29kZRgBIAEoCRIRCgl1c2VyX2NvZGUYAiABKAkSGAoQdmVyaWZpY2F0aW9uX3VyaRgDIAEoCRIYChBpbnRlcnZhbF9zZWNvbmRzGAQgASgFEhIKCmV4cGlyZXNfYXQYBSABKAkiLQoWUG9sbERldmljZUxvZ2luUmVxdWVzdBITCgtkZXZpY2VfY29kZRgBIAEoCSJ/ChdQb2xsRGV2aWNlTG9naW5SZXNwb25zZRI5CgVzdGF0ZRgBIAEoDjIqLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5EZXZpY2VMb2dpblN0YXRlEhUKDXNlc3Npb25fdG9rZW4YAiABKAkSEgoKZXhwaXJlc19hdBgDIAEoCSIuChlBcHByb3ZlRGV2aWNlTG9naW5SZXF1ZXN0EhEKCXVzZXJfY29kZRgBIAEoCSIcChpBcHByb3ZlRGV2aWNlTG9naW5SZXNwb25zZSIrChZEZW55RGV2aWNlTG9naW5SZXF1ZXN0EhEKCXVzZXJfY29kZRgBIAEoCSIZChdEZW55RGV2aWNlTG9naW5SZXNwb25zZSqcAQoOQXV0aE1ldGhvZEtpbmQSIAocQVVUSF9NRVRIT0RfS0lORF9VTlNQRUNJRklFRBAAEiIKHkFVVEhfTUVUSE9EX0tJTkRfTUFDSElORV9UT0tFThABEiYKIkFVVEhfTUVUSE9EX0tJTkRfR0FURVdBWV9BU1NFUlRJT04QAhIcChhBVVRIX01FVEhPRF9LSU5EX1RPRl9TU08QAypcCgtTdWJqZWN0VHlwZRIcChhTVUJKRUNUX1RZUEVfVU5TUEVDSUZJRUQQABIVChFTVUJKRUNUX1RZUEVfVVNFUhABEhgKFFNVQkpFQ1RfVFlQRV9NQUNISU5FEAIqtgEKEERldmljZUxvZ2luU3RhdGUSIgoeREVWSUNFX0xPR0lOX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaREVWSUNFX0xPR0lOX1NUQVRFX1BFTkRJTkcQARIfChtERVZJQ0VfTE9HSU5fU1RBVEVfQVBQUk9WRUQQAhIdChlERVZJQ0VfTE9HSU5fU1RBVEVfREVOSUVEEAMSHgoaREVWSUNFX0xPR0lOX1NUQVRFX0VYUElSRUQQBDKtDQoPSWRlbnRpdHlTZXJ2aWNlElgKBUxvZ2luEiYud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkxvZ2luUmVxdWVzdBonLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Mb2dpblJlc3BvbnNlEnMKDkdldEF1dGhNZXRob2RzEi8ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkdldEF1dGhNZXRob2RzUmVxdWVzdBowLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5HZXRBdXRoTWV0aG9kc1Jlc3BvbnNlEnAKDUJlZ2luVG9mTG9naW4SLi53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQmVnaW5Ub2ZMb2dpblJlcXVlc3QaLy53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQmVnaW5Ub2ZMb2dpblJlc3BvbnNlEnkKEENvbXBsZXRlVG9mTG9naW4SMS53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQ29tcGxldGVUb2ZMb2dpblJlcXVlc3QaMi53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQ29tcGxldGVUb2ZMb2dpblJlc3BvbnNlEn8KEkV4Y2hhbmdlTG9jYWxMb2dpbhIzLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5FeGNoYW5nZUxvY2FsTG9naW5SZXF1ZXN0GjQud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkV4Y2hhbmdlTG9jYWxMb2dpblJlc3BvbnNlEl4KB1JlZnJlc2gSKC53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuUmVmcmVzaFJlcXVlc3QaKS53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuUmVmcmVzaFJlc3BvbnNlElsKBkxvZ291dBInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Mb2dvdXRSZXF1ZXN0Gigud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkxvZ291dFJlc3BvbnNlEnMKDkxpc3RJZGVudGl0aWVzEi8ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkxpc3RJZGVudGl0aWVzUmVxdWVzdBowLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5MaXN0SWRlbnRpdGllc1Jlc3BvbnNlEnMKDlVuYmluZElkZW50aXR5Ei8ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLlVuYmluZElkZW50aXR5UmVxdWVzdBowLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5VbmJpbmRJZGVudGl0eVJlc3BvbnNlEm0KDEJpbmRJZGVudGl0eRItLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5CaW5kSWRlbnRpdHlSZXF1ZXN0Gi4ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkJpbmRJZGVudGl0eVJlc3BvbnNlEnkKEFN0YXJ0RGV2aWNlTG9naW4SMS53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuU3RhcnREZXZpY2VMb2dpblJlcXVlc3QaMi53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuU3RhcnREZXZpY2VMb2dpblJlc3BvbnNlEnYKD1BvbGxEZXZpY2VMb2dpbhIwLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Qb2xsRGV2aWNlTG9naW5SZXF1ZXN0GjEud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLlBvbGxEZXZpY2VMb2dpblJlc3BvbnNlEn8KEkFwcHJvdmVEZXZpY2VMb2dpbhIzLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5BcHByb3ZlRGV2aWNlTG9naW5SZXF1ZXN0GjQud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkFwcHJvdmVEZXZpY2VMb2dpblJlc3BvbnNlEnYKD0RlbnlEZXZpY2VMb2dpbhIwLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5EZW55RGV2aWNlTG9naW5SZXF1ZXN0GjEud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkRlbnlEZXZpY2VMb2dpblJlc3BvbnNlElsKBldob0FtSRInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5XaG9BbUlSZXF1ZXN0Gigud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLldob0FtSVJlc3BvbnNlQj5aPHdvb2hhYTMvYXBpL2dlbi9nby93b29oYWEvaWRlbnRpdHkvdjFhbHBoYTE7aWRlbnRpdHl2MWFscGhhMWIGcHJvdG8z");
+  fileDesc("Cid3b29oYWEvaWRlbnRpdHkvdjFhbHBoYTEvaWRlbnRpdHkucHJvdG8SGHdvb2hhYS5pZGVudGl0eS52MWFscGhhMSIdCgxMb2dpblJlcXVlc3QSDQoFdG9rZW4YASABKAkiFwoVR2V0QXV0aE1ldGhvZHNSZXF1ZXN0ImEKCkF1dGhNZXRob2QSNgoEa2luZBgBIAEoDjIoLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5BdXRoTWV0aG9kS2luZBIKCgJpZBgCIAEoCRIPCgdhbWJpZW50GAMgASgIIm0KFkdldEF1dGhNZXRob2RzUmVzcG9uc2USNQoHbWV0aG9kcxgBIAMoCzIkLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5BdXRoTWV0aG9kEhwKFGRldmljZV9sb2dpbl9lbmFibGVkGAIgASgIIikKFEJlZ2luVG9mTG9naW5SZXF1ZXN0EhEKCXJldHVybl90bxgBIAEoCSIqChVCZWdpblRvZkxvZ2luUmVzcG9uc2USEQoJbG9naW5fdXJsGAEgASgJIjAKF0NvbXBsZXRlVG9mTG9naW5SZXF1ZXN0EhUKDWV4Y2hhbmdlX2NvZGUYASABKAkiVgoZRXhjaGFuZ2VMb2NhbExvZ2luUmVxdWVzdBIMCgRjb2RlGAEgASgJEhUKDWNvZGVfdmVyaWZpZXIYAiABKAkSFAoMcmVkaXJlY3RfdXJpGAMgASgJIo4BChpFeGNoYW5nZUxvY2FsTG9naW5SZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnN1YmplY3RfaWQYAiABKAkSEgoKZXhwaXJlc19hdBgDIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAQgASgJEhoKEnJlZnJlc2hfZXhwaXJlc19hdBgFIAEoCSKMAQoYQ29tcGxldGVUb2ZMb2dpblJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc3ViamVjdF9pZBgCIAEoCRISCgpleHBpcmVzX2F0GAMgASgJEhUKDXJlZnJlc2hfdG9rZW4YBCABKAkSGgoScmVmcmVzaF9leHBpcmVzX2F0GAUgASgJIoEBCg1Mb2dpblJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc3ViamVjdF9pZBgCIAEoCRISCgpleHBpcmVzX2F0GAMgASgJEhUKDXJlZnJlc2hfdG9rZW4YBCABKAkSGgoScmVmcmVzaF9leHBpcmVzX2F0GAUgASgJIj4KDlJlZnJlc2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSFQoNcmVmcmVzaF90b2tlbhgCIAEoCSJvCg9SZWZyZXNoUmVzcG9uc2USFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpleHBpcmVzX2F0GAIgASgJEhUKDXJlZnJlc2hfdG9rZW4YAyABKAkSGgoScmVmcmVzaF9leHBpcmVzX2F0GAQgASgJIiYKDUxvZ291dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSIQCg5Mb2dvdXRSZXNwb25zZSIPCg1XaG9BbUlSZXF1ZXN0InUKDldob0FtSVJlc3BvbnNlEhIKCnN1YmplY3RfaWQYASABKAkSOwoMc3ViamVjdF90eXBlGAIgASgOMiUud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLlN1YmplY3RUeXBlEhIKCmV4cGlyZXNfYXQYAyABKAkiFwoVTGlzdElkZW50aXRpZXNSZXF1ZXN0IjQKDUJvdW5kSWRlbnRpdHkSDgoGc291cmNlGAEgASgJEhMKC2V4dGVybmFsX2lkGAIgASgJIlUKFkxpc3RJZGVudGl0aWVzUmVzcG9uc2USOwoKaWRlbnRpdGllcxgBIAMoCzInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Cb3VuZElkZW50aXR5IjwKFVVuYmluZElkZW50aXR5UmVxdWVzdBIOCgZzb3VyY2UYASABKAkSEwoLZXh0ZXJuYWxfaWQYAiABKAkiVQoWVW5iaW5kSWRlbnRpdHlSZXNwb25zZRI7CgppZGVudGl0aWVzGAEgAygLMicud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkJvdW5kSWRlbnRpdHkiOQoTQmluZElkZW50aXR5UmVxdWVzdBIOCgZzb3VyY2UYASABKAkSEgoKY3JlZGVudGlhbBgCIAEoCSJkChRCaW5kSWRlbnRpdHlSZXNwb25zZRI7CgppZGVudGl0aWVzGAEgAygLMicud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkJvdW5kSWRlbnRpdHkSDwoHY2xhaW1lZBgCIAEoCCIZChdTdGFydERldmljZUxvZ2luUmVxdWVzdCKKAQoYU3RhcnREZXZpY2VMb2dpblJlc3BvbnNlEhMKC2RldmljZV9jb2RlGAEgASgJEhEKCXVzZXJfY29kZRgCIAEoCRIYChB2ZXJpZmljYXRpb25fdXJpGAMgASgJEhgKEGludGVydmFsX3NlY29uZHMYBCABKAUSEgoKZXhwaXJlc19hdBgFIAEoCSItChZQb2xsRGV2aWNlTG9naW5SZXF1ZXN0EhMKC2RldmljZV9jb2RlGAEgASgJIrIBChdQb2xsRGV2aWNlTG9naW5SZXNwb25zZRI5CgVzdGF0ZRgBIAEoDjIqLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5EZXZpY2VMb2dpblN0YXRlEhUKDXNlc3Npb25fdG9rZW4YAiABKAkSEgoKZXhwaXJlc19hdBgDIAEoCRIVCg1yZWZyZXNoX3Rva2VuGAQgASgJEhoKEnJlZnJlc2hfZXhwaXJlc19hdBgFIAEoCSIuChlBcHByb3ZlRGV2aWNlTG9naW5SZXF1ZXN0EhEKCXVzZXJfY29kZRgBIAEoCSIcChpBcHByb3ZlRGV2aWNlTG9naW5SZXNwb25zZSIrChZEZW55RGV2aWNlTG9naW5SZXF1ZXN0EhEKCXVzZXJfY29kZRgBIAEoCSIZChdEZW55RGV2aWNlTG9naW5SZXNwb25zZSqcAQoOQXV0aE1ldGhvZEtpbmQSIAocQVVUSF9NRVRIT0RfS0lORF9VTlNQRUNJRklFRBAAEiIKHkFVVEhfTUVUSE9EX0tJTkRfTUFDSElORV9UT0tFThABEiYKIkFVVEhfTUVUSE9EX0tJTkRfR0FURVdBWV9BU1NFUlRJT04QAhIcChhBVVRIX01FVEhPRF9LSU5EX1RPRl9TU08QAypcCgtTdWJqZWN0VHlwZRIcChhTVUJKRUNUX1RZUEVfVU5TUEVDSUZJRUQQABIVChFTVUJKRUNUX1RZUEVfVVNFUhABEhgKFFNVQkpFQ1RfVFlQRV9NQUNISU5FEAIqtgEKEERldmljZUxvZ2luU3RhdGUSIgoeREVWSUNFX0xPR0lOX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaREVWSUNFX0xPR0lOX1NUQVRFX1BFTkRJTkcQARIfChtERVZJQ0VfTE9HSU5fU1RBVEVfQVBQUk9WRUQQAhIdChlERVZJQ0VfTE9HSU5fU1RBVEVfREVOSUVEEAMSHgoaREVWSUNFX0xPR0lOX1NUQVRFX0VYUElSRUQQBDKtDQoPSWRlbnRpdHlTZXJ2aWNlElgKBUxvZ2luEiYud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkxvZ2luUmVxdWVzdBonLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Mb2dpblJlc3BvbnNlEnMKDkdldEF1dGhNZXRob2RzEi8ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkdldEF1dGhNZXRob2RzUmVxdWVzdBowLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5HZXRBdXRoTWV0aG9kc1Jlc3BvbnNlEnAKDUJlZ2luVG9mTG9naW4SLi53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQmVnaW5Ub2ZMb2dpblJlcXVlc3QaLy53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQmVnaW5Ub2ZMb2dpblJlc3BvbnNlEnkKEENvbXBsZXRlVG9mTG9naW4SMS53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQ29tcGxldGVUb2ZMb2dpblJlcXVlc3QaMi53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuQ29tcGxldGVUb2ZMb2dpblJlc3BvbnNlEn8KEkV4Y2hhbmdlTG9jYWxMb2dpbhIzLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5FeGNoYW5nZUxvY2FsTG9naW5SZXF1ZXN0GjQud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkV4Y2hhbmdlTG9jYWxMb2dpblJlc3BvbnNlEl4KB1JlZnJlc2gSKC53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuUmVmcmVzaFJlcXVlc3QaKS53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuUmVmcmVzaFJlc3BvbnNlElsKBkxvZ291dBInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Mb2dvdXRSZXF1ZXN0Gigud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkxvZ291dFJlc3BvbnNlEnMKDkxpc3RJZGVudGl0aWVzEi8ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkxpc3RJZGVudGl0aWVzUmVxdWVzdBowLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5MaXN0SWRlbnRpdGllc1Jlc3BvbnNlEnMKDlVuYmluZElkZW50aXR5Ei8ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLlVuYmluZElkZW50aXR5UmVxdWVzdBowLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5VbmJpbmRJZGVudGl0eVJlc3BvbnNlEm0KDEJpbmRJZGVudGl0eRItLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5CaW5kSWRlbnRpdHlSZXF1ZXN0Gi4ud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkJpbmRJZGVudGl0eVJlc3BvbnNlEnkKEFN0YXJ0RGV2aWNlTG9naW4SMS53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuU3RhcnREZXZpY2VMb2dpblJlcXVlc3QaMi53b29oYWEuaWRlbnRpdHkudjFhbHBoYTEuU3RhcnREZXZpY2VMb2dpblJlc3BvbnNlEnYKD1BvbGxEZXZpY2VMb2dpbhIwLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5Qb2xsRGV2aWNlTG9naW5SZXF1ZXN0GjEud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLlBvbGxEZXZpY2VMb2dpblJlc3BvbnNlEn8KEkFwcHJvdmVEZXZpY2VMb2dpbhIzLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5BcHByb3ZlRGV2aWNlTG9naW5SZXF1ZXN0GjQud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkFwcHJvdmVEZXZpY2VMb2dpblJlc3BvbnNlEnYKD0RlbnlEZXZpY2VMb2dpbhIwLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5EZW55RGV2aWNlTG9naW5SZXF1ZXN0GjEud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLkRlbnlEZXZpY2VMb2dpblJlc3BvbnNlElsKBldob0FtSRInLndvb2hhYS5pZGVudGl0eS52MWFscGhhMS5XaG9BbUlSZXF1ZXN0Gigud29vaGFhLmlkZW50aXR5LnYxYWxwaGExLldob0FtSVJlc3BvbnNlQj5aPHdvb2hhYTMvYXBpL2dlbi9nby93b29oYWEvaWRlbnRpdHkvdjFhbHBoYTE7aWRlbnRpdHl2MWFscGhhMWIGcHJvdG8z");
 
 /**
  * @generated from message woohaa.identity.v1alpha1.LoginRequest
@@ -234,7 +234,7 @@ export const ExchangeLocalLoginRequestSchema: GenMessage<ExchangeLocalLoginReque
  */
 export type ExchangeLocalLoginResponse = Message<"woohaa.identity.v1alpha1.ExchangeLocalLoginResponse"> & {
   /**
-   * Opaque session token. Bearer credential: never logged.
+   * Opaque access token. Bearer credential for every RPC: never logged.
    *
    * @generated from field: string session_token = 1;
    */
@@ -246,11 +246,25 @@ export type ExchangeLocalLoginResponse = Message<"woohaa.identity.v1alpha1.Excha
   subjectId: string;
 
   /**
-   * RFC 3339 UTC instant after which the session stops working.
+   * RFC 3339 UTC instant after which the access token stops working.
    *
    * @generated from field: string expires_at = 3;
    */
   expiresAt: string;
+
+  /**
+   * Opaque refresh token; see LoginResponse.refresh_token.
+   *
+   * @generated from field: string refresh_token = 4;
+   */
+  refreshToken: string;
+
+  /**
+   * RFC 3339 UTC instant after which the refresh token stops working.
+   *
+   * @generated from field: string refresh_expires_at = 5;
+   */
+  refreshExpiresAt: string;
 };
 
 /**
@@ -268,7 +282,7 @@ export const ExchangeLocalLoginResponseSchema: GenMessage<ExchangeLocalLoginResp
  */
 export type CompleteTofLoginResponse = Message<"woohaa.identity.v1alpha1.CompleteTofLoginResponse"> & {
   /**
-   * Opaque session token. Bearer credential: never logged.
+   * Opaque access token. Bearer credential for every RPC: never logged.
    *
    * @generated from field: string session_token = 1;
    */
@@ -280,11 +294,25 @@ export type CompleteTofLoginResponse = Message<"woohaa.identity.v1alpha1.Complet
   subjectId: string;
 
   /**
-   * RFC 3339 UTC instant after which the session stops working.
+   * RFC 3339 UTC instant after which the access token stops working.
    *
    * @generated from field: string expires_at = 3;
    */
   expiresAt: string;
+
+  /**
+   * Opaque refresh token; see LoginResponse.refresh_token.
+   *
+   * @generated from field: string refresh_token = 4;
+   */
+  refreshToken: string;
+
+  /**
+   * RFC 3339 UTC instant after which the refresh token stops working.
+   *
+   * @generated from field: string refresh_expires_at = 5;
+   */
+  refreshExpiresAt: string;
 };
 
 /**
@@ -299,7 +327,8 @@ export const CompleteTofLoginResponseSchema: GenMessage<CompleteTofLoginResponse
  */
 export type LoginResponse = Message<"woohaa.identity.v1alpha1.LoginResponse"> & {
   /**
-   * Opaque session token. Bearer credential: never logged.
+   * Opaque access token. Bearer credential for every RPC: never logged.
+   * Short-lived; rotate it with Refresh rather than treating it as durable.
    *
    * @generated from field: string session_token = 1;
    */
@@ -311,11 +340,32 @@ export type LoginResponse = Message<"woohaa.identity.v1alpha1.LoginResponse"> & 
   subjectId: string;
 
   /**
-   * RFC 3339 UTC instant after which the session stops working.
+   * RFC 3339 UTC instant after which the access token stops working.
    *
    * @generated from field: string expires_at = 3;
    */
   expiresAt: string;
+
+  /**
+   * Opaque refresh token. Accepted only by Refresh, never as a Bearer
+   * credential, and never logged. Outlives the access token: it is what makes a
+   * client that stayed offline past the access lifetime able to resume without
+   * a human signing in again.
+   *
+   * Empty when the deployment issues access tokens only (single-token mode);
+   * callers must then fall back to signing in again on expiry.
+   *
+   * @generated from field: string refresh_token = 4;
+   */
+  refreshToken: string;
+
+  /**
+   * RFC 3339 UTC instant after which the refresh token stops working.
+   * Empty when refresh_token is empty.
+   *
+   * @generated from field: string refresh_expires_at = 5;
+   */
+  refreshExpiresAt: string;
 };
 
 /**
@@ -330,9 +380,25 @@ export const LoginResponseSchema: GenMessage<LoginResponse> = /*@__PURE__*/
  */
 export type RefreshRequest = Message<"woohaa.identity.v1alpha1.RefreshRequest"> & {
   /**
+   * The access token to rotate. This is the original single-token behaviour and
+   * is kept for callers that predate the split: it only works while the token is
+   * still unexpired.
+   *
    * @generated from field: string session_token = 1;
    */
   sessionToken: string;
+
+  /**
+   * The refresh token, NOT the access token. When set it takes precedence over
+   * `session_token` and works even after the access token has expired — that is
+   * the point of the split.
+   *
+   * This RPC is public, so an expired access token in `Authorization` is not a
+   * problem: the refresh token itself is the evidence here.
+   *
+   * @generated from field: string refresh_token = 2;
+   */
+  refreshToken: string;
 };
 
 /**
@@ -347,14 +413,32 @@ export const RefreshRequestSchema: GenMessage<RefreshRequest> = /*@__PURE__*/
  */
 export type RefreshResponse = Message<"woohaa.identity.v1alpha1.RefreshResponse"> & {
   /**
+   * New access token. Bearer credential for every RPC: never logged.
+   *
    * @generated from field: string session_token = 1;
    */
   sessionToken: string;
 
   /**
+   * RFC 3339 UTC instant after which the new access token stops working.
+   *
    * @generated from field: string expires_at = 2;
    */
   expiresAt: string;
+
+  /**
+   * New refresh token; the presented one is now revoked.
+   *
+   * @generated from field: string refresh_token = 3;
+   */
+  refreshToken: string;
+
+  /**
+   * RFC 3339 UTC instant after which the new refresh token stops working.
+   *
+   * @generated from field: string refresh_expires_at = 4;
+   */
+  refreshExpiresAt: string;
 };
 
 /**
@@ -712,6 +796,20 @@ export type PollDeviceLoginResponse = Message<"woohaa.identity.v1alpha1.PollDevi
    * @generated from field: string expires_at = 3;
    */
   expiresAt: string;
+
+  /**
+   * Present only when state is APPROVED; see LoginResponse.refresh_token.
+   *
+   * @generated from field: string refresh_token = 4;
+   */
+  refreshToken: string;
+
+  /**
+   * RFC 3339 UTC instant after which the refresh token stops working.
+   *
+   * @generated from field: string refresh_expires_at = 5;
+   */
+  refreshExpiresAt: string;
 };
 
 /**
@@ -1009,9 +1107,21 @@ export const IdentityService: GenService<{
     output: typeof ExchangeLocalLoginResponseSchema;
   },
   /**
-   * Exchange a still-valid session for a new one. The old session is revoked
-   * in the same transaction, so no two sessions issued to the same holder stay
-   * valid at once.
+   * Exchange a refresh token for a new access token (and a new refresh token).
+   *
+   * Two credentials, two lifetimes: the access token is the Bearer credential on
+   * every call and expires quickly; the refresh token is only accepted here and
+   * lives long. Its purpose is to let a client that has been offline for longer
+   * than the access lifetime get back in without a human signing in again — the
+   * reason a single sliding token did not work, since rotating it requires the
+   * old token to still be unexpired.
+   *
+   * Both tokens rotate in the same transaction: the presented refresh token is
+   * revoked and the access token it last issued is revoked too, so no two
+   * credential pairs for the same holder stay valid at once.
+   *
+   * The refresh token is NOT a Bearer credential: it is rejected by every other
+   * RPC here. Presenting it as `Authorization` yields unauthenticated.
    *
    * @generated from rpc woohaa.identity.v1alpha1.IdentityService.Refresh
    */
