@@ -104,6 +104,19 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/**
+ * 去掉结尾的 NUL（glTF 允许 JSON 分块用 NUL 对齐到 4 字节）。
+ *
+ * 原来用 `replace(/\u0000+$/g, "")`：`+` 在带 `$` 锚点时每换一个起点都要重扫剩余
+ * 的 NUL，遇到「一串 NUL 后跟非 NUL」就是平方级。GLB 上限 32MB，且这是用户导入的
+ * 模型文件，实测 80KB 的该形状就要 5s。从尾部扫一遍即可，语义相同。
+ */
+function stripTrailingNuls(text: string): string {
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 0) end -= 1;
+  return text.slice(0, end);
+}
+
 function asIndex(value: unknown, limit: number): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value < limit ? value : null;
 }
@@ -133,7 +146,7 @@ export function parseGlbModel(input: Uint8Array): GlbParseResult {
     const chunk = input.subarray(start, start + length);
     if (type === CHUNK_JSON) {
       if (jsonText !== null) return fail("malformed", "GLB 含多个 JSON 分块");
-      jsonText = new TextDecoder().decode(chunk).replace(/\u0000+$/g, "").trimEnd();
+      jsonText = stripTrailingNuls(new TextDecoder().decode(chunk)).trimEnd();
     } else if (type === CHUNK_BIN) {
       if (bin !== null) return fail("malformed", "GLB 含多个二进制分块");
       bin = chunk;

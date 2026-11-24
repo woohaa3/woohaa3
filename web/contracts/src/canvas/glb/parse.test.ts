@@ -331,6 +331,48 @@ describe("GLB 静态解析", () => {
   });
 });
 
+describe("GLB 的 JSON 分块 NUL 对齐", () => {
+  it("去掉结尾 NUL 后再解析", () => {
+    const { document, bin } = triangleFixture();
+    const glb = buildGlb(document, bin);
+    // buildGlb 用空格对齐；这里改写成 NUL 对齐（glTF 允许），确认仍能解析出几何。
+    const view = new DataView(glb.buffer);
+    const jsonLength = view.getUint32(12, true);
+    const jsonStart = 20;
+    for (let i = jsonStart; i < jsonStart + jsonLength; i += 1) {
+      if (glb[i] === 0x20) glb[i] = 0;
+    }
+    const result = parseGlbModel(glb);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.stats).toMatchObject({ vertices: 3, faces: 1 });
+  });
+
+  it("一长串 NUL 后接非 NUL 不会拖成平方复杂度", () => {
+    // 旧实现 `replace(/\u0000+$/g, "")` 从每个 NUL 起点都要重扫剩余 NUL：NUL 串后面
+    // 跟着非 NUL 时是平方级（80KB 约 5s）。GLB 上限 32MB，且字节完全由用户导入的文件
+    // 决定，所以这是可触发的输入。
+    const json = new TextEncoder().encode('{"asset":{"version":"2.0"}}');
+    const nulRun = 200_000;
+    const jsonLength = json.byteLength + nulRun + 1;
+    const total = 12 + 8 + jsonLength;
+    const out = new Uint8Array(total);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, GLB_MAGIC, true);
+    view.setUint32(4, 2, true);
+    view.setUint32(8, total, true);
+    view.setUint32(12, jsonLength, true);
+    view.setUint32(16, CHUNK_JSON, true);
+    out.set(json, 20);
+    // JSON 正文之后是一长串 NUL，最后跟一个非 NUL —— 正是让 `+$` 反复回溯的形状。
+    out[20 + json.byteLength + nulRun] = 0x78; // "x"
+    const started = Date.now();
+    expect(parseGlbModel(out).ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+
+});
+
 describe("GLB 旋转与欧拉角", () => {
   it("四元数转 YXZ 欧拉角与正向转换互逆", () => {
     const rotation: [number, number, number] = [12, -34, 56];
