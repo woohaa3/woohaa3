@@ -623,4 +623,18 @@ describe("工具入参结构上限（GHSA-46jr-4wx8-v453）", () => {
     expect(response.status).toBe(413);
     await response.text();
   });
+
+  it("超长斜杠路径不会把路径归一拖成平方复杂度", async () => {
+    // normalizePath 现在从尾部扫；旧实现 `replace(/\/+$/, "")` 在「一串斜杠后跟非
+    // 斜杠」时是平方级（32KB 约 0.8s），而 pathname 直接来自请求 URL，且发生在
+    // 回环校验之前。这里走真实 HTTP 路径确认不卡。
+    const { base } = await start();
+    // 16KB 斜杠串：旧实现约 198ms，新实现 0ms。再长会被 HTTP 头大小限制挡成 431，
+    // 测不到归一化本身。
+    const started = Date.now();
+    const response = await fetch(`${base}/a${"/".repeat(16_000)}x`, { method: "POST" });
+    await response.text();
+    expect(Date.now() - started).toBeLessThan(150);
+    expect([404, 431]).toContain(response.status);
+  });
 });

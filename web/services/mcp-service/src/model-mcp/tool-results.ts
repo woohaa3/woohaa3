@@ -93,7 +93,16 @@ export function toolError(message: unknown, code = "unavailable") {
   };
 }
 
+/**
+ * 去掉结尾的斜杠，根路径归一成 `/`。
+ *
+ * 原来用 `value.replace(/\/+$/, "")`：`+` 配 `$` 锚点时，遇到「一串斜杠后跟非斜杠」
+ * 要从每个起点重扫剩余斜杠，是平方级。这里的 `value` 来自请求 URL 的 pathname（见
+ * mcp-http 的 handle），32KB 的该形状实测 801ms，而且发生在回环校验之前。从尾部扫
+ * 一遍即可，语义相同。
+ */
 export function normalizePath(value: string): string {
-  const trimmed = value.replace(/\/+$/, "");
-  return trimmed === "" ? "/" : trimmed;
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return end === 0 ? "/" : value.slice(0, end);
 }
