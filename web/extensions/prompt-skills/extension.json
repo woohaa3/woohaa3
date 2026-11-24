@@ -4,7 +4,7 @@
   "site": {
     "name": "提示词快捷改写",
     "description": "把执行面板的快捷改写交给站点语言模型：通用润色、画面细节润色、中英翻译、提示词分层整理、视觉风格迁移与 Loop 动态提示词。",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "configSchema": { "schemaId": "prompt-skills-config", "schemaVersion": 1 },
     "capabilities": [
       {
@@ -30,5 +30,5 @@
       "methods": ["GET", "POST"]
     }
   ],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

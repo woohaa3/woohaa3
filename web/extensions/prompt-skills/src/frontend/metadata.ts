@@ -10,7 +10,7 @@ import { PROMPT_SKILLS_PLUGIN_ID } from "../shared.js";
 
 export const PROMPT_SKILLS_FRONTEND_METADATA: ExtensionFrontendMetadata = {
   extensionId: PROMPT_SKILLS_PLUGIN_ID,
-  version: "0.1.0",
+  version: "0.1.1",
   label: "提示词快捷改写",
   description: "把执行面板的快捷改写交给站点语言模型：润色、翻译、分层整理、风格迁移与 Loop 动态提示词。",
   activation: "server-active",

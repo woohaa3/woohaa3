@@ -94,8 +94,8 @@ export function decodePromptSkillRewriteRequest(value: unknown): DecodeResult<Pr
 /** 清理模型输出：去掉代码围栏、常见前缀与包裹引号，只保留提示词正文。 */
 export function cleanRewrittenPrompt(raw: string): string {
   let text = raw.trim();
-  const fenced = /^```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```$/.exec(text);
-  if (fenced) text = fenced[1]!.trim();
+  const fenced = unfence(text);
+  if (fenced !== null) text = fenced.trim();
   text = text.replace(/^(改写后的提示词|改写后|润色后的提示词|润色后|结果|输出)\s*[:：]\s*/, "").trim();
   if (
     (text.startsWith('"') && text.endsWith('"')) ||
@@ -106,3 +106,34 @@ export function cleanRewrittenPrompt(raw: string): string {
   }
   return text;
 }
+
+/**
+ * 取出整段 Markdown 代码围栏的正文；不是围栏返回 null。
+ *
+ * 原来是 `/^```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```$/`：`\s*` 与惰性捕获都能吃空白，
+ * 未闭合的围栏会让引擎在两者之间反复退让。实测 64 KB 的「空格+换行」要 1.2 s，而
+ * 这里吃的是模型原始输出，没有长度上限。按字符扫一遍即可，语义不变。
+ */
+function unfence(text: string): string | null {
+  // 原正则没有 `m` 标志：围栏必须从串首开始，三条反引号必须在串尾结束。
+  if (!text.startsWith("```") || !text.endsWith("\n```")) return null;
+  let index = 3;
+  while (index < text.length && isFenceLanguage(text.charCodeAt(index))) index += 1;
+  // 围栏头之后至少要有一个换行；`\s*` 是贪婪的，正文从该空白段的**最后**一个换行后开始。
+  let bodyStart = -1;
+  let cursor = index;
+  while (cursor < text.length && isWhitespace(text.charCodeAt(cursor))) {
+    if (text[cursor] === "\n") bodyStart = cursor + 1;
+    cursor += 1;
+  }
+  if (bodyStart === -1) return null;
+  const bodyEnd = text.length - 4;
+  if (bodyEnd < bodyStart) return null;
+  return text.slice(bodyStart, bodyEnd);
+}
+
+const isFenceLanguage = (code: number): boolean =>
+  (code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a) || code === 0x5f || code === 0x2d;
+
+const isWhitespace = (code: number): boolean =>
+  code === 0x20 || (code >= 0x09 && code <= 0x0d) || code === 0xa0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff;

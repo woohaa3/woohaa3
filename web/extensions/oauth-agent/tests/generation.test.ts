@@ -211,6 +211,21 @@ describe("ChatGPT 生成编排", () => {
     expect(parseCandidateText("not json").ok).toBe(false);
   });
 
+  it("未闭合的代码块不会把解析拖成平方复杂度", () => {
+    // 模型被截断时常给出「围栏头 + 一长串空白 + 正文」；旧正则在这上面退让到平方级
+    // （2000 个空格约 2.2 s，4000 个约 16.9 s）。末尾留非空白字节，避免被 trim 提前吃掉。
+    const adversarial = `\u0060\u0060\u0060json${" ".repeat(4000)}x`;
+    const started = Date.now();
+    expect(parseCandidateText(adversarial).ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(250);
+  });
+
+  it("围栏头只接受空标注或 json", () => {
+    expect(parseCandidateText('\u0060\u0060\u0060json\n{"a":1}\n\u0060\u0060\u0060')).toEqual({ ok: true, value: { a: 1 } });
+    // 其他语言标注不是候选 JSON，原样交给 JSON.parse 报错。
+    expect(parseCandidateText('\u0060\u0060\u0060python\nx=1\n\u0060\u0060\u0060').ok).toBe(false);
+  });
+
   it("overwriteGuard：默认拒绝大幅缩水，明确重建时放行", () => {
     const big = "scene.box({ id: 'a', size: [1,1,1] });".repeat(40); // > 800 chars
     const tiny = `scene.box({ id: "b", size: [1,1,1] });`;

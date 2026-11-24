@@ -1,6 +1,6 @@
 {
   "name": "@woohaa3/extension-prompt-skills",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "执行面板快捷改写扩展：用站点语言模型执行润色、翻译、分层整理、风格迁移与 Loop 动态提示词改写。",

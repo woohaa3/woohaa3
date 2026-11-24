@@ -8,13 +8,35 @@ export function parseCandidateText(text: string): { ok: true; value: unknown } |
   const trimmed = text.trim();
   if (trimmed === "") return { ok: false, message: "推理未返回候选内容。" };
   // 允许模型包裹 ```json 代码块。
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/m.exec(trimmed);
-  const payload = fenced ? fenced[1]! : trimmed;
+  const payload = unfence(trimmed);
   try {
     return { ok: true, value: JSON.parse(payload) as unknown };
   } catch {
     return { ok: false, message: "推理返回不是合法 JSON，无法作为候选结果。" };
   }
+}
+
+/**
+ * 去掉 Markdown 代码围栏。
+ *
+ * 原实现是 `/^```(?:json)?\s*([\s\S]*?)\s*```$/m`：围栏头尾两侧的 `\s*` 与惰性捕获
+ * 都能吞空白，未闭合的围栏（模型被截断时常见）会让引擎在两者之间反复退让——实测
+ * 4000 个空格要 16.8 s。围栏的语义只是「某一行是围栏头、之后某一行是围栏尾」，按行
+ * 扫一遍就够，不需要正则回溯。`m` 标志允许围栏前有别的话术，这里照样保留。
+ */
+function unfence(text: string): string {
+  const lines = text.split("\n");
+  for (let start = 0; start < lines.length; start += 1) {
+    const line = lines[start]!;
+    if (!line.startsWith("```")) continue;
+    // 围栏头只接受空标注或 json；其他语言标注不是候选 JSON，原样交给 JSON.parse 报错。
+    const header = line.slice(3).trim();
+    if (header !== "" && header !== "json") continue;
+    for (let end = start + 1; end < lines.length; end += 1) {
+      if (lines[end]!.trim() === "```") return lines.slice(start + 1, end).join("\n").trim();
+    }
+  }
+  return text;
 }
 
 /**

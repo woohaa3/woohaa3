@@ -53,4 +53,22 @@ describe("cleanRewrittenPrompt", () => {
     expect(cleanRewrittenPrompt("“雨夜街道，霓虹灯反射在水面上。”")).toBe("雨夜街道，霓虹灯反射在水面上。");
     expect(cleanRewrittenPrompt("霓虹灯写着「营业中」")).toBe("霓虹灯写着「营业中」");
   });
+
+  it("围栏必须从首字符开始、在串尾结束", () => {
+    const fence = "\u0060\u0060\u0060";
+    expect(cleanRewrittenPrompt(`${fence}js\n正文\n${fence}`)).toBe("正文");
+    // 前面有话术时整段不是围栏，正文原样保留。
+    expect(cleanRewrittenPrompt(`说明\n${fence}js\n正文\n${fence}`)).toBe(`说明\n${fence}js\n正文\n${fence}`);
+    // 未闭合的围栏不是围栏。
+    expect(cleanRewrittenPrompt(`${fence}js\n正文`)).toBe(`${fence}js\n正文`);
+  });
+
+  it("未闭合围栏不会把清理拖成平方复杂度", () => {
+    // 模型被截断时常给出「围栏头 + 一长串空白 + 正文」；旧正则在这上面退让到平方级
+    // （128 KB 约 2.5 s）。末尾留一个非空白字节，避免被 trim 提前吃掉。
+    const adversarial = `\u0060\u0060\u0060${" \n".repeat(160_000)}x`;
+    const started = Date.now();
+    cleanRewrittenPrompt(adversarial);
+    expect(Date.now() - started).toBeLessThan(250);
+  });
 });
