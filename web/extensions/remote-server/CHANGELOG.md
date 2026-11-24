@@ -20,3 +20,7 @@
     而 `HostCapabilityService.register` 自 `add-extension-capability-abi` 起接 `{ id, version, value }`
     单对象，导致注册表里存的是 id 与 version 而不是 `value`，19 个用例找不到能力而失败
   - 顺手移除 `tests/assistant-world.integration.test.ts` 里未使用的导入（TS6192）
+
+## 1.1.3
+
+- 2026-11-24 `1.1.3`（上一版 `1.1.2`）：chore(security): 收口 Dependabot 228 条告警 (#42)
