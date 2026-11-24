@@ -319,6 +319,13 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
       displayName: session.displayName,
       expiresAt: result.expiresAt
     };
+    // 落库前再确认一次「续的还是当前这份会话」：续期是一次网络往返，期间人可能已经登出
+    // （`save(null)`）或换了个账号（另一个令牌）。无条件写回会把会话复活——用户点了登出，
+    // 几百毫秒后又变成已连接，而且新令牌在远端是有效的。
+    const latest = await store.load();
+    if (latest === null || latest.token !== session.token) {
+      return { ok: false, kind: "no-session", code: "session-changed" };
+    }
     await store.save(next);
     options.onSessionChanged?.();
     return { ok: true, session: next };

@@ -2498,6 +2498,31 @@ describe("renew()：续期的三态语义", () => {
     expect(calls).toBe(0);
   });
 
+  it("续期途中登出：不把已经清掉的会话写回来", async () => {
+    // 续期是一次网络往返。若期间人点了登出（`save(null)`），无条件写回会让「已登出」在
+    // 几百毫秒后复活成「已连接」，而新令牌在远端还是有效的——那是个真实的安全缺口。
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const built = build({
+      refreshSession: async () => {
+        await gate;
+        return { ok: true as const, token: "session-2", expiresAt: Date.now() + 60 * 60 * 1000 };
+      }
+    });
+    await built.store.save(session());
+
+    const pending = built.source.renew();
+    // 在返程之前登出。
+    await built.source.save(null);
+    release!();
+    const result = await pending;
+
+    expect(result).toEqual({ ok: false, kind: "no-session", code: "session-changed" });
+    expect(await built.store.load()).toBeNull();
+  });
+
   it("换地址后不拿旧部署的会话去续", async () => {
     let calls = 0;
     const built = build({
