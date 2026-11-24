@@ -134,6 +134,8 @@ async function finishLogin(
   );
   if (!who.ok) return { ok: false, code: who.code, message: who.message };
 
+  const refreshToken = readString(payload, "refreshToken");
+  const refreshExpiresAt = readString(payload, "refreshExpiresAt");
   return {
     ok: true,
     session: {
@@ -141,7 +143,12 @@ async function finishLogin(
       token,
       subject: readString(who.value, "subjectId") ?? subjectId,
       displayName: null,
-      expiresAt: parseSessionExpiry(readString(who.value, "expiresAt"), expiresAt)
+      expiresAt: parseSessionExpiry(readString(who.value, "expiresAt"), expiresAt),
+      // 两把钥匙：远端给了长期 refresh 就一起存下来，续期从此不再受 access 寿命限制。
+      // 没给（单令牌部署）时字段缺席，行为与拆分之前一致。
+      ...(refreshToken !== null
+        ? { refreshToken, refreshExpiresAt: parseSessionExpiry(refreshExpiresAt, now()) }
+        : {})
     }
   };
 }
@@ -155,41 +162,64 @@ export type ExchangeLoginInput = {
 };
 
 export type RemoteRefreshResult =
-  | { ok: true; token: string; expiresAt: number }
+  | {
+      ok: true;
+      token: string;
+      expiresAt: number;
+      /** 新的 refresh 令牌；单令牌部署没有这一项（也就没有长期续期能力）。 */
+      refreshToken?: string;
+      refreshExpiresAt?: number;
+    }
   | { ok: false; code: string; message: string };
 
 /**
- * 用一份**仍然有效**的会话换一份新的（`Refresh`）。
+ * 换一对新令牌（`Refresh`）。
  *
- * 远端语义是**轮换**而不是延长：旧令牌在同一次事务里作废，新令牌按完整 TTL 重算。所以：
- *  - 拿已失效的令牌调它一定会失败，调用方必须先确认会话可用（`isSessionUsable`）；
- *  - 成功后旧令牌立刻不能再用了，本机必须把新令牌落库，否则下一次调用就是 401。
+ * 两条路，由调用方给出的是哪个字段决定：
+ *  - 有 `refreshToken`：用它换。**不要求 access 仍然有效**——这正是它的意义，
+ *    宿主睡过了 access 的整个寿命之后仍然能自己回来；
+ *  - 没有 `refreshToken`：用 access 换（单令牌部署 / 老会话），要求它仍未过期。
  *
- * 这里**不校准** `WhoAmI`：续期不改变主体（远端按旧令牌的主体签发新令牌），多发一次请求
+ * 远端语义是**成对轮换**而不是延长：旧的一对在同一次事务里作废，新令牌按完整 TTL 重算。
+ * 所以成功后必须把新的两把钥匙都落库，否则下一次调用就是 401。
+ *
+ * `Authorization` 只在单令牌那条路上带：refresh 这条路的前提是"access 可能已经死了"，
+ * 把一个已过期的令牌塞进请求头只会让中间层（反向代理的鉴权规则、访问日志里的 401 计数）
+ * 看起来像一次失败，而实际上这次调用是成功的。`Refresh` 是公开过程，不带 Bearer 是正常形态。
+ *
+ * 这里**不校准** `WhoAmI`：续期不改变主体（远端按旧凭证的主体签发新令牌），多发一次请求
  * 只增加失败面——登录路径调 `WhoAmI` 是因为别名表可能在首次登录时改写归属。
  */
 export async function callSessionRefresh(
   fetchImpl: typeof globalThis.fetch,
   now: () => number,
   serverUrl: string,
-  token: string
+  token: string,
+  refreshToken?: string
 ): Promise<RemoteRefreshResult> {
   const result = await callConnect<unknown>(
     fetchImpl,
     serverUrl,
     connectProcedurePath(IDENTITY_SERVICE, "Refresh"),
-    // proto 字段是 session_token；Connect 的 JSON 编解码用 lowerCamelCase。
-    { sessionToken: token },
-    { token }
+    // proto 字段是 session_token / refresh_token；Connect 的 JSON 编解码用 lowerCamelCase。
+    refreshToken !== undefined && refreshToken !== ""
+      ? { refreshToken }
+      : { sessionToken: token },
+    refreshToken !== undefined && refreshToken !== "" ? {} : { token }
   );
   if (!result.ok) return { ok: false, code: result.code, message: result.message };
   const next = readString(result.value, "sessionToken");
   // 形状不符按未认证处理：续期说成功却没给令牌，等于会话已经不能用了，不能假装续上。
   if (!next) return { ok: false, code: "unauthenticated", message: "远端没有返回续期后的会话（响应形状不符）" };
+  const nextRefresh = readString(result.value, "refreshToken");
+  const refreshExpiresAt = readString(result.value, "refreshExpiresAt");
   return {
     ok: true,
     token: next,
-    expiresAt: parseSessionExpiry(readString(result.value, "expiresAt"), now())
+    expiresAt: parseSessionExpiry(readString(result.value, "expiresAt"), now()),
+    ...(nextRefresh !== null
+      ? { refreshToken: nextRefresh, refreshExpiresAt: parseSessionExpiry(refreshExpiresAt, now()) }
+      : {})
   };
 }
 

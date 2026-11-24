@@ -20,20 +20,39 @@ type PersistedSession = {
   subject: string;
   displayName: string | null;
   expiresAt: number;
+  /**
+   * 长期钥匙。两把钥匙的部署才有；旧记录（拆分之前写入的）没有这两项。
+   *
+   * 存在同一个文档里而不是单开一条：两把钥匙必须一起轮换、一起撤销，分开写会留下
+   * "换了 access 但 refresh 还是旧的"这种半新半旧的状态，而那个状态的 refresh 在远端
+   * 已经作废了。
+   */
+  refreshToken?: string;
+  refreshExpiresAt?: number;
 };
 
 function isPersistedSession(value: unknown): value is PersistedSession {
   if (value === null || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
-  return (
+  const base =
     typeof record.serverUrl === "string" &&
     typeof record.token === "string" &&
     record.token !== "" &&
     typeof record.subject === "string" &&
     (record.displayName === null || typeof record.displayName === "string") &&
     typeof record.expiresAt === "number" &&
-    Number.isFinite(record.expiresAt)
-  );
+    Number.isFinite(record.expiresAt);
+  if (!base) return false;
+  // 两把钥匙的两项是**可选**的（旧记录没有），但给了就必须是合法值：一份 refresh 令牌
+  // 配一个 NaN 到期时刻，会让"能不能自己救回来"这个判断永远出错。
+  if (record.refreshToken !== undefined && typeof record.refreshToken !== "string") return false;
+  if (
+    record.refreshExpiresAt !== undefined &&
+    (typeof record.refreshExpiresAt !== "number" || !Number.isFinite(record.refreshExpiresAt))
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -54,7 +73,10 @@ export function createDocumentSessionStore(store: ExtensionDocumentStore): Remot
         token: value.token,
         subject: value.subject,
         displayName: value.displayName,
-        expiresAt: value.expiresAt
+        expiresAt: value.expiresAt,
+        ...(typeof value.refreshToken === "string" && value.refreshToken !== ""
+          ? { refreshToken: value.refreshToken, refreshExpiresAt: value.refreshExpiresAt }
+          : {})
       };
     },
     async save(session: RemoteSession | null): Promise<void> {
@@ -65,7 +87,10 @@ export function createDocumentSessionStore(store: ExtensionDocumentStore): Remot
             token: session.token,
             subject: session.subject,
             displayName: session.displayName,
-            expiresAt: session.expiresAt
+            expiresAt: session.expiresAt,
+            ...(typeof session.refreshToken === "string" && session.refreshToken !== ""
+              ? { refreshToken: session.refreshToken, refreshExpiresAt: session.refreshExpiresAt }
+              : {})
           };
       // `null` 表示删除：登出后不留下令牌，哪怕是一条空的。
       const result = await store.batch([session === null ? { op: "delete", key: SESSION_KEY } : { op: "set", key: SESSION_KEY, value }]);

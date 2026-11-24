@@ -22,10 +22,21 @@
 /** 已登录会话（只在本机宿主内存在；绝不进入任何响应体）。 */
 export type RemoteSession = {
   serverUrl: string;
+  /** access 令牌：每条 RPC 的 Bearer 凭证，寿命短。 */
   token: string;
   subject: string;
   displayName: string | null;
   expiresAt: number;
+  /**
+   * refresh 令牌：只用来换新的 access，**不能**当 Bearer 用（服务端会拒），寿命长。
+   *
+   * 有它就意味着「这台宿主离开多久都还能自己回来」：access 过期之后不必重新登录，
+   * 拿它换一对新的即可。没有它（单令牌部署，或人还没重新登录过）时行为退化成
+   * 上一版的定时续期。
+   */
+  refreshToken?: string;
+  /** refresh 令牌的到期时刻；没有 `refreshToken` 时无意义。 */
+  refreshExpiresAt?: number;
 };
 
 /**
@@ -58,9 +69,30 @@ export function createMemorySessionStore(): RemoteSessionStore {
   };
 }
 
-/** 会话是否仍然可用（到期即视为未登录，不拿死令牌去连中继）。 */
+/** access 令牌是否仍然可用（到期即视为未登录，不拿死令牌去连中继）。 */
 export function isSessionUsable(session: RemoteSession | null, now: number): session is RemoteSession {
   return session !== null && session.token !== "" && session.expiresAt - SESSION_EXPIRY_SKEW_MS > now;
+}
+
+/**
+ * 这份会话还能不能**自己救回来**：refresh 令牌存在且尚未到期。
+ *
+ * 它与 `isSessionUsable` 是两个独立的问题，这是两把钥匙的全部要点：
+ * access 已经过期但 refresh 还有效时，`isSessionUsable` 是 false
+ * （因此不能拿去做 Bearer），但它仍然可以换出一份新的——宿主睡过了 access 的
+ * 整个寿命也不必让人重新登录。
+ *
+ * 留同样的 skew：刚好在到期瞬间拿一个已死的 refresh 去换，只会得到一次必然的
+ * 拒绝，而那次拒绝会被当成「这个人不能再用了」清掉会话。
+ */
+export function isSessionRenewable(session: RemoteSession | null, now: number): session is RemoteSession {
+  return (
+    session !== null &&
+    typeof session.refreshToken === "string" &&
+    session.refreshToken !== "" &&
+    typeof session.refreshExpiresAt === "number" &&
+    session.refreshExpiresAt - SESSION_EXPIRY_SKEW_MS > now
+  );
 }
 
 /**
@@ -118,10 +150,16 @@ export type RemoteSessionSourceOptions = {
    *
    * 缺省（宿主没接这个端口）时续期整体缺席：调用方按「没有续期能力」处理，不是失败。
    */
-  refreshSession?: (
-    serverUrl: string,
-    token: string
-  ) => Promise<{ ok: true; token: string; expiresAt: number } | { ok: false; code: string }>;
+  refreshSession?: (request: {
+    serverUrl: string;
+    /** access 令牌；可能已经过期——过期正是这条路径要处理的情况之一。 */
+    token: string;
+    /** refresh 令牌；缺省时退化成「用 access 换 access」的单令牌轮换。 */
+    refreshToken?: string;
+  }) => Promise<
+    | { ok: true; token: string; expiresAt: number; refreshToken?: string; refreshExpiresAt?: number }
+    | { ok: false; code: string }
+  >;
   /**
    * 会话落库后（登录成功 / 登出 / 401 作废 / `ensure()` 自动换会话 / 续期）通知宿主。
    *
@@ -163,7 +201,17 @@ export type RenewSessionResult =
 const REJECTED_CODES: ReadonlySet<string> = new Set(["unauthenticated", "permission_denied"]);
 
 export type RemoteSessionSource = {
-  /** 只读当前会话：不触发任何登录，过期/换地址都收敛成「没有会话」。 */
+  /**
+   * 取当前可用会话。
+   *
+   * **不触发交互式登录**：过期/换地址都收敛成「没有会话」，不会自己用人或机器凭证换了
+   * 一份新的。但它**会**在 access 过期而 refresh 仍有效时就地续一对新的——那不是登录，
+   * 而是把同一个人（同一个主体、同一台部署）已经持有的会话延续下去。
+   *
+   * 这个区分很重要：续期不需要人的同意，登录需要。把续期藏在 `ensure()` 里会让「只读」
+   * 入口（界面状态、画布上游）在重启后看到一个 `null`，界面显示「本地模式」，而其实
+   * 手里的长期钥匙完全可以把会话救回来。
+   */
   current: () => Promise<RemoteSession | null>;
   /**
    * 取一个可用会话；没有且配置了部署凭证时自动换一份。
@@ -243,14 +291,39 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
   /** 并发请求共享同一次登录。 */
   let loginInFlight: Promise<EnsureSessionResult> | null = null;
 
-  const current = async (): Promise<RemoteSession | null> => {
+  /**
+   * 读库里的会话，并丢掉「换了部署」的那些。
+   *
+   * 与 `current()` 的差别只有一条：**不判到期**。两把钥匙下「过期」不等于「不能用了」，
+   * 所以到期判断必须在调用点按用途分开做（见 `current` 与 `renewOnce`）。
+   */
+  const storedForDeployment = async (): Promise<RemoteSession | null> => {
     const stored = await store.load();
+    if (stored === null) return null;
     const serverUrl = options.configuredServerUrl();
-    if (!isSessionUsable(stored, options.now())) return null;
     // 换了地址就当作未登录：旧令牌属于另一个部署的会话，拿它连新地址只会得到 401。
     // 部署配置优先（人改过配置就是要换部署）；没配地址时会话自带的地址就是它的地址。
     if (serverUrl !== null && !sameServerOrigin(stored.serverUrl, serverUrl)) return null;
     return stored;
+  };
+
+  /**
+   * 取一个**可用**会话；access 过期而 refresh 还有效时，就地换一对新的再返回。
+   *
+   * 惰性续期放在这里、而不是放在 `ensure()` 里，是因为「谁先碰到过期的会话」无法预测：
+   * 界面状态轮询、画布同步上游、存储后端读字节，任何一个都可能是重启后的第一个调用。
+   * 只在 `ensure()` 里做的话，其余入口会看到一个 `null`，界面就会显示「本地模式」——
+   * 明明 refresh 还能把会话救回来，人却以为要重新登录。
+   *
+   * 续期复用 `renew()`，因此单飞、明确拒绝才清会话、CAS 防复活这些性质自动继承。
+   */
+  const current = async (): Promise<RemoteSession | null> => {
+    const stored = await storedForDeployment();
+    if (isSessionUsable(stored, options.now())) return stored;
+    // 不可用：只有 refresh 还活着时才值得试一次，否则那是必然失败的往返。
+    if (!isSessionRenewable(stored, options.now())) return null;
+    const renewed = await renew();
+    return renewed.ok ? renewed.session : null;
   };
 
   const save = async (session: RemoteSession | null): Promise<void> => {
@@ -259,6 +332,8 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
   };
 
   const ensure = async (): Promise<EnsureSessionResult> => {
+    // `current()` 已经包含了惰性续期（access 过期但 refresh 有效时就地换新），所以这里
+    // 拿到的 null 就是"确实没有会话"：没登录过、两把钥匙都过期了，或者换了部署。
     const existing = await current();
     if (existing) return { ok: true, session: existing };
     const serverUrl = options.configuredServerUrl();
@@ -290,15 +365,31 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
   let renewInFlight: Promise<RenewSessionResult> | null = null;
 
   const renewOnce = async (): Promise<RenewSessionResult> => {
-    // 只用**自己正在用的那条会话**续期：`current()` 已经收敛了到期与换地址两种情况，
-    // 拿一份在远端已经死掉或属于别的部署的令牌去续，只会得到一次必然的 401。
-    const session = await current();
-    if (session === null) return { ok: false, kind: "no-session", code: SESSION_UNCONFIGURED_CODE };
+    // 这里刻意**不用 `current()`**：它把"access 过期"收敛成「没有会话」，而 access 过期
+    // 恰恰是这条路径要处理的主要情况。判据换成「refresh 还能不能救」。
+    const session = await storedForDeployment();
+    const now = options.now();
+    const accessUsable = isSessionUsable(session, now);
+    const hasRefresh = isSessionRenewable(session, now);
+    // 提前取出令牌字符串再判断：`hasRefresh` 来自类型谓词，直接拿它分叉会让 TS 在另一支
+    // 把 `session` 收窄成 never（"不可续"不等于"不是会话"）。
+    const refreshToken = hasRefresh && session !== null ? session.refreshToken : undefined;
+    // 两把钥匙都没有活路：access 死了、refresh 也没有（或也死了）。此时拿任何一把去换
+    // 都只会得到一次必然的 401，然后被误当成「被明确拒绝」清掉会话。
+    if (session === null || (!accessUsable && !hasRefresh)) {
+      return { ok: false, kind: "no-session", code: SESSION_UNCONFIGURED_CODE };
+    }
     // 没接续期端口 = 这条会话源没有续期能力，不是「这次没问到」：按 no-session 交回调用方，
     // 免得排出一个永远重试、永远失败的定时器。
     if (!options.refreshSession) return { ok: false, kind: "no-session", code: "unsupported" };
+    // 优先用 refresh 令牌：它对「access 已经过期」这种情况同样成立，是两把钥匙的入口。
+    // 没有 refresh 令牌时退回单令牌轮换（旧部署 / 老会话），那条路要求 access 仍未过期。
     const result = await options
-      .refreshSession(session.serverUrl, session.token)
+      .refreshSession({
+        serverUrl: session.serverUrl,
+        token: session.token,
+        ...(refreshToken !== undefined ? { refreshToken } : {})
+      })
       .catch((error: unknown) => ({
         // 续期抛出的是意外错误（不是远端回的失败码）：按「没问到」处置，别清人的会话。
         ok: false as const,
@@ -317,13 +408,28 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
       token: result.token,
       subject: session.subject,
       displayName: session.displayName,
-      expiresAt: result.expiresAt
+      expiresAt: result.expiresAt,
+      // 远端每次轮换都换一把新的 refresh；没给就沿用旧的（单令牌部署没有这一项）。
+      ...(result.refreshToken
+        ? { refreshToken: result.refreshToken, refreshExpiresAt: result.refreshExpiresAt }
+        : refreshToken !== undefined
+          ? { refreshToken, refreshExpiresAt: session.refreshExpiresAt }
+          : {})
     };
     // 落库前再确认一次「续的还是当前这份会话」：续期是一次网络往返，期间人可能已经登出
     // （`save(null)`）或换了个账号（另一个令牌）。无条件写回会把会话复活——用户点了登出，
     // 几百毫秒后又变成已连接，而且新令牌在远端是有效的。
+    // 判据用 refresh 令牌（有的话）：用 refresh 续期时，轮换的正是它；而 access 令牌在
+    // 这条路径上可能已经过期，拿它比对没有意义。没有 refresh 时退回比 access。
     const latest = await store.load();
-    if (latest === null || latest.token !== session.token) {
+    if (latest === null) {
+      return { ok: false, kind: "no-session", code: "session-changed" };
+    }
+    const sameHolder =
+      refreshToken !== undefined
+        ? latest.refreshToken === refreshToken
+        : latest.token === session.token;
+    if (!sameHolder) {
       return { ok: false, kind: "no-session", code: "session-changed" };
     }
     await store.save(next);
@@ -347,7 +453,18 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
     async invalidate(token) {
       const stored = await store.load();
       if (stored === null || stored.token !== token) return;
-      await store.save(null);
+      // 只把**那把被判无效的 access** 丢掉，长期钥匙留着：两把钥匙下 401 首先意味着
+      // "access 过期了"，而不是"这个人不能再用了"。把整份会话清掉等于把 90 天的
+      // refresh 一起扔掉，人又得重新登录——正好是拆分要消灭的那种麻烦。
+      //
+      // 留着的会话会立刻被 `current()` 当作"access 不可用、refresh 可救"，就地续一对新的。
+      // 真到了 refresh 也不成立的时候，`renew()` 会拿到明确的拒绝并清空会话。
+      if (typeof stored.refreshToken === "string" && stored.refreshToken !== "") {
+        // 把 access 标记成已过期：`token` 保留着，使 CAS 判据还能认出"清的是这一份"。
+        await store.save({ ...stored, expiresAt: 0 });
+      } else {
+        await store.save(null);
+      }
       options.onSessionChanged?.();
     }
   };

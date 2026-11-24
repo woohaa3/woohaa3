@@ -81,6 +81,12 @@ export type FakeServerOptions = {
   /** 会话有效期（毫秒）。 */
   sessionTtlMs?: number;
   /**
+   * 两把钥匙模式：`Login` 同时签发一把 refresh 令牌，有效期由它决定。
+   *
+   * 缺省 0 = 单令牌（不签发 refresh），使既有用例保持"一把钥匙"的语义不变。
+   */
+  refreshTokenTtlMs?: number;
+  /**
    * `Refresh` 签发的新会话有效期（毫秒），缺省等于 `sessionTtlMs`。
    *
    * 单列出来是为了让「续期把到期时刻推到更远」这件事在 fake 上也成立：轮换是按完整 TTL
@@ -266,10 +272,19 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
   const identities = options.identities ?? { "device-token": "device-alice" };
   const sessionTtlMs = options.sessionTtlMs ?? 60 * 60 * 1000;
   const refreshSessionTtlMs = options.refreshSessionTtlMs ?? sessionTtlMs;
+  /** 两把钥匙模式：refresh 令牌的有效期。缺省关闭（单令牌），保持既有用例不变。 */
+  const refreshTokenTtlMs = options.refreshTokenTtlMs ?? 0;
   /** 运行期可改：续期是登录之后才发生的事，测试要在中途翻转服务端的拒绝行为。 */
   let refreshRejection = options.refreshRejection;
   const sessions = new Map<string, string>();
   const revoked: string[] = [];
+  /**
+   * refresh 令牌 → 主体。刻意**不**进 `sessions`：那张表回答「这个字符串能不能当 Bearer」，
+   * 而 refresh 令牌的正确答案是「不能」——服务端的 `Verify` 就是这样区分的。
+   */
+  const refreshTokens = new Map<string, string>();
+  /** refresh 令牌 → 它配对签出的 access 令牌，用于成对作废。 */
+  const pairedAccess = new Map<string, string>();
   const calls: FakeServer["calls"] = [];
   /** 远端目录：可变数组，测试可直接 push 来模拟「首次推送后远端登记」。 */
   const remoteCanvasIds = [...(options.canvasIds ?? ["canvas-remote-1"])];
@@ -699,22 +714,63 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
       counter += 1;
       const sessionToken = `session-${counter}`;
       sessions.set(sessionToken, subject);
-      return json({
+      const issued: Record<string, unknown> = {
         sessionToken,
         subjectId: subject,
         expiresAt: new Date(Date.now() + sessionTtlMs).toISOString()
-      });
+      };
+      if (refreshTokenTtlMs > 0) {
+        // 两把钥匙：同时给一把长期的 refresh，客户端据此获得"睡过头也能自己回来"的能力。
+        const refreshToken = `refresh-${counter}`;
+        refreshTokens.set(refreshToken, subject);
+        pairedAccess.set(refreshToken, sessionToken);
+        issued.refreshToken = refreshToken;
+        issued.refreshExpiresAt = new Date(Date.now() + refreshTokenTtlMs).toISOString();
+      }
+      return json(issued);
     }
 
     if (method === "Refresh") {
-      // 与远端一致：轮换而不是延长——旧令牌在同一次调用里作废，新令牌从头算 TTL。
+      // 与远端一致：轮换而不是延长——旧的一对在同一次调用里作废，新令牌从头算 TTL。
       // 因此「拿已经作废的令牌再来一次」必须失败，客户端得能分辨这是被明确拒绝。
       if (refreshRejection !== undefined) {
         return json({ code: refreshRejection, message: "续期被拒绝" }, refreshRejection === "unavailable" ? 503 : 401);
       }
-      const token = authorization?.replace(/^Bearer\s+/i, "") ?? "";
-      const bodyToken = (body as { sessionToken?: unknown } | null)?.sessionToken;
-      if (typeof bodyToken === "string" && bodyToken !== "" && bodyToken !== token) {
+      const bearer = authorization?.replace(/^Bearer\s+/i, "") ?? "";
+      const presented = (body as { sessionToken?: unknown; refreshToken?: unknown } | null) ?? {};
+      const bodyAccess = typeof presented.sessionToken === "string" ? presented.sessionToken : "";
+      const bodyRefresh = typeof presented.refreshToken === "string" ? presented.refreshToken : "";
+
+      // 两把钥匙：refresh 令牌**不要求** access 仍然有效——这正是它存在的理由。
+      // 但 refresh 令牌不能当 Bearer 用（服务端 Verify 拒绝它），这里同构。
+      if (bodyRefresh !== "") {
+        const subject = refreshTokens.get(bodyRefresh);
+        if (subject === undefined) return json({ code: "unauthenticated", message: "未认证" }, 401);
+        // 成对轮换：旧的 access 与 refresh 一起作废。
+        const paired = pairedAccess.get(bodyRefresh);
+        if (paired !== undefined) {
+          sessions.delete(paired);
+          revoked.push(paired);
+        }
+        refreshTokens.delete(bodyRefresh);
+        revoked.push(bodyRefresh);
+        counter += 1;
+        const sessionToken = `session-${counter}`;
+        const refreshToken = `refresh-${counter}`;
+        sessions.set(sessionToken, subject);
+        refreshTokens.set(refreshToken, subject);
+        pairedAccess.set(refreshToken, sessionToken);
+        return json({
+          sessionToken,
+          expiresAt: new Date(Date.now() + refreshSessionTtlMs).toISOString(),
+          refreshToken,
+          refreshExpiresAt: new Date(Date.now() + refreshTokenTtlMs).toISOString()
+        });
+      }
+
+      // 单令牌轮换（旧部署 / 老会话）：要求 access 仍然有效。
+      const token = bearer;
+      if (bodyAccess !== "" && bodyAccess !== token) {
         return json({ code: "invalid_argument", message: "令牌不一致" }, 400);
       }
       const subject = sessions.get(token);

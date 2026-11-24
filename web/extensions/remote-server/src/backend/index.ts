@@ -719,7 +719,8 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
          * 同样能续。这也正是「配置里留一份长期令牌」被禁止的原因：那等于把无人值守凭据
          * 当成人类会话的续期手段。
          */
-        refreshSession: async (serverUrl, token) => callSessionRefresh(fetchImpl, now, serverUrl, token),
+        refreshSession: async ({ serverUrl, token, refreshToken }) =>
+          callSessionRefresh(fetchImpl, now, serverUrl, token, refreshToken),
         /**
          * 会话一变就通知宿主重新解析画布同步上游。
          *
@@ -752,9 +753,14 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
        * 会一起静默失效——界面只会突然从「远端已接入」掉回「本地模式」，没有任何可行动提示。
        * 远端的 `IdentityService.Refresh` 本来就是为这件事准备的（轮换而非延长），只是没人调。
        *
+       * 定时器是**后备**，不是前提。真正的保证在 `ensure()`/`renew()` 里：access 过期而
+       * refresh 还有效时，用的时候就地换一对新的。因此下面这个定时器只负责"尽量提前换"，
+       * 它错过的后果只是下一次调用多一次往返，而不是把人踢下线——正是这一点让定时器不必
+       * 精确（宿主此刻没在跑也无所谓，它下次醒来时自己会续上）。
+       *
        * 几个刻意的选择：
-       *  - **提前**续（缺省到期前 10 分钟），不等到过期：过期后再续在语义上不可能——`Refresh`
-       *    要求旧令牌仍然有效；
+       *  - 只在**有 refresh 令牌**时提前排期：单令牌部署的续期必须赶在 access 过期之前，
+       *    那种情况没有懒惰的余地（过期后 `Refresh` 在语义上就不成立）；
        *  - 只用会话自己，不用部署凭证：人用设备码/OAuth 登录进来的会话同样能续，因此不需要
        *    （也不该）在配置里留一份长期令牌；
        *  - 失败分两类（见 `RenewSessionResult`）：明确拒绝才清会话，网络暂时不可用只重试并
@@ -765,6 +771,7 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
        * 轮询——定时器只在「下一次该续的时刻」醒一次。
        */
       const renewalConfig = options.sessionRenewal ?? {};
+      /** 提前量：缺省到期前 10 分钟，供宿主按需覆盖。 */
       const renewalLeadMs = renewalConfig.leadMs ?? 10 * 60 * 1000;
       const renewalMinDelayMs = renewalConfig.minDelayMs ?? 60 * 1000;
       const renewalRetryMs = renewalConfig.retryMs ?? 5 * 60 * 1000;
@@ -782,10 +789,12 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       /**
        * 距「该续了」还有多久（毫秒）；`<= 0` 就是现在。
        *
-       * 「该续了」= 到期前 `renewalLeadMs`。为什么必须提前：`Refresh` 要求旧令牌**仍然有效**，
-       * 过期之后在语义上就续不动了——那条路只剩「重新登录」。
+       * 「该续了」= 到期前 `renewalLeadMs`。两把钥匙下这个定时器只是优化（过期了照样能
+       * 懒续），单令牌下它仍是唯一机会。提前量必须是**固定值**而不是按剩余寿命算的
+       * 比例：后者每次调用都给出不同的目标时刻，定时器永远等不到那个点。
        */
-      const msUntilRenewal = (session: RemoteSession): number => session.expiresAt - renewalLeadMs - now();
+      const msUntilRenewal = (session: RemoteSession): number =>
+        session.expiresAt - renewalLeadMs - now();
 
       /**
        * 排一次续期，`delayMs` 是希望的延迟。
@@ -811,8 +820,15 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
       const runRenewal = async (): Promise<void> => {
         if (renewalStopped) return;
         const session = await sessionSource.current();
-        // 没有可用会话（未登录、已到期、换了部署）：不排期，等下一次会话变化再唤醒。
-        if (session === null) return;
+        // 到点了但没有**可用**会话：可能是 access 已经过期。这时仍然该试一次——两把钥匙
+        // 下这恰恰是 refresh 存在的意义（`renew()` 自己会判断 refresh 还有没有效）。
+        // 只有"什么都不剩"才放弃，那由 `renew()` 回 `no-session` 表达。
+        if (session === null) {
+          const result = await sessionSource.renew();
+          if (result.ok) log({ event: "remote-session-renewed", level: "debug", serverUrl: result.session.serverUrl });
+          else if (result.kind === "transient") scheduleRenewal(renewalRetryMs);
+          return;
+        }
         // 被定时器上限提前唤醒时，真正的续期时刻还没到（按同一判据重排，不另立一份）。
         if (msUntilRenewal(session) > 0) {
           scheduleRenewal(msUntilRenewal(session));

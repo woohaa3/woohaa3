@@ -369,6 +369,47 @@ describe("remote-server 后端", () => {
     expect(session.body).toMatchObject({ phase: "connected" });
   });
 
+  it("两把钥匙一起落库、一起跨实例保留（拆开写会留下已作废的半份）", async () => {
+    const fake = createFakeServer({
+      sessionTtlMs: 60 * 60 * 1000,
+      refreshTokenTtlMs: 90 * 24 * 60 * 60 * 1000
+    });
+    const docs = createFakeDocuments();
+    const store = createDocumentSessionStore(docs);
+    const first = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+    await first.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+    const issued = (await store.load())!;
+    expect(issued.refreshToken).toBeTruthy();
+
+    // 重启后从同一份文档读回：两把钥匙都在，长期的那把没有被丢掉。
+    const reloaded = await createDocumentSessionStore(docs).load();
+    expect(reloaded?.token).toBe(issued.token);
+    expect(reloaded?.refreshToken).toBe(issued.refreshToken);
+    expect(reloaded?.refreshExpiresAt).toBe(issued.refreshExpiresAt);
+  });
+
+  it("旧记录（拆分之前写入、没有 refresh 字段）仍能读回，行为退回单令牌", async () => {
+    const fake = createFakeServer();
+    const docs = createFakeDocuments();
+    // 拆分之前的记录形状：只有一把钥匙。
+    await docs.batch([
+      {
+        op: "set",
+        key: "session/current",
+        value: {
+          serverUrl: fake.serverUrl,
+          token: "legacy-token",
+          subject: "device-alice",
+          displayName: null,
+          expiresAt: Date.now() + 60 * 60 * 1000
+        }
+      }
+    ]);
+    const loaded = await createDocumentSessionStore(docs).load();
+    expect(loaded).toMatchObject({ token: "legacy-token" });
+    expect(loaded?.refreshToken).toBeUndefined();
+  });
+
   it("文档存储里的损坏记录按未登录处理（安全方向）", async () => {
     const docs = createFakeDocuments();
     await docs.batch([{ op: "set", key: "session/current", value: { serverUrl: 1 } }]);
@@ -2366,6 +2407,85 @@ describe("自动续约：不让会话到期把人踢下线", () => {
     }
   });
 
+  it("两把钥匙：整个 access 寿命都睡过去之后，宿主自己回来，不必重新登录", async () => {
+    // 这是两把钥匙存在的**唯一**理由，也是单令牌设计做不到的那件事：
+    // 之前的实现只能在「到期前 10 分钟」那个窗口里续期，宿主只要在那个窗口没运行
+    // （关了一晚上、出差一周），access 就过期，只能等人工重新登录。
+    // 有了长期 refresh，续期从「定时驱动」变成「用的时候发现过期就换」。
+    vi.useFakeTimers();
+    try {
+      const HOUR = 60 * MINUTE;
+      const fake = createFakeServer({
+        sessionTtlMs: HOUR,
+        refreshTokenTtlMs: 90 * 24 * HOUR,
+        identities: { "device-token": "device-alice" }
+      });
+      const store = createMemorySessionStore();
+      const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+      await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+
+      const issued = (await store.load())!;
+      // 登录确实拿到了两把不同的钥匙。
+      expect(issued.refreshToken).toBeTruthy();
+      expect(issued.refreshToken).not.toBe(issued.token);
+      expect(issued.refreshExpiresAt!).toBeGreaterThan(issued.expiresAt);
+      const firstAccess = issued.token;
+
+      // 宿主完全停摆：把它销毁，让时钟越过 access 的整个寿命（远超 10 分钟提前量）。
+      // 停摆期间**不**发生任何续期——这正是"机器关着"与"机器开着只是没人用"的区别，
+      // 也是定时器路线做不到的那件事。
+      const running = await store.load();
+      expect(running!.token).toBe(firstAccess);
+      // 跑掉扩展注册的 effect 清理函数 = 宿主进程退出：定时器被收掉，不再有任何后台活动。
+      for (const undo of host.effects) undo();
+      host.effects.length = 0;
+
+      await tick(4 * HOUR);
+      const beforeWake = (await store.load())!;
+      expect(beforeWake.token).toBe(firstAccess);
+
+      // 重新拉起同一份存储（模拟宿主重启）：access 已经过期，但会话不该要求重新登录。
+      const resumedHost = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+      const ensured = await resumedHost.call(REMOTE_SERVER_SESSION_ROUTE);
+      expect(ensured.body).toMatchObject({ phase: "connected", subject: "device-alice" });
+
+      // 真的换出了新的一对，旧 access 在远端作废。
+      const resumed = (await store.load())!;
+      expect(resumed.token).not.toBe(firstAccess);
+      expect(fake.revoked).toContain(firstAccess);
+      expect(fake.sessions.get(resumed.token)).toBe("device-alice");
+      expect(resumed.refreshToken).not.toBe(issued.refreshToken);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("两把钥匙：refresh 令牌绝不当 Bearer 用", async () => {
+    // 服务端拒绝 refresh 令牌作 Bearer（`Verify` 只认 access）。客户端必须同样不用它：
+    // 一旦漏用，每次业务调用都会 401，而 401 又会被当作"会话失效"清掉登录态。
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeServer({
+        sessionTtlMs: 60 * MINUTE,
+        refreshTokenTtlMs: 90 * 24 * 60 * MINUTE
+      });
+      const store = createMemorySessionStore();
+      const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+      await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+      const issued = (await store.load())!;
+
+      // 用它去调业务面：远端拒绝，客户端据此清掉会话。
+      const result = await host.call(REMOTE_SERVER_SESSION_ROUTE);
+      expect(result.body).toMatchObject({ phase: "connected" });
+
+      // 真正断言：会话里两把钥匙是分开的，且 fake 的 sessions 表里只有 access。
+      expect(fake.sessions.has(issued.token)).toBe(true);
+      expect(fake.sessions.has(issued.refreshToken!)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("已经不可用的会话不会被拿去续（死令牌换不出新会话）", async () => {
     // 远端语义是轮换：拿已失效的令牌调 Refresh 只会得到 401，然后被误判成「被明确拒绝」。
     // 所以过期之后应当是「等重新登录」，而不是「打一次必失败的续期再清空」。
@@ -2420,8 +2540,9 @@ describe("renew()：续期的三态语义", () => {
   });
 
   const build = (options: {
-    refreshSession?: (serverUrl: string, token: string) => Promise<
-      { ok: true; token: string; expiresAt: number } | { ok: false; code: string }
+    refreshSession?: (request: { serverUrl: string; token: string; refreshToken?: string }) => Promise<
+      | { ok: true; token: string; expiresAt: number; refreshToken?: string; refreshExpiresAt?: number }
+      | { ok: false; code: string }
     >;
     configured?: string | null;
   }) => {
@@ -2520,6 +2641,39 @@ describe("renew()：续期的三态语义", () => {
     const result = await pending;
 
     expect(result).toEqual({ ok: false, kind: "no-session", code: "session-changed" });
+    expect(await built.store.load()).toBeNull();
+  });
+
+  it("401 只丢掉那把 access，长期钥匙留着（下一次取会话会就地续上）", async () => {
+    // 两把钥匙下 401 首先意味着"access 过期/被作废"，而不是"这个人不能再用了"。
+    // 把整份会话清掉等于把长期 refresh 一起扔掉，人又得重新登录——正是拆分要消灭的麻烦。
+    const now = Date.now();
+    const built = build({
+      refreshSession: async () => ({ ok: true as const, token: "session-2", expiresAt: now + 60 * 60 * 1000 })
+    });
+    await built.store.save(
+      session({
+        refreshToken: "refresh-1",
+        refreshExpiresAt: now + 90 * 24 * 60 * 60 * 1000
+      })
+    );
+
+    await built.source.invalidate("session-1");
+
+    const stored = await built.store.load();
+    // 会话没被清空，长期钥匙还在。
+    expect(stored).not.toBeNull();
+    expect(stored!.refreshToken).toBe("refresh-1");
+    // access 被标成不可用。
+    expect(stored!.expiresAt).toBe(0);
+    // 下一次取会话：refresh 把它救回来了，而且不需要人登录。
+    expect(await built.source.current()).toMatchObject({ token: "session-2" });
+  });
+
+  it("没有长期钥匙时 401 仍然清空会话（退化成上一版行为）", async () => {
+    const built = build({});
+    await built.store.save(session());
+    await built.source.invalidate("session-1");
     expect(await built.store.load()).toBeNull();
   });
 
