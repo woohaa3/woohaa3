@@ -33,7 +33,7 @@
   "devDependencies": {
     "@types/node": "^22.15.3",
     "typescript": "^7.0.2",
-    "vitest": "^2.0.0",
+    "vitest": "^4.1.12",
     "ai": "^7.0.99",
     "@ai-sdk/provider": "^4.0.14"
   }

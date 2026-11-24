@@ -27,7 +27,7 @@ function kebab(name: string): string {
 
 describe("跨运行时 token fixture（任务 5.5）", () => {
   it("Rust fallback 每个 token 与 canonical preset 完全一致", () => {
-    const rust = readFileSync(resolve(REPO_ROOT, "bevy/src/theme_generated.rs"), "utf8");
+    const rust = readFileSync(resolve(REPO_ROOT, "bevy/src/support/theme_generated.rs"), "utf8");
     const theme = defaultAppTheme();
     for (const name of APP_THEME_TOKEN_NAMES) {
       // 生成物形态：("tokenName", "#rrggbb")。

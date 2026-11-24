@@ -7,7 +7,7 @@
  * 本模块只定义版本常量、请求类型与编码；有限值/zoom/overview 校验与原子接受在 Rust 接受点。
  *
  * 固定大小意味着 payload 不随节点、边或模型规模增长（design D3 / spec「payload SHALL 独立于
- * 全场规模」）。版本与 Rust `bevy/src/protocol/viewport.rs` 的 `CANVAS_VIEWPORT_UPDATE_VERSION`
+ * 全场规模」）。版本与 Rust `bevy/src/contract/protocol/viewport.rs` 的 `CANVAS_VIEWPORT_UPDATE_VERSION`
  * 必须逐字节一致；结构变化必须升版本，旧 WASM 由 loader 明确拒绝。
  */
 import { clampWoohaa3CanvasZoom, WOOHAA3_CANVAS_MAX_ZOOM, WOOHAA3_CANVAS_MIN_ZOOM } from "./domain/core/viewport-zoom.js";

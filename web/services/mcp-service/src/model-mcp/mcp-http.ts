@@ -34,6 +34,28 @@ export {
 } from "./http-types.js";
 export { buildModelApiGuideText } from "./guide.js";
 
+/**
+ * 单个 `tools/call` 参数里允许的数组元素与对象成员总数上限
+ * （GHSA-46jr-4wx8-v453：未设上限时一次 4 MiB 请求即可在校验阶段耗尽堆内存）。
+ *
+ * 取值远高于任何真实批次：脚本源按字符数另行限制（`MODEL_SCRIPT_MAX_CHARS` 20 万字符/项），
+ * 而这里只数结构层级（每个节点约 4-6 个成员），20 万元素已覆盖数万个节点的画布批次。
+ * 超出上限的调用返回 `isError: true`，不会被静默截断。
+ */
+const MAX_TOOL_INPUT_ELEMENTS = 200_000;
+
+/** 传给 `McpServer` 的结构上限选项；两处构造共用，避免只加固其中一处。 */
+const MCP_SERVER_OPTIONS = { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS } as const;
+
+/**
+ * POST 请求体字节上限（GHSA-46jr-4wx8-v453 的第二道闸）。
+ *
+ * `maxToolInputElements` 只覆盖 `tools/call` 的 `arguments`，请求体其余部分（`params._meta`
+ * 等）不受它约束，所以传输层仍要有一个显式的字节上限。这里沿用上游默认的 4 MiB 而不放大：
+ * 单个脚本源另有 20 万字符上限，4 MiB 足以容纳成批的中等规模脚本。超限请求在解析前即返回 413。
+ */
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
+
 export function createModelMcpHttpHandler(options: ModelMcpHttpOptions): ModelMcpHttpHandler {
   const path = normalizePath(options.path ?? MODEL_MCP_HTTP_PATH);
   const log = options.logger ?? (() => undefined);
@@ -42,6 +64,7 @@ export function createModelMcpHttpHandler(options: ModelMcpHttpOptions): ModelMc
     (ctx) => createModelMcpServer(options, extractBearer(ctx.requestInfo), requestLoopback.getStore() === true),
     {
       legacy: "stateless",
+      maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
       onerror: (error) => log({ event: "model-mcp-protocol-error", status: 400, code: error.name })
     }
   );
@@ -131,7 +154,7 @@ function extractBearer(request: Request | undefined): string | null {
 }
 
 function createModelMcpServer(options: ModelMcpHttpOptions, bearerToken: string | null, loopback: boolean): McpServer {
-  const server = new McpServer({ name: "woohaa3-model-canvas", version: "1.0.0" });
+  const server = new McpServer({ name: "woohaa3-model-canvas", version: "1.0.0" }, MCP_SERVER_OPTIONS);
   const grantDenied = (tool: string, args: { canvasId?: unknown; nodeId?: unknown; nodeIds?: unknown; items?: unknown; cameraId?: unknown }): string | null => {
     if (!bearerToken) return null;
     if (!options.toolGrant) return "工具授权校验未装配";
@@ -210,7 +233,7 @@ const GRANTED_TOOLS = new Set([
  */
 export function listModelMcpToolNames(options: ModelMcpHttpOptions = {}): readonly string[] {
   const names = new Set<string>();
-  const server = new McpServer({ name: "woohaa3-model-canvas", version: "1.0.0" });
+  const server = new McpServer({ name: "woohaa3-model-canvas", version: "1.0.0" }, MCP_SERVER_OPTIONS);
   server.registerTool = ((name: string) => {
     names.add(name);
     return undefined;

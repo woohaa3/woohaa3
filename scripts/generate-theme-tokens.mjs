@@ -13,7 +13,7 @@
  *   - web/contracts/src/theme/generated-default.ts   TypeScript 默认 snapshot
  *   - web/contracts/src/theme/generated-dark.ts      TypeScript 暗色 snapshot
  *   - web/ui/src/styles/generated-theme.css 根级 `--app-*` CSS variables（含 dark 首帧规则）
- *   - bevy/src/theme_generated.rs                    Rust fallback token 常量（仅默认 preset）
+ *   - bevy/src/support/theme_generated.rs            Rust fallback token 常量（仅默认 preset）
  *
  * 因此新增/删除 token 必须提升 schema version 并同时更新两个消费者；任何一端手工漂移
  * 都会被 `--check` 捕获。
@@ -31,7 +31,7 @@ const CANONICAL_DARK = join(root, "web", "contracts", "src", "theme", "app-theme
 const OUT_TS_DEFAULT = join(root, "web", "contracts", "src", "theme", "generated-default.ts");
 const OUT_TS_DARK = join(root, "web", "contracts", "src", "theme", "generated-dark.ts");
 const OUT_CSS = join(root, "web", "ui", "src", "styles", "generated-theme.css");
-const OUT_RS = join(root, "bevy", "src", "theme_generated.rs");
+const OUT_RS = join(root, "bevy", "src", "support", "theme_generated.rs");
 
 const SCHEMA_VERSION = "woohaa-app-theme-v2";
 const MAX_ID_LENGTH = 80;

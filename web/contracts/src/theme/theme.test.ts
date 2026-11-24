@@ -232,7 +232,7 @@ describe("canonical 生成物一致性（任务 1.4）", () => {
   });
 
   it("Rust 生成物包含全部 token 与 fingerprint", () => {
-    const rust = readFileSync(resolve(here, "../../../../bevy/src/theme_generated.rs"), "utf8");
+    const rust = readFileSync(resolve(here, "../../../../bevy/src/support/theme_generated.rs"), "utf8");
     expect(rust).toContain(APP_THEME_DEFAULT_FINGERPRINT);
     for (const name of APP_THEME_TOKEN_NAMES) {
       expect(rust, name).toContain(`("${name}",`);

@@ -85,7 +85,8 @@ tauri = { version = "=2.12.3", default-features = false, features = ["wry", "com
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 tauri-plugin-notification = "2.7.0"
 tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
+# 2.14.1 起解压走 zip ^9（4.x/8.x 的 zip 有未修复的解压路径问题）；与 rust-toolchain 的 1.97.1 兼容。
+tauri-plugin-updater = "2.14.1"
 tauri-plugin-dialog = { version = "2", default-features = false, features = ["xdg-portal"] }
 # 壳层日志走官方插件（change: unify-host-client-logging，design D7）：
 # 平台日志目录、轮转与级别过滤由它提供，不再自研文件写入。

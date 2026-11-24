@@ -196,6 +196,8 @@ export function collectPreflightProblems(host, { slotDeclarations = null, bumpBa
  *    `scripts/lib/extension-version.mjs` 的文件头），但值必须只有一个。
  * 2. **单调性**（`bumpBase` 提供时判定）：扩展目录在基线之后有改动而分发版本没变，说明
  *    「改了代码没发版」。缺省告警，`--strict` 时升级为失败；基线不可用时只告警跳过。
+ *    只动 `devDependencies`（或增删目录内锁文件）不算——那不进 `dist/`，见
+ *    `scripts/lib/extension-version.mjs` 的 `onlyToolingChanges`。
  *
  * 只读 JSON 与字面量，不 import 扩展模块。
  */

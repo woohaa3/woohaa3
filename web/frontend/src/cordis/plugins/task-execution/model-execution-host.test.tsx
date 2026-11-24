@@ -20,6 +20,7 @@ import { createModelDraftStore } from "./model-draft.js";
 import { canvasModelParameterStore, canvasModelParametersKey } from "./canvas-model-parameters.js";
 import { nodeDraftStore } from "./drafts.js";
 import type { ModelPanelProps } from "../../contract/model-interaction.js";
+import type { SubmitCoordinator } from "./submit-coordinator.js";
 import { catalogFixture, canvasFixture } from "./test-support/fixtures.js";
 import { ModelInteractionService } from "../../services/model-interaction-service.js";
 import { DialogService } from "../../services/dialogs/service.js";
@@ -206,7 +207,7 @@ function videoCatalog(options: {
   ]);
 }
 
-async function mountVideoHost(catalog: CanvasTaskCatalog, submit: ReturnType<typeof vi.fn>) {
+async function mountVideoHost(catalog: CanvasTaskCatalog, submit: SubmitCoordinator["submit"]) {
   let panel: ModelPanelProps | undefined;
   const registry = new ModelInteractionService();
   registry.register({
@@ -238,7 +239,7 @@ async function mountVideoHost(catalog: CanvasTaskCatalog, submit: ReturnType<typ
 
 describe("ModelExecutionHost 视频参数门禁", () => {
   it("缺 aspectRatio 时拒绝提交且不调用协调器", async () => {
-    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const submit = vi.fn<SubmitCoordinator["submit"]>(async () => ({ ok: true, runId: "r", jobId: "j" }));
     const panel = await mountVideoHost(videoCatalog(), submit);
     let outcome: Awaited<ReturnType<ModelPanelProps["submit"]>> | undefined;
     await act(async () => {
@@ -256,7 +257,7 @@ describe("ModelExecutionHost 视频参数门禁", () => {
   });
 
   it("缺 resolution 时拒绝提交", async () => {
-    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const submit = vi.fn<SubmitCoordinator["submit"]>(async () => ({ ok: true, runId: "r", jobId: "j" }));
     const panel = await mountVideoHost(videoCatalog(), submit);
     await act(async () => {
       await panel.submit({
@@ -269,7 +270,7 @@ describe("ModelExecutionHost 视频参数门禁", () => {
   });
 
   it("时长越界时拒绝提交并显示范围", async () => {
-    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const submit = vi.fn<SubmitCoordinator["submit"]>(async () => ({ ok: true, runId: "r", jobId: "j" }));
     const panel = await mountVideoHost(videoCatalog(), submit);
     let outcome: Awaited<ReturnType<ModelPanelProps["submit"]>> | undefined;
     await act(async () => {
@@ -284,8 +285,8 @@ describe("ModelExecutionHost 视频参数门禁", () => {
   });
 
   it("提交快照包含模型默认值", async () => {
-    const submit = vi.fn(async (_input: { parameters: Record<string, unknown> }) => ({
-      ok: true as const,
+    const submit = vi.fn<SubmitCoordinator["submit"]>(async () => ({
+      ok: true,
       runId: "r",
       jobId: "j"
     }));
@@ -312,7 +313,7 @@ describe("画布内同模型参数沿用", () => {
     const registry = new ModelInteractionService();
     registry.register({ id: "test-panel", version: 1, owner: "test", Panel: props => { panel = props; return <output>{props.draft.prompt}</output>; } });
     const catalog = videoCatalog({ defaults: { aspectRatio: "16:9", resolution: "720p", durationSeconds: 5 } });
-    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const submit = vi.fn<SubmitCoordinator["submit"]>(async () => ({ ok: true, runId: "r", jobId: "j" }));
     const mountHost = (nodeId: string) => mount(
       <ModelExecutionHost canvasId="canvas-1" selectedNodeId={nodeId} session={{} as never} runClient={{} as never} writable
         dialogs={new DialogService()} catalog={new StubCatalogService(catalog)} registry={registry}
@@ -400,7 +401,7 @@ describe("model choice persistence", () => {
       panel = props;
       return <output>{props.model.modelKey}</output>;
     } });
-    const submit = vi.fn(async () => ({ ok: true as const, runId: "r", jobId: "j" }));
+    const submit = vi.fn<SubmitCoordinator["submit"]>(async () => ({ ok: true, runId: "r", jobId: "j" }));
     const host = await mount(<ModelExecutionHost canvasId="canvas-1" selectedNodeId={nodeId} session={{} as never}
       writable runClient={{} as never} dialogs={new DialogService()} catalog={new StubCatalogService(catalog)}
       registry={registry} draftStore={createModelDraftStore()} submitCoordinator={{ submit, cancel: vi.fn() }} />);
