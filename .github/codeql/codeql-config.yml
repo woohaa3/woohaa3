@@ -1,0 +1,55 @@
+# CodeQL configuration for the public client repository.
+#
+# Loaded by .github/workflows/codeql.yml through the init step's `config-file`
+# input. GitHub's default setup cannot read a checked-in configuration, which is
+# why this repository runs advanced setup instead.
+#
+# Scope decision: analyse code that this repository's maintainers write and
+# ship. Third-party source vendored into the tree, test scaffolding and
+# generated bindings are excluded, because alerts there cannot be fixed here and
+# they bury the alerts that can.
+#
+# Both keys below are the only per-path / per-query controls CodeQL offers:
+# `paths-ignore` excludes a path from every query, and `query-filters` excludes a
+# query from every path. Neither can suppress one query on one file, so reviewed
+# single-site false positives are dismissed as alerts instead of being encoded
+# here.
+
+name: "woohaa3 client CodeQL config"
+
+paths-ignore:
+  # Vendored third-party source. `desktop/vendor/photocraft` is an upstream
+  # Cargo tree carried in-tree for the desktop build; `web/vendor` holds
+  # pre-built extension bundles. Fixes belong upstream or in the vendoring
+  # process, not in a patch applied here.
+  - desktop/vendor/**
+  - web/vendor/**
+
+  # Dependencies. Already excluded by CodeQL, listed so the intent is explicit.
+  - "**/node_modules/**"
+
+  # Tests, end-to-end harnesses and fixtures. These deliberately contain
+  # synthetic URLs, weak hashes and planted secrets to exercise the checks they
+  # belong to; a finding here describes the fixture, not the product.
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test.mjs"
+  - "**/*.test.js"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/tests/**"
+  - web/e2e/**
+  - web/ui/showcase/e2e/**
+  - web/test-fixtures/**
+  # Fixture sources, named individually. A blanket `**/fixtures/**` would also
+  # swallow web/ui/fixtures/standalone.tsx, which is a hand-written entry point
+  # for opening a component outside the app, not a test double.
+  - scripts/fixtures/**
+  - web/ui/showcase/src/fixtures/**
+
+  # Generated contract bindings. Written by `pnpm -C api run gen` from
+  # api/proto and never hand-edited.
+  - api/gen/**
+
+  # Lock files: dependency pins, not code this repository authors.
+  - locks/**

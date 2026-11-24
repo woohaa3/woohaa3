@@ -1,0 +1,101 @@
+name: CodeQL
+
+# Code scanning for the client repository, run as advanced setup so that
+# .github/codeql/codeql-config.yml applies. Default setup cannot read a checked-in
+# configuration, and its auto-detected scope produced 261 alerts of which 212
+# came from vendored third-party source or test scaffolding.
+#
+# Languages: `javascript-typescript` and `rust` carry the product code and hold
+# every alert found so far; `actions` is kept because the workflows here run
+# release tooling; `python` is kept for the two first-party asset generator
+# scripts even though it has produced no alerts. Dropping a language default
+# setup covered would trade noise for blind spots, which is not the intent here.
+#
+# Scope, exclusions and the reasoning behind each excluded path live in the
+# config file, next to the patterns they justify.
+#
+# Third-party actions are pinned to full commit SHAs; update them deliberately.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly, Monday 04:14 UTC. Offset from the top of the hour to avoid the
+    # queue that GitHub-wide cron schedules create there.
+    - cron: "14 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches rust-toolchain.toml; the Rust extractor shells out to cargo even in
+  # buildless mode, so the pinned toolchain has to be installed first.
+  RUST_VERSION: "1.97.1"
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    permissions:
+      # Uploading SARIF results for the analyzed ref.
+      security-events: write
+      # Reading the merged results of earlier analyses on the same ref.
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            # No build step exists for the action-metadata extractor.
+            build-mode: none
+          - language: javascript-typescript
+            # Interpreted: the database is extracted from source, no build step.
+            build-mode: none
+          - language: python
+            # Two first-party asset generator scripts. Cheap to scan, and drop-
+            # ping a language would silently shrink coverage.
+            build-mode: none
+          - language: rust
+            # The Rust extractor only accepts `none`; it reads the source and
+            # resolves the dependency graph itself. `autobuild` and `manual` are
+            # rejected by the extractor, so no cargo build runs below.
+            build-mode: none
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Set up Rust
+        if: matrix.language == 'rust'
+        # Buildless extraction still shells out to cargo, and rust-toolchain.toml
+        # pins 1.97.1. Installing that toolchain up front is cheaper than letting
+        # cargo auto-install it on first use, and it keeps the analysis on the
+        # version the project is developed against.
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; explicit toolchain input
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: "/language:${{ matrix.language }}"
