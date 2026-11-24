@@ -400,3 +400,93 @@ test("metadataObjectRange 找不到导出时返回 null（不猜）", () => {
   assert.equal(metadataObjectRange('export const M = 1;', "M"), null);
   assert.equal(metadataObjectRange("", "M"), null);
 });
+
+// ---------------------------------------------------------------------------
+// 门禁豁免口径：改动只落在不进分发产物的位置时不要求 bump 版本
+// （一次仓库级测试框架升级会碰几十个扩展的 package.json，逼它们各发一个空 patch
+//  会让用户侧出现一串无实际变化的更新，反而埋掉真正需要留意的更新）。
+// ---------------------------------------------------------------------------
+
+/** 建一个带 package.json 的扩展目录并提交，返回便于后续改动的句柄。 */
+function toolingRepo() {
+  const { root, run } = gitRepo();
+  const dir = path.join(root, "ext");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "extension.json"), '{"schemaVersion":1,"extensionId":"demo","version":"0.1.0"}\n');
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: "demo", version: "0.1.0", dependencies: { left: "1.0.0" }, devDependencies: { vitest: "^2.0.0" } }, null, 2) + "\n"
+  );
+  fs.writeFileSync(path.join(dir, "src.ts"), "export const a = 1;\n");
+  run(["add", "."]);
+  run(["commit", "-qm", "init"]);
+  return { root, run, dir, manifest: path.join(dir, "package.json") };
+}
+
+test("unreleasedChanges：只有 devDependencies 变化 → 不要求 bump", async () => {
+  const { unreleasedChanges } = await import("./extension-version.mjs");
+  const { root, dir, manifest } = toolingRepo();
+  const current = JSON.parse(fs.readFileSync(manifest, "utf8"));
+  current.devDependencies.vitest = "^4.1.12";
+  fs.writeFileSync(manifest, JSON.stringify(current, null, 2) + "\n");
+  const result = unreleasedChanges({ repoRoot: root, base: "HEAD", dir, currentVersion: "0.1.0" });
+  assert.equal(result.bumped, true);
+  assert.equal(result.toolingOnly, true);
+});
+
+test("unreleasedChanges：devDependencies 变化且键序不同 → 仍视为一致", async () => {
+  const { unreleasedChanges } = await import("./extension-version.mjs");
+  const { root, dir, manifest } = toolingRepo();
+  // 反转所有键序：豁免必须只看内容，不能因序列化顺序不同就误报。
+  const current = JSON.parse(fs.readFileSync(manifest, "utf8"));
+  current.devDependencies = { vitest: "^4.1.12" };
+  fs.writeFileSync(manifest, JSON.stringify(current, null, 2) + "\n");
+  const result = unreleasedChanges({ repoRoot: root, base: "HEAD", dir, currentVersion: "0.1.0" });
+  assert.equal(result.bumped, true);
+});
+
+test("unreleasedChanges：删改锁文件 → 不要求 bump", async () => {
+  const { unreleasedChanges } = await import("./extension-version.mjs");
+  const { root, run, dir } = toolingRepo();
+  fs.writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  run(["add", "."]);
+  run(["commit", "-qm", "add lock"]);
+  // 基线取加上锁文件之后的那次提交，再把它删掉。
+  run(["rm", "-q", "ext/pnpm-lock.yaml"]);
+  const result = unreleasedChanges({ repoRoot: root, base: "HEAD", dir, currentVersion: "0.1.0" });
+  assert.equal(result.bumped, true);
+  assert.equal(result.toolingOnly, true);
+});
+
+test("unreleasedChanges：dependencies 变化不豁免（哪怕 devDependencies 同时变了）", async () => {
+  const { unreleasedChanges } = await import("./extension-version.mjs");
+  const { root, dir, manifest } = toolingRepo();
+  const current = JSON.parse(fs.readFileSync(manifest, "utf8"));
+  current.devDependencies.vitest = "^4.1.12";
+  current.dependencies.left = "1.0.1";
+  fs.writeFileSync(manifest, JSON.stringify(current, null, 2) + "\n");
+  const result = unreleasedChanges({ repoRoot: root, base: "HEAD", dir, currentVersion: "0.1.0" });
+  assert.equal(result.bumped, false);
+});
+
+test("unreleasedChanges：源码变化不豁免（哪怕同时只改了 devDependencies）", async () => {
+  const { unreleasedChanges } = await import("./extension-version.mjs");
+  const { root, dir, manifest } = toolingRepo();
+  const current = JSON.parse(fs.readFileSync(manifest, "utf8"));
+  current.devDependencies.vitest = "^4.1.12";
+  fs.writeFileSync(manifest, JSON.stringify(current, null, 2) + "\n");
+  fs.appendFileSync(path.join(dir, "src.ts"), "export const b = 2;\n");
+  const result = unreleasedChanges({ repoRoot: root, base: "HEAD", dir, currentVersion: "0.1.0" });
+  assert.equal(result.bumped, false);
+});
+
+test("unreleasedChanges：新增 package.json（基线不存在）不豁免", async () => {
+  const { unreleasedChanges } = await import("./extension-version.mjs");
+  const { root, run, dir } = toolingRepo();
+  // 基线上没有 package.json，无法证明"只动了 devDependencies"。
+  run(["rm", "-q", "ext/package.json"]);
+  run(["commit", "-qm", "drop manifest"]);
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "demo", version: "0.1.0", devDependencies: { vitest: "^4.1.12" } }, null, 2) + "\n");
+  const result = unreleasedChanges({ repoRoot: root, base: "HEAD", dir, currentVersion: "0.1.0" });
+  assert.equal(result.bumped, false);
+});

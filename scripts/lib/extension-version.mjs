@@ -502,6 +502,70 @@ export function versionAtBase({ repoRoot, base, dir }) {
   }
 }
 
+/** 目录内不随产物发布、因而与发版无关的文件。 */
+const LOCKFILES = new Set(["pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock"]);
+
+/**
+ * 这些改动是否只落在**不进分发产物**的位置。
+ *
+ * 门禁的语义是「改了扩展就要发版」——判的是**用户拿到的产物变了**。测试工具（`vitest`）、
+ * lint / 构建脚本的版本只在开发者机器上生效，不随 `dist/` 发布；若把它们也算进去，一次
+ * 仓库级的测试框架升级会逼着几十个扩展各发一个空 patch，用户侧看到一串没有任何实际变化的
+ * 更新，反而把真正需要留意的更新埋掉。
+ *
+ * 口径刻意收窄：
+ * - 只认 `package.json`，且**只当 `devDependencies` 一个键变化时才豁免**；`dependencies`
+ *   `peerDependencies` `scripts` `version` 等任何其他字段变了都不豁免（`scripts` 会进产物
+ *   构建流程，保守起见不放过）。
+ * - 只认 `CHANGELOG.md`——bump 自身要写它，不能因为"写了 changelog"就自我豁免。
+ * - 其余任何文件（源码、`extension.json`、`metadata.ts`、静态资源…）都不豁免。
+ *
+ * 逐文件比对基线与工作区的内容；基线缺失或解析失败一律**不豁免**（宁可误报，不可漏报）。
+ */
+function onlyToolingChanges({ repoRoot, base, dir, changed }) {
+  const run = (args) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] });
+  const relativeDir = path.relative(repoRoot, path.resolve(dir)).split(path.sep).join("/");
+  for (const file of changed) {
+    const normalized = file.split(path.sep).join("/");
+    const relative = relativeDir ? (normalized.startsWith(`${relativeDir}/`) ? normalized.slice(relativeDir.length + 1) : normalized) : normalized;
+    // CHANGELOG 是 bump 的产物本身，与版本号一起判定，不构成"有实质改动"。
+    if (relative === "CHANGELOG.md") continue;
+    // 锁文件不随 `dist/` 发布：扩展的产物由工作区根 `locks/web/pnpm-lock.yaml` 统一解析，
+    // 目录内的嵌套锁是本地安装残留。新增/删除它都只影响开发机。
+    if (LOCKFILES.has(relative)) continue;
+    if (relative !== "package.json") return false;
+    let before;
+    let after;
+    try {
+      before = JSON.parse(run(["show", `${base}:${normalized}`]));
+      after = JSON.parse(fs.readFileSync(path.join(repoRoot, normalized), "utf8"));
+    } catch {
+      // 新文件、已删除、或不是合法 JSON：无法证明「只动了 devDependencies」，不豁免。
+      return false;
+    }
+    if (!sameExceptDevDependencies(before, after)) return false;
+  }
+  return changed.length > 0;
+}
+
+/** 两份 manifest 除 `devDependencies` 外是否完全一致（键序无关）。 */
+function sameExceptDevDependencies(before, after) {
+  const strip = (manifest) => {
+    const { devDependencies: _ignored, ...rest } = manifest ?? {};
+    return JSON.stringify(sortKeysDeep(rest));
+  };
+  return strip(before) === strip(after);
+}
+
+/** 递归排序对象键，避免键序差异被误判成内容变化。 */
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeysDeep(value[key])]));
+  }
+  return value;
+}
+
 /**
  * 「改了代码但没发版」的判定。
  *
@@ -510,6 +574,7 @@ export function versionAtBase({ repoRoot, base, dir }) {
  *
  * - `skipped`：没有可用基线（或基线上读不到该扩展的声明），调用方按"跳过"处理；
  * - `changed`：基线之后有改动，且分发版本与基线相同。
+ * - `toolingOnly`：改动全部落在 `devDependencies` / `CHANGELOG.md`，不需要发版。
  */
 export function unreleasedChanges({ repoRoot, base, dir, currentVersion }) {
   const check = changedSince({ repoRoot, base, dir });
@@ -518,5 +583,8 @@ export function unreleasedChanges({ repoRoot, base, dir, currentVersion }) {
   const previous = versionAtBase({ repoRoot, base, dir });
   // 基线上根本没有这个扩展（新增目录）：首次发版不需要"推进"一个不存在的版本。
   if (previous === null) return { ...check, previous: null, bumped: true };
+  if (onlyToolingChanges({ repoRoot, base, dir, changed: check.changed })) {
+    return { ...check, previous, bumped: true, toolingOnly: true };
+  }
   return { ...check, previous, bumped: previous !== currentVersion };
 }
