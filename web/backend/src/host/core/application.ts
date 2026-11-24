@@ -252,12 +252,13 @@ export const applicationPlugin: HostPlugin<ApplicationPluginConfig> = {
       const runtimeCanvas = createExtensionNodeFacade(ctx.canvas, "agent-runtime-bridge");
       const bridge = await createAgentRuntimeBridge({
         socketPath: bridgeSocket,
-        // Windows 命名管道不是文件目录，桥身份必须落在执行器的真实状态目录。
-        runtimeDir: executorRuntimeDir || undefined,
+        // 桥身份落在磁盘上（不是命名管道目录）。两处诉求合并：
+        // - 执行器给了真实状态目录就用它；
+        // - Windows 的桥端点是命名管道，dirname 会落到 `\\.\pipe`，缺省落到临时目录。
+        runtimeDir: executorRuntimeDir
+          || (process.platform === "win32" ? path.join(os.tmpdir(), "woohaa-host-bridge") : undefined),
         token: bridgeToken,
         workspaceKey: executorWorkspace,
-        // Windows 的桥端点是命名管道，dirname 会落到 `\\.\pipe`，不能在那里写身份文件。
-        runtimeDir: process.platform === "win32" ? path.join(os.tmpdir(), "woohaa-host-bridge") : undefined,
         tools: roleAuthoring.tools,
         canvasRead: ({ subject, canvasId }) => runtimeCanvas.read({ subject, canvasId, permission: "read" }),
         mediaRead: async ({ storageKey, canvasId }) => {
