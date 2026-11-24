@@ -35,7 +35,7 @@ export type MediaServiceOptions = {
   internalBasePath?: string;
   maxBytes?: number;
   fetchImpl?: typeof globalThis.fetch;
-  resolveHost?: (hostname: string) => Promise<string[]>;
+  resolveHost: (hostname: string) => Promise<string[]>;
   /** provider URL 转存的重试退避（默认 300ms/900ms；测试注入零等待）。 */
   importRetryDelaysMs?: readonly number[];
   importSleep?: (ms: number) => Promise<void>;
@@ -100,7 +100,7 @@ export function createMediaService(options: MediaServiceOptions): MediaService {
     storage,
     ...(options.maxBytes !== undefined ? { maxImportBytes: options.maxBytes } : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}),
+    resolveHost: options.resolveHost,
     ...(options.importRetryDelaysMs ? { importRetryDelaysMs: options.importRetryDelaysMs } : {}),
     ...(options.importSleep ? { importSleep: options.importSleep } : {}),
     logger: log

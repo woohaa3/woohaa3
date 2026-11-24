@@ -39,6 +39,7 @@ function service(fetchImpl: typeof globalThis.fetch) {
   const logs: Array<Record<string, unknown>> = [];
   const app = createMediaApplicationService({
     storage: memoryStorage(objects),
+    resolveHost: async () => ["93.184.216.34"],
     fetchImpl,
     importRetryDelaysMs: [0, 0],
     importSleep: async () => undefined,

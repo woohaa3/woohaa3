@@ -19,8 +19,12 @@ export type GuardedDownloadOptions = {
   maxRedirects?: number;
   allowedMediaTypes?: readonly string[];
   fetchImpl?: typeof globalThis.fetch;
-  /** 注入 DNS 解析（测试 DNS 重绑定）；默认不做额外解析，只校验字面 host。 */
-  resolveHost?: (hostname: string) => Promise<string[]>;
+  /**
+   * DNS 解析实现。**必填**：只校验字面 host 拦不住「解析到回环/元数据地址的公网
+   * 域名」，而那正是 DNS 重绑定的入口。做成必填是为了让忘记注入的装配在编译期报错，
+   * 而不是在运行时悄悄跳过检查。
+   */
+  resolveHost: (hostname: string) => Promise<string[]>;
 };
 
 export type GuardedDownloadResult = {
@@ -84,10 +88,10 @@ export async function guardedDownload(options: GuardedDownloadOptions): Promise<
   throw new GuardedDownloadError("redirect", "受控下载：重定向次数过多");
 }
 
-/** 校验 host 本身，并用可选的 DNS 解析结果拦截解析到私网的情况（DNS 重绑定）。 */
+/** 校验 host 本身，并用 DNS 解析结果拦截解析到私网的情况（DNS 重绑定）。 */
 export async function assertAllowedHost(
   hostname: string,
-  resolveHost?: (hostname: string) => Promise<string[]>
+  resolveHost: (hostname: string) => Promise<string[]>
 ): Promise<void> {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "" || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
@@ -96,12 +100,12 @@ export async function assertAllowedHost(
   if (isPrivateOrMetadata(host)) {
     throw new GuardedDownloadError("blocked-host", "受控下载：拒绝私网/元数据地址");
   }
-  if (resolveHost) {
-    const addresses = await resolveHost(host);
-    for (const address of addresses) {
-      if (isPrivateOrMetadata(address)) {
-        throw new GuardedDownloadError("blocked-host", "受控下载：域名解析到私网/元数据地址");
-      }
+  // 解析必须做：只校验字面 host 拦不住「解析到 127.0.0.1 的公网域名」，这正是
+  // DNS 重绑定的入口。这里不设可选分支，免得某个装配忘了注入就悄悄退化成不查。
+  const addresses = await resolveHost(host);
+  for (const address of addresses) {
+    if (isPrivateOrMetadata(address)) {
+      throw new GuardedDownloadError("blocked-host", "受控下载：域名解析到私网/元数据地址");
     }
   }
 }

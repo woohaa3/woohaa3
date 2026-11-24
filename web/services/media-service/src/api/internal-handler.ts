@@ -54,7 +54,7 @@ export type MediaInternalOptions = {
   importSleep?: (ms: number) => Promise<void>;
   signTtlSeconds?: number;
   fetchImpl?: typeof globalThis.fetch;
-  resolveHost?: (hostname: string) => Promise<string[]>;
+  resolveHost: (hostname: string) => Promise<string[]>;
   logger?: (event: { event: string; status: number; code?: string; upstreamStatus?: number }) => void;
   /** readiness 覆盖（测试注入 COS 故障）。 */
   readiness?: () => Promise<{ ready: boolean; reason?: string }>;

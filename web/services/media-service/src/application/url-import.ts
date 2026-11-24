@@ -46,7 +46,7 @@ export async function downloadProviderUrl(options: ProviderUrlDownloadOptions): 
         ...(options.maxRedirects !== undefined ? { maxRedirects: options.maxRedirects } : {}),
         ...(options.allowedMediaTypes !== undefined ? { allowedMediaTypes: options.allowedMediaTypes } : {}),
         ...(options.fetchImpl !== undefined ? { fetchImpl: options.fetchImpl } : {}),
-        ...(options.resolveHost !== undefined ? { resolveHost: options.resolveHost } : {})
+        resolveHost: options.resolveHost
       });
     } catch (error) {
       const failure = classifyDownloadFailure(error);

@@ -15,6 +15,14 @@ import { createMediaService } from "./composition.js";
 import { guardedDownload } from "./security/guarded-fetch.js";
 import { isPrivateAddress } from "./security/address.js";
 
+/**
+ * 测试用的 DNS 解析桩：把域名解析成一个公网地址，避免测试真的去查 DNS。
+ *
+ * `resolveHost` 现在是必填项（只校验字面 host 拦不住 DNS 重绑定），所以每个入口都
+ * 得给一个；默认给公网地址，需要测拦截的用例自己覆盖成私网地址。
+ */
+const publicResolver = async (): Promise<string[]> => ["93.184.216.34"];
+
 const CHECKSUM = "a".repeat(64);
 const STORAGE_KEY = `sha256-${CHECKSUM}`;
 const TOKENS = {
@@ -149,7 +157,8 @@ function jsonBody(result: InvokeResult): unknown {
 
 describe("public 媒体接口（任务 3.1）", () => {
   it("上传合法图片返回稳定 metadata，重复上传去重", async () => {
-    const service = createMediaService({ storage: memoryStorage(), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(), identities: TOKENS });
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
     const first = await invoke(service.handle, {
       method: "POST",
@@ -173,7 +182,8 @@ describe("public 媒体接口（任务 3.1）", () => {
   });
 
   it("无 decoder 二进制原件可内容寻址上传和读取，不解释为脚本", async () => {
-    const service = createMediaService({ storage: memoryStorage(), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(), identities: TOKENS });
     const bytes = Uint8Array.from([0, 255, 13, 60, 115, 99, 114, 105, 112, 116, 62]);
     const uploaded = await invoke(service.handle, { method: "POST", url: "/api/media", headers: { "content-type": "application/octet-stream" }, body: bytes });
     expect(uploaded.status).toBe(201);
@@ -188,7 +198,8 @@ describe("public 媒体接口（任务 3.1）", () => {
   });
 
   it("不安全/超限请求返回稳定错误码且不回显存储错误", async () => {
-    const service = createMediaService({ storage: memoryStorage(), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(), identities: TOKENS });
     const badType = await invoke(service.handle, {
       method: "POST",
       url: "/api/media",
@@ -206,7 +217,8 @@ describe("public 媒体接口（任务 3.1）", () => {
     const objects = new Map<string, MediaObject>();
     const storage = memoryStorage(objects);
     objects.set(STORAGE_KEY, { bytes: Uint8Array.from([1, 2, 3, 4, 5, 6]), contentType: "image/png" });
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
 
     const ranged = await invoke(service.handle, {
       method: "GET",
@@ -235,7 +247,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
       accessed = true;
       return original.call(storage, key);
     };
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
     const result = await invoke(service.handle, {
       method: "POST",
       url: "/internal/v1/media/verify",
@@ -247,7 +260,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
   });
 
   it("协议版本不兼容在副作用前失败", async () => {
-    const service = createMediaService({ storage: memoryStorage(), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(), identities: TOKENS });
     const result = await invoke(service.handle, {
       method: "POST",
       url: "/internal/v1/media/verify",
@@ -265,7 +279,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
   it("Canvas 身份不能请求签名（作用域）", async () => {
     const objects = new Map<string, MediaObject>();
     objects.set(STORAGE_KEY, { bytes: Uint8Array.from([1]), contentType: "image/png" });
-    const service = createMediaService({ storage: memoryStorage(objects), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(objects), identities: TOKENS });
     const result = await invoke(service.handle, {
       method: "POST",
       url: "/internal/v1/media/sign",
@@ -278,7 +293,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
   it("Task 可签名，TTL 受限", async () => {
     const objects = new Map<string, MediaObject>();
     objects.set(STORAGE_KEY, { bytes: Uint8Array.from([1]), contentType: "image/png" });
-    const service = createMediaService({ storage: memoryStorage(objects), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(objects), identities: TOKENS });
     const ok = await invoke(service.handle, {
       method: "POST",
       url: "/internal/v1/media/sign",
@@ -303,7 +319,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
     const key = `sha256-${checksum}`;
     const objects = new Map<string, MediaObject>();
     objects.set(key, { bytes, contentType: "image/png" });
-    const service = createMediaService({ storage: memoryStorage(objects), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(objects), identities: TOKENS });
 
     const match = await invoke(service.handle, {
       method: "POST",
@@ -332,7 +349,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
   });
 
   it("import 拒绝私网目标、协议与超大内容", async () => {
-    const service = createMediaService({ storage: memoryStorage(), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(), identities: TOKENS });
     const internal = await invoke(service.handle, {
       method: "POST",
       url: "/internal/v1/media/import",
@@ -354,6 +372,7 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
     const objects = new Map<string, MediaObject>();
     const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 9]);
     const service = createMediaService({
+    resolveHost: publicResolver,
       storage: memoryStorage(objects),
       identities: TOKENS,
       fetchImpl: (async () =>
@@ -377,7 +396,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
   it("import-bytes：provider 以 base64 返回图片时按字节内容寻址写入", async () => {
     const objects = new Map<string, MediaObject>();
     const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
-    const service = createMediaService({ storage: memoryStorage(objects), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(objects), identities: TOKENS });
 
     const result = await invoke(service.handle, {
       method: "POST",
@@ -409,7 +429,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
     const objects = new Map<string, MediaObject>();
     const bytes = new Uint8Array(900 * 1024); // 900 KiB → base64 ~1.2 MiB
     bytes[0] = 0x89;
-    const service = createMediaService({ storage: memoryStorage(objects), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(objects), identities: TOKENS });
 
     const result = await invoke(service.handle, {
       method: "POST",
@@ -425,6 +446,7 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
     const objects = new Map<string, MediaObject>();
     const bytes = Uint8Array.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 1, 2]);
     const service = createMediaService({
+    resolveHost: publicResolver,
       storage: memoryStorage(objects),
       identities: TOKENS,
       fetchImpl: (async () =>
@@ -448,7 +470,8 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
 
   it("import-bytes 允许音频、拒绝视频", async () => {
     const objects = new Map<string, MediaObject>();
-    const service = createMediaService({ storage: memoryStorage(objects), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(objects), identities: TOKENS });
     const audio = Uint8Array.from([0xff, 0xfb, 0x90, 0x00]);
     const accepted = await invoke(service.handle, {
       method: "POST",
@@ -471,6 +494,7 @@ describe("internal 媒体协议（任务 3.2 / 3.3）", () => {
   it("import 拒绝未知媒体类型", async () => {
     const objects = new Map<string, MediaObject>();
     const service = createMediaService({
+    resolveHost: publicResolver,
       storage: memoryStorage(objects),
       identities: TOKENS,
       fetchImpl: (async () =>
@@ -512,11 +536,13 @@ describe("受控下载守卫与地址分类（任务 3.3）", () => {
 
   it("guardedDownload 拒绝非 https 与超限", async () => {
     await expect(
-      guardedDownload({ url: "http://cdn.example/x.png", maxBytes: 10, timeoutMs: 1000 })
+      guardedDownload({
+        resolveHost: publicResolver, url: "http://cdn.example/x.png", maxBytes: 10, timeoutMs: 1000 })
     ).rejects.toMatchObject({ code: "unsupported-protocol" });
 
     await expect(
       guardedDownload({
+        resolveHost: publicResolver,
         url: "https://cdn.example/x.png",
         maxBytes: 2,
         timeoutMs: 1000,
@@ -529,6 +555,7 @@ describe("受控下载守卫与地址分类（任务 3.3）", () => {
   it("重定向逐跳校验，重定向到私网被拒绝", async () => {
     await expect(
       guardedDownload({
+        resolveHost: publicResolver,
         url: "https://cdn.example/x.png",
         maxBytes: 1024,
         timeoutMs: 1000,
@@ -541,6 +568,7 @@ describe("受控下载守卫与地址分类（任务 3.3）", () => {
   it("超时即中止", async () => {
     await expect(
       guardedDownload({
+        resolveHost: publicResolver,
         url: "https://cdn.example/x.png",
         maxBytes: 1024,
         timeoutMs: 20,
@@ -562,7 +590,8 @@ describe("受控下载守卫与地址分类（任务 3.3）", () => {
 describe("画布作用域透传", () => {
   it("public 上传、HEAD 与 GET 带 canvas 时把作用域透传给存储", async () => {
     const { storage, calls } = recordingStorage();
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 5]);
     const upload = await invoke(service.handle, {
       method: "POST",
@@ -586,7 +615,8 @@ describe("画布作用域透传", () => {
 
   it("不带 canvas 时读写保持旧行为（无作用域）", async () => {
     const { storage, calls } = recordingStorage();
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
     const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 6]);
     const upload = await invoke(service.handle, {
       method: "POST",
@@ -605,7 +635,8 @@ describe("画布作用域透传", () => {
 
   it("非法或空 canvas 查询参数视为无作用域", async () => {
     const { storage, calls } = recordingStorage();
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
     const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 7]);
     const upload = await invoke(service.handle, {
       method: "POST",
@@ -626,6 +657,7 @@ describe("画布作用域透传", () => {
     const { storage, calls } = recordingStorage();
     const imported = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 9]);
     const service = createMediaService({
+    resolveHost: publicResolver,
       storage,
       identities: TOKENS,
       fetchImpl: (async () =>
@@ -655,7 +687,8 @@ describe("画布作用域透传", () => {
 
   it("internal import 的非法 canvasId 被拒绝且不写存储", async () => {
     const { storage, calls } = recordingStorage();
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
     const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1]);
     const rejected = await invoke(service.handle, {
       method: "POST",
@@ -673,7 +706,8 @@ describe("画布作用域透传", () => {
     const objects = new Map<string, MediaObject>();
     objects.set(STORAGE_KEY, { bytes: Uint8Array.from([1]), contentType: "image/png" });
     const { storage, calls } = recordingStorage(objects);
-    const service = createMediaService({ storage, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage, identities: TOKENS });
 
     const verified = await invoke(service.handle, {
       method: "POST",
@@ -703,6 +737,7 @@ describe("进程内媒体能力的作用域", () => {
     objects.set(STORAGE_KEY, { bytes: Uint8Array.from([1]), contentType: "image/png" });
     const { storage, calls } = recordingStorage(objects);
     const app = createMediaApplicationService({
+    resolveHost: publicResolver,
       storage,
       fetchImpl: (async () =>
         new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } })) as unknown as typeof globalThis.fetch
@@ -728,14 +763,16 @@ describe("进程内媒体能力的作用域", () => {
 
 describe("Media readiness（任务 3.4）", () => {
   it("COS 探测成功时 ready，失败时 not-ready 且不回退", async () => {
-    const service = createMediaService({ storage: memoryStorage(), identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: memoryStorage(), identities: TOKENS });
     expect(await service.readiness()).toEqual({ ready: true });
 
     const failing = memoryStorage();
     failing.put = async () => {
       throw new Error("COS down");
     };
-    const broken = createMediaService({ storage: failing, identities: TOKENS });
+    const broken = createMediaService({
+    resolveHost: publicResolver, storage: failing, identities: TOKENS });
     const readiness = await broken.readiness();
     expect(readiness.ready).toBe(false);
     expect(readiness.reason).toBeDefined();
@@ -746,7 +783,8 @@ describe("Media readiness（任务 3.4）", () => {
     failing.put = async () => {
       throw new Error("COS down");
     };
-    const service = createMediaService({ storage: failing, identities: TOKENS });
+    const service = createMediaService({
+    resolveHost: publicResolver, storage: failing, identities: TOKENS });
     const result = await invoke(service.handle, { method: "GET", url: "/internal/v1/media/health" });
     expect(result.status).toBe(503);
   });

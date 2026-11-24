@@ -76,7 +76,7 @@ export type MediaApplicationServiceOptions = {
   importSleep?: (ms: number) => Promise<void>;
   signTtlSeconds?: number;
   fetchImpl?: typeof globalThis.fetch;
-  resolveHost?: (hostname: string) => Promise<string[]>;
+  resolveHost: (hostname: string) => Promise<string[]>;
   now?: () => Date;
   /**
    * 转存失败诊断出口。
