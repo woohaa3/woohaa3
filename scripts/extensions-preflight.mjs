@@ -129,6 +129,8 @@ export function collectPreflightProblems(host, { slotDeclarations = null, bumpBa
   errors.push(...contentDeclarationCollisions(host.registrations));
   errors.push(...packageFilesProblems(host.scan.extensions));
   errors.push(...extensionVersionProblems(host, { bumpBase, warnings }));
+  // 与上一条互补：那条查「代码变了版本没变」，这条查「版本变了产物没重建」。
+  errors.push(...artifactFreshnessProblems(host, { warnings }));
   for (const extension of host.scan.extensions) {
     const built = hasBrowserArtifact(extension.dir);
     const hasSources = hasBrowserEntry(extension.dir);
@@ -267,6 +269,125 @@ function extensionVersionProblems(host, { bumpBase = null, warnings = [] } = {})
     });
   }
   return errors;
+}
+
+/**
+ * 产物新鲜度：`dist/` 是不是用它现在声明的那一版源码构建的。
+ *
+ * 存在的理由：分发版本有**两个**写入点，而它们由不同命令各自管——
+ * `pnpm ext:bump` 改 `extension.json` / `package.json` / `metadata.ts` 里的版本字面量，
+ * `pnpm run build` 与 `build:browser` 才会重写 `dist/`、`browser-dist/`。
+ * 只做前者不做后者，就得到一个**声明说 1.3.0、产物还是 1.2.0** 的目录：宿主与市场按声明认版本，
+ * 运行时加载的却是旧代码。`extensionVersionProblems` 发现不了这种不一致——它比的是四处版本
+ * **声明**彼此相等，完全不看产物。
+ *
+ * 真实事故：2026-11-24 发布 `remote-server` 1.3.0，线上 `/api/extensions` 仍报 1.2.0；
+ * 磁盘上 `extension.json` 已是 1.3.0，`dist/shared.js` 里还是 1.2.0。发布脚本、边界门禁、
+ * 扩展预检全部通过。
+ *
+ * 判据（只用产物里已有的信息，不引入新的构建期依赖）：
+ *
+ * - `dist/`：读 `build-package.mjs` 写的 `.build-meta.json`（版本 + 源码指纹）。缺失即视为过期——
+ *   只有新构建才会写它，没有标记说明这份产物早于该机制，正好该重建。
+ * - `browser-dist/`：`build-extension-browser.mjs` 在构建时就会 `assertDescriptorMetadataVersion`，
+ *   所以清单里的 `metadata.version` 只要等于当前分发版本，就说明它是用这一版构建的。这条不需要
+ *   额外标记。
+ *
+ * 只在**有产物且扩展确实需要**时检查：纯预构建目录（部署形态、别的仓库交付）没有源码可比，
+ * 跳过而不是报错。
+ */
+function artifactFreshnessProblems(host, { warnings = [] } = {}) {
+  const errors = [];
+  for (const [extensionId, directory] of extensionDirectories(host)) {
+    const descriptorPath = path.join(directory, "extension.json");
+    if (!fs.existsSync(descriptorPath)) continue;
+    let declarations;
+    try {
+      declarations = readVersionDeclarations(directory);
+    } catch {
+      // 读不动版本声明由 extensionVersionProblems 报，这里不重复制造噪音。
+      continue;
+    }
+    const declared = declarations.distributionVersion;
+    if (!declared) continue;
+    const location = path.relative(host.repoRoot ?? DEFAULT_REPO_ROOT, directory) || directory;
+
+    // 后端产物：`build-package.mjs` 的标记。
+    const backendDist = path.join(directory, "dist");
+    if (fs.existsSync(backendDist)) {
+      const metaPath = path.join(backendDist, ".build-meta.json");
+      let meta = null;
+      try {
+        meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+      } catch (error) {
+        // 缺标记只**告警**：标记是后加的，存量产物都没有它。把它判失败会让每台已有开发机
+        // 与每个 CI 缓存在跑门禁前都得先全量重建，而它并不说明产物真的过期了。
+        // 一旦产物带上标记，版本不符就是硬失败——那才是「声明说新版、加载旧代码」的确证。
+        warnings.push({
+          code: EXTENSION_VERSION_CODES.staleBuild,
+          extensionId,
+          directory,
+          message:
+            `${extensionId}（${location}）有 dist/ 但没有 .build-meta.json，无法核对产物与声明版本（${declared}）` +
+            `${error instanceof Error && error.code !== "ENOENT" ? `：${error.message}` : ""}；` +
+            `运行 \`cd ${location} && pnpm run build\` 补上标记`
+        });
+        continue;
+      }
+      if (meta?.version !== declared) {
+        errors.push({
+          code: EXTENSION_VERSION_CODES.staleBuild,
+          extensionId,
+          directory,
+          message:
+            `${extensionId}（${location}）的 dist/ 是 ${String(meta?.version)} 构建的，` +
+            `但分发版本已是 ${declared}：这就是「声明说新版、加载的是旧代码」。` +
+            `运行 \`cd ${location} && pnpm run build\``
+        });
+      }
+    }
+
+    // 浏览器产物：清单里的 metadata.version 就是构建时的版本。
+    const manifestPath = path.join(directory, "browser-dist", "artifact-manifest.json");
+    if (fs.existsSync(manifestPath)) {
+      let manifest = null;
+      try {
+        manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      } catch {
+        // 清单本身损坏由 checkBrowserArtifact 报。
+        continue;
+      }
+      const artifactVersion = manifest?.metadata?.version;
+      if (artifactVersion !== undefined && artifactVersion !== declared) {
+        errors.push({
+          code: EXTENSION_VERSION_CODES.staleBuild,
+          extensionId,
+          directory,
+          message:
+            `${extensionId}（${location}）的 browser-dist/ 是 ${String(artifactVersion)} 构建的，` +
+            `但分发版本已是 ${declared}；运行 \`pnpm -C client run build:browser\``
+        });
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * 参与版本与产物检查的扩展目录：注册表里的 + 停用的。
+ *
+ * 停用的目录不在注册表里，但它同样会随发布装配进产物，版本漂移一样会漏出去。
+ */
+function extensionDirectories(host) {
+  const directories = new Map();
+  for (const registration of host.registrations ?? []) {
+    if (registration.directory) directories.set(registration.extensionId, registration.directory);
+  }
+  for (const disabled of host.disabled ?? []) {
+    if (typeof disabled.dir !== "string") continue;
+    directories.set(path.basename(disabled.dir).replace(/^\.+/, ""), disabled.dir);
+  }
+  return directories;
 }
 
 /**

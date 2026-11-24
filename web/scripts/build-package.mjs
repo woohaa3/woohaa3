@@ -18,7 +18,9 @@
  *   由消费方的打包器（Vite）照常处理，行为与 source-first 时一致。
  * - 类型入口仍指向 `src`（`exports.types`）：本仓库不生成 .d.ts。
  */
-import { readFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import * as esbuild from "esbuild";
@@ -151,6 +153,72 @@ if (watch) {
   console.log(`[build-package] watching ${manifest.name} -> ${outdir}/`);
 } else {
   await esbuild.build(options);
+}
+
+/**
+ * 构建标记：把「这次产物是用哪份版本声明、哪份源码构建的」写到 `dist/.build-meta.json`。
+ *
+ * 存在的理由：`extension.json` 的版本必须靠 `pnpm ext:bump` 推进，而 `dist/` 只有另一个命令
+ * （`build` / `build:extension-backend`）才会重写。两个命令各管一处，就会产生
+ * **`extension.json` 说 1.3.0、`dist/` 里还是 1.2.0** 的部署：宿主与市场按声明认版本、
+ * 运行时加载的却是旧代码。这种不一致没有任何现有门禁能发现——`extensions:check` 校验的是
+ * 四处版本**声明**彼此相等，它不看产物。
+ *
+ * 真实事故：2026-11-24 发布 `remote-server` 1.3.0，线上 `/api/extensions` 报 1.2.0，
+ * 因为只跑了 `ext:bump` 没重跑 `build`。
+ *
+ * 标记记两个值：声明版本（`extension.json` 优先，回落到 `package.json`）与源码指纹。
+ * 预检拿它们和当前声明/当前源码比对，任一不符就说明产物过期。
+ * `dist/` 本身不入库（`.gitignore` 的 `dist/`），所以标记只影响本地与流水线，不进提交。
+ */
+const buildMetaPath = path.join(packageDir, outdir, ".build-meta.json");
+const builtVersion = typeof manifest.version === "string" && manifest.version.trim() ? manifest.version.trim() : null;
+if (!watch) {
+  const descriptorPath = path.join(packageDir, "extension.json");
+  let descriptorVersion = null;
+  if (existsSync(descriptorPath)) {
+    try {
+      const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+      if (typeof descriptor.version === "string" && descriptor.version.trim()) descriptorVersion = descriptor.version.trim();
+    } catch {
+      // 声明读不动不是本脚本的职责（预检会报），标记里留空即可。
+    }
+  }
+  await writeFile(
+    buildMetaPath,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        // 分发版本的真源是 `extension.json`；没有声明时（纯包）回落到 package.json。
+        version: descriptorVersion ?? builtVersion,
+        packageVersion: builtVersion,
+        entryName,
+        sourceFingerprint: await fingerprintSources(path.join(packageDir, sourceRoot)),
+        builtAt: new Date().toISOString()
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+}
+
+/**
+ * `src/` 下全部 .ts/.tsx/.mts 的合并指纹（按相对路径排序后逐个计入路径与内容）。
+ *
+ * 为什么不用 mtime：`git checkout`、`rsync -a`、CI 缓存都可能让 mtime 看起来「更新」或「更旧」，
+ * 与内容无关。内容指纹只回答「源码有没有变」。
+ */
+async function fingerprintSources(dir) {
+  const files = (await collectSourceFiles(dir)).sort();
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(path.relative(dir, file));
+    hash.update("\u0000");
+    hash.update(await readFile(file));
+    hash.update("\u0000");
+  }
+  return { files: files.length, sha256: hash.digest("hex") };
 }
 
 /**

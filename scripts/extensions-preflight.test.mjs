@@ -641,3 +641,86 @@ test("受管预检：依赖相容的包正常通过", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * 产物新鲜度（`EXTENSION_VERSION_STALE_BUILD`）：版本推进了但产物没重建。
+ *
+ * 真实事故：2026-11-24 发布 `remote-server` 1.3.0，`ext:bump` 改了 `extension.json`，
+ * 没人重跑 `build`；线上 `/api/extensions` 因此仍报 1.2.0，而所有门禁都是绿的。
+ * 下面三个用例分别覆盖：后端产物过期（硬失败）、浏览器产物过期（硬失败）、
+ * 缺标记（只告警，因为标记机制是后加的，存量产物都没有）。
+ */
+function freshnessFixture({ declared = "1.3.0", marker, manifestVersion } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-fresh-"));
+  fs.writeFileSync(path.join(dir, "extension.json"), JSON.stringify({ extensionId: "alpha", version: declared }));
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "@woohaa3/extension-alpha", version: declared }));
+  fs.mkdirSync(path.join(dir, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "dist", "index.js"), "export {};\n");
+  if (marker !== undefined) {
+    fs.writeFileSync(path.join(dir, "dist", ".build-meta.json"), JSON.stringify(marker));
+  }
+  if (manifestVersion !== undefined) {
+    fs.mkdirSync(path.join(dir, "browser-dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "browser-dist", "artifact-manifest.json"),
+      JSON.stringify({ metadata: { extensionId: "alpha", version: manifestVersion } })
+    );
+  }
+  return dir;
+}
+
+function freshnessHost(dir) {
+  return {
+    repoRoot: path.dirname(dir),
+    scan: { extensions: [{ extensionId: "alpha", dir }] },
+    registrations: [{ extensionId: "alpha", directory: dir, descriptor: { extensionId: "alpha" }, hasBrowserArtifact: false }]
+  };
+}
+
+test("产物新鲜度：dist 标记版本与声明不符 → 失败", () => {
+  const dir = freshnessFixture({ declared: "1.3.0", marker: { version: "1.2.0" } });
+  try {
+    const { errors } = collectPreflightProblems(freshnessHost(dir));
+    const hit = errors.find((error) => error.code === "EXTENSION_VERSION_STALE_BUILD");
+    assert.ok(hit, JSON.stringify(errors));
+    assert.match(hit.message, /dist\/ 是 1\.2\.0 构建的/);
+    assert.match(hit.message, /1\.3\.0/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("产物新鲜度：dist 标记与声明一致 → 通过", () => {
+  const dir = freshnessFixture({ declared: "1.3.0", marker: { version: "1.3.0" } });
+  try {
+    const { errors } = collectPreflightProblems(freshnessHost(dir));
+    assert.equal(errors.filter((error) => error.code === "EXTENSION_VERSION_STALE_BUILD").length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("产物新鲜度：缺 .build-meta.json → 只告警，不失败", () => {
+  const dir = freshnessFixture({ declared: "1.3.0" });
+  try {
+    const { errors, warnings } = collectPreflightProblems(freshnessHost(dir));
+    assert.equal(errors.filter((error) => error.code === "EXTENSION_VERSION_STALE_BUILD").length, 0);
+    const hit = warnings.find((warning) => warning.code === "EXTENSION_VERSION_STALE_BUILD");
+    assert.ok(hit, JSON.stringify(warnings));
+    assert.match(hit.message, /没有 \.build-meta\.json/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("产物新鲜度：browser-dist 清单版本与声明不符 → 失败", () => {
+  const dir = freshnessFixture({ declared: "1.3.0", marker: { version: "1.3.0" }, manifestVersion: "1.2.0" });
+  try {
+    const { errors } = collectPreflightProblems(freshnessHost(dir));
+    const hit = errors.find((error) => error.code === "EXTENSION_VERSION_STALE_BUILD");
+    assert.ok(hit, JSON.stringify(errors));
+    assert.match(hit.message, /browser-dist\/ 是 1\.2\.0 构建的/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

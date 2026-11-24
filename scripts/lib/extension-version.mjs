@@ -28,7 +28,14 @@ export const EXTENSION_VERSION_CODES = Object.freeze({
   /** 四处声明不是同一个值。 */
   mismatch: "EXTENSION_VERSION_MISMATCH",
   /** 扩展目录有改动但分发版本没推进。 */
-  notBumped: "EXTENSION_VERSION_NOT_BUMPED"
+  notBumped: "EXTENSION_VERSION_NOT_BUMPED",
+  /**
+   * 产物与声明版本不一致：`extension.json` 已推进，但 `dist/` / `browser-dist/` 还是旧构建。
+   *
+   * 与 `notBumped` 是**相反方向**的漂移，两者都要报：那个是「代码变了、版本没变」，
+   * 这个是「版本变了、代码没变」，表现都是线上跑的东西与声明对不上。
+   */
+  staleBuild: "EXTENSION_VERSION_STALE_BUILD"
 });
 
 /** 严格三段 semver（`1.2.3`；预发布/构建后缀不参与版本推进，见 design D2）。 */

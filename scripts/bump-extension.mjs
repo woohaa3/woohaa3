@@ -247,6 +247,22 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
     `[ext:bump] ${result.extensionId} ${result.from} → ${result.to}${prefix}\n` +
       (result.dryRun ? "" : `[ext:bump] 已更新：${result.changed.join("、")}\n`)
   );
+  // bump 只改版本**声明**，不重建产物。少了下面这条提示，很容易以为「bump 完就发完了」，
+  // 结果发布出去的是「extension.json 说新版、dist/ 还是旧代码」——2026-11-24 的
+  // remote-server 1.3.0 就是这样漏到线上的。真正拦住的在 `extensions:check`
+  // （EXTENSION_VERSION_STALE_BUILD），这里只是在最靠近动作的地方先说一句。
+  if (!result.dryRun) {
+    // 写成两条可直接执行的命令，而不是相对当前目录拼路径：bump 可以从仓库任意位置调用，
+    // `path.relative(process.cwd(), ...)` 会随调用位置变成一长串 `../../..`。
+    const relativeToRepo = path.relative(REPO_ROOT, result.directory);
+    // 从仓库根之外调用 bump（测试夹具、别的 checkout）时没有可读的仓库内路径，直接给绝对路径。
+    const rel = relativeToRepo.startsWith("..") ? result.directory.split(path.sep).join("/") : relativeToRepo.split(path.sep).join("/");
+    stdout.write(
+      `[ext:bump] 下一步：重建产物，否则 dist/ 与 browser-dist/ 仍是旧代码\n` +
+        `[ext:bump]   pnpm -C client run build:browser\n` +
+        `[ext:bump]   cd ${relativeToRepo.startsWith("..") ? "" : "<client 根>/"}${rel} && pnpm run build\n`
+    );
+  }
   return 0;
 }
 
