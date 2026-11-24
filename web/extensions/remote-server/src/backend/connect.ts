@@ -9,6 +9,7 @@
  *
  * 端点约定（与公开的 Connect HTTP/JSON 协议一致）：
  *   POST <base>/woohaa.identity.v1alpha1.IdentityService/Login      body {token}  → {sessionToken, subjectId, expiresAt}
+ *   POST <base>/woohaa.identity.v1alpha1.IdentityService/Refresh    body {sessionToken}（Bearer 同一个令牌）→ {sessionToken, expiresAt}
  *   POST <base>/woohaa.identity.v1alpha1.IdentityService/WhoAmI                    → {subjectId, subjectType, expiresAt}
  *   POST <base>/woohaa.identity.v1alpha1.IdentityService/GetAuthMethods            → {methods:[{kind,id,ambient}]}
  *   POST <base>/woohaa.identity.v1alpha1.IdentityService/Logout
@@ -152,6 +153,45 @@ export type ExchangeLoginInput = {
   /** 网关注入的断言头；存在时优先用它（它代表「当前这个人」）。 */
   gatewayHeaders?: Record<string, string>;
 };
+
+export type RemoteRefreshResult =
+  | { ok: true; token: string; expiresAt: number }
+  | { ok: false; code: string; message: string };
+
+/**
+ * 用一份**仍然有效**的会话换一份新的（`Refresh`）。
+ *
+ * 远端语义是**轮换**而不是延长：旧令牌在同一次事务里作废，新令牌按完整 TTL 重算。所以：
+ *  - 拿已失效的令牌调它一定会失败，调用方必须先确认会话可用（`isSessionUsable`）；
+ *  - 成功后旧令牌立刻不能再用了，本机必须把新令牌落库，否则下一次调用就是 401。
+ *
+ * 这里**不校准** `WhoAmI`：续期不改变主体（远端按旧令牌的主体签发新令牌），多发一次请求
+ * 只增加失败面——登录路径调 `WhoAmI` 是因为别名表可能在首次登录时改写归属。
+ */
+export async function callSessionRefresh(
+  fetchImpl: typeof globalThis.fetch,
+  now: () => number,
+  serverUrl: string,
+  token: string
+): Promise<RemoteRefreshResult> {
+  const result = await callConnect<unknown>(
+    fetchImpl,
+    serverUrl,
+    connectProcedurePath(IDENTITY_SERVICE, "Refresh"),
+    // proto 字段是 session_token；Connect 的 JSON 编解码用 lowerCamelCase。
+    { sessionToken: token },
+    { token }
+  );
+  if (!result.ok) return { ok: false, code: result.code, message: result.message };
+  const next = readString(result.value, "sessionToken");
+  // 形状不符按未认证处理：续期说成功却没给令牌，等于会话已经不能用了，不能假装续上。
+  if (!next) return { ok: false, code: "unauthenticated", message: "远端没有返回续期后的会话（响应形状不符）" };
+  return {
+    ok: true,
+    token: next,
+    expiresAt: parseSessionExpiry(readString(result.value, "expiresAt"), now())
+  };
+}
 
 /**
  * 用凭证换一份会话（`Login` + `WhoAmI`）。

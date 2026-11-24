@@ -80,10 +80,25 @@ export type FakeServerOptions = {
   identities?: Record<string, string>;
   /** 会话有效期（毫秒）。 */
   sessionTtlMs?: number;
+  /**
+   * `Refresh` 签发的新会话有效期（毫秒），缺省等于 `sessionTtlMs`。
+   *
+   * 单列出来是为了让「续期把到期时刻推到更远」这件事在 fake 上也成立：轮换是按完整 TTL
+   * 重算的，不是延长剩余时间。测试若把续期 TTL 与续期阈值设成一样，会观察到续了又续。
+   */
+  refreshSessionTtlMs?: number;
   /** 让所有请求失败（模拟不可达）。 */
   down?: boolean;
   /** 让 Login 返回未认证（模拟坏凭证）。 */
   rejectLogin?: boolean;
+  /**
+   * 让 `Refresh` 以给定 Connect 码失败。
+   *
+   * `unauthenticated` 模拟「会话已被服务端作废」——客户端必须据此清会话并要求重新登录；
+   * `unavailable` 之类模拟「这次没问到」——客户端必须保留会话到到期时刻，不能因为一次
+   * 网络抖动把人踢下线。
+   */
+  refreshRejection?: "unauthenticated" | "unavailable" | "permission_denied";
   /** 网关断言主体（模拟企业网关登录）；设置后带断言头的 Login 直接成功。 */
   gatewaySubject?: string;
   /** WhoAmI 返回的主体（模拟别名表把渠道身份折到另一个主体）。 */
@@ -187,6 +202,13 @@ export type FakeServer = {
    * 于是被测的是宿主「换码 → 落会话 → 轮询交付」这一段，而不是远端实现（那由 server/e2e 覆盖）。
    */
   grantLocalLoginCode: (input: { code: string; challenge?: string }) => void;
+  /**
+   * 改续期行为（`undefined` 恢复成功）。
+   *
+   * 续期是**登录之后**才发生的事：要测「服务端中途把会话作废」或「这次没问到」，
+   * 只能在拿到会话之后翻转服务端的行为，构造参数做不到。
+   */
+  setRefreshRejection: (code: "unauthenticated" | "unavailable" | "permission_denied" | undefined) => void;
 };
 
 const enc = new TextEncoder();
@@ -243,6 +265,9 @@ function readProtoRevision(value: unknown): number | null {
 export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
   const identities = options.identities ?? { "device-token": "device-alice" };
   const sessionTtlMs = options.sessionTtlMs ?? 60 * 60 * 1000;
+  const refreshSessionTtlMs = options.refreshSessionTtlMs ?? sessionTtlMs;
+  /** 运行期可改：续期是登录之后才发生的事，测试要在中途翻转服务端的拒绝行为。 */
+  let refreshRejection = options.refreshRejection;
   const sessions = new Map<string, string>();
   const revoked: string[] = [];
   const calls: FakeServer["calls"] = [];
@@ -681,6 +706,27 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
       });
     }
 
+    if (method === "Refresh") {
+      // 与远端一致：轮换而不是延长——旧令牌在同一次调用里作废，新令牌从头算 TTL。
+      // 因此「拿已经作废的令牌再来一次」必须失败，客户端得能分辨这是被明确拒绝。
+      if (refreshRejection !== undefined) {
+        return json({ code: refreshRejection, message: "续期被拒绝" }, refreshRejection === "unavailable" ? 503 : 401);
+      }
+      const token = authorization?.replace(/^Bearer\s+/i, "") ?? "";
+      const bodyToken = (body as { sessionToken?: unknown } | null)?.sessionToken;
+      if (typeof bodyToken === "string" && bodyToken !== "" && bodyToken !== token) {
+        return json({ code: "invalid_argument", message: "令牌不一致" }, 400);
+      }
+      const subject = sessions.get(token);
+      if (subject === undefined) return json({ code: "unauthenticated", message: "未认证" }, 401);
+      sessions.delete(token);
+      revoked.push(token);
+      counter += 1;
+      const sessionToken = `session-${counter}`;
+      sessions.set(sessionToken, subject);
+      return json({ sessionToken, expiresAt: new Date(Date.now() + refreshSessionTtlMs).toISOString() });
+    }
+
     if (method === "WhoAmI") {
       const token = authorization?.replace(/^Bearer\s+/i, "") ?? "";
       const subject = sessions.get(token);
@@ -937,6 +983,9 @@ export function createFakeServer(options: FakeServerOptions = {}): FakeServer {
     canvasShares,
     canvasInvites,
     generation,
+    setRefreshRejection(code) {
+      refreshRejection = code;
+    },
     grantLocalLoginCode(input) {
       localLoginCodes.set(input.code, { challenge: input.challenge ?? null, used: false });
     },

@@ -4,15 +4,17 @@
  * 这个套件的重点是**结论**而不是实现细节：
  * 1. 令牌永远不进 URL，也不出现在任何响应体里；
  * 2. 会话到期或换了地址就当作未登录（不拿死令牌去连中继）；
- * 3. 登出尽力撤销远端会话，但一定清本地。
+ * 3. 登出尽力撤销远端会话，但一定清本地；
+ * 4. 会话在到期前自动轮换续期，明确拒绝才失效（网络抖动不踢人）。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   ApplicationBackendDiagnosticEntry,
   ApplicationBackendDiagnostics,
   CanvasUpstreamProvider
 } from "@woohaa3/contracts";
-import { createRemoteServerPlugin, createMemorySessionStore, type RemoteSessionStore } from "../src/backend/index.js";
+import { createRemoteServerPlugin, createMemorySessionStore, type RemoteSession, type RemoteSessionStore } from "../src/backend/index.js";
+import { createRemoteSessionSource } from "../src/backend/session.js";
 import { createDocumentSessionStore } from "../src/backend/session-store.js";
 import {
   parseServerUrl,
@@ -128,6 +130,14 @@ async function activate(options: {
   loginAssertionHeaders?: readonly string[];
   /** 是否让扩展在激活时自动用 deviceToken 换会话；缺省关，避免打乱各用例的请求计数。 */
   autoLoginWithDeviceToken?: boolean;
+  /**
+   * 自动续约的时序覆盖项。
+   *
+   * 缺省就用生产值（到期前 10 分钟续、失败 5 分钟重试）：续约的端到端用例靠**假时钟**推进
+   * 真实时间线，而不是把提前量压成 0——那样测到的「立刻续」不是生产里发生的事。
+   * 这个缝留给需要别的时序的用例（例如观察速率闸门）。
+   */
+  sessionRenewal?: { leadMs?: number; minDelayMs?: number; retryMs?: number };
 }) {
   const services = {
     ...(options.documents ? { documents: options.documents } : {}),
@@ -140,7 +150,8 @@ async function activate(options: {
     loginAssertionHeaders: options.loginAssertionHeaders,
     autoLoginWithDeviceToken: options.autoLoginWithDeviceToken === true,
     ...(options.now ? { now: options.now } : {}),
-    ...(options.store ? { store: options.store } : {})
+    ...(options.store ? { store: options.store } : {}),
+    ...(options.sessionRenewal ? { sessionRenewal: options.sessionRenewal } : {})
   });
   await plugin.apply(host as never, {} as never);
   return host;
@@ -2247,5 +2258,257 @@ describe("deleteCanvas()：删除属于远端的画布", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(phase).toBe("connected");
+  });
+});
+
+describe("自动续约：不让会话到期把人踢下线", () => {
+  // 续约是**定时**行为：默认等到「到期前 10 分钟」才动。用假时钟推进，而不是等真实时间；
+  // 也不能只测 `renew()` 本身——那样测不到「有没有排期、排得对不对」。
+  const MINUTE = 60 * 1000;
+  /**
+   * 按分钟推进假时钟。
+   *
+   * 一次跳完整个窗口是不行的：定时器醒来后的续期是异步链（读会话 → 发 Refresh → 写会话），
+   * 一口气跳过全部时长会让时间在链完成前就跑到下一个窗口，观察到的状态就不再是「续约当下的
+   * 状态」。按分钟走既是真实时间的节奏，也让每一步的断言有意义。
+   */
+  const tick = async (durationMs: number): Promise<void> => {
+    for (let elapsed = 0; elapsed < durationMs; elapsed += MINUTE) {
+      await vi.advanceTimersByTimeAsync(Math.min(MINUTE, durationMs - elapsed));
+    }
+  };
+  /** 1 小时会话、提前 10 分钟续：越过 50 分钟就该发生一次轮换。 */
+  const pastRenewalPoint = (): Promise<void> => tick(52 * MINUTE);
+
+  it("到期前自动轮换会话，界面全程是「已连接」", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeServer();
+      const store = createMemorySessionStore();
+      const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+      const login = await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+      const loginExpiry = (login.body as { snapshot: { expiresAt: number } }).snapshot.expiresAt;
+      const loginToken = (await store.load())!.token;
+      expect(fake.calls.some((call) => call.path.endsWith("/Refresh"))).toBe(false);
+
+      await pastRenewalPoint();
+
+      // 远端轮换：旧令牌作废、新令牌生效——证据是会话本身变了。
+      expect(fake.revoked).toContain(loginToken);
+      const renewed = await store.load();
+      expect(renewed?.token).not.toBe(loginToken);
+      expect(fake.sessions.get(renewed!.token)).toBe("device-alice");
+      // 到期时刻被推到更远（轮换按完整 TTL 重算，不是延长剩余时间）。
+      expect(renewed!.expiresAt).toBeGreaterThan(loginExpiry);
+      // 主体与地址沿用旧会话：续期不换人、不换部署。
+      expect(renewed!.subject).toBe("device-alice");
+      expect(renewed!.serverUrl).toBe(fake.serverUrl);
+
+      const session = await host.call(REMOTE_SERVER_SESSION_ROUTE);
+      expect(session.body).toMatchObject({ phase: "connected", subject: "device-alice" });
+      // 令牌仍然不出现在任何响应里。
+      expect(JSON.stringify(session.body)).not.toContain(renewed!.token);
+
+      // 只续一次：刚续完离下一个续期点还远，不该出现第二轮。
+      expect(fake.calls.filter((call) => call.path.endsWith("/Refresh"))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("续期被明确拒绝时清会话，界面回到未登录", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeServer();
+      const store = createMemorySessionStore();
+      const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+      await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+      // 登录之后服务端才把这份会话作废（在别处登出、令牌被吊销）。
+      fake.setRefreshRejection("unauthenticated");
+
+      await pastRenewalPoint();
+
+      expect(await store.load()).toBeNull();
+      const session = await host.call(REMOTE_SERVER_SESSION_ROUTE);
+      expect(session.body).toMatchObject({ phase: "local", subject: null });
+      // 会话已清：不该再对着一个已经不存在的会话反复续。
+      await tick(30 * MINUTE);
+      expect(fake.calls.filter((call) => call.path.endsWith("/Refresh"))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("网络暂时不可用时保留会话，过一会儿再试", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeServer();
+      const store = createMemorySessionStore();
+      const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+      await host.call(REMOTE_SERVER_LOGIN_ROUTE, {});
+      const token = (await store.load())!.token;
+      // 503 只是「这次没问到」——一次网络抖动不该把人踢下线。
+      fake.setRefreshRejection("unavailable");
+
+      await pastRenewalPoint();
+
+      expect((await store.load())?.token).toBe(token);
+      expect((await host.call(REMOTE_SERVER_SESSION_ROUTE)).body).toMatchObject({ phase: "connected" });
+
+      // 失败后按重试间隔再排一次；服务端恢复后就能续上，新旧令牌正常交接。
+      fake.setRefreshRejection(undefined);
+      await tick(6 * MINUTE);
+      const renewed = await store.load();
+      expect(renewed?.token).not.toBe(token);
+      expect(fake.sessions.get(renewed!.token)).toBe("device-alice");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("已经不可用的会话不会被拿去续（死令牌换不出新会话）", async () => {
+    // 远端语义是轮换：拿已失效的令牌调 Refresh 只会得到 401，然后被误判成「被明确拒绝」。
+    // 所以过期之后应当是「等重新登录」，而不是「打一次必失败的续期再清空」。
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeServer();
+      const store = createMemorySessionStore();
+      await store.save({
+        serverUrl: fake.serverUrl,
+        token: "session-dead",
+        subject: "device-alice",
+        displayName: null,
+        expiresAt: Date.now() - 1
+      });
+      const host = await activate({ deployment: fake.deployment, fetchImpl: fake.fetch, store });
+
+      await pastRenewalPoint();
+
+      expect(fake.calls.some((call) => call.path.endsWith("/Refresh"))).toBe(false);
+      expect((await host.call(REMOTE_SERVER_SESSION_ROUTE)).body).toMatchObject({ phase: "local" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("纯本地形态下不产生任何后台请求", async () => {
+    // 没有 serverUrl、没有会话：本扩展不得有后台活动（这也是「纯本地不是失败」的一部分）。
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeServer();
+      const host = await activate({
+        deployment: { serverUrl: null, deviceToken: null, keyPrefix: "" },
+        fetchImpl: fake.fetch
+      });
+      await pastRenewalPoint();
+      expect(fake.calls).toHaveLength(0);
+      expect((await host.call(REMOTE_SERVER_SESSION_ROUTE)).body).toMatchObject({ phase: "local" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("renew()：续期的三态语义", () => {
+  const session = (overrides: Partial<RemoteSession> = {}) => ({
+    serverUrl: "https://canvas.example.com",
+    token: "session-1",
+    subject: "alice",
+    displayName: null,
+    expiresAt: Date.now() + 60 * 60 * 1000,
+    ...overrides
+  });
+
+  const build = (options: {
+    refreshSession?: (serverUrl: string, token: string) => Promise<
+      { ok: true; token: string; expiresAt: number } | { ok: false; code: string }
+    >;
+    configured?: string | null;
+  }) => {
+    const store = createMemorySessionStore();
+    const changes: number[] = [];
+    const source = createRemoteSessionSource({
+      store,
+      configuredServerUrl: () => options.configured ?? null,
+      now: () => Date.now(),
+      onSessionChanged: () => changes.push(1),
+      ...(options.refreshSession ? { refreshSession: options.refreshSession } : {})
+    });
+    return { store, source, changes };
+  };
+
+  it("并发续期共享同一次轮换（两个 Refresh 会互相作废令牌）", async () => {
+    let calls = 0;
+    const built = build({
+      refreshSession: async () => {
+        calls += 1;
+        // 拉开间隔，让第二个调用确实撞上进行中的那一次。
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { ok: true as const, token: "session-2", expiresAt: Date.now() + 60 * 60 * 1000 };
+      }
+    });
+    await built.store.save(session());
+
+    const [left, right] = await Promise.all([built.source.renew(), built.source.renew()]);
+
+    expect(calls).toBe(1);
+    expect(left).toMatchObject({ ok: true });
+    expect(right).toMatchObject({ ok: true });
+    expect((await built.store.load())?.token).toBe("session-2");
+    // 至少通知一次宿主（画布上游/存储后端要跟着换）。
+    expect(built.changes.length).toBeGreaterThan(0);
+  });
+
+  it("明确拒绝清会话；暂时失败保留会话到到期时刻", async () => {
+    const rejected = build({ refreshSession: async () => ({ ok: false as const, code: "unauthenticated" }) });
+    await rejected.store.save(session());
+    expect(await rejected.source.renew()).toEqual({ ok: false, kind: "rejected", code: "unauthenticated" });
+    expect(await rejected.store.load()).toBeNull();
+
+    for (const code of ["timeout", "unreachable", "unavailable", "internal"]) {
+      const transient = build({ refreshSession: async () => ({ ok: false as const, code }) });
+      const stored = session();
+      await transient.store.save(stored);
+      expect(await transient.source.renew()).toEqual({ ok: false, kind: "transient", code });
+      expect((await transient.store.load())?.token).toBe(stored.token);
+    }
+  });
+
+  it("续期抛出意外错误按暂时失败处理，不当成「人被拒绝」", async () => {
+    const built = build({
+      refreshSession: async () => {
+        throw new TypeError("fetch failed");
+      }
+    });
+    const stored = session();
+    await built.store.save(stored);
+    expect(await built.source.renew()).toEqual({ ok: false, kind: "transient", code: "unreachable" });
+    expect((await built.store.load())?.token).toBe(stored.token);
+  });
+
+  it("没有会话时不发续期请求", async () => {
+    let calls = 0;
+    const built = build({
+      refreshSession: async () => {
+        calls += 1;
+        return { ok: true as const, token: "session-2", expiresAt: Date.now() };
+      }
+    });
+    expect(await built.source.renew()).toEqual({ ok: false, kind: "no-session", code: "unconfigured" });
+    expect(calls).toBe(0);
+  });
+
+  it("换地址后不拿旧部署的会话去续", async () => {
+    let calls = 0;
+    const built = build({
+      configured: "https://other.example.com",
+      refreshSession: async () => {
+        calls += 1;
+        return { ok: true as const, token: "session-2", expiresAt: Date.now() };
+      }
+    });
+    await built.store.save(session());
+    expect(await built.source.renew()).toEqual({ ok: false, kind: "no-session", code: "unconfigured" });
+    expect(calls).toBe(0);
   });
 });

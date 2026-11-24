@@ -11,7 +11,10 @@
  *   它的地址就是这条会话的一部分。只看部署配置会让「登录过、但没写 config.local.json」
  *   变成一种说不清的状态（存储后端注册不上，媒体静默回落主存储）；
  * - `ensure()` 是唯一允许「自己换会话」的入口：有部署凭证（deviceToken）时用它换一份，
- *   并发调用共享同一次登录（冷启动时三个 RPC 不该换三份会话）。
+ *   并发调用共享同一次登录（冷启动时三个 RPC 不该换三份会话）；
+ * - `renew()` 是续约的唯一入口：拿**当前这份**会话换下一段（远端轮换），不需要部署凭证，
+ *   因此人用设备码/OAuth 登录进来的会话同样能自动续，不必在配置文件里留长期令牌。
+ *   明确被拒绝才清会话，网络暂时不可用时保留到到期时刻。
  *
  * 令牌是 Bearer 凭据：不进日志、不进错误信息、不进任何响应体。
  */
@@ -108,7 +111,19 @@ export type RemoteSessionSourceOptions = {
    */
   loginWithDeviceToken?: (serverUrl: string) => Promise<EnsureSessionResult>;
   /**
-   * 会话落库后（登录成功 / 登出 / 401 作废 / `ensure()` 自动换会话）通知宿主。
+   * 用**当前仍有效的会话**换一份新的（远端 `Refresh`：轮换，不是延长）。
+   *
+   * 与会话源同住的原因和登录一样：令牌只有这里能读写。返回值只带新令牌与到期时刻，
+   * 主体沿用旧会话——续期不改变归属，远端也不会在续期时换人。
+   *
+   * 缺省（宿主没接这个端口）时续期整体缺席：调用方按「没有续期能力」处理，不是失败。
+   */
+  refreshSession?: (
+    serverUrl: string,
+    token: string
+  ) => Promise<{ ok: true; token: string; expiresAt: number } | { ok: false; code: string }>;
+  /**
+   * 会话落库后（登录成功 / 登出 / 401 作废 / `ensure()` 自动换会话 / 续期）通知宿主。
    *
    * 画布同步上游由宿主按 capability 解析，而宿主不轮询扩展会话；所以会话一变化必须推一次，
    * 否则画布会继续连旧上游（或停留在纯本地），界面却已经显示「已连接」。
@@ -123,6 +138,29 @@ export type EnsureSessionResult =
 
 /** `unconfigured`：既没有会话，也没有可用于自动换会话的地址/凭证。 */
 export const SESSION_UNCONFIGURED_CODE = "unconfigured";
+
+/**
+ * 续期结果。
+ *
+ * 三态而不是二态：调用方必须能分辨「续上了」「这个人已经不能再用了（明确拒绝）」与
+ * 「这次没问到（网络问题）」。后两者的处置完全相反——前者要清会话要求重新登录，后者
+ * 必须保住会话到到期时刻，否则一次网络抖动就把人踢下线。
+ *
+ * `no-session` 是「没什么可续的」：既包括没有可用会话（未登录 / 已到期 / 换了部署），
+ * 也包括这条会话源压根没接续期端口。两者的正确处置相同——**不排期、不清会话、不报错**。
+ */
+export type RenewSessionResult =
+  | { ok: true; session: RemoteSession }
+  | { ok: false; kind: "rejected"; code: string }
+  | { ok: false; kind: "transient"; code: string }
+  | { ok: false; kind: "no-session"; code: string };
+
+/**
+ * 远端明确表示「这份会话不再有效」的码：只有这些才该清会话。
+ *
+ * `unavailable` / `timeout` / `unreachable` 与 5xx 都不在内——那些说明**没问到**。
+ */
+const REJECTED_CODES: ReadonlySet<string> = new Set(["unauthenticated", "permission_denied"]);
 
 export type RemoteSessionSource = {
   /** 只读当前会话：不触发任何登录，过期/换地址都收敛成「没有会话」。 */
@@ -143,6 +181,22 @@ export type RemoteSessionSource = {
    * 拿旧令牌去清会把新会话一起打掉。
    */
   invalidate: (token: string) => Promise<void>;
+  /**
+   * 把当前会话续到下一段（远端 `Refresh`，轮换而非延长）。
+   *
+   * 自动续约的**唯一**入口。与 `ensure()` 的分工：
+   *  - `ensure()` 是「我需要一份会话」：没有就（用部署凭证）换一份；
+   *  - `renew()` 是「我手里这份快到期了」：只续不换人，**没有**凭证也能用，因为它靠的是
+   *    会话本身。这样人类用设备码/OAuth 登录进来的会话同样能自动续，不需要配置文件里
+   *    留一份长期令牌——那正是规格禁止的用法。
+   *
+   * 已经不可用的会话**不会**被拿去续：那个令牌在远端已经死了，续期只会得到一次必然的
+   * 401，然后被误当成「被明确拒绝」。此时直接回 `no-session`，交回调用方决定是否重新登录。
+   *
+   * 并发共享同一次轮换——两个并发的 Refresh 会让先到的那个令牌作废，后到的拿着死令牌
+   * 得到 401，把一次正常续期变成一次「被拒绝」。
+   */
+  renew: () => Promise<RenewSessionResult>;
 };
 
 /**
@@ -232,10 +286,57 @@ export function createRemoteSessionSource(options: RemoteSessionSourceOptions): 
     return loginInFlight;
   };
 
+  /** 并发共享同一次轮换：见 `renew` 的类型注释（并发的 Refresh 会互相作废令牌）。 */
+  let renewInFlight: Promise<RenewSessionResult> | null = null;
+
+  const renewOnce = async (): Promise<RenewSessionResult> => {
+    // 只用**自己正在用的那条会话**续期：`current()` 已经收敛了到期与换地址两种情况，
+    // 拿一份在远端已经死掉或属于别的部署的令牌去续，只会得到一次必然的 401。
+    const session = await current();
+    if (session === null) return { ok: false, kind: "no-session", code: SESSION_UNCONFIGURED_CODE };
+    // 没接续期端口 = 这条会话源没有续期能力，不是「这次没问到」：按 no-session 交回调用方，
+    // 免得排出一个永远重试、永远失败的定时器。
+    if (!options.refreshSession) return { ok: false, kind: "no-session", code: "unsupported" };
+    const result = await options
+      .refreshSession(session.serverUrl, session.token)
+      .catch((error: unknown) => ({
+        // 续期抛出的是意外错误（不是远端回的失败码）：按「没问到」处置，别清人的会话。
+        ok: false as const,
+        code: error instanceof Error && error.name === "TimeoutError" ? "timeout" : "unreachable"
+      }));
+    if (!result.ok) {
+      if (!REJECTED_CODES.has(result.code)) return { ok: false, kind: "transient", code: result.code };
+      // 明确被拒绝：这份会话已经不能再用了，继续留着只会让每条 RPC 各撞一次 401。
+      await store.save(null);
+      options.onSessionChanged?.();
+      return { ok: false, kind: "rejected", code: result.code };
+    }
+    const next: RemoteSession = {
+      // 地址与主体沿用旧会话：续期不改变「接哪台、以谁的身份」，远端也不会在续期时换人。
+      serverUrl: session.serverUrl,
+      token: result.token,
+      subject: session.subject,
+      displayName: session.displayName,
+      expiresAt: result.expiresAt
+    };
+    await store.save(next);
+    options.onSessionChanged?.();
+    return { ok: true, session: next };
+  };
+
+  const renew = async (): Promise<RenewSessionResult> => {
+    if (renewInFlight) return renewInFlight;
+    renewInFlight = renewOnce().finally(() => {
+      renewInFlight = null;
+    });
+    return renewInFlight;
+  };
+
   return {
     current,
     ensure,
     save,
+    renew,
     async invalidate(token) {
       const stored = await store.load();
       if (stored === null || stored.token !== token) return;

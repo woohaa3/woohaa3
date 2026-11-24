@@ -91,7 +91,7 @@ import {
   REMOTE_ASSISTANT_ADAPTER_ID
 } from "../shared.js";
 import { readRemoteServerDeployment, type RemoteServerDeployment } from "../deployment.js";
-import { callConnect, connectErrorText, exchangeLogin } from "./connect.js";
+import { callConnect, callSessionRefresh, connectErrorText, exchangeLogin } from "./connect.js";
 import { createRemoteAssistant } from "./assistant/index.js";
 import { createCanvasToolChannel } from "./assistant/canvas-tools.js";
 import { createRemoteGenerationBridge, type RemoteGenerationStatus } from "./generation/index.js";
@@ -107,7 +107,8 @@ import {
   parseSessionExpiry,
   resolveServerUrl,
   type RemoteSession,
-  type RemoteSessionStore
+  type RemoteSessionStore,
+  type RenewSessionResult
 } from "./session.js";
 import { createDocumentSessionStore } from "./session-store.js";
 import {
@@ -120,7 +121,7 @@ import { createServerStorageBackend, type ServerStorageBackendOptions } from "./
 import { resolveServerStorageConfig, type ServerStorageConfig } from "./storage/config.js";
 import { createHumanoidMotionContribution } from "./humanoid/contribution.js";
 
-export type { RemoteSession, RemoteSessionStore };
+export type { RemoteSession, RemoteSessionStore, RenewSessionResult };
 export { createMemorySessionStore };
 
 export type RemoteServerExtensionOptions = {
@@ -159,6 +160,13 @@ export type RemoteServerExtensionOptions = {
    * 生产不配置：轮询间隔由服务端 `GetCapabilities.pollAfterMs` / pptask 缺省决定。
    */
   generation?: { pollIntervalMs?: number; clientTimeoutMs?: number };
+  /**
+   * 自动续约的时序（测试注入）。
+   *
+   * 生产不配置：缺省「到期前 10 分钟续一次」，续期失败按 5 分钟重试。测试靠把 `leadMs`
+   * 调得比会话剩余时间还大、`minDelayMs` 调成 0 来让第一次续期立刻发生，而不是等真实时钟。
+   */
+  sessionRenewal?: { leadMs?: number; minDelayMs?: number; retryMs?: number };
 };
 
 /** 从 GetAuthMethods 的响应里抽出展示所需的登录方式。 */
@@ -681,6 +689,13 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
        * 而会话源本身是异步的。镜像由下面的 `onSessionChanged` 与启动时的一次预取维护。
        */
       let sessionSourceRef: ReturnType<typeof createRemoteSessionSource> | null = null;
+      /**
+       * 会话一变就重排续约定时器（登录、续期、登出、401 作废都走同一条通知）。
+       *
+       * 用可变引用而不是直接在 `onSessionChanged` 里调 `armRenewal`：续约的实现依赖会话源自身，
+       * 而它在构造时就要拿到这个回调（先有鸡还是先有蛋）。缺省是空实现，装配末尾才回填。
+       */
+      let rearmRenewal: () => void = () => undefined;
       const marketplaceSource = createServerMarketplaceSource({
         currentSession: async () => (sessionSourceRef ? sessionSourceRef.current() : null),
         fetchImpl
@@ -698,6 +713,14 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
           return result.ok ? { ok: true, session: result.session } : { ok: false, code: result.code };
         },
         /**
+         * 续期：用当前会话换下一段（远端轮换）。
+         *
+         * 这里**不带任何凭证**——续期靠的是会话本身，因此人用设备码/OAuth 登录进来的会话
+         * 同样能续。这也正是「配置里留一份长期令牌」被禁止的原因：那等于把无人值守凭据
+         * 当成人类会话的续期手段。
+         */
+        refreshSession: async (serverUrl, token) => callSessionRefresh(fetchImpl, now, serverUrl, token),
+        /**
          * 会话一变就通知宿主重新解析画布同步上游。
          *
          * 否则「连接成功」只更新了界面状态：宿主在启动时解析过一次上游，之后不会轮询扩展，
@@ -714,10 +737,127 @@ export function createRemoteServerPlugin(options: RemoteServerExtensionOptions =
           void syncStorageBackendWithSession().catch(() => undefined);
           // 市场来源的同步镜像：`available()` 是同步契约，边界处必须先把会话喂进去。
           void sessionSource.current().then((current) => marketplaceSource.setSession(current)).catch(() => undefined);
+          // 续约按新到期时刻重排；会话没了就把定时器收掉。
+          rearmRenewal();
         }
       });
       sessionSourceRef = sessionSource;
       void sessionSource.current().then((current) => marketplaceSource.setSession(current)).catch(() => undefined);
+
+      /**
+       * 自动续约。
+       *
+       * 为什么要它：会话有 TTL（部署配置的 `CANVAS_SESSION_TTL`，缺省 7 天），到期就当作未登录。
+       * 没有续约时唯一出路是「等过期 → 人重新登录」，而这中间画布同步、服务端存储、托管生成
+       * 会一起静默失效——界面只会突然从「远端已接入」掉回「本地模式」，没有任何可行动提示。
+       * 远端的 `IdentityService.Refresh` 本来就是为这件事准备的（轮换而非延长），只是没人调。
+       *
+       * 几个刻意的选择：
+       *  - **提前**续（缺省到期前 10 分钟），不等到过期：过期后再续在语义上不可能——`Refresh`
+       *    要求旧令牌仍然有效；
+       *  - 只用会话自己，不用部署凭证：人用设备码/OAuth 登录进来的会话同样能续，因此不需要
+       *    （也不该）在配置里留一份长期令牌；
+       *  - 失败分两类（见 `RenewSessionResult`）：明确拒绝才清会话，网络暂时不可用只重试并
+       *    保留到到期时刻——一次网络抖动不该把人踢下线；
+       *  - 没有会话时不排任何定时器：纯本地形态下本扩展不得产生后台活动。
+       *
+       * 会话一变（登录、续期、登出、401 作废）都由 `onSessionChanged` 重新排期，所以这里不需要
+       * 轮询——定时器只在「下一次该续的时刻」醒一次。
+       */
+      const renewalConfig = options.sessionRenewal ?? {};
+      const renewalLeadMs = renewalConfig.leadMs ?? 10 * 60 * 1000;
+      const renewalMinDelayMs = renewalConfig.minDelayMs ?? 60 * 1000;
+      const renewalRetryMs = renewalConfig.retryMs ?? 5 * 60 * 1000;
+      /** `setTimeout` 的上限约 24.8 天；更远的到期时刻先排到这个上限，醒来再判断是否真该续。 */
+      const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+      let renewalTimer: ReturnType<typeof setTimeout> | null = null;
+      let renewalStopped = false;
+
+      const clearRenewalTimer = (): void => {
+        if (renewalTimer === null) return;
+        clearTimeout(renewalTimer);
+        renewalTimer = null;
+      };
+
+      /**
+       * 距「该续了」还有多久（毫秒）；`<= 0` 就是现在。
+       *
+       * 「该续了」= 到期前 `renewalLeadMs`。为什么必须提前：`Refresh` 要求旧令牌**仍然有效**，
+       * 过期之后在语义上就续不动了——那条路只剩「重新登录」。
+       */
+      const msUntilRenewal = (session: RemoteSession): number => session.expiresAt - renewalLeadMs - now();
+
+      /**
+       * 排一次续期，`delayMs` 是希望的延迟。
+       *
+       * 下限 `renewalMinDelayMs` 是**速率闸门**，不是精度选项，所以只在这里定义一次：部署若把
+       * `CANVAS_SESSION_TTL` 调得比提前量还短（例如 5 分钟 vs 默认 10 分钟），「到期前 10 分钟」
+       * 永远是过去时刻，没有下限就会退化成不间断轮换。有了下限，最坏情况是每分钟轮换一次——
+       * 频繁但仍有界，且轮换本身无害（每次都是一份合法的新会话）。正常配置（TTL 7 天、
+       * 提前 10 分钟）下这个下限根本不会生效，一天也就醒一次。
+       */
+      const scheduleRenewal = (delayMs: number): void => {
+        if (renewalStopped) return;
+        clearRenewalTimer();
+        const delay = Math.min(MAX_TIMER_DELAY_MS, Math.max(renewalMinDelayMs, delayMs));
+        renewalTimer = setTimeout(() => {
+          renewalTimer = null;
+          void runRenewal();
+        }, delay);
+        // 定时器不该单独把进程钉住：宿主退出时它跟着消失，不需要额外保证。
+        renewalTimer.unref?.();
+      };
+
+      const runRenewal = async (): Promise<void> => {
+        if (renewalStopped) return;
+        const session = await sessionSource.current();
+        // 没有可用会话（未登录、已到期、换了部署）：不排期，等下一次会话变化再唤醒。
+        if (session === null) return;
+        // 被定时器上限提前唤醒时，真正的续期时刻还没到（按同一判据重排，不另立一份）。
+        if (msUntilRenewal(session) > 0) {
+          scheduleRenewal(msUntilRenewal(session));
+          return;
+        }
+        const result = await sessionSource.renew();
+        if (result.ok) {
+          log({ event: "remote-session-renewed", level: "debug", serverUrl: result.session.serverUrl });
+          // 下一次排期由 `onSessionChanged` 触发（它会拿到刚写入的新到期时刻）。
+          return;
+        }
+        if (result.kind === "no-session") return;
+        log({
+          event: "remote-session-renew-failed",
+          level: "warn",
+          code: result.code,
+          serverUrl: session.serverUrl,
+          reason:
+            result.kind === "rejected"
+              ? "续期被远端明确拒绝，已清除会话，需要重新登录"
+              : "续期暂时失败，保留会话到到期时刻"
+        });
+        // 明确的拒绝已经清掉会话（`onSessionChanged` 会把定时器收掉）；只有暂时性失败要重试。
+        if (result.kind === "transient") scheduleRenewal(renewalRetryMs);
+      };
+
+      const armRenewal = async (): Promise<void> => {
+        if (renewalStopped) return;
+        const session = await sessionSource.current();
+        if (session === null) {
+          clearRenewalTimer();
+          return;
+        }
+        scheduleRenewal(msUntilRenewal(session));
+      };
+      // `onSessionChanged` 在会话源构造时就固定了，用可变引用回填（见下面的赋值）。
+      rearmRenewal = () => void armRenewal().catch(() => undefined);
+
+      ctx.effect(() => {
+        void armRenewal().catch(() => undefined);
+        return () => {
+          renewalStopped = true;
+          clearRenewalTimer();
+        };
+      });
 
       /**
        * 当前**可用**的远端地址：部署配置优先，其次已登录会话（与存储后端同一个判据）。
