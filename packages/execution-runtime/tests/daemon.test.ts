@@ -170,4 +170,27 @@ describe("woohaa3-executor daemon", () => {
     expect(twice.get("done")).toMatchObject({ status: "cancelled" });
     first.cancel("running");
   });
+
+  it("超大 timeoutMs 不会被 Node 截断成 1ms 而立刻取消回合", async () => {
+    const stateDir = tempState();
+    // 让 executor 在第一次 tick 之后才返回，好让 timer 有机会先触发。
+    const slow: Executor = { id: "slow", kind: "any", run: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { status: "succeeded" };
+    } };
+    const store = new TurnStore({ stateDir });
+    const deps = {
+      stateDir,
+      workspaceKey: "test",
+      processes: { ensure: async () => { throw new Error("unused"); }, stop: async () => undefined }
+    };
+    // 3e9 > 2^31-1：旧实现 setTimeout 收到它会被 Node 静默改成 1ms，回合立即被判超时。
+    const view = store.run(
+      { turnId: "big-timeout", requestId: "req-big", kind: "agent", executor: "slow", timeoutMs: 3_000_000_000 },
+      [slow], "slow", deps
+    );
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(store.get(view.turnId)).toMatchObject({ status: "succeeded" });
+    store.cancel(view.turnId);
+  });
 });

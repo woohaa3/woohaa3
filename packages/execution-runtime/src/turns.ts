@@ -27,6 +27,9 @@ type TurnRecord = TurnView & {
 
 const MAX_EVENTS = 2_000;
 
+/** setTimeout 的上限（2^31-1 ms，约 24.8 天）。超出部分会被 Node 静默截断成 1ms。 */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export type TurnStoreOptions = {
   stateDir: string;
   logger?: (event: Record<string, unknown>) => void;
@@ -200,11 +203,15 @@ export class TurnStore {
     record.updatedAt = new Date().toISOString();
     this.save();
     if (typeof input.timeoutMs === "number" && input.timeoutMs > 0) {
+      // Node 的 setTimeout 只接受 32 位有符号毫秒数；超出会被**静默改成 1ms**，
+      // 于是一个「很久才超时」的回合反而立即被取消。这里显式夹住，让超长超时退化成
+      // 「实际上不超时」，而不是提前触发。
+      const delay = Math.min(input.timeoutMs, MAX_TIMER_DELAY_MS);
       record.timer = setTimeout(() => {
         if (record.status !== "running") return;
         withError(record, { code: "turn-timeout", message: `执行超过 ${input.timeoutMs}ms，已取消` });
         controller.abort();
-      }, input.timeoutMs);
+      }, delay);
       record.timer.unref?.();
     }
     const operation = (async () => {
